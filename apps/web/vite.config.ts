@@ -6,21 +6,23 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@mcua/core': path.resolve(__dirname, '../../packages/core/src'),
     },
   },
   server: {
     port: 3000,
-    host: true,
+    proxy: {
+      '/api': { target: 'http://localhost:4000', changeOrigin: true },
+      '/socket.io': { target: 'http://localhost:4000', ws: true },
+    },
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
     rollupOptions: {
       output: {
         manualChunks: {
-          vendor: ['react', 'react-dom', 'react-router-dom'],
-          query: ['@tanstack/react-query'],
+          react: ['react', 'react-dom'],
+          router: ['react-router-dom'],
           state: ['zustand', 'immer'],
         },
       },
