@@ -1,0 +1,33 @@
+{
+  "name": "media-composer-unified-application",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:web": "turbo run dev --filter=@mcua/web",
+    "dev:desktop": "turbo run dev --filter=@mcua/desktop",
+    "dev:mobile": "turbo run dev --filter=@mcua/mobile",
+    "build": "turbo run build",
+    "build:web": "turbo run build --filter=@mcua/web",
+    "build:desktop": "turbo run build --filter=@mcua/desktop",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "type-check": "turbo run type-check",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}
