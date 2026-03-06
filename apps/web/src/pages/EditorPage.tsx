@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { Toolbar } from '../components/Toolbar/Toolbar';
 import { BinPanel } from '../components/Bins/BinPanel';
 import { MonitorArea } from '../components/Monitor/MonitorArea';
@@ -36,19 +36,24 @@ function usePlaybackEngine() {
 
 export function EditorPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const { showAIPanel, loadProject } = useEditorStore();
+  const { showAIPanel, showCollabPanel, loadProject } = useEditorStore();
   usePlaybackEngine();
-  useEffect(() => { if (projectId && projectId !== 'new') loadProject(projectId); }, [projectId]);
+
+  useEffect(() => {
+    if (projectId && projectId !== 'new') loadProject(projectId);
+  }, [projectId]);
 
   return (
     <div className="editor-shell" onContextMenu={e => e.preventDefault()}>
       <Toolbar />
-      <BinPanel />
-      <div className="canvas-area" style={{ position: 'relative' }}>
-        <MonitorArea />
-        {showAIPanel && <AIPanel />}
+      <div className="workspace">
+        <BinPanel />
+        <div className="canvas-area" style={{ position: 'relative' }}>
+          <MonitorArea />
+          {showAIPanel && <AIPanel />}
+        </div>
+        <InspectorPanel />
       </div>
-      <InspectorPanel />
       <Timeline />
       <StatusBar />
     </div>

@@ -2,335 +2,343 @@ import React, { useRef, useCallback, useEffect, useState } from 'react';
 import { useEditorStore } from '../../store/editor.store';
 import type { Track, Clip } from '../../store/editor.store';
 
-// ─── Waveform SVG ──────────────────────────────────────────────────────────────
+// ─── Waveform ─────────────────────────────────────────────────────────────────
 function Waveform({ data, width, height, color }: { data: number[]; width: number; height: number; color: string }) {
   if (!data.length) return null;
-  const hw = height / 2;
-  const step = width / data.length;
-
+  const hw = height / 2, step = width / data.length;
   const pathD = data.map((v, i) => {
-    const x = i * step;
-    const amp = v * hw * 0.9;
+    const x = i * step, amp = v * hw * 0.85;
     return `M${x.toFixed(1)},${(hw - amp).toFixed(1)} L${x.toFixed(1)},${(hw + amp).toFixed(1)}`;
   }).join(' ');
-
   return (
     <svg width={width} height={height} style={{ position: 'absolute', inset: 0 }} preserveAspectRatio="none">
-      <path d={pathD} stroke={color} strokeWidth="1.2" opacity="0.6" fill="none" />
+      <path d={pathD} stroke={color} strokeWidth="1.2" opacity="0.55" fill="none" />
     </svg>
   );
 }
 
-// ─── Ruler ─────────────────────────────────────────────────────────────────────
-function Ruler({ zoom, scrollLeft, duration }: { zoom: number; scrollLeft: number; duration: number }) {
+// ─── Ruler ────────────────────────────────────────────────────────────────────
+function Ruler({ zoom, scrollLeft, duration, onScrub }: {
+  zoom: number; scrollLeft: number; duration: number;
+  onScrub: (t: number) => void;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
+  const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
-    const W = canvas.offsetWidth;
-    const H = canvas.offsetHeight;
-    canvas.width = W;
-    canvas.height = H;
-
+    const W = canvas.offsetWidth, H = canvas.offsetHeight;
+    canvas.width = W; canvas.height = H;
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = '#161d28';
+    ctx.fillStyle = '#111822';
     ctx.fillRect(0, 0, W, H);
 
-    // Grid intervals
-    const secWidth = zoom; // px per second
-    const intervalSec = secWidth < 40 ? 5 : secWidth < 80 ? 2 : 1;
+    const secWidth = zoom;
+    const intervalSec = secWidth < 30 ? 10 : secWidth < 60 ? 5 : secWidth < 100 ? 2 : 1;
     const startSec = scrollLeft / zoom;
     const endSec = startSec + W / zoom;
 
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.fillStyle = 'rgba(143,160,180,0.7)';
-    ctx.font = `10px 'DM Mono', monospace`;
+    ctx.font = `9.5px 'DM Mono', monospace`;
     ctx.textAlign = 'center';
 
     for (let t = Math.floor(startSec / intervalSec) * intervalSec; t <= endSec; t += intervalSec) {
       const x = t * zoom - scrollLeft;
-      const isMain = t % (intervalSec * 5) === 0;
-
+      const isMain = t % (intervalSec * 5) === 0 || intervalSec >= 5;
       ctx.beginPath();
-      ctx.moveTo(x, isMain ? 0 : H * 0.6);
+      ctx.moveTo(x, isMain ? 0 : H * 0.55);
       ctx.lineTo(x, H);
-      ctx.strokeStyle = isMain ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.06)';
+      ctx.strokeStyle = isMain ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.05)';
       ctx.stroke();
-
       if (isMain || intervalSec >= 2) {
         const m = Math.floor(t / 60), s = Math.floor(t % 60);
-        const label = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-        ctx.fillStyle = 'rgba(143,160,180,0.6)';
-        ctx.fillText(label, x, H - 5);
+        ctx.fillStyle = 'rgba(90, 112, 136, 0.8)';
+        ctx.fillText(`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`, x, H - 5);
       }
     }
   }, [zoom, scrollLeft, duration]);
 
+  useEffect(() => {
+    draw();
+    const obs = new ResizeObserver(draw);
+    if (canvasRef.current) obs.observe(canvasRef.current);
+    return () => obs.disconnect();
+  }, [draw]);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    const scrub = (ev: MouseEvent) => {
+      const x = ev.clientX - rect.left;
+      onScrub(Math.max(0, (x + scrollLeft) / zoom));
+    };
+    scrub(e.nativeEvent);
+    const up = () => { window.removeEventListener('mousemove', scrub); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', scrub);
+    window.addEventListener('mouseup', up);
+  };
+
   return (
-    <canvas
-      ref={canvasRef}
-      style={{ width: '100%', height: '100%', display: 'block' }}
-    />
+    <div className="timeline-ruler" onMouseDown={handleMouseDown}>
+      <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
+    </div>
   );
 }
 
-// ─── Clip ──────────────────────────────────────────────────────────────────────
-function ClipItem({ clip, zoom, scrollLeft, trackHeight }: {
-  clip: Clip; zoom: number; scrollLeft: number; trackHeight: number;
+// ─── Clip Component ───────────────────────────────────────────────────────────
+function ClipView({ clip, zoom, trackId, trackColor }: {
+  clip: Clip; zoom: number; trackId: string; trackColor: string;
 }) {
-  const { selectedClipIds, selectClip, trimClip, splitClip } = useEditorStore();
+  const { selectedClipIds, selectClip, moveClip, trimClip, splitClip, tracks } = useEditorStore();
   const isSelected = selectedClipIds.includes(clip.id);
-
-  const left = clip.startTime * zoom - scrollLeft;
   const width = Math.max(2, (clip.endTime - clip.startTime) * zoom);
-  const clipH = trackHeight - 6;
+  const left = clip.startTime * zoom;
 
-  const handleClick = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    selectClip(clip.id, e.metaKey || e.ctrlKey || e.shiftKey);
-  }, [clip.id, selectClip]);
+  const typeClass = `clip-${clip.type}`;
 
-  // Dragging trim handle
-  const handleTrimDrag = useCallback((side: 'left' | 'right', e: React.MouseEvent) => {
+  const handleMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (e.ctrlKey || e.metaKey) {
+      selectClip(clip.id, true);
+    } else {
+      selectClip(clip.id);
+    }
+
     const startX = e.clientX;
-    const origTime = side === 'left' ? clip.startTime : clip.endTime;
+    const origStart = clip.startTime;
+    let dragging = false;
 
     const onMove = (ev: MouseEvent) => {
-      const dt = (ev.clientX - startX) / zoom;
-      trimClip(clip.id, side, origTime + dt);
+      const dx = ev.clientX - startX;
+      if (!dragging && Math.abs(dx) > 3) dragging = true;
+      if (!dragging) return;
+      const newStart = Math.max(0, origStart + dx / zoom);
+      const targetTrackEl = (ev.target as HTMLElement).closest('[data-track-id]');
+      const newTrackId = targetTrackEl?.getAttribute('data-track-id') ?? trackId;
+      moveClip(clip.id, newTrackId, newStart);
     };
     const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
     };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [clip, zoom, trimClip]);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
 
-  if (left + width < -20 || left > 9999) return null; // off-screen
+  const handleTrimLeft = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const startX = e.clientX;
+    const origStart = clip.startTime;
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX;
+      trimClip(clip.id, 'left', origStart + dx / zoom);
+    };
+    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const handleTrimRight = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const startX = e.clientX;
+    const origEnd = clip.endTime;
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX;
+      trimClip(clip.id, 'right', origEnd + dx / zoom);
+    };
+    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
 
   return (
     <div
-      className={`clip ${clip.type}${isSelected ? ' selected' : ''}`}
-      style={{ left: Math.max(0, left), width, top: 3, height: clipH }}
-      onClick={handleClick}
+      className={`clip ${typeClass}${isSelected ? ' selected' : ''}`}
+      style={{ left, width: Math.max(6, width), top: 3, bottom: 3, position: 'absolute' }}
+      onMouseDown={handleMouseDown}
     >
-      {/* Waveform for audio */}
-      {clip.waveformData && (
-        <Waveform
-          data={clip.waveformData}
-          width={width}
-          height={clipH}
-          color={clip.type === 'audio' ? '#2bb672' : '#5b6af5'}
-        />
+      {width > 18 && (
+        <div className="clip-trim-handle left" onMouseDown={handleTrimLeft} />
       )}
 
-      {/* Clip label */}
-      <div className="clip-name">{clip.name}</div>
+      {clip.waveformData && clip.type === 'audio' && (
+        <Waveform data={clip.waveformData} width={width} height={32} color={trackColor} />
+      )}
 
-      {/* Trim handles */}
-      <div className="trim-handle left yellow" onMouseDown={(e) => handleTrimDrag('left', e)} />
-      <div className="trim-handle right green"  onMouseDown={(e) => handleTrimDrag('right', e)} />
+      {width > 30 && (
+        <div className="clip-label">{clip.name}</div>
+      )}
+
+      {width > 18 && (
+        <div className="clip-trim-handle right" onMouseDown={handleTrimRight} />
+      )}
     </div>
   );
 }
 
-// ─── Track Header ──────────────────────────────────────────────────────────────
-function TrackHeader({ track }: { track: Track }) {
-  const { toggleMute, toggleSolo, toggleLock, selectedTrackId, selectTrack } = useEditorStore();
-  const typeLabel = track.type.slice(0, 3);
-  const typeClass = track.type.toLowerCase().replace('subtitle','subtitle').split('_')[0];
-  const isSelected = selectedTrackId === track.id;
-
+// ─── Track Lane ───────────────────────────────────────────────────────────────
+function TrackLane({ track, zoom, totalWidth }: { track: Track; zoom: number; totalWidth: number }) {
+  const { clearSelection } = useEditorStore();
   return (
     <div
-      className={`track-header${isSelected ? ' selected' : ''}`}
-      onClick={() => selectTrack(track.id)}
+      className="track-lane"
+      style={{ height: 'var(--track-h)', width: totalWidth }}
+      data-track-id={track.id}
+      onClick={() => clearSelection()}
     >
-      <div className={`track-type-pill ${typeClass}`}>{typeLabel}</div>
-      <span className="track-name">{track.name}</span>
-      <div className="track-controls">
-        <button
-          className={`track-ctrl-btn${track.muted ? ' active-mute' : ''}`}
-          onClick={(e) => { e.stopPropagation(); toggleMute(track.id); }}
-          title="Mute"
-        >M</button>
-        <button
-          className={`track-ctrl-btn${track.solo ? ' active-solo' : ''}`}
-          onClick={(e) => { e.stopPropagation(); toggleSolo(track.id); }}
-          title="Solo"
-        >S</button>
-        <button
-          className={`track-ctrl-btn${track.locked ? ' active-lock' : ''}`}
-          onClick={(e) => { e.stopPropagation(); toggleLock(track.id); }}
-          title="Lock"
-        >🔒</button>
-      </div>
+      {track.clips.map(clip => (
+        <ClipView key={clip.id} clip={clip} zoom={zoom} trackId={track.id} trackColor={track.color} />
+      ))}
     </div>
   );
 }
 
-// ─── Timeline ──────────────────────────────────────────────────────────────────
+// ─── Playhead Line ────────────────────────────────────────────────────────────
+function PlayheadLine({ time, zoom, scrollLeft }: { time: number; zoom: number; scrollLeft: number }) {
+  const left = time * zoom - scrollLeft;
+  if (left < 0 || left > 10000) return null;
+  return <div className="playhead" style={{ left }} />;
+}
+
+// ─── Main Timeline ────────────────────────────────────────────────────────────
 export function Timeline() {
   const {
-    tracks, markers, playheadTime, setPlayhead, zoom, setZoom,
-    scrollLeft, setScrollLeft, clearSelection, isPlaying,
+    tracks, markers, playheadTime, setPlayhead,
+    zoom, setZoom, scrollLeft, setScrollLeft,
+    duration, selectedTrackId, selectTrack,
+    toggleMute, toggleSolo, toggleLock,
   } = useEditorStore();
 
-  const laneScrollRef = useRef<HTMLDivElement>(null);
-  const rulerRef = useRef<HTMLDivElement>(null);
-  const TRACK_H = 40;
-  const TOTAL_DURATION = 60; // seconds visible
-  const totalWidth = TOTAL_DURATION * zoom;
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
-  // Sync horizontal scroll between ruler and lanes
-  const handleScroll = useCallback(() => {
-    const x = laneScrollRef.current?.scrollLeft ?? 0;
-    setScrollLeft(x);
-  }, [setScrollLeft]);
+  const totalWidth = Math.max(duration * zoom + 200, 800);
 
-  // Click ruler to seek
-  const handleRulerClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left + scrollLeft;
-    setPlayhead(x / zoom);
-  }, [scrollLeft, zoom, setPlayhead]);
+  // Sync scroll between header and content
+  const handleScroll = (e: React.UIEvent) => {
+    setScrollLeft((e.target as HTMLElement).scrollLeft);
+    const headers = document.querySelector('.track-headers');
+    if (headers) headers.scrollTop = (e.target as HTMLElement).scrollTop;
+  };
 
-  // Playhead auto-scroll
+  // Zoom with Ctrl+Scroll
   useEffect(() => {
-    if (!isPlaying || !laneScrollRef.current) return;
-    const playX = playheadTime * zoom;
-    const el = laneScrollRef.current;
-    const right = el.scrollLeft + el.offsetWidth - 60;
-    if (playX > right) el.scrollLeft = playX - el.offsetWidth * 0.4;
-  }, [playheadTime, isPlaying, zoom]);
+    const el = contentRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.15 : 0.87;
+        setZoom(zoom * factor);
+      }
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, [zoom, setZoom]);
 
-  const playheadX = playheadTime * zoom - scrollLeft;
+  const trackTypeColor = (type: Track['type']) => {
+    const map: Record<string, string> = {
+      VIDEO: 'var(--track-video)', AUDIO: 'var(--track-audio)',
+      EFFECT: 'var(--track-effect)', SUBTITLE: 'var(--track-sub)',
+      GRAPHIC: 'var(--track-gfx)',
+    };
+    return map[type] ?? 'var(--text-muted)';
+  };
 
   return (
-    <div className="timeline-area">
-      {/* Header row */}
-      <div className="timeline-header">
-        <div className="timeline-tracks-header">
-          <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.06em' }}>TRACKS</span>
-          <button
-            className="panel-action-btn"
-            title="Add track"
-            style={{ marginLeft: 'auto' }}
-          >+</button>
+    <div className="timeline-panel">
+      {/* Toolbar */}
+      <div className="timeline-toolbar">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          {[
+            { icon: '⊣⊢', label: 'Match Frame' },
+            { icon: '⊞', label: 'Add Track' },
+            { icon: '⊟', label: 'Remove Track' },
+          ].map(b => (
+            <button key={b.label} className="tl-btn" title={b.label}>{b.icon}</button>
+          ))}
         </div>
-        <div
-          className="timeline-ruler"
-          ref={rulerRef}
-          onClick={handleRulerClick}
-          style={{ overflow: 'hidden', position: 'relative' }}
-        >
-          <Ruler zoom={zoom} scrollLeft={scrollLeft} duration={TOTAL_DURATION} />
+        <div className="divider" />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          {[
+            { icon: 'I', label: 'Set In (I)', active: false },
+            { icon: 'O', label: 'Set Out (O)', active: false },
+            { icon: '⌫', label: 'Clear In/Out', active: false },
+          ].map(b => (
+            <button key={b.label} className={`tl-btn${b.active ? ' active' : ''}`} title={b.label}
+              style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{b.icon}</button>
+          ))}
+        </div>
 
-          {/* Markers on ruler */}
-          {markers.map(m => {
-            const mx = m.time * zoom - scrollLeft;
-            if (mx < 0 || mx > 9999) return null;
-            return (
-              <div key={m.id} style={{
-                position: 'absolute', top: 0, left: mx,
-                width: 1, height: '100%',
-                background: m.color, opacity: 0.8,
-                zIndex: 5, pointerEvents: 'none',
-              }}>
-                <div style={{
-                  position: 'absolute', top: 2, left: 3,
-                  fontSize: 9, color: m.color, whiteSpace: 'nowrap',
-                  fontFamily: 'var(--font-mono)', background: 'var(--bg-base)',
-                  padding: '1px 3px', borderRadius: 2,
-                }}>
-                  {m.label}
-                </div>
-              </div>
-            );
-          })}
+        <div style={{ flex: 1 }} />
 
-          {/* Playhead on ruler */}
-          {playheadX >= 0 && (
-            <div style={{
-              position: 'absolute', top: 0, bottom: 0, left: playheadX,
-              width: 1, background: 'var(--playhead)', zIndex: 10, pointerEvents: 'none',
-            }}>
-              <div style={{
-                position: 'absolute', top: 2, left: -4,
-                width: 9, height: 9,
-                background: 'var(--playhead)',
-                clipPath: 'polygon(50% 100%, 0% 0%, 100% 0%)',
-              }} />
-            </div>
-          )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span className="zoom-label" style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-muted)' }}>
+            {Math.round(zoom)}px/s
+          </span>
+          <button className="tl-btn" onClick={() => setZoom(Math.max(10, zoom / 1.5))} title="Zoom Out">−</button>
+          <input type="range" className="range-slider zoom-slider" min={10} max={400} step={1}
+            value={zoom} onChange={e => setZoom(+e.target.value)} style={{ width: 80 }} />
+          <button className="tl-btn" onClick={() => setZoom(Math.min(400, zoom * 1.5))} title="Zoom In">+</button>
+          <button className="tl-btn" title="Fit Timeline" onClick={() => setZoom(60)}>⊡</button>
         </div>
       </div>
 
       {/* Body */}
       <div className="timeline-body">
-        {/* Track headers sidebar */}
-        <div className="tracks-sidebar">
-          {tracks.map(t => <TrackHeader key={t.id} track={t} />)}
+        {/* Track headers */}
+        <div className="track-headers">
+          <div className="ruler-spacer" />
+          {tracks.map(track => (
+            <div
+              key={track.id}
+              className={`track-header${selectedTrackId === track.id ? ' selected' : ''}`}
+              style={{ height: 'var(--track-h)' }}
+              onClick={() => selectTrack(track.id)}
+            >
+              <div className="track-color" style={{ background: trackTypeColor(track.type) }} />
+              <span className="track-name" title={track.name}>{track.name}</span>
+              <div className="track-icons">
+                <button
+                  className={`track-icon-btn${track.muted ? ' active' : ''}`}
+                  title={track.muted ? 'Unmute' : 'Mute'}
+                  onClick={e => { e.stopPropagation(); toggleMute(track.id); }}
+                >M</button>
+                <button
+                  className={`track-icon-btn solo${track.solo ? ' active' : ''}`}
+                  title={track.solo ? 'Unsolo' : 'Solo'}
+                  onClick={e => { e.stopPropagation(); toggleSolo(track.id); }}
+                >S</button>
+                <button
+                  className={`track-icon-btn lock${track.locked ? ' active' : ''}`}
+                  title={track.locked ? 'Unlock' : 'Lock'}
+                  onClick={e => { e.stopPropagation(); toggleLock(track.id); }}
+                >🔒</button>
+              </div>
+            </div>
+          ))}
         </div>
 
-        {/* Scrollable lanes */}
-        <div
-          className="timeline-tracks-scroll"
-          ref={laneScrollRef}
-          onScroll={handleScroll}
-          onClick={clearSelection}
-        >
-          <div style={{ width: totalWidth, position: 'relative' }}>
-            {/* Playhead vertical bar */}
-            {playheadX >= 0 && (
-              <div className="playhead" style={{ left: playheadX }} />
-            )}
+        {/* Timeline content */}
+        <div className="timeline-content" ref={contentRef} onScroll={handleScroll}>
+          <div className="timeline-inner" style={{ width: totalWidth }}>
+            <Ruler zoom={zoom} scrollLeft={scrollLeft} duration={duration} onScrub={setPlayhead} />
 
-            {/* Marker lines */}
-            {markers.map(m => {
-              const mx = m.time * zoom - scrollLeft;
-              return (
-                <div key={m.id} style={{
-                  position: 'absolute', top: 0, bottom: 0, left: m.time * zoom,
-                  width: 1, background: m.color, opacity: 0.4, zIndex: 5, pointerEvents: 'none',
-                }} />
-              );
-            })}
-
-            {/* Tracks + clips */}
             {tracks.map(track => (
-              <div
-                key={track.id}
-                className={`track-lane${track.type === 'AUDIO' ? ' audio-track' : ''}`}
-                style={{ height: TRACK_H }}
-              >
-                {track.clips.map(clip => (
-                  <ClipItem
-                    key={clip.id}
-                    clip={clip}
-                    zoom={zoom}
-                    scrollLeft={scrollLeft}
-                    trackHeight={TRACK_H}
-                  />
-                ))}
-              </div>
+              <TrackLane key={track.id} track={track} zoom={zoom} totalWidth={totalWidth} />
             ))}
+
+            {/* Markers */}
+            {markers.map(m => (
+              <div key={m.id} className="timeline-marker"
+                style={{ left: m.time * zoom, color: m.color }}
+                title={m.label}
+              />
+            ))}
+
+            {/* Playhead */}
+            <PlayheadLine time={playheadTime} zoom={zoom} scrollLeft={scrollLeft} />
           </div>
         </div>
-      </div>
-
-      {/* Zoom controls */}
-      <div className="timeline-zoom">
-        <button className="zoom-btn" onClick={() => setZoom(zoom * 0.7)} title="Zoom out (-)">−</button>
-        <div className="zoom-level">{Math.round(zoom)}px/s</div>
-        <button className="zoom-btn" onClick={() => setZoom(zoom * 1.4)} title="Zoom in (+)">+</button>
-        <button className="zoom-btn" onClick={() => setZoom(60)} title="Reset zoom" style={{ fontSize: 9 }}>⌂</button>
       </div>
     </div>
   );

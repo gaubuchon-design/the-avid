@@ -5,12 +5,10 @@ function ColorWheelWidget({ label }: { label: string }) {
   const [dot, setDot] = useState({ x: 50, y: 50 });
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const update = (ev: MouseEvent) => {
-      setDot({
-        x: Math.max(0, Math.min(100, ((ev.clientX - rect.left) / rect.width) * 100)),
-        y: Math.max(0, Math.min(100, ((ev.clientY - rect.top) / rect.height) * 100)),
-      });
-    };
+    const update = (ev: MouseEvent) => setDot({
+      x: Math.max(0, Math.min(100, ((ev.clientX - rect.left) / rect.width) * 100)),
+      y: Math.max(0, Math.min(100, ((ev.clientY - rect.top) / rect.height) * 100)),
+    });
     update(e.nativeEvent);
     const up = () => { document.removeEventListener('mousemove', update); document.removeEventListener('mouseup', up); };
     document.addEventListener('mousemove', update);
@@ -18,10 +16,27 @@ function ColorWheelWidget({ label }: { label: string }) {
   };
   return (
     <div style={{ textAlign: 'center' }}>
-      <div className="color-wheel" style={{ width: 72, height: 72, margin: '0 auto' }} onMouseDown={handleMouseDown}>
+      <div className="color-wheel" style={{ width: 68, height: 68, margin: '0 auto' }} onMouseDown={handleMouseDown}>
         <div className="color-wheel-dot" style={{ left: `${dot.x}%`, top: `${dot.y}%` }} />
       </div>
       <div className="color-wheel-label">{label}</div>
+    </div>
+  );
+}
+
+function Slider({ label, value, unit = '', min = 0, max = 100, onChange }: {
+  label: string; value: number; unit?: string; min?: number; max?: number; onChange: (v: number) => void;
+}) {
+  return (
+    <div className="property-row">
+      <div className="property-label">{label}</div>
+      <div className="property-value">
+        <input type="number" className="property-input" value={value} style={{ width: 48 }}
+          onChange={e => onChange(+e.target.value || 0)} />
+        {unit && <span className="property-unit">{unit}</span>}
+        <input type="range" className="range-slider" min={min} max={max} value={value}
+          onChange={e => onChange(+e.target.value)} style={{ flex: 1 }} />
+      </div>
     </div>
   );
 }
@@ -32,16 +47,14 @@ function EffectRow({ name, defaultEnabled }: { name: string; defaultEnabled?: bo
   return (
     <div className="effect-item">
       <div className="effect-header" onClick={() => setOpen(!open)}>
-        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{open ? '▾' : '▸'}</span>
+        <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{open ? '▾' : '▸'}</span>
         <span className="effect-name">{name}</span>
-        <div className={`effect-toggle${enabled ? ' on' : ''}`} onClick={(e) => { e.stopPropagation(); setEnabled(!enabled); }} />
+        <div className={`effect-toggle${enabled ? ' on' : ''}`}
+          onClick={e => { e.stopPropagation(); setEnabled(!enabled); }} />
       </div>
       {open && (
         <div className="effect-body">
-          <div className="property-row" style={{ marginTop: 8 }}>
-            <div className="property-label" style={{ fontSize: 10 }}>Intensity</div>
-            <input type="range" className="range-slider" min={0} max={100} defaultValue={50} style={{ flex: 1 }} />
-          </div>
+          <Slider label="Amount" value={50} onChange={() => {}} />
         </div>
       )}
     </div>
@@ -51,38 +64,30 @@ function EffectRow({ name, defaultEnabled }: { name: string; defaultEnabled?: bo
 function VideoTab() {
   const [opacity, setOpacity] = useState(100);
   const [scale, setScale] = useState(100);
-  const Row = ({ label, value, unit = '', min = 0, max = 100, onChange }: any) => (
-    <div className="property-row">
-      <div className="property-label">{label}</div>
-      <div className="property-value">
-        <input type="number" className="property-input" value={value} style={{ width: 54 }} onChange={e => onChange(+e.target.value || 0)} />
-        {unit && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{unit}</span>}
-        <input type="range" className="range-slider" min={min} max={max} value={value} onChange={e => onChange(+e.target.value)} style={{ flex: 1 }} />
-      </div>
-    </div>
-  );
+  const [x, setX] = useState(0), [y, setY] = useState(0), [rot, setRot] = useState(0);
   return (
     <div className="tab-content">
       <div className="inspector-section">
         <div className="inspector-section-title">Transform</div>
-        <Row label="Opacity" value={opacity} unit="%" onChange={setOpacity} />
-        <Row label="Scale" value={scale} unit="%" min={1} max={400} onChange={setScale} />
-        <Row label="Pos X" value={0} unit="px" min={-2000} max={2000} onChange={() => {}} />
-        <Row label="Pos Y" value={0} unit="px" min={-2000} max={2000} onChange={() => {}} />
-        <Row label="Rotation" value={0} unit="°" min={-360} max={360} onChange={() => {}} />
+        <Slider label="Opacity" value={opacity} unit="%" onChange={setOpacity} />
+        <Slider label="Scale" value={scale} unit="%" min={1} max={400} onChange={setScale} />
+        <Slider label="Pos X" value={x} unit="px" min={-2000} max={2000} onChange={setX} />
+        <Slider label="Pos Y" value={y} unit="px" min={-2000} max={2000} onChange={setY} />
+        <Slider label="Rotation" value={rot} unit="°" min={-360} max={360} onChange={setRot} />
       </div>
       <div className="inspector-section">
         <div className="inspector-section-title">Applied Effects</div>
         <EffectRow name="Color Correction" defaultEnabled={true} />
         <EffectRow name="Noise Reduction" />
         <EffectRow name="Stabilizer" />
-        <button className="btn btn-ghost" style={{ width: '100%', marginTop: 4, fontSize: 11 }}>+ Add Effect</button>
+        <button className="btn btn-ghost" style={{ width: '100%', marginTop: 6, fontSize: 11 }}>+ Add Effect</button>
       </div>
     </div>
   );
 }
 
 function ColorTab() {
+  const [curves, setCurves] = useState<{x:number;y:number}[]>([{x:0,y:100},{x:100,y:0}]);
   return (
     <div className="tab-content">
       <div className="inspector-section">
@@ -95,89 +100,112 @@ function ColorTab() {
       </div>
       <div className="inspector-section">
         <div className="inspector-section-title">Curves</div>
-        <div style={{ width: '100%', height: 100, background: 'var(--bg-void)', border: '1px solid var(--border)', borderRadius: 4, overflow: 'hidden' }}>
+        <div className="curves-canvas">
           <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
-            {[25,50,75].map(v => <React.Fragment key={v}><line x1={v} y1={0} x2={v} y2={100} stroke="rgba(255,255,255,0.05)" strokeWidth="0.5" /><line x1={0} y1={v} x2={100} y2={v} stroke="rgba(255,255,255,0.05)" strokeWidth="0.5" /></React.Fragment>)}
-            <line x1={0} y1={100} x2={100} y2={0} stroke="rgba(255,255,255,0.08)" strokeWidth="0.5" strokeDasharray="3,3" />
-            <path d="M0,100 C20,90 40,30 60,20 S90,5 100,0" stroke="var(--accent)" strokeWidth="1.5" fill="none" />
-            {[[20,88],[60,20],[90,4]].map(([x,y],i) => <circle key={i} cx={x} cy={y} r={2.5} fill="var(--accent)" stroke="white" strokeWidth="0.8" />)}
+            {[25,50,75].map(v => (
+              <React.Fragment key={v}>
+                <line x1={v} y1={0} x2={v} y2={100} stroke="rgba(255,255,255,0.04)" strokeWidth="0.5" />
+                <line x1={0} y1={v} x2={100} y2={v} stroke="rgba(255,255,255,0.04)" strokeWidth="0.5" />
+              </React.Fragment>
+            ))}
+            <path d="M 0,100 C 25,75 75,25 100,0" stroke="var(--brand-bright)" strokeWidth="1.5" fill="none" />
+            {[[0,100],[50,50],[100,0]].map(([x,y]) => (
+              <circle key={`${x}-${y}`} cx={x} cy={y} r="2.5" fill="var(--brand-bright)" style={{ cursor: 'crosshair' }} />
+            ))}
           </svg>
         </div>
-      </div>
-      <div className="inspector-section">
-        <div className="inspector-section-title">HSL</div>
-        {['Hue','Saturation','Luminance'].map(l => (
-          <div key={l} className="property-row">
-            <div className="property-label">{l}</div>
-            <input type="range" className="range-slider" min={-100} max={100} defaultValue={0} style={{ flex: 1 }} />
-          </div>
-        ))}
+        <Slider label="Contrast" value={50} onChange={() => {}} />
+        <Slider label="Saturation" value={50} onChange={() => {}} />
+        <Slider label="Temperature" value={50} onChange={() => {}} />
       </div>
     </div>
   );
 }
 
 function AudioTab() {
+  const [gain, setGain] = useState(0);
+  const [pan, setPan] = useState(0);
   return (
     <div className="tab-content">
       <div className="inspector-section">
-        <div className="inspector-section-title">Levels</div>
-        {['Gain','Pan','Bass','Mid','Treble'].map(l => (
-          <div key={l} className="property-row">
-            <div className="property-label">{l}</div>
-            <input type="range" className="range-slider" min={l === 'Pan' ? -100 : 0} max={l === 'Gain' ? 200 : 100} defaultValue={l === 'Gain' ? 100 : l === 'Pan' ? 0 : 70} style={{ flex: 1 }} />
-          </div>
-        ))}
+        <div className="inspector-section-title">Audio</div>
+        <Slider label="Gain" value={gain + 60} unit="dB" min={0} max={120} onChange={v => setGain(v - 60)} />
+        <Slider label="Pan" value={pan + 50} unit="" min={0} max={100} onChange={v => setPan(v - 50)} />
+        <Slider label="Pitch" value={50} min={0} max={100} onChange={() => {}} />
       </div>
       <div className="inspector-section">
-        <div className="inspector-section-title">AI Audio Tools</div>
-        {[{name:'Voice Isolation',desc:'Remove background noise'},{name:'Enhance Speech',desc:'Clarity & presence'},{name:'Auto Duck',desc:'Duck music under dialogue'}].map(tool => (
-          <div key={tool.name} style={{ display:'flex',alignItems:'center',justifyContent:'space-between',padding:'6px 8px',background:'var(--bg-raised)',borderRadius:4,border:'1px solid var(--border)',marginBottom:4 }}>
-            <div><div style={{fontSize:11,color:'var(--text-secondary)'}}>{tool.name}</div><div style={{fontSize:10,color:'var(--text-muted)'}}>{tool.desc}</div></div>
-            <button className="btn btn-ghost" style={{fontSize:10,padding:'3px 8px'}}>Apply</button>
-          </div>
-        ))}
+        <div className="inspector-section-title">Audio Effects</div>
+        <EffectRow name="EQ" />
+        <EffectRow name="Compressor" defaultEnabled={true} />
+        <EffectRow name="Noise Gate" />
+        <EffectRow name="Voice Isolation" />
+        <button className="btn btn-ghost" style={{ width: '100%', marginTop: 6, fontSize: 11 }}>+ Add Effect</button>
       </div>
     </div>
   );
 }
 
+function ClipInfo() {
+  const { tracks, selectedClipIds } = useEditorStore();
+  const clip = selectedClipIds.length > 0
+    ? tracks.flatMap(t => t.clips).find(c => c.id === selectedClipIds[0])
+    : null;
+
+  if (!clip) return (
+    <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
+      Select a clip to inspect
+    </div>
+  );
+
+  const duration = clip.endTime - clip.startTime;
+
+  return (
+    <div className="inspector-section">
+      <div className="inspector-section-title">Clip Info</div>
+      {[
+        ['Name', clip.name],
+        ['Start', `${clip.startTime.toFixed(2)}s`],
+        ['End', `${clip.endTime.toFixed(2)}s`],
+        ['Duration', `${duration.toFixed(2)}s`],
+      ].map(([label, value]) => (
+        <div key={label} className="property-row">
+          <div className="property-label">{label}</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-primary)' }}>{value}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function InspectorPanel() {
-  const { activeInspectorTab, setInspectorTab } = useEditorStore();
-  const tabs = [
-    { id: 'video' as const, label: 'Video', icon: '▶' },
-    { id: 'color' as const, label: 'Color', icon: '🎨' },
-    { id: 'audio' as const, label: 'Audio', icon: '♪' },
-    { id: 'ai'    as const, label: 'AI',    icon: '✦' },
-  ];
+  const { activeInspectorTab, setInspectorTab, activePanel } = useEditorStore();
+
+  const tabs = activePanel === 'color'
+    ? ['color', 'video', 'audio']
+    : activePanel === 'audio'
+    ? ['audio', 'video', 'color']
+    : ['video', 'color', 'audio'];
+
   return (
     <div className="inspector-panel">
-      <div className="tabs">
+      <div className="panel-header">
+        <span className="panel-title">Inspector</span>
+      </div>
+      <div className="panel-tabs">
         {tabs.map(t => (
-          <div key={t.id} className={`tab${activeInspectorTab === t.id ? ' active' : ''}`} onClick={() => setInspectorTab(t.id)}>
-            <span>{t.icon}</span>{t.label}
-          </div>
+          <button key={t} className={`panel-tab${activeInspectorTab === t ? ' active' : ''}`}
+            onClick={() => setInspectorTab(t as any)}>
+            {t}
+          </button>
         ))}
       </div>
-      {activeInspectorTab === 'video' && <VideoTab />}
-      {activeInspectorTab === 'color' && <ColorTab />}
-      {activeInspectorTab === 'audio' && <AudioTab />}
-      {activeInspectorTab === 'ai' && (
-        <div className="tab-content">
-          <div className="inspector-section">
-            <div className="inspector-section-title">Smart Effects</div>
-            {[{name:'Object Masking',icon:'⬡',desc:'Hover-and-click masking',cost:30},{name:'Smart Reframe',icon:'⊡',desc:'Auto-resize to any ratio',cost:20},{name:'Relight Scene',icon:'☀',desc:'AI lighting adjustment',cost:25},{name:'Depth of Field',icon:'◎',desc:'Synthetic bokeh',cost:15}].map(item => (
-              <div key={item.name} style={{padding:'8px',background:'var(--bg-raised)',borderRadius:5,border:'1px solid var(--border)',marginBottom:5,cursor:'pointer'}}>
-                <div style={{display:'flex',alignItems:'center',gap:8}}>
-                  <span style={{fontSize:16,width:24,textAlign:'center'}}>{item.icon}</span>
-                  <div style={{flex:1}}><div style={{fontSize:11,fontWeight:500,color:'var(--text-primary)'}}>{item.name}</div><div style={{fontSize:10,color:'var(--text-muted)'}}>{item.desc}</div></div>
-                  <span style={{fontSize:9,color:'var(--text-accent)',fontFamily:'var(--font-mono)'}}>{item.cost}t</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+
+      <div className="panel-body">
+        <ClipInfo />
+        {activeInspectorTab === 'video' && <VideoTab />}
+        {activeInspectorTab === 'color' && <ColorTab />}
+        {activeInspectorTab === 'audio' && <AudioTab />}
+      </div>
     </div>
   );
 }
