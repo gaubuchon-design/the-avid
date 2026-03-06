@@ -1,0 +1,878 @@
+// ─── The Avid — Prisma Schema ──────────────────────────────────────────────────
+// Covers: users, orgs, projects, bins, media, timeline, AI, publishing,
+//         collaboration, marketplace, billing, entitlements
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  OWNER
+  ADMIN
+  EDITOR
+  ASSISTANT
+  REVIEWER
+  VIEWER
+}
+
+enum MediaType {
+  VIDEO
+  AUDIO
+  IMAGE
+  DOCUMENT
+  GRAPHIC
+}
+
+enum TrackType {
+  VIDEO
+  AUDIO
+  EFFECT
+  SUBTITLE
+  GRAPHIC
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+  DELETED
+}
+
+enum MediaStatus {
+  UPLOADING
+  PROCESSING
+  PROXY_GENERATING
+  READY
+  ERROR
+}
+
+enum AIJobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AIJobType {
+  TRANSCRIPTION
+  ASSEMBLY
+  PHRASE_SEARCH
+  SMART_REFRAME
+  VOICE_ISOLATION
+  OBJECT_MASK
+  AUTO_CAPTIONS
+  HIGHLIGHTS
+  COMPLIANCE_SCAN
+  SCENE_DETECTION
+  MUSIC_BEATS
+  SCRIPT_SYNC
+}
+
+enum PublishStatus {
+  DRAFT
+  PENDING
+  PROCESSING
+  PUBLISHED
+  FAILED
+}
+
+enum PublishPlatform {
+  YOUTUBE
+  INSTAGRAM
+  TIKTOK
+  TWITTER_X
+  LINKEDIN
+  VIMEO
+  CUSTOM_RTMP
+}
+
+enum CollaborationEventType {
+  JOIN
+  LEAVE
+  EDIT
+  COMMENT
+  APPROVE
+  LOCK
+  UNLOCK
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+}
+
+enum SubscriptionTier {
+  FREE
+  CREATOR
+  PRO
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  TRIALING
+  EXPIRED
+}
+
+enum MarketplaceItemType {
+  EFFECT_PLUGIN
+  AI_MODEL
+  TEMPLATE
+  PRESET_PACK
+  FONT_PACK
+  WORKFLOW_SCRIPT
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// USERS & AUTHENTICATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  emailVerified Boolean  @default(false)
+  passwordHash  String?
+  displayName   String
+  avatarUrl     String?
+  bio           String?
+  timezone      String   @default("UTC")
+  locale        String   @default("en")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  lastActiveAt  DateTime @default(now())
+  deletedAt     DateTime?
+
+  // Auth
+  refreshTokens  RefreshToken[]
+  oauthAccounts  OAuthAccount[]
+
+  // Org membership
+  orgMemberships OrgMember[]
+
+  // Project access
+  projectMembers ProjectMember[]
+
+  // Content
+  comments       Comment[]
+  approvals      Approval[]
+  aiJobs         AIJob[]
+
+  // Billing
+  subscription   Subscription?
+  tokenBalance   TokenBalance?
+  invoices       Invoice[]
+
+  // Marketplace
+  marketplaceItems MarketplaceItem[] @relation("ItemAuthor")
+  purchases        MarketplacePurchase[]
+
+  // Publishing
+  publishConnections SocialConnection[]
+
+  // Settings
+  preferences    UserPreferences?
+  keyboardLayout String           @default("avid")
+
+  @@index([email])
+  @@index([createdAt])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+  userAgent String?
+  ipAddress String?
+
+  @@index([token])
+  @@index([userId])
+}
+
+model OAuthAccount {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider       String   // google | apple | avid
+  providerUserId String
+  accessToken    String?
+  refreshToken   String?
+  expiresAt      DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
+}
+
+model UserPreferences {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  theme             String   @default("dark")
+  language          String   @default("en")
+  defaultWorkspace  String   @default("edit")
+  aiAggressionLevel Int      @default(2) // 1-5
+  proxyQuality      String   @default("720p")
+  autoSaveInterval  Int      @default(60) // seconds
+  waveformStyle     String   @default("filled")
+  timelineUnit      String   @default("timecode")
+  updatedAt         DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ORGANIZATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Organization {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  logoUrl     String?
+  website     String?
+  plan        SubscriptionTier @default(FREE)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  members     OrgMember[]
+  projects    Project[]
+  subscription OrgSubscription?
+
+  @@index([slug])
+}
+
+model OrgMember {
+  id       String   @id @default(uuid())
+  orgId    String
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role     UserRole @default(EDITOR)
+  joinedAt DateTime @default(now())
+
+  @@unique([orgId, userId])
+  @@index([orgId])
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Project {
+  id          String        @id @default(uuid())
+  name        String
+  description String?
+  orgId       String?
+  org         Organization? @relation(fields: [orgId], references: [id])
+  status      ProjectStatus @default(ACTIVE)
+  thumbnailUrl String?
+
+  // Technical settings
+  frameRate        Float    @default(23.976)
+  width            Int      @default(1920)
+  height           Int      @default(1080)
+  sampleRate       Int      @default(48000)
+  colorSpace       String   @default("Rec.709")
+  bitDepth         Int      @default(8)
+
+  // Metadata
+  tags        String[]
+  scriptUrl   String?   // linked script for ScriptSync
+  notes       String?
+
+  // Timestamps
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  lastEditedAt DateTime @default(now())
+
+  // Relations
+  members     ProjectMember[]
+  bins        Bin[]
+  timelines   Timeline[]
+  aiJobs      AIJob[]
+  publishJobs PublishJob[]
+  comments    Comment[]
+  approvals   Approval[]
+  versions    ProjectVersion[]
+  locks       ResourceLock[]
+
+  @@index([orgId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ProjectMember {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      UserRole @default(EDITOR)
+  joinedAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  @@unique([projectId, userId])
+  @@index([projectId])
+  @@index([userId])
+}
+
+model ProjectVersion {
+  id          String   @id @default(uuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version     String   // e.g. "v1.0", "Director's Cut"
+  snapshotUrl String   // S3 URL of full project JSON snapshot
+  notes       String?
+  createdById String
+  createdAt   DateTime @default(now())
+
+  @@index([projectId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BINS & MEDIA MANAGEMENT
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Bin {
+  id          String   @id @default(uuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parentId    String?
+  parent      Bin?     @relation("BinHierarchy", fields: [parentId], references: [id])
+  children    Bin[]    @relation("BinHierarchy")
+  name        String
+  color       String   @default("#6366f1")
+  isShared    Boolean  @default(false)
+  isLocked    Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  mediaAssets MediaAsset[]
+
+  @@index([projectId])
+  @@index([parentId])
+}
+
+model MediaAsset {
+  id            String      @id @default(uuid())
+  binId         String
+  bin           Bin         @relation(fields: [binId], references: [id], onDelete: Cascade)
+  name          String
+  type          MediaType
+  status        MediaStatus @default(UPLOADING)
+
+  // Storage
+  s3Key         String?     // original media key in S3
+  s3Bucket      String?
+  proxyS3Key    String?     // 720p proxy
+  thumbnailS3Key String?
+  waveformS3Key String?     // pre-generated waveform JSON
+
+  // Technical metadata
+  duration      Float?      // seconds
+  fileSize      BigInt?     // bytes
+  mimeType      String?
+  width         Int?
+  height        Int?
+  frameRate     Float?
+  codec         String?
+  audioChannels Int?
+  sampleRate    Int?
+  bitrate       Int?
+  colorSpace    String?
+
+  // Editorial metadata
+  tapeName      String?
+  reel          String?
+  scene         String?
+  take          String?
+  description   String?
+  tags          String[]
+  rating        Int?        // 1-5 stars
+  isFavorite    Boolean     @default(false)
+  isOffline     Boolean     @default(false)
+
+  // AI-derived metadata
+  transcript    String?     // auto-transcribed text
+  transcriptUrl String?     // S3 URL to full transcript JSON
+  autoTags      String[]    // AI-detected objects/actions
+  dominantColors String[]
+  emotionScores Json?       // {happy: 0.7, neutral: 0.2, ...}
+
+  // Ingestion
+  capturedAt    DateTime?
+  capturedDevice String?
+  cameraAngle   String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  clips         Clip[]
+  aiJobs        AIJob[]
+
+  @@index([binId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TIMELINE
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Timeline {
+  id          String   @id @default(uuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name        String   @default("Timeline 1")
+  isPrimary   Boolean  @default(false)
+  duration    Float    @default(0) // seconds
+  frameRate   Float    @default(23.976)
+  width       Int      @default(1920)
+  height      Int      @default(1080)
+  sampleRate  Int      @default(48000)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tracks      Track[]
+  markers     TimelineMarker[]
+
+  @@index([projectId])
+}
+
+model Track {
+  id          String    @id @default(uuid())
+  timelineId  String
+  timeline    Timeline  @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+  name        String
+  type        TrackType
+  sortOrder   Int       @default(0)
+  height      Int       @default(50) // display height in pixels
+  muted       Boolean   @default(false)
+  locked      Boolean   @default(false)
+  solo        Boolean   @default(false)
+  volume      Float     @default(1.0) // 0-2
+  pan         Float     @default(0)   // -1 to +1
+  color       String    @default("#6366f1")
+  isPatched   Boolean   @default(true) // A/V patching like Avid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  clips       Clip[]
+  keyframes   Keyframe[]
+
+  @@index([timelineId])
+  @@index([type])
+}
+
+model Clip {
+  id           String     @id @default(uuid())
+  trackId      String
+  track        Track      @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  mediaAssetId String?
+  mediaAsset   MediaAsset? @relation(fields: [mediaAssetId], references: [id])
+
+  // Timeline position
+  startTime    Float      // seconds on timeline
+  endTime      Float      // seconds on timeline
+  trimStart    Float      @default(0) // trim from start of source
+  trimEnd      Float      @default(0) // trim from end of source
+
+  // Motion
+  speed        Float      @default(1.0)  // 0.1-10x
+  reversed     Boolean    @default(false)
+
+  // Color/opacity
+  opacity      Float      @default(1.0)
+  blendMode    String     @default("normal")
+
+  // Audio
+  volume       Float      @default(1.0)
+  audioGain    Float      @default(0)    // dB
+
+  // Labels & metadata
+  name         String?
+  color        String?
+  notes        String?
+
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  effects      ClipEffect[]
+  keyframes    Keyframe[]
+
+  @@index([trackId])
+  @@index([startTime])
+}
+
+model ClipEffect {
+  id        String   @id @default(uuid())
+  clipId    String
+  clip      Clip     @relation(fields: [clipId], references: [id], onDelete: Cascade)
+  type      String   // e.g. "color-correction", "blur", "object-mask"
+  sortOrder Int      @default(0)
+  enabled   Boolean  @default(true)
+  params    Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  keyframes Keyframe[]
+
+  @@index([clipId])
+}
+
+model Keyframe {
+  id        String   @id @default(uuid())
+  trackId   String?
+  track     Track?   @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  clipId    String?
+  clip      Clip?    @relation(fields: [clipId], references: [id], onDelete: Cascade)
+  effectId  String?
+  effect    ClipEffect? @relation(fields: [effectId], references: [id], onDelete: Cascade)
+
+  time      Float    // seconds
+  property  String   // e.g. "opacity", "scale", "position.x"
+  value     Json     // number | [x,y] | {r,g,b,a} etc.
+  easing    String   @default("linear") // linear | ease-in | ease-out | bezier
+
+  @@index([clipId])
+  @@index([trackId])
+}
+
+model TimelineMarker {
+  id         String   @id @default(uuid())
+  timelineId String
+  timeline   Timeline @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+  time       Float
+  duration   Float    @default(0)
+  label      String
+  color      String   @default("#ef4444")
+  notes      String?
+  createdById String?
+  createdAt  DateTime @default(now())
+
+  @@index([timelineId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI JOBS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AIJob {
+  id            String      @id @default(uuid())
+  projectId     String?
+  project       Project?    @relation(fields: [projectId], references: [id])
+  mediaAssetId  String?
+  mediaAsset    MediaAsset? @relation(fields: [mediaAssetId], references: [id])
+  userId        String
+  user          User        @relation(fields: [userId], references: [id])
+
+  type          AIJobType
+  status        AIJobStatus @default(QUEUED)
+  priority      Int         @default(5) // 1-10, higher = more urgent
+
+  // Input params (e.g. language, role, script text)
+  inputParams   Json        @default("{}")
+
+  // Output
+  resultUrl     String?     // S3 URL to result JSON/data
+  resultSummary String?
+  errorMessage  String?
+
+  // Token cost
+  tokensUsed    Int         @default(0)
+
+  // Timing
+  queuedAt      DateTime    @default(now())
+  startedAt     DateTime?
+  completedAt   DateTime?
+  estimatedMs   Int?
+
+  @@index([projectId])
+  @@index([userId])
+  @@index([status])
+  @@index([type])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COLLABORATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Comment {
+  id          String   @id @default(uuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  parentId    String?
+  parent      Comment? @relation("CommentThread", fields: [parentId], references: [id])
+  replies     Comment[] @relation("CommentThread")
+
+  // Position on timeline
+  timelineId  String?
+  timecode    Float?   // seconds
+
+  text        String
+  isResolved  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  @@index([projectId])
+  @@index([userId])
+}
+
+model Approval {
+  id          String         @id @default(uuid())
+  projectId   String
+  project     Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User           @relation(fields: [userId], references: [id])
+  status      ApprovalStatus @default(PENDING)
+  version     String?        // which version being approved
+  notes       String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([projectId])
+  @@index([userId])
+  @@index([status])
+}
+
+model ResourceLock {
+  id          String   @id @default(uuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  resourceType String  // "timeline" | "bin" | "clip"
+  resourceId  String
+  lockedById  String
+  sessionId   String
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@unique([resourceType, resourceId])
+  @@index([projectId])
+  @@index([lockedById])
+}
+
+model CollaborationEvent {
+  id          String                 @id @default(uuid())
+  projectId   String
+  userId      String
+  sessionId   String
+  eventType   CollaborationEventType
+  payload     Json                   @default("{}")
+  createdAt   DateTime               @default(now())
+
+  @@index([projectId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PUBLISHING
+// ─────────────────────────────────────────────────────────────────────────────
+
+model PublishJob {
+  id          String          @id @default(uuid())
+  projectId   String
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId      String
+  platform    PublishPlatform
+  status      PublishStatus   @default(DRAFT)
+
+  // Export settings
+  timelineId  String
+  aspectRatio String          @default("16:9")
+  resolution  String          @default("1920x1080")
+  format      String          @default("mp4")
+  bitrate     Int             @default(8000) // kbps
+
+  // Platform metadata
+  title       String?
+  description String?
+  tags        String[]
+  thumbnail   String?
+  scheduledAt DateTime?
+
+  // AI features
+  autoCaption Boolean         @default(false)
+  smartReframe Boolean        @default(false)
+  autoChapters Boolean        @default(false)
+
+  // Results
+  externalUrl String?
+  externalId  String?
+  exportS3Key String?
+  errorMessage String?
+  publishedAt DateTime?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([status])
+  @@index([platform])
+}
+
+model SocialConnection {
+  id           String          @id @default(uuid())
+  userId       String
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform     PublishPlatform
+  accountName  String
+  accountId    String
+  accessToken  String
+  refreshToken String?
+  expiresAt    DateTime?
+  isActive     Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@unique([userId, platform, accountId])
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BILLING & ENTITLEMENTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Subscription {
+  id              String             @id @default(uuid())
+  userId          String             @unique
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tier            SubscriptionTier   @default(FREE)
+  status          SubscriptionStatus @default(ACTIVE)
+  stripeCustomerId String?
+  stripeSubId     String?
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  cancelAtPeriodEnd  Boolean         @default(false)
+  trialEndsAt     DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([userId])
+  @@index([tier])
+}
+
+model OrgSubscription {
+  id              String             @id @default(uuid())
+  orgId           String             @unique
+  org             Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  tier            SubscriptionTier   @default(FREE)
+  status          SubscriptionStatus @default(ACTIVE)
+  seats           Int                @default(5)
+  stripeCustomerId String?
+  stripeSubId     String?
+  currentPeriodEnd DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+}
+
+model TokenBalance {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  balance     Int      @default(100) // free tier starts with 100 tokens
+  lifetime    Int      @default(100) // total ever earned/purchased
+  updatedAt   DateTime @updatedAt
+
+  transactions TokenTransaction[]
+}
+
+model TokenTransaction {
+  id          String   @id @default(uuid())
+  balanceId   String
+  balance     TokenBalance @relation(fields: [balanceId], references: [id], onDelete: Cascade)
+  delta       Int      // positive = credit, negative = debit
+  reason      String   // "purchase" | "ai_transcription" | "ai_assembly" | "bonus"
+  referenceId String?  // AIJob ID or purchase ID
+  createdAt   DateTime @default(now())
+
+  @@index([balanceId])
+}
+
+model Invoice {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  stripeInvoiceId String   @unique
+  amountPaid      Int      // cents
+  currency        String   @default("usd")
+  paidAt          DateTime?
+  pdfUrl          String?
+  createdAt       DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARKETPLACE
+// ─────────────────────────────────────────────────────────────────────────────
+
+model MarketplaceItem {
+  id           String              @id @default(uuid())
+  authorId     String
+  author       User                @relation("ItemAuthor", fields: [authorId], references: [id])
+  type         MarketplaceItemType
+  name         String
+  slug         String              @unique
+  description  String
+  longDescription String?
+  thumbnailUrl String?
+  previewUrls  String[]
+  version      String              @default("1.0.0")
+  priceTokens  Int                 @default(0) // 0 = free
+  priceCents   Int                 @default(0)
+  downloadUrl  String?             // S3 key
+  tags         String[]
+  isPublished  Boolean             @default(false)
+  isFeatured   Boolean             @default(false)
+  rating       Float               @default(0)
+  downloadCount Int                @default(0)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  purchases    MarketplacePurchase[]
+
+  @@index([type])
+  @@index([isPublished])
+  @@index([authorId])
+}
+
+model MarketplacePurchase {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id])
+  itemId    String
+  item      MarketplaceItem  @relation(fields: [itemId], references: [id])
+  paidTokens Int             @default(0)
+  paidCents  Int             @default(0)
+  createdAt DateTime         @default(now())
+
+  @@unique([userId, itemId])
+  @@index([userId])
+  @@index([itemId])
+}

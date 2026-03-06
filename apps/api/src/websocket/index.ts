@@ -1,0 +1,179 @@
+import { Server as SocketServer, Socket } from 'socket.io';
+import { Server as HttpServer } from 'http';
+import jwt from 'jsonwebtoken';
+import { db } from '../db/client';
+import { config } from '../config';
+import { logger } from '../utils/logger';
+import type { JwtPayload } from '../middleware/auth';
+
+// ─── Event types ───────────────────────────────────────────────────────────────
+export interface ServerToClientEvents {
+  'project:update': (payload: { projectId: string; data: unknown }) => void;
+  'timeline:update': (payload: { timelineId: string; operation: TimelineOperation }) => void;
+  'clip:move': (payload: { clipId: string; startTime: number; trackId: string }) => void;
+  'clip:trim': (payload: { clipId: string; startTime: number; endTime: number }) => void;
+  'clip:add': (payload: { clip: unknown }) => void;
+  'clip:delete': (payload: { clipId: string }) => void;
+  'playhead:move': (payload: { timelineId: string; position: number; userId: string }) => void;
+  'comment:new': (payload: { comment: unknown }) => void;
+  'approval:update': (payload: { approval: unknown }) => void;
+  'ai:job:update': (payload: { jobId: string; status: string; result?: unknown }) => void;
+  'publish:update': (payload: { jobId: string; status: string; progress?: number }) => void;
+  'user:joined': (payload: { userId: string; displayName: string; projectId: string }) => void;
+  'user:left': (payload: { userId: string; projectId: string }) => void;
+  'lock:acquired': (payload: { resourceType: string; resourceId: string; userId: string }) => void;
+  'lock:released': (payload: { resourceType: string; resourceId: string }) => void;
+  error: (payload: { message: string; code: string }) => void;
+}
+
+export interface ClientToServerEvents {
+  'project:join': (projectId: string, callback: (ok: boolean) => void) => void;
+  'project:leave': (projectId: string) => void;
+  'timeline:operation': (payload: TimelineOperation) => void;
+  'playhead:move': (payload: { timelineId: string; position: number }) => void;
+  'cursor:move': (payload: { x: number; y: number }) => void;
+}
+
+export interface TimelineOperation {
+  type: 'clip:add' | 'clip:move' | 'clip:trim' | 'clip:delete' | 'track:add' | 'track:delete';
+  payload: unknown;
+  timelineId: string;
+  userId?: string;
+  timestamp?: number;
+}
+
+// ─── Active sessions ───────────────────────────────────────────────────────────
+const projectSessions = new Map<string, Set<string>>(); // projectId → Set<userId>
+const socketUsers = new Map<string, { userId: string; displayName: string }>(); // socketId → user
+
+// ─── Init ──────────────────────────────────────────────────────────────────────
+export function initWebSocket(httpServer: HttpServer) {
+  const io = new SocketServer<ClientToServerEvents, ServerToClientEvents>(httpServer, {
+    cors: { origin: config.cors.origins, credentials: true },
+    maxHttpBufferSize: config.ws.maxPayload,
+    pingInterval: config.ws.heartbeatInterval,
+    pingTimeout: 10000,
+  });
+
+  // ─── Auth middleware ─────────────────────────────────────────────────────────
+  io.use(async (socket, next) => {
+    try {
+      const token = socket.handshake.auth.token ?? socket.handshake.headers.authorization?.slice(7);
+      if (!token) return next(new Error('No token'));
+
+      const payload = jwt.verify(token, config.jwt.secret) as JwtPayload;
+      const user = await db.user.findUnique({
+        where: { id: payload.sub, deletedAt: null },
+        select: { id: true, displayName: true },
+      });
+      if (!user) return next(new Error('User not found'));
+
+      (socket as any).user = user;
+      socketUsers.set(socket.id, user);
+      next();
+    } catch {
+      next(new Error('Authentication failed'));
+    }
+  });
+
+  // ─── Connection ──────────────────────────────────────────────────────────────
+  io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>) => {
+    const user = (socket as any).user as { id: string; displayName: string };
+    logger.debug(`WS connected: ${user.displayName} (${socket.id})`);
+
+    // Join project room
+    socket.on('project:join', async (projectId, callback) => {
+      try {
+        // Verify access
+        const member = await db.projectMember.findUnique({
+          where: { projectId_userId: { projectId, userId: user.id } },
+        });
+        if (!member) return callback(false);
+
+        socket.join(`project:${projectId}`);
+
+        if (!projectSessions.has(projectId)) projectSessions.set(projectId, new Set());
+        projectSessions.get(projectId)!.add(user.id);
+
+        // Notify room of new user
+        socket.to(`project:${projectId}`).emit('user:joined', {
+          userId: user.id,
+          displayName: user.displayName,
+          projectId,
+        });
+
+        // Record collaboration event
+        db.collaborationEvent.create({
+          data: { projectId, userId: user.id, sessionId: socket.id, eventType: 'JOIN', payload: {} },
+        }).catch(logger.error);
+
+        callback(true);
+        logger.debug(`${user.displayName} joined project:${projectId}`);
+      } catch (err) {
+        callback(false);
+      }
+    });
+
+    // Leave project room
+    socket.on('project:leave', (projectId) => {
+      handleLeave(socket, projectId);
+    });
+
+    // Timeline operations (OT-based — broadcast to room, skip sender)
+    socket.on('timeline:operation', (operation) => {
+      const op = { ...operation, userId: user.id, timestamp: Date.now() };
+      socket.to(`project:${operation.timelineId}`).emit('timeline:update', op);
+    });
+
+    // Playhead sync
+    socket.on('playhead:move', ({ timelineId, position }) => {
+      socket.to(`project:${timelineId}`).emit('playhead:move', {
+        timelineId,
+        position,
+        userId: user.id,
+      });
+    });
+
+    // Disconnect
+    socket.on('disconnect', () => {
+      socketUsers.delete(socket.id);
+      // Leave all joined rooms
+      socket.rooms.forEach((room) => {
+        if (room.startsWith('project:')) {
+          const projectId = room.slice('project:'.length);
+          handleLeave(socket, projectId);
+        }
+      });
+      logger.debug(`WS disconnected: ${user.displayName}`);
+    });
+  });
+
+  function handleLeave(socket: Socket, projectId: string) {
+    const user = socketUsers.get(socket.id);
+    if (!user) return;
+
+    socket.leave(`project:${projectId}`);
+    projectSessions.get(projectId)?.delete(user.userId);
+
+    socket.to(`project:${projectId}`).emit('user:left', { userId: user.userId, projectId });
+
+    db.collaborationEvent.create({
+      data: {
+        projectId,
+        userId: user.userId,
+        sessionId: socket.id,
+        eventType: 'LEAVE',
+        payload: {},
+      },
+    }).catch(logger.error);
+  }
+
+  // ─── Utility: broadcast to project ──────────────────────────────────────────
+  return {
+    io,
+    broadcastToProject: (projectId: string, event: keyof ServerToClientEvents, payload: unknown) => {
+      io.to(`project:${projectId}`).emit(event as any, payload);
+    },
+    getProjectUsers: (projectId: string) => projectSessions.get(projectId) ?? new Set<string>(),
+  };
+}
