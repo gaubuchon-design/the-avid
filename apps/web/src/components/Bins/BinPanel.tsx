@@ -1,12 +1,16 @@
 import React, { useState } from 'react';
-import { getMediaAssetTechnicalSummary } from '@mcua/core';
 import { useEditorStore } from '../../store/editor.store';
-import type { Bin, MediaAsset } from '../../store/editor.store';
+import type { Bin, MediaAsset, SmartBin } from '../../store/editor.store';
 
 function formatDuration(sec?: number): string {
   if (!sec) return '--:--';
   const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function formatDate(): string {
+  const d = new Date();
+  return `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)} ${d.toLocaleTimeString()}`;
 }
 
 function BinItem({ bin, depth = 0 }: { bin: Bin; depth?: number }) {
@@ -41,10 +45,8 @@ function BinItem({ bin, depth = 0 }: { bin: Bin; depth?: number }) {
 }
 
 function AssetCard({ asset }: { asset: MediaAsset }) {
-  const { appendAssetToTimeline, setSourceAsset, sourceAsset } = useEditorStore();
+  const { setSourceAsset, sourceAsset } = useEditorStore();
   const isSelected = sourceAsset?.id === asset.id;
-  const typeClass = asset.type.toLowerCase();
-  const technicalSummary = getMediaAssetTechnicalSummary(asset).slice(0, 2);
 
   const typeIcon: Record<string, string> = { VIDEO: '▶', AUDIO: '♪', IMAGE: '⬛', DOCUMENT: '📄' };
 
@@ -52,10 +54,7 @@ function AssetCard({ asset }: { asset: MediaAsset }) {
     <div
       className={`asset-card${isSelected ? ' selected' : ''}`}
       onClick={() => setSourceAsset(asset)}
-      onDoubleClick={() => {
-        setSourceAsset(asset);
-        appendAssetToTimeline(asset.id);
-      }}
+      onDoubleClick={() => setSourceAsset(asset)}
     >
       <div className="asset-thumb">
         {asset.status === 'PROCESSING' ? (
@@ -64,188 +63,326 @@ function AssetCard({ asset }: { asset: MediaAsset }) {
           <div className="asset-thumb-placeholder">{typeIcon[asset.type] ?? '📄'}</div>
         )}
         {asset.duration && <div className="asset-duration">{formatDuration(asset.duration)}</div>}
-        <div className={`asset-type-badge ${typeClass}`}>{asset.type}</div>
+        <div className={`asset-type-badge ${asset.type.toLowerCase()}`}>{asset.type}</div>
         {asset.isFavorite && <div className="asset-fav">★</div>}
       </div>
       <div className="asset-name truncate">{asset.name}</div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-        {technicalSummary.map((item) => (
-          <span key={item} className="badge badge-muted">{item}</span>
-        ))}
-        {asset.proxyMetadata?.status === 'READY' && <span className="badge badge-accent">Proxy</span>}
-        {asset.indexStatus === 'MISSING' && <span className="badge badge-error">Missing</span>}
-        {asset.waveformMetadata?.status === 'READY' && asset.type !== 'IMAGE' && asset.type !== 'DOCUMENT' && (
-          <span className="badge badge-muted">Waveform</span>
-        )}
-        {asset.ingestMetadata?.storageMode && <span className="badge badge-muted">{asset.ingestMetadata.storageMode}</span>}
+    </div>
+  );
+}
+
+/** Figma-style column list view with Color | Name | Date | Duration */
+function AssetListView({ assets }: { assets: MediaAsset[] }) {
+  const { setSourceAsset, sourceAsset } = useEditorStore();
+
+  return (
+    <div className="bin-list-view">
+      {/* Column headers */}
+      <div className="bin-list-header">
+        <span className="bin-col-color"></span>
+        <span className="bin-col-name">Name</span>
+        <span className="bin-col-date">Creation Date</span>
+        <span className="bin-col-duration">Duration</span>
       </div>
+      {/* Rows */}
+      {assets.map(asset => (
+        <div
+          key={asset.id}
+          className={`bin-list-row${sourceAsset?.id === asset.id ? ' selected' : ''}`}
+          onClick={() => setSourceAsset(asset)}
+          onDoubleClick={() => setSourceAsset(asset)}
+        >
+          <span className="bin-col-color">
+            <span className="bin-list-color-dot" style={{
+              background: asset.type === 'VIDEO' ? 'var(--track-video)' :
+                asset.type === 'AUDIO' ? 'var(--track-audio)' : 'var(--track-effect)',
+            }} />
+          </span>
+          <span className="bin-col-name truncate">{asset.name}</span>
+          <span className="bin-col-date">{formatDate()}</span>
+          <span className="bin-col-duration">{formatDuration(asset.duration)}</span>
+        </div>
+      ))}
     </div>
   );
 }
 
 type ViewMode = 'grid' | 'list';
 
+/* ─── Effects library data ─────────────────────────────────────────────── */
+interface EffectEntry { id: string; name: string; category: string; }
+
+const EFFECTS_LIBRARY: { category: string; effects: EffectEntry[] }[] = [
+  {
+    category: 'Video Effects',
+    effects: [
+      { id: 'fx-cc', name: 'Color Correction', category: 'Video Effects' },
+      { id: 'fx-lut', name: 'LUT Loader', category: 'Video Effects' },
+      { id: 'fx-stab', name: 'Stabilizer', category: 'Video Effects' },
+      { id: 'fx-blur', name: 'Gaussian Blur', category: 'Video Effects' },
+      { id: 'fx-sharp', name: 'Unsharp Mask', category: 'Video Effects' },
+      { id: 'fx-chroma', name: 'Chroma Key', category: 'Video Effects' },
+      { id: 'fx-luma', name: 'Luma Key', category: 'Video Effects' },
+      { id: 'fx-resize', name: 'Resize', category: 'Video Effects' },
+      { id: 'fx-denoise', name: 'Noise Reduction', category: 'Video Effects' },
+    ],
+  },
+  {
+    category: 'Audio Effects',
+    effects: [
+      { id: 'fx-eq', name: 'Parametric EQ', category: 'Audio Effects' },
+      { id: 'fx-comp', name: 'Compressor', category: 'Audio Effects' },
+      { id: 'fx-limiter', name: 'Limiter', category: 'Audio Effects' },
+      { id: 'fx-reverb', name: 'Reverb', category: 'Audio Effects' },
+      { id: 'fx-denoise-a', name: 'Noise Reduction', category: 'Audio Effects' },
+      { id: 'fx-304c', name: '304C', category: 'Audio Effects' },
+      { id: 'fx-sp76', name: 'SP 76', category: 'Audio Effects' },
+      { id: 'fx-dyns', name: 'DynS Compressor/Limiter', category: 'Audio Effects' },
+    ],
+  },
+  {
+    category: 'Transitions',
+    effects: [
+      { id: 'fx-dissolve', name: 'Dissolve', category: 'Transitions' },
+      { id: 'fx-dip-black', name: 'Dip to Black', category: 'Transitions' },
+      { id: 'fx-dip-white', name: 'Dip to White', category: 'Transitions' },
+      { id: 'fx-wipe', name: 'Wipe', category: 'Transitions' },
+      { id: 'fx-push', name: 'Push', category: 'Transitions' },
+      { id: 'fx-slide', name: 'Slide', category: 'Transitions' },
+    ],
+  },
+];
+
+function EffectsBrowser({ search }: { search: string }) {
+  const lowerSearch = search.toLowerCase();
+  const [appliedFx, setAppliedFx] = useState<string | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, fx: EffectEntry) => {
+    e.dataTransfer.setData('application/x-effect', JSON.stringify(fx));
+    e.dataTransfer.effectAllowed = 'copy';
+  };
+
+  const handleApplyEffect = (fx: EffectEntry) => {
+    setAppliedFx(fx.id);
+    setTimeout(() => setAppliedFx(null), 1200);
+  };
+
+  return (
+    <div className="panel-body">
+      {EFFECTS_LIBRARY.map(cat => {
+        const filtered = cat.effects.filter(fx =>
+          !lowerSearch || fx.name.toLowerCase().includes(lowerSearch) || fx.category.toLowerCase().includes(lowerSearch)
+        );
+        if (filtered.length === 0) return null;
+
+        return (
+          <div key={cat.category} className="fx-browser-category">
+            <div className="fx-browser-category-title">{cat.category}</div>
+            {filtered.map(fx => (
+              <div
+                key={fx.id}
+                className={`fx-browser-item${appliedFx === fx.id ? ' applied' : ''}`}
+                draggable
+                title={`Drag to timeline or double-click to apply\n${fx.name}`}
+                onDragStart={e => handleDragStart(e, fx)}
+                onDoubleClick={() => handleApplyEffect(fx)}
+              >
+                <span className="fx-browser-icon">
+                  {cat.category === 'Video Effects' ? '◈' : cat.category === 'Audio Effects' ? '♪' : '⇄'}
+                </span>
+                <span className="fx-browser-name">{fx.name}</span>
+                {appliedFx === fx.id && <span style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--success)' }}>✓ Applied</span>}
+              </div>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ─── Smart Bin item ──────────────────────────────────────────────────── */
+
+function SmartBinItem({ smartBin }: { smartBin: SmartBin }) {
+  const { selectedSmartBinId, selectSmartBin, removeSmartBin } = useEditorStore();
+  const isSelected = selectedSmartBinId === smartBin.id;
+  const assetCount = useEditorStore.getState().getSmartBinAssets(smartBin.id).length;
+
+  return (
+    <div
+      className={`bin-item smart-bin-item${isSelected ? ' selected' : ''}`}
+      style={{ paddingLeft: 8 }}
+      onClick={() => selectSmartBin(smartBin.id)}
+    >
+      <div className="bin-indent">
+        <span style={{ fontSize: 10, opacity: 0.6 }}>✦</span>
+      </div>
+      <div className="bin-dot" style={{ background: smartBin.color }} />
+      <span className="bin-name">{smartBin.name}</span>
+      <span className="bin-count">{assetCount}</span>
+      <button
+        className="smart-bin-remove"
+        onClick={e => { e.stopPropagation(); removeSmartBin(smartBin.id); }}
+        title="Remove Smart Bin"
+      >✕</button>
+    </div>
+  );
+}
+
+/* ─── Main BinPanel ───────────────────────────────────────────────────── */
+
 export function BinPanel() {
-  const { bins, activeBinAssets, appendAssetToTimeline, selectedBinId, projectId, importAssets, saveProject } = useEditorStore();
+  const { bins, activeBinAssets, toolbarTab, addBin, selectedBinId, smartBins } = useEditorStore();
   const [search, setSearch] = useState('');
-  const [viewMode, setViewMode] = useState<ViewMode>('grid');
-  const [tab, setTab] = useState<'bins' | 'search'>('bins');
-  const [isImporting, setIsImporting] = useState(false);
-  const selectedBinName = findBinName(bins, selectedBinId) ?? 'Media';
-  const isDesktop = Boolean(window.electronAPI);
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [tab, setTab] = useState<'bins' | 'smart' | 'search'>('bins');
+  const [showNewBinInput, setShowNewBinInput] = useState(false);
+  const [newBinName, setNewBinName] = useState('');
+
+  const isEffectsMode = toolbarTab === 'effects';
 
   const filtered = activeBinAssets.filter(a =>
     !search || a.name.toLowerCase().includes(search.toLowerCase()) ||
-    a.tags.some(t => t.toLowerCase().includes(search.toLowerCase()))
+    a.tags.some(t => t.includes(search.toLowerCase()))
   );
-
-  const handleImportMedia = async () => {
-    if (!window.electronAPI || !projectId || isImporting) {
-      return;
-    }
-
-    setIsImporting(true);
-
-    try {
-      const result = await window.electronAPI.openFile({
-        title: `Import Media into ${selectedBinName}`,
-        properties: ['openFile', 'multiSelections'],
-        filters: [
-          { name: 'Media', extensions: ['mov', 'mp4', 'mxf', 'webm', 'avi', 'm4v', 'mkv', 'mpg', 'mpeg', 'mts', 'm2ts', 'r3d', 'braw', 'ari', 'wav', 'mp3', 'aif', 'aiff', 'aac', 'm4a', 'flac', 'ogg', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'tif', 'tiff', 'dng', 'bmp', 'pdf'] },
-          { name: 'All Files', extensions: ['*'] },
-        ],
-      });
-
-      if (result.canceled || result.filePaths.length === 0) {
-        return;
-      }
-
-      const imported = await window.electronAPI.importMedia(projectId, result.filePaths);
-      importAssets(imported, selectedBinId);
-      await saveProject();
-    } catch (error) {
-      console.error('Failed to import media', error);
-    } finally {
-      setIsImporting(false);
-    }
-  };
 
   return (
     <div className="bin-panel">
       {/* Header */}
       <div className="panel-header">
-        <span className="panel-title">{selectedBinName}</span>
+        <span className="panel-title">{isEffectsMode ? 'Effects' : 'Media'}</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
-          <button
-            className="tl-btn"
-            title={isDesktop ? 'Import Media' : 'Desktop import is available in the macOS and Windows apps'}
-            style={{ fontSize: 12 }}
-            onClick={() => { void handleImportMedia(); }}
-            disabled={!isDesktop || !projectId || isImporting}
-          >
-            {isImporting ? '…' : '+'}
-          </button>
-          <button className="tl-btn" title="New Bin">📁</button>
+          {!isEffectsMode && (
+            <>
+              <button className="tl-btn" title="Import Media" style={{ fontSize: 12 }}
+                onClick={() => {
+                  // Trigger native file picker (mock — in production connects to media ingest pipeline)
+                  const input = document.createElement('input');
+                  input.type = 'file';
+                  input.multiple = true;
+                  input.accept = 'video/*,audio/*,image/*';
+                  input.onchange = () => {
+                    // In production: upload to S3, create MediaAsset records
+                    if (input.files?.length) {
+                      alert(`${input.files.length} file(s) selected for import. (Media ingest pipeline not connected in demo)`);
+                    }
+                  };
+                  input.click();
+                }}>+</button>
+              <button className="tl-btn" title="New Bin"
+                onClick={() => setShowNewBinInput(true)}>📁</button>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="panel-tabs">
-        {(['bins', 'search'] as const).map(t => (
-          <button key={t} className={`panel-tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
-            {t}
-          </button>
-        ))}
-      </div>
+      {/* New bin input */}
+      {showNewBinInput && (
+        <div style={{ display: 'flex', gap: 4, padding: '4px 8px', borderBottom: '1px solid var(--border-subtle)' }}>
+          <input type="text" placeholder="Bin name…" value={newBinName}
+            onChange={e => setNewBinName(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && newBinName.trim()) {
+                addBin(newBinName.trim(), selectedBinId ?? undefined);
+                setNewBinName('');
+                setShowNewBinInput(false);
+              }
+              if (e.key === 'Escape') { setShowNewBinInput(false); setNewBinName(''); }
+            }}
+            autoFocus
+            style={{ flex: 1, background: 'var(--bg-void)', border: '1px solid var(--border)', borderRadius: 4,
+              color: 'var(--text-primary)', fontSize: 11, padding: '3px 6px', outline: 'none' }} />
+          <button className="tl-btn" style={{ fontSize: 10 }}
+            onClick={() => {
+              if (newBinName.trim()) {
+                addBin(newBinName.trim(), selectedBinId ?? undefined);
+                setNewBinName('');
+                setShowNewBinInput(false);
+              }
+            }}>Create</button>
+          <button className="tl-btn" style={{ fontSize: 10 }}
+            onClick={() => { setShowNewBinInput(false); setNewBinName(''); }}>✕</button>
+        </div>
+      )}
+
+      {/* Tabs — only show for Media mode */}
+      {!isEffectsMode && (
+        <div className="panel-tabs">
+          {(['bins', 'smart', 'search'] as const).map(t => (
+            <button key={t} className={`panel-tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
+              {t === 'smart' ? '✦ Smart' : t}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Search */}
       <div className="bin-search">
         <input
-          type="text" placeholder="Search…" value={search}
+          type="text" placeholder={isEffectsMode ? 'Search effects…' : 'Search…'} value={search}
           onChange={e => setSearch(e.target.value)}
         />
-        <div className="bin-view-toggle" style={{ display: 'flex', gap: 2, padding: 0 }}>
-          <button className={`view-btn${viewMode === 'grid' ? ' active' : ''}`}
-            onClick={() => setViewMode('grid')} title="Grid view">▦</button>
-          <button className={`view-btn${viewMode === 'list' ? ' active' : ''}`}
-            onClick={() => setViewMode('list')} title="List view">☰</button>
-        </div>
-      </div>
-
-      {/* Bin tree */}
-      <div className="bin-tree" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-        {bins.map(bin => <BinItem key={bin.id} bin={bin} />)}
-      </div>
-
-      {/* Asset area */}
-      <div className="panel-body">
-        {filtered.length === 0 ? (
-          <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
-            {search ? 'No matches' : 'No assets in this bin'}
-          </div>
-        ) : viewMode === 'grid' ? (
-          <div className="asset-grid">
-            {filtered.map(asset => <AssetCard key={asset.id} asset={asset} />)}
-          </div>
-        ) : (
-          <div style={{ padding: '4px 0' }}>
-            {filtered.map((asset) => {
-              const summary = getMediaAssetTechnicalSummary(asset).slice(0, 2).join(' · ');
-              return (
-              <div key={asset.id}
-                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 12px', cursor: 'pointer',
-                  borderBottom: '1px solid var(--border-subtle)', fontSize: 11 }}
-                onClick={() => useEditorStore.getState().setSourceAsset(asset)}
-                onDoubleClick={() => appendAssetToTimeline(asset.id)}
-              >
-                <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-                  {asset.type === 'VIDEO' ? '▶' : asset.type === 'AUDIO' ? '♪' : '⬛'}
-                </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="truncate" style={{ color: 'var(--text-secondary)' }}>{asset.name}</div>
-                  {(summary || asset.ingestMetadata?.storageMode || asset.proxyMetadata?.status === 'READY') && (
-                    <div className="truncate" style={{ color: 'var(--text-muted)', fontSize: 9.5 }}>
-                      {[summary, asset.ingestMetadata?.storageMode, asset.proxyMetadata?.status === 'READY' ? 'Proxy ready' : '', asset.indexStatus === 'MISSING' ? 'Missing media' : ''].filter(Boolean).join(' · ')}
-                    </div>
-                  )}
-                </div>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9.5, color: 'var(--text-muted)' }}>
-                  {formatDuration(asset.duration)}
-                </span>
-              </div>
-              );
-            })}
+        {!isEffectsMode && (
+          <div className="bin-view-toggle" style={{ display: 'flex', gap: 2, padding: 0 }}>
+            <button className={`view-btn${viewMode === 'grid' ? ' active' : ''}`}
+              onClick={() => setViewMode('grid')} title="Grid view">▦</button>
+            <button className={`view-btn${viewMode === 'list' ? ' active' : ''}`}
+              onClick={() => setViewMode('list')} title="List view">☰</button>
           </div>
         )}
       </div>
+
+      {isEffectsMode ? (
+        /* ── Effects browser mode ── */
+        <EffectsBrowser search={search} />
+      ) : (
+        /* ── Media browser mode ── */
+        <>
+          {/* Bin tree — normal or smart bins */}
+          <div className="bin-tree" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+            {tab === 'smart' ? (
+              smartBins.length > 0 ? (
+                smartBins.map(sb => <SmartBinItem key={sb.id} smartBin={sb} />)
+              ) : (
+                <div style={{ padding: 12, textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
+                  No smart bins. Smart bins auto-populate based on rules.
+                </div>
+              )
+            ) : (
+              bins.map(bin => <BinItem key={bin.id} bin={bin} />)
+            )}
+          </div>
+
+          {/* Asset area */}
+          <div className="panel-body">
+            {filtered.length === 0 ? (
+              <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
+                {search ? 'No matches' : 'No assets in this bin'}
+              </div>
+            ) : viewMode === 'grid' ? (
+              <div className="asset-grid">
+                {filtered.map(asset => <AssetCard key={asset.id} asset={asset} />)}
+              </div>
+            ) : (
+              <AssetListView assets={filtered} />
+            )}
+          </div>
+        </>
+      )}
 
       {/* Footer */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px',
         background: 'var(--bg-void)', borderTop: '1px solid var(--border-subtle)',
         fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-        <span>{filtered.length} items</span>
-        <span>Double-click to add to the timeline</span>
-        <span style={{ marginLeft: 'auto' }}>{activeBinAssets.filter(a => a.status === 'PROCESSING').length > 0 ? '⟳ Processing…' : '✓ Ready'}</span>
+        {isEffectsMode ? (
+          <span>{EFFECTS_LIBRARY.reduce((n, c) => n + c.effects.length, 0)} effects available</span>
+        ) : (
+          <>
+            <span>{filtered.length} items</span>
+            <span style={{ marginLeft: 'auto' }}>{activeBinAssets.filter(a => a.status === 'PROCESSING').length > 0 ? '⟳ Processing…' : '✓ Ready'}</span>
+          </>
+        )}
       </div>
     </div>
   );
-}
-
-function findBinName(bins: Bin[], id: string | null): string | null {
-  if (!id) {
-    return null;
-  }
-
-  for (const bin of bins) {
-    if (bin.id === id) {
-      return bin.name;
-    }
-
-    const nested = findBinName(bin.children, id);
-    if (nested) {
-      return nested;
-    }
-  }
-
-  return null;
 }

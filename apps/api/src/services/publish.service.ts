@@ -1,11 +1,19 @@
 import { db } from '../db/client';
 import { logger } from '../utils/logger';
-import type { PublishJob } from '@prisma/client';
+
+interface QueuedPublishJob {
+  id: string;
+  timelineId: string;
+  platform: 'YOUTUBE' | 'INSTAGRAM' | 'TIKTOK' | 'VIMEO' | 'CUSTOM';
+  smartReframe: boolean;
+  aspectRatio: string | null;
+  autoCaption: boolean;
+}
 
 class PublishService {
-  private queue: PublishJob[] = [];
+  private queue: QueuedPublishJob[] = [];
 
-  async enqueue(job: PublishJob) {
+  async enqueue(job: QueuedPublishJob) {
     this.queue.push(job);
     this.processNext();
   }
@@ -56,13 +64,13 @@ class PublishService {
     }
   }
 
-  private async simulateExport(job: PublishJob): Promise<void> {
+  private async simulateExport(job: QueuedPublishJob): Promise<void> {
     // In production: kick off FFmpeg export via job queue
     // ffmpeg -i [input] -vf scale={resolution} -b:v {bitrate}k -preset fast [output]
     await new Promise((r) => setTimeout(r, 1000));
   }
 
-  private async deliverToPlatform(job: PublishJob): Promise<string> {
+  private async deliverToPlatform(job: QueuedPublishJob): Promise<string> {
     switch (job.platform) {
       case 'YOUTUBE':
         // YouTube Data API v3: videos.insert with multipart upload

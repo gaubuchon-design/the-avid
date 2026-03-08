@@ -75,6 +75,7 @@ export async function optionalAuth(req: Request, res: Response, next: NextFuncti
 // ─── requireProject access ────────────────────────────────────────────────────
 export function requireProjectAccess(minRole: 'VIEWER' | 'REVIEWER' | 'EDITOR' | 'ADMIN' | 'OWNER' = 'VIEWER') {
   const hierarchy = { VIEWER: 0, REVIEWER: 1, EDITOR: 2, ASSISTANT: 2, ADMIN: 3, OWNER: 4 };
+  type ProjectRole = keyof typeof hierarchy;
 
   return async (req: Request, _res: Response, next: NextFunction) => {
     try {
@@ -87,7 +88,8 @@ export function requireProjectAccess(minRole: 'VIEWER' | 'REVIEWER' | 'EDITOR' |
       });
 
       if (!member) throw new ForbiddenError('Not a project member');
-      if (hierarchy[member.role] < hierarchy[minRole]) {
+      const memberRole = member.role as ProjectRole;
+      if (hierarchy[memberRole] < hierarchy[minRole]) {
         throw new ForbiddenError(`Requires ${minRole} access or higher`);
       }
 

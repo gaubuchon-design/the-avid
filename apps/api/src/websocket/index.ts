@@ -122,7 +122,10 @@ export function initWebSocket(httpServer: HttpServer) {
     // Timeline operations (OT-based — broadcast to room, skip sender)
     socket.on('timeline:operation', (operation) => {
       const op = { ...operation, userId: user.id, timestamp: Date.now() };
-      socket.to(`project:${operation.timelineId}`).emit('timeline:update', op);
+      socket.to(`project:${operation.timelineId}`).emit('timeline:update', {
+        timelineId: operation.timelineId,
+        operation: op,
+      });
     });
 
     // Playhead sync

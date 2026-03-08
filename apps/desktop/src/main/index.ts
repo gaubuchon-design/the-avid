@@ -5,6 +5,7 @@ import { mkdir, readdir, readFile, rm, unlink, writeFile } from 'node:fs/promise
 import path from 'path';
 import { flattenAssets, PROJECT_SCHEMA_VERSION } from '@mcua/core';
 import type { EditorMediaAsset, EditorProject } from '@mcua/core';
+import { detectGPU } from './gpu';
 import {
   createProjectMediaPaths,
   ensureProjectMediaPaths,
@@ -576,7 +577,17 @@ ipcMain.handle('dialog:open-file', async (_event, opts) => {
   return result;
 });
 
+ipcMain.handle('dialog:open', async (_event, opts) => {
+  const result = await dialog.showOpenDialog(opts);
+  return result;
+});
+
 ipcMain.handle('dialog:save-file', async (_event, opts) => {
+  const result = await dialog.showSaveDialog(opts);
+  return result;
+});
+
+ipcMain.handle('dialog:save', async (_event, opts) => {
   const result = await dialog.showSaveDialog(opts);
   return result;
 });
@@ -643,4 +654,6 @@ ipcMain.handle('fs:write-text', async (_event, filePath: string, contents: strin
 
 ipcMain.handle('app:get-version', () => app.getVersion());
 ipcMain.handle('app:get-platform', () => process.platform);
+ipcMain.handle('app:version', () => app.getVersion());
 ipcMain.handle('app:get-media-tools', async () => getMediaToolPaths());
+ipcMain.handle('gpu:info', async () => detectGPU());

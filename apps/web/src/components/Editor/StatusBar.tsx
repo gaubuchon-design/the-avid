@@ -7,25 +7,11 @@ function formatTC(sec: number) {
 }
 
 export function StatusBar() {
-  const { tracks, duration, zoom, playheadTime, isPlaying, projectName, projectSettings, saveStatus, lastSavedAt, desktopJobs, activePanel } = useEditorStore();
+  const { tracks, duration, zoom, playheadTime, isPlaying, projectName, activePanel } = useEditorStore();
   const clipCount = tracks.reduce((n, t) => n + t.clips.length, 0);
   const isDesktop = Boolean(window.electronAPI);
-  const activeDesktopJob = desktopJobs.find((job) => job.status === 'RUNNING' || job.status === 'QUEUED');
-  const latestDesktopJob = activeDesktopJob ?? desktopJobs[0];
-  const saveLabel = saveStatus === 'saving'
-    ? 'Autosaving'
-    : saveStatus === 'error'
-    ? 'Save failed'
-    : lastSavedAt
-    ? `Saved ${new Date(lastSavedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-    : 'Unsaved';
-  const desktopJobLabel = !latestDesktopJob
-    ? 'Offline-ready'
-    : latestDesktopJob.status === 'FAILED'
-    ? `${latestDesktopJob.kind} failed`
-    : latestDesktopJob.status === 'COMPLETED'
-    ? `${latestDesktopJob.kind === 'INGEST' ? 'Ingest ready' : 'Export ready'}`
-    : `${latestDesktopJob.kind === 'INGEST' ? 'Ingesting media' : 'Exporting package'} ${latestDesktopJob.progress}%`;
+  const saveLabel = isDesktop ? 'Local project package' : 'Connected';
+  const projectFormatLabel = '3840x2160 · 24fps · MOV';
 
   return (
     <div className="status-bar">
@@ -67,7 +53,7 @@ export function StatusBar() {
       {isDesktop && (
         <>
           <div className="status-item">
-            <span>{desktopJobLabel}</span>
+            <span>Native desktop pipeline</span>
           </div>
           <div className="status-item">
             <span>Project package</span>
@@ -78,7 +64,7 @@ export function StatusBar() {
         <span>Zoom: {Math.round(zoom)}px/s</span>
       </div>
       <div className="status-item">
-        <span>{projectSettings.width}x{projectSettings.height} · {projectSettings.frameRate}fps · {projectSettings.exportFormat.toUpperCase()}</span>
+        <span>{projectFormatLabel}</span>
       </div>
     </div>
   );

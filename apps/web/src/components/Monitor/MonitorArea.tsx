@@ -1,5 +1,4 @@
-import React, { useState } from 'react';
-import { getMediaAssetPlaybackUrl, getMediaAssetTechnicalSummary } from '@mcua/core';
+import React, { useRef, useCallback } from 'react';
 import { useEditorStore } from '../../store/editor.store';
 
 function formatTC(sec: number) {
@@ -8,133 +7,148 @@ function formatTC(sec: number) {
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}:${String(f).padStart(2,'0')}`;
 }
 
-function Monitor({ label, labelClass, timecode, isPlaying, onToggle, showSafeZones, children }: {
-  label: string; labelClass: string; timecode: string;
-  isPlaying?: boolean; onToggle?: () => void;
-  showSafeZones?: boolean; children?: React.ReactNode;
-}) {
-  const [vol, setVol] = useState(0.8);
+export function MonitorArea() {
+  const {
+    isPlaying, togglePlay, playheadTime, setPlayhead, showSafeZones, duration,
+    tracks, selectedClipIds, sourceAsset, inPoint, outPoint, isFullscreen,
+  } = useEditorStore();
+  const totalClips = tracks.reduce((n, t) => n + t.clips.length, 0);
+  const scrubRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+
+  // Scrub bar progress
+  const progress = duration > 0 ? (playheadTime / duration) * 100 : 0;
+
+  // In/Out point positions on scrub bar
+  const inPos = inPoint !== null && duration > 0 ? (inPoint / duration) * 100 : null;
+  const outPos = outPoint !== null && duration > 0 ? (outPoint / duration) * 100 : null;
+
+  // Scrub bar click-to-seek
+  const handleScrub = useCallback((e: React.MouseEvent) => {
+    const bar = scrubRef.current;
+    if (!bar) return;
+    const rect = bar.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    setPlayhead(pct * duration);
+  }, [duration, setPlayhead]);
+
+  // Scrub drag
+  const handleScrubDrag = useCallback((e: React.MouseEvent) => {
+    handleScrub(e);
+    const bar = scrubRef.current;
+    if (!bar) return;
+
+    const onMove = (ev: MouseEvent) => {
+      const rect = bar.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+      setPlayhead(pct * duration);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [duration, setPlayhead, handleScrub]);
+
+  // Toggle fullscreen
+  const handleFullscreen = useCallback(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    if (!document.fullscreenElement) {
+      el.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  }, []);
 
   return (
-    <div className="monitor">
-      <div className="monitor-header">
-        <span className={`monitor-label ${labelClass}`}>{label}</span>
-        <span className="monitor-tc">{timecode}</span>
-      </div>
-
-      <div className="monitor-canvas">
-        {children ?? (
-          <div className="monitor-placeholder">
-            <div className="monitor-placeholder-icon">▶</div>
-            <div className="monitor-placeholder-text">No media loaded</div>
+    <div className="composer-monitor" ref={canvasRef}>
+      {/* Video canvas */}
+      <div className="composer-canvas">
+        {sourceAsset ? (
+          <div className="composer-content">
+            <div className="composer-asset-icon">
+              {sourceAsset.type === 'AUDIO' ? '♪' : '▶'}
+            </div>
+            <div className="composer-asset-name">{sourceAsset.name}</div>
+          </div>
+        ) : (
+          <div className="composer-placeholder">
+            <div className="composer-placeholder-icon">▶</div>
           </div>
         )}
+
         {showSafeZones && (
           <div className="safe-zone">
             <div className="safe-zone-action" />
             <div className="safe-zone-title" />
           </div>
         )}
-      </div>
 
-      <div className="monitor-footer">
-        <div className="transport-controls">
-          {[
-            { icon: '⏮', label: 'Go to Start (Home)' },
-            { icon: '◀', label: 'Prev Frame (←)' },
-            { icon: '⏪', label: 'Rewind (J)' },
-          ].map(btn => (
-            <button key={btn.icon} className="transport-btn" title={btn.label}>{btn.icon}</button>
-          ))}
-          <button className="transport-btn play-btn" onClick={onToggle} title="Play/Pause (Space)">
-            {isPlaying ? '⏸' : '▶'}
+        {/* Timecode overlay */}
+        <div style={{
+          position: 'absolute', bottom: 8, left: 8,
+          fontFamily: 'var(--font-mono)', fontSize: 11,
+          color: 'rgba(255,255,255,0.7)', textShadow: '0 1px 3px rgba(0,0,0,0.8)',
+        }}>
+          {formatTC(playheadTime)}
+        </div>
+
+        {/* Resize/fullscreen controls — top right */}
+        <div className="composer-controls-overlay">
+          <button className="composer-ctrl-btn" title="Toggle Fullscreen" onClick={handleFullscreen}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
+              <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+            </svg>
           </button>
-          {[
-            { icon: '⏩', label: 'Fast Forward (L)' },
-            { icon: '▶', label: 'Next Frame (→)' },
-            { icon: '⏭', label: 'Go to End (End)' },
-          ].map(btn => (
-            <button key={btn.icon + btn.label} className="transport-btn" title={btn.label}>{btn.icon}</button>
-          ))}
-        </div>
-
-        <div className="monitor-vol">
-          <span className="monitor-vol-icon" title="Volume">🔊</span>
-          <input type="range" className="range-slider monitor-vol" min={0} max={1} step={0.01}
-            value={vol} onChange={e => setVol(+e.target.value)} />
         </div>
       </div>
-    </div>
-  );
-}
 
-export function MonitorArea() {
-  const { isPlaying, togglePlay, playheadTime, showSafeZones, sourceAsset, inPoint, outPoint } = useEditorStore();
-  const sourceTC = inPoint !== null ? formatTC(inPoint) : '00:00:00:00';
-  const playbackUrl = sourceAsset ? getMediaAssetPlaybackUrl(sourceAsset) : undefined;
-  const technicalSummary = sourceAsset ? getMediaAssetTechnicalSummary(sourceAsset) : [];
+      {/* Blue scrub/progress bar — clickable */}
+      <div className="composer-scrubbar" ref={scrubRef} onMouseDown={handleScrubDrag}>
+        {/* In/Out point markers */}
+        {inPos !== null && (
+          <div className="composer-scrubbar-mark in" style={{ left: `${inPos}%` }} title={`In: ${formatTC(inPoint!)}`} />
+        )}
+        {outPos !== null && (
+          <div className="composer-scrubbar-mark out" style={{ left: `${outPos}%` }} title={`Out: ${formatTC(outPoint!)}`} />
+        )}
+        {/* In/Out highlighted range */}
+        {inPos !== null && outPos !== null && (
+          <div className="composer-scrubbar-range" style={{ left: `${inPos}%`, width: `${outPos - inPos}%` }} />
+        )}
+        <div className="composer-scrubbar-fill" style={{ width: `${progress}%` }} />
+        <div className="composer-scrubbar-head" style={{ left: `${progress}%` }} />
+      </div>
 
-  return (
-    <div className="monitors-row" style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-      <Monitor
-        label="Source"
-        labelClass="source"
-        timecode={sourceTC}
-        showSafeZones={false}
-      >
-        {sourceAsset ? (
-          <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, padding: 12 }}>
-            {playbackUrl && sourceAsset.type === 'VIDEO' ? (
-              <video
-                key={playbackUrl}
-                src={playbackUrl}
-                controls
-                preload="metadata"
-                style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: 10, background: '#05070d' }}
-              />
-            ) : playbackUrl && sourceAsset.type === 'AUDIO' ? (
-              <div style={{ display: 'grid', placeItems: 'center', gap: 12, height: '100%' }}>
-                <div style={{ fontSize: 42, opacity: 0.45, color: 'var(--text-secondary)' }}>♪</div>
-                <audio key={playbackUrl} src={playbackUrl} controls preload="metadata" style={{ width: '100%' }} />
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, color: 'var(--text-secondary)' }}>
-                <div style={{ fontSize: 36, opacity: 0.4 }}>
-                  {sourceAsset.type === 'AUDIO' ? '♪' : sourceAsset.type === 'IMAGE' ? '⬛' : '▶'}
-                </div>
-                <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>
-                  {sourceAsset.name}
-                </div>
-              </div>
-            )}
+      {/* Simple transport — just play button like Figma */}
+      <div className="composer-transport">
+        <button
+          className="composer-play-btn"
+          onClick={togglePlay}
+          title="Play/Pause (Space)"
+        >
+          {isPlaying ? (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="4" width="4" height="16" rx="1" />
+              <rect x="14" y="4" width="4" height="16" rx="1" />
+            </svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3" />
+            </svg>
+          )}
+        </button>
+      </div>
 
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-              <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>
-                {sourceAsset.name}
-              </div>
-              {sourceAsset.duration && (
-                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-                  {formatTC(sourceAsset.duration)}
-                </div>
-              )}
-              {technicalSummary.map((item) => (
-                <span key={item} className="badge badge-muted">{item}</span>
-              ))}
-              {sourceAsset.proxyMetadata?.status === 'READY' && <span className="badge badge-accent">Proxy</span>}
-              {sourceAsset.indexStatus && <span className="badge badge-muted">{sourceAsset.indexStatus.toLowerCase()}</span>}
-            </div>
-          </div>
-        ) : undefined}
-      </Monitor>
-
-      <Monitor
-        label="Record"
-        labelClass="record"
-        timecode={formatTC(playheadTime)}
-        isPlaying={isPlaying}
-        onToggle={togglePlay}
-        showSafeZones={showSafeZones}
-      />
+      {/* Status bar — Figma: "Selected: X  Duration: Y  Viewing: Z" */}
+      <div className="composer-status-bar">
+        <span>Selected: {selectedClipIds.length}</span>
+        <span>Duration: {formatTC(duration)}</span>
+        <span>Viewing: {totalClips > 0 ? '1.2:1' : '--'}</span>
+      </div>
     </div>
   );
 }

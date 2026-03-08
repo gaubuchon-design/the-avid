@@ -5,7 +5,15 @@ import { db } from '../db/client';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { NotFoundError, MediaProcessingError } from '../utils/errors';
-import type { MediaAsset } from '@prisma/client';
+
+interface MediaAssetRecord {
+  id: string;
+  s3Key: string | null;
+  proxyS3Key: string | null;
+  thumbnailS3Key: string | null;
+  waveformS3Key: string | null;
+  [key: string]: unknown;
+}
 
 // ─── S3 Client ─────────────────────────────────────────────────────────────────
 const s3 = new AWS.S3({
@@ -166,7 +174,7 @@ class MediaService {
   /**
    * Enrich an asset with signed URLs for playback.
    */
-  async enrichWithUrls(asset: MediaAsset) {
+  async enrichWithUrls(asset: MediaAssetRecord) {
     return {
       ...asset,
       playbackUrl: asset.s3Key

@@ -2,7 +2,19 @@ import { Request, Response, NextFunction } from 'express';
 import { AppError } from '../utils/errors';
 import { logger } from '../utils/logger';
 import { ZodError } from 'zod';
-import { Prisma } from '@prisma/client';
+
+type PrismaLikeKnownRequestError = Error & {
+  code: string;
+  meta?: {
+    target?: unknown;
+  };
+};
+
+function isPrismaKnownRequestError(err: Error): err is PrismaLikeKnownRequestError {
+  const maybePrismaError = err as unknown as { code?: unknown };
+  return typeof maybePrismaError.code === 'string'
+    && /^P\d{4}$/.test(maybePrismaError.code);
+}
 
 export function errorHandler(
   err: Error,
@@ -30,7 +42,7 @@ export function errorHandler(
   }
 
   // Prisma errors
-  if (err instanceof Prisma.PrismaClientKnownRequestError) {
+  if (isPrismaKnownRequestError(err)) {
     switch (err.code) {
       case 'P2002': // Unique constraint violation
         return res.status(409).json({

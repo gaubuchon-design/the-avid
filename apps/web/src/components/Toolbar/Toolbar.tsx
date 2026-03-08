@@ -1,8 +1,7 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { exportProject } from '@mcua/core';
 import { useEditorStore } from '../../store/editor.store';
-import type { PanelType } from '../../store/editor.store';
+import { editEngine } from '../../engine/EditEngine';
 
 function formatTC(sec: number): string {
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60),
@@ -10,216 +9,148 @@ function formatTC(sec: number): string {
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}:${String(f).padStart(2,'0')}`;
 }
 
-interface TBtnProps {
-  label: string; icon: string; shortcut?: string;
-  active?: boolean; danger?: boolean; wide?: boolean; onClick?: () => void;
-}
-function TBtn({ label, icon, shortcut, active, danger, wide, onClick }: TBtnProps) {
-  return (
-    <div className="tooltip-wrap">
-      <button
-        className={`toolbar-btn${wide ? ' toolbar-btn-wide' : ''}${active ? ' active' : ''}${danger ? ' danger' : ''}`}
-        onClick={onClick}
-      >
-        <span>{icon}</span>
-        {wide && <span>{label}</span>}
-      </button>
-      <div className="tooltip">{label}{shortcut ? ` · ${shortcut}` : ''}</div>
-    </div>
-  );
-}
-
-type ToolMode = 'select' | 'trim' | 'razor' | 'slip' | 'slide' | 'hand';
-
 export function Toolbar() {
   const navigate = useNavigate();
-  const { togglePlay, playheadTime, showAIPanel, toggleAIPanel,
-    collabUsers, tokenBalance, activePanel, setActivePanel, projectName,
-    saveStatus, lastSavedAt, saveProject, setInToPlayhead, setOutToPlayhead,
-    addMarkerAtPlayhead, matchFrame, liftSelection, extractSelection, toggleCommandPalette } = useEditorStore();
-  const [toolMode, setToolMode] = React.useState<ToolMode>('select');
-  const saveLabel = saveStatus === 'saving'
-    ? 'Autosaving'
-    : saveStatus === 'error'
-    ? 'Save failed'
-    : lastSavedAt
-    ? `Saved ${new Date(lastSavedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-    : 'Unsaved';
+  const {
+    isPlaying, togglePlay, playheadTime, showInspector, toggleInspector,
+    toggleExportPanel, toolbarTab, setToolbarTab, projectName,
+    selectedClipIds, splitClip, showAIPanel, toggleAIPanel, tokenBalance,
+    showTranscriptPanel, toggleTranscriptPanel,
+    tracks,
+  } = useEditorStore();
 
-  const handleExport = async () => {
-    const project = await saveProject();
-    if (!project) {
-      return;
-    }
-
-    if (window.electronAPI) {
-      await window.electronAPI.startExportJob(project);
-      return;
-    }
-
-    const blob = new Blob([exportProject(project)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${project.name.replace(/[^a-z0-9-_]+/gi, '-').toLowerCase()}.export.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
+  // Get selected clip info for sub-bar
+  const selectedClip = selectedClipIds.length > 0
+    ? tracks.flatMap(t => t.clips).find(c => c.id === selectedClipIds[0])
+    : null;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (['INPUT','TEXTAREA'].includes((e.target as Element)?.tagName)) return;
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        toggleCommandPalette(true);
-        return;
-      }
       switch (e.key) {
         case ' ': e.preventDefault(); togglePlay(); break;
-        case 'i': case 'I': setInToPlayhead(); break;
-        case 'o': case 'O': setOutToPlayhead(); break;
-        case 'm': case 'M': addMarkerAtPlayhead(); break;
-        case 'f': case 'F': matchFrame(); break;
-        case 'x': case 'X': extractSelection(); break;
-        case 'z': case 'Z': liftSelection(); break;
-        case 'v': case 'V': setToolMode('select'); break;
-        case 't': case 'T': setToolMode('trim'); break;
-        case 'b': case 'B': setToolMode('razor'); break;
-        case 'y': case 'Y': setToolMode('slip'); break;
-        case 'u': case 'U': setToolMode('slide'); break;
-        case 'h': case 'H': setToolMode('hand'); break;
+        case 'z': case 'Z':
+          if (e.metaKey || e.ctrlKey) { e.preventDefault(); e.shiftKey ? editEngine.redo() : editEngine.undo(); }
+          break;
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [addMarkerAtPlayhead, extractSelection, liftSelection, matchFrame, setInToPlayhead, setOutToPlayhead, toggleCommandPalette, togglePlay]);
-
-  const tools: Array<{ mode: ToolMode; icon: string; label: string; shortcut: string }> = [
-    { mode: 'select', icon: '↖', label: 'Select', shortcut: 'V' },
-    { mode: 'trim',   icon: '⊣', label: 'Trim',   shortcut: 'T' },
-    { mode: 'razor',  icon: '✂', label: 'Cut',    shortcut: 'B' },
-    { mode: 'slip',   icon: '⇄', label: 'Slip',   shortcut: 'Y' },
-    { mode: 'slide',  icon: '⟺', label: 'Slide',  shortcut: 'U' },
-    { mode: 'hand',   icon: '✋', label: 'Hand',   shortcut: 'H' },
-  ];
-
-  const workspaces: PanelType[] = ['edit', 'script', 'review', 'ingest', 'color', 'audio', 'effects', 'publish'];
-  const workspaceLabels: Record<PanelType, string> = {
-    edit: 'Editorial',
-    script: 'Script',
-    review: 'Review',
-    ingest: 'Ingest',
-    color: 'Color',
-    audio: 'Audio',
-    effects: 'Effects',
-    publish: 'Publish',
-  };
+  }, [togglePlay]);
 
   return (
-    <div className="toolbar">
-      {/* Logo */}
-      <div className="toolbar-label" onClick={() => navigate('/')} style={{ cursor: 'pointer' }}>
-        The<span> Avid</span>
-      </div>
-
-      {/* Workspace tabs */}
-      <div className="toolbar-group">
-        {workspaces.map(w => (
-          <button key={w}
-            className={`toolbar-btn toolbar-btn-wide${activePanel === w ? ' active' : ''}`}
-            onClick={() => setActivePanel(w)}
-          >{workspaceLabels[w]}</button>
-        ))}
-      </div>
-
-      <div className="divider" />
-
-      {/* Tool modes */}
-      <div className="toolbar-group">
-        {tools.map(t => (
-          <TBtn key={t.mode} label={t.label} icon={t.icon} shortcut={t.shortcut}
-            active={toolMode === t.mode} onClick={() => setToolMode(t.mode)} />
-        ))}
-      </div>
-
-      <div className="toolbar-group">
-        <TBtn label="Undo" icon="↩" shortcut="⌘Z" />
-        <TBtn label="Redo" icon="↪" shortcut="⌘⇧Z" />
-      </div>
-
-      <div className="toolbar-group">
-        <TBtn label="Lift" icon="↑" shortcut="Z" onClick={liftSelection} />
-        <TBtn label="Extract" icon="⇥" shortcut="X" onClick={extractSelection} />
-        <TBtn label="Overwrite" icon="▼" wide shortcut="B" />
-        <TBtn label="Splice-in" icon="▶" wide shortcut="V" />
-      </div>
-
-      <div className="toolbar-spacer" />
-
-      {/* Timecode */}
-      <div className="timecode-display">{formatTC(playheadTime)}</div>
-
-      <div className="toolbar-spacer" />
-
-      {/* Collaborators */}
-      <div className="toolbar-group" style={{ gap: 6, paddingRight: 10 }}>
-        <div className="collab-avatars">
-          {collabUsers.map((u, i) => (
-            <div key={u.id} className="collab-avatar"
-              style={{ background: u.color, zIndex: collabUsers.length - i }}
-              title={u.displayName}
-            >{u.displayName[0]}</div>
-          ))}
+    <>
+      {/* Main toolbar row */}
+      <div className="toolbar">
+        {/* Mac-style window dots */}
+        <div className="toolbar-window-dots">
+          <span className="dot dot-close" />
+          <span className="dot dot-minimize" />
+          <span className="dot dot-maximize" />
         </div>
-      </div>
 
-      {/* AI toggle */}
-      <div className="toolbar-group">
+        {/* Home + Folder icons */}
+        <button className="toolbar-icon-btn" onClick={() => navigate('/')} title="Home">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9 22 9 12 15 12 15 22" />
+          </svg>
+        </button>
+        <button className="toolbar-icon-btn" title="Open Project">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+          </svg>
+        </button>
+
+        <div className="toolbar-divider" />
+
+        {/* Media / Effects tabs — Figma style */}
+        <div className="toolbar-nav-tabs">
+          <button
+            className={`toolbar-nav-tab${toolbarTab === 'media' ? ' active' : ''}`}
+            onClick={() => setToolbarTab('media')}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="2" y="2" width="20" height="20" rx="2" /><circle cx="12" cy="12" r="3" />
+            </svg>
+            Media
+          </button>
+          <button
+            className={`toolbar-nav-tab${toolbarTab === 'effects' ? ' active' : ''}`}
+            onClick={() => setToolbarTab('effects')}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+            </svg>
+            Effects
+          </button>
+        </div>
+
+        <div className="toolbar-spacer" />
+
+        {/* Center: Project Name */}
+        <div className="toolbar-project-name">{projectName || 'Project Name'}</div>
+
+        <div className="toolbar-spacer" />
+
+        {/* AI Toggle */}
         <button
-          className={`toolbar-btn toolbar-btn-wide${showAIPanel ? ' active' : ''}`}
+          className={`toolbar-icon-btn toolbar-ai-btn${showAIPanel ? ' active' : ''}`}
           onClick={toggleAIPanel}
+          title="AI Assistant"
         >
           <span>✦</span>
-          <span>AI</span>
-          <span style={{
-            fontSize: 9, background: 'var(--accent-muted)',
-            color: 'var(--text-accent)', borderRadius: 3,
-            padding: '1px 4px', fontFamily: 'var(--font-mono)',
-          }}>{tokenBalance}</span>
+          <span className="toolbar-ai-label">AI</span>
+          <span className="toolbar-ai-tokens">{tokenBalance}</span>
         </button>
-      </div>
 
-      <div className="toolbar-group">
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          minWidth: 170,
-          padding: '0 10px',
-          gap: 1,
-        }}>
-          <span className="truncate" style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-primary)' }}>
-            {projectName}
-          </span>
-          <span style={{ fontSize: 9.5, color: saveStatus === 'error' ? 'var(--error)' : 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-            {saveLabel}
-          </span>
-        </div>
-      </div>
-
-      <div className="toolbar-group">
+        {/* Transcript toggle */}
         <button
-          className="toolbar-btn toolbar-btn-wide"
-          onClick={() => { void saveProject(); }}
+          className={`toolbar-icon-btn${showTranscriptPanel ? ' active' : ''}`}
+          onClick={toggleTranscriptPanel}
+          title={showTranscriptPanel ? 'Hide Transcript' : 'Show Transcript'}
         >
-          <span>Save</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><line x1="10" y1="9" x2="8" y2="9" />
+          </svg>
         </button>
-        <TBtn label="Project Settings" icon="⚙" />
-        <button className="toolbar-btn toolbar-btn-wide btn-primary"
-          style={{ background: 'var(--brand)', color: '#fff', padding: '0 12px' }}
-          onClick={handleExport}>
-          <span>⬆</span><span>Export</span>
+
+        {/* Inspector toggle — purple when active */}
+        <button
+          className={`toolbar-inspector-toggle${showInspector ? ' active' : ''}`}
+          onClick={toggleInspector}
+          title={showInspector ? 'Hide Inspector' : 'Show Inspector'}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="2" y="3" width="20" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
+          </svg>
+          Inspector
+        </button>
+
+        {/* Cursor/pointer icon */}
+        <button className="toolbar-icon-btn" title="Select">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M4 4l7.07 17 2.51-7.39L21 11.07z" />
+          </svg>
         </button>
       </div>
-    </div>
+
+      {/* Sub-bar: Timecode | Sequence Name ✦ | Clip name + TC */}
+      <div className="toolbar-sub-bar">
+        <div className="toolbar-sub-timecode">{formatTC(playheadTime)}</div>
+        <div className="toolbar-sub-spacer" />
+        <div className="toolbar-sub-sequence">Sequence Name</div>
+        <span className="toolbar-sub-diamond">✦</span>
+        {selectedClip ? (
+          <>
+            <span className="toolbar-sub-clip-name">{selectedClip.name}</span>
+            <span className="toolbar-sub-clip-tc">{formatTC(selectedClip.endTime - selectedClip.startTime)}</span>
+          </>
+        ) : (
+          <span className="toolbar-sub-clip-name" style={{ opacity: 0.4 }}>No clip selected</span>
+        )}
+      </div>
+    </>
   );
 }

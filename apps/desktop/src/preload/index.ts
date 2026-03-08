@@ -20,12 +20,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getVersion:  () => ipcRenderer.invoke('app:get-version'),
   getPlatform: () => ipcRenderer.invoke('app:get-platform'),
   getMediaTools: () => ipcRenderer.invoke('app:get-media-tools'),
+  app: {
+    getVersion: () => ipcRenderer.invoke('app:version'),
+    platform: process.platform,
+  },
+  gpu: {
+    getInfo: () => ipcRenderer.invoke('gpu:info'),
+  },
 
   // Dialogs
   openFile: (opts?: Electron.OpenDialogOptions) =>
     ipcRenderer.invoke('dialog:open-file', opts),
   saveFile: (opts?: Electron.SaveDialogOptions) =>
     ipcRenderer.invoke('dialog:save-file', opts),
+  dialog: {
+    openFile: (options: Electron.OpenDialogOptions) => ipcRenderer.invoke('dialog:open', options),
+    saveFile: (options: Electron.SaveDialogOptions) => ipcRenderer.invoke('dialog:save', options),
+  },
   listProjects: () =>
     ipcRenderer.invoke('projects:list'),
   getProject: (projectId: string) =>

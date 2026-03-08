@@ -25,7 +25,6 @@ export const db: PrismaClient =
   global.__prisma ?? (global.__prisma = createPrismaClient());
 
 if (config.isDev) {
-  // @ts-expect-error prisma event typing
   db.$on('query', (e: any) => {
     if (e.duration > 200) {
       logger.warn('Slow query', { query: e.query, duration: `${e.duration}ms` });
@@ -33,7 +32,6 @@ if (config.isDev) {
   });
 }
 
-// @ts-expect-error prisma event typing
 db.$on('error', (e: any) => logger.error('Prisma error', e));
 
 export async function connectDb(): Promise<void> {

@@ -3,19 +3,26 @@ import { db } from '../db/client';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { AIServiceError } from '../utils/errors';
-import type { AIJob } from '@prisma/client';
 
 const openai = config.openai.apiKey ? new OpenAI({ apiKey: config.openai.apiKey }) : null;
 
+interface QueuedAIJob {
+  id: string;
+  type: string;
+  inputParams: unknown;
+  mediaAssetId: string | null;
+  projectId: string | null;
+}
+
 // ─── In-memory job queue (replace with Bull/BullMQ in production) ──────────────
-const jobQueue: AIJob[] = [];
+const jobQueue: QueuedAIJob[] = [];
 let isProcessing = false;
 
 class AIService {
   /**
    * Enqueue an AI job for async processing.
    */
-  async enqueue(job: AIJob) {
+  async enqueue(job: QueuedAIJob) {
     jobQueue.push(job);
     if (!isProcessing) this.processNext();
   }
@@ -48,8 +55,8 @@ class AIService {
     setImmediate(() => this.processNext());
   }
 
-  private async processJob(job: AIJob): Promise<{ summary: string; url?: string }> {
-    const params = job.inputParams as Record<string, any>;
+  private async processJob(job: QueuedAIJob): Promise<{ summary: string; url?: string }> {
+    const params = (job.inputParams ?? {}) as Record<string, any>;
 
     switch (job.type) {
       case 'TRANSCRIPTION':
@@ -70,7 +77,7 @@ class AIService {
   }
 
   // ─── Transcription (Whisper) ─────────────────────────────────────────────────
-  private async runTranscription(job: AIJob, params: Record<string, any>) {
+  private async runTranscription(job: QueuedAIJob, params: Record<string, any>) {
     logger.info(`Transcribing asset ${job.mediaAssetId}`);
 
     if (!openai || !job.mediaAssetId) {
@@ -106,7 +113,7 @@ class AIService {
   }
 
   // ─── Agentic Assembly (GPT-4o) ───────────────────────────────────────────────
-  private async runAssembly(job: AIJob, params: Record<string, any>) {
+  private async runAssembly(job: QueuedAIJob, params: Record<string, any>) {
     logger.info(`Running agentic assembly for project ${job.projectId}`);
 
     if (!openai) {
@@ -134,7 +141,7 @@ Create a JSON timeline assembly from the provided media clips based on their tra
 Return valid JSON: { clips: [{ assetId, startTime, endTime, trimStart, trimEnd, notes }], narrative: string }`;
 
     const userPrompt = `Assemble a compelling sequence using these clips:
-${assets.map((a) => `- ${a.name} (${a.duration?.toFixed(1)}s): "${a.transcript?.slice(0, 200)}..."`).join('\n')}
+${assets.map((a: { name: string; duration: number | null; transcript: string | null }) => `- ${a.name} (${a.duration?.toFixed(1)}s): "${a.transcript?.slice(0, 200)}..."`).join('\n')}
 
 ${params.prompt ? `Additional direction: ${params.prompt}` : ''}`;
 
@@ -160,25 +167,25 @@ ${params.prompt ? `Additional direction: ${params.prompt}` : ''}`;
   }
 
   // ─── Auto-Captions ───────────────────────────────────────────────────────────
-  private async runCaptions(job: AIJob, params: Record<string, any>) {
+  private async runCaptions(job: QueuedAIJob, params: Record<string, any>) {
     logger.info(`Generating captions for ${job.mediaAssetId ?? job.projectId}`);
     return { summary: 'Auto-captions generated with word-level timing' };
   }
 
   // ─── Highlights Detection ────────────────────────────────────────────────────
-  private async runHighlights(job: AIJob, params: Record<string, any>) {
+  private async runHighlights(job: QueuedAIJob, params: Record<string, any>) {
     logger.info(`Detecting highlights for project ${job.projectId}`);
     return { summary: `Detected highlights: 5 moments (${params.criteria ?? 'action,emotion'})` };
   }
 
   // ─── Scene Detection ─────────────────────────────────────────────────────────
-  private async runSceneDetection(job: AIJob, params: Record<string, any>) {
+  private async runSceneDetection(job: QueuedAIJob, params: Record<string, any>) {
     logger.info(`Detecting scenes in asset ${job.mediaAssetId}`);
     return { summary: 'Detected 14 scene cuts' };
   }
 
   // ─── Compliance Scan ─────────────────────────────────────────────────────────
-  private async runComplianceScan(job: AIJob, params: Record<string, any>) {
+  private async runComplianceScan(job: QueuedAIJob, params: Record<string, any>) {
     logger.info(`Running compliance scan for project ${job.projectId}`);
     return {
       summary: 'Compliance scan complete: 2 loudness issues detected, 0 color gamut violations',
@@ -215,7 +222,7 @@ ${params.prompt ? `Additional direction: ${params.prompt}` : ''}`;
     });
 
     // Return with match context
-    return assets.map((asset) => ({
+    return assets.map((asset: { id: string; name: string; type: string; binId: string; transcript: string | null }) => ({
       assetId: asset.id,
       assetName: asset.name,
       type: asset.type,
