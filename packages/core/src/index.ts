@@ -4,3 +4,4 @@ export * from './types';
 export * from './store';
 export * from './utils';
 export * from './api';
+export * from './collab';

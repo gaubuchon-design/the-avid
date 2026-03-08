@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect } from 'react';
-import { useEditorStore, WorkspaceMode } from '../../store/editorStore';
+import { useEditorStore, PanelType } from '../../store/editor.store';
 import { toTimecode } from '../../lib/timecode';
 
-const WORKSPACES: { id: WorkspaceMode; label: string }[] = [
+const WORKSPACES: { id: PanelType; label: string }[] = [
   { id: 'edit',    label: 'Edit' },
   { id: 'color',   label: 'Color' },
   { id: 'effects', label: 'Effects' },
@@ -12,14 +12,14 @@ const WORKSPACES: { id: WorkspaceMode; label: string }[] = [
 
 export default function Toolbar() {
   const {
-    workspace, setWorkspace,
-    playhead, isPlaying, setIsPlaying, setPlayhead,
+    activePanel, setActivePanel,
+    playheadTime, isPlaying, togglePlay, setPlayhead,
     showSafeZones, toggleSafeZones,
     showWaveforms, toggleWaveforms,
     snapToGrid, toggleSnap,
     zoom, setZoom,
     projectName,
-    timeline,
+    duration,
   } = useEditorStore();
 
   // Keyboard shortcuts
@@ -30,20 +30,20 @@ export default function Toolbar() {
       switch (e.key) {
         case ' ':
           e.preventDefault();
-          setIsPlaying(!isPlaying);
+          togglePlay();
           break;
-        case 'j': setIsPlaying(false); break;
-        case 'k': setIsPlaying(!isPlaying); break;
-        case 'l': setIsPlaying(true); break;
+        case 'j': if (isPlaying) togglePlay(); break;
+        case 'k': togglePlay(); break;
+        case 'l': if (!isPlaying) togglePlay(); break;
         case 'Home': setPlayhead(0); break;
-        case 'End':  setPlayhead(timeline?.duration ?? 0); break;
+        case 'End':  setPlayhead(duration); break;
         case '+': case '=': setZoom(zoom * 1.5); break;
         case '-': setZoom(zoom / 1.5); break;
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isPlaying, zoom, timeline]);
+  }, [isPlaying, zoom, duration, togglePlay, setPlayhead, setZoom]);
 
   return (
     <header className="avid-toolbar">
@@ -54,11 +54,11 @@ export default function Toolbar() {
 
       {/* Edit tools */}
       <div className="toolbar-group">
-        <button className="toolbar-btn active" title="Selection (A)">▲</button>
-        <button className="toolbar-btn" title="Trim (T)">◂▸</button>
-        <button className="toolbar-btn" title="Razor (C)">✂</button>
-        <button className="toolbar-btn" title="Slip (Y)">⇆</button>
-        <button className="toolbar-btn" title="Slide">⟺</button>
+        <button className="toolbar-btn active" title="Selection (A)">&#9650;</button>
+        <button className="toolbar-btn" title="Trim (T)">&#9666;&#9656;</button>
+        <button className="toolbar-btn" title="Razor (C)">&#9986;</button>
+        <button className="toolbar-btn" title="Slip (Y)">&#8646;</button>
+        <button className="toolbar-btn" title="Slide">&#10234;</button>
       </div>
 
       {/* Playback controls */}
@@ -67,33 +67,33 @@ export default function Toolbar() {
           className="toolbar-btn"
           title="Go to Start (Home)"
           onClick={() => setPlayhead(0)}
-        >⏮</button>
+        >&#9198;</button>
         <button
           className="toolbar-btn"
           title="Step Back"
-          onClick={() => setPlayhead(Math.max(0, playhead - 1/24))}
-        >◁</button>
+          onClick={() => setPlayhead(Math.max(0, playheadTime - 1/24))}
+        >&#9665;</button>
         <button
           className={`toolbar-btn ${isPlaying ? 'accent-active' : ''}`}
           title="Play/Pause (Space)"
           style={{ fontSize: 16 }}
-          onClick={() => setIsPlaying(!isPlaying)}
-        >{isPlaying ? '⏸' : '▶'}</button>
+          onClick={() => togglePlay()}
+        >{isPlaying ? '\u23F8' : '\u25B6'}</button>
         <button
           className="toolbar-btn"
           title="Step Forward"
-          onClick={() => setPlayhead(playhead + 1/24)}
-        >▷</button>
+          onClick={() => setPlayhead(playheadTime + 1/24)}
+        >&#9655;</button>
         <button
           className="toolbar-btn"
           title="Go to End (End)"
-          onClick={() => setPlayhead(timeline?.duration ?? 0)}
-        >⏭</button>
+          onClick={() => setPlayhead(duration)}
+        >&#9197;</button>
       </div>
 
       {/* Timecode */}
       <div className="timecode-display" title="Current Timecode">
-        {toTimecode(playhead)}
+        {toTimecode(playheadTime)}
       </div>
 
       {/* View controls */}
@@ -102,17 +102,17 @@ export default function Toolbar() {
           className={`toolbar-btn ${showSafeZones ? 'active' : ''}`}
           title="Safe Zones"
           onClick={toggleSafeZones}
-        >⊡</button>
+        >&#8865;</button>
         <button
           className={`toolbar-btn ${showWaveforms ? 'active' : ''}`}
           title="Waveforms"
           onClick={toggleWaveforms}
-        >〜</button>
+        >&#12316;</button>
         <button
           className={`toolbar-btn ${snapToGrid ? 'active' : ''}`}
           title="Snap to Grid"
           onClick={toggleSnap}
-        >⊞</button>
+        >&#8862;</button>
       </div>
 
       {/* Workspace switcher */}
@@ -123,9 +123,9 @@ export default function Toolbar() {
           <button
             key={ws.id}
             role="tab"
-            aria-selected={workspace === ws.id}
-            className={`workspace-tab ${workspace === ws.id ? 'active' : ''}`}
-            onClick={() => setWorkspace(ws.id)}
+            aria-selected={activePanel === ws.id}
+            className={`workspace-tab ${activePanel === ws.id ? 'active' : ''}`}
+            onClick={() => setActivePanel(ws.id)}
           >
             {ws.label}
           </button>
@@ -143,13 +143,13 @@ export default function Toolbar() {
         {projectName}
       </span>
 
-      <button className="toolbar-btn" title="Export">⬆</button>
-      <button className="toolbar-btn" title="Share">⤷</button>
+      <button className="toolbar-btn" title="Export">&#11014;</button>
+      <button className="toolbar-btn" title="Share">&#10551;</button>
       <button
         className="toolbar-btn"
         title="Settings"
         style={{ marginLeft: 4, color: 'var(--brand-bright)' }}
-      >⚙</button>
+      >&#9881;</button>
     </header>
   );
 }
