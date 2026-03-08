@@ -2,17 +2,19 @@
    THE AVID — UNIFIED DESIGN SYSTEM v2
    ═══════════════════════════════════════════════════════════════════════════ */
 
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
 :root {
-  /* Surface hierarchy */
-  --bg-void:      #06090d;
-  --bg-canvas:    #0a0e14;
-  --bg-base:      #0d1219;
-  --bg-surface:   #111822;
-  --bg-raised:    #16202e;
-  --bg-elevated:  #1c2a3c;
-  --bg-overlay:   #223248;
-  --bg-hover:     rgba(255,255,255,0.045);
-  --bg-active:    rgba(255,255,255,0.08);
+  /* Surface hierarchy — aligned with Figma spec (Tamara 2/18/26 Dark) */
+  --bg-void:      #000000;
+  --bg-canvas:    #050508;
+  --bg-base:      #0a0a10;
+  --bg-surface:   #0e0e1a;
+  --bg-raised:    #141420;
+  --bg-elevated:  #1a1a2e;
+  --bg-overlay:   #222240;
+  --bg-hover:     rgba(255,255,255,0.05);
+  --bg-active:    rgba(255,255,255,0.09);
 
   /* Brand violet */
   --brand:         #6d4cfa;
@@ -40,18 +42,18 @@
   --info:     #3b82f6;
 
   /* Text scale */
-  --text-primary:   #dde4ed;
-  --text-secondary: #8fa4be;
-  --text-tertiary:  #5a7088;
-  --text-muted:     #3d5468;
-  --text-disabled:  #29374a;
+  --text-primary:   #e0e6ef;
+  --text-secondary: #8a9cb5;
+  --text-tertiary:  #556880;
+  --text-muted:     #384a5e;
+  --text-disabled:  #263344;
   --text-accent:    #9b7dff;
 
   /* Borders */
-  --border:         rgba(255,255,255,0.065);
-  --border-subtle:  rgba(255,255,255,0.035);
-  --border-default: rgba(255,255,255,0.075);
-  --border-strong:  rgba(255,255,255,0.13);
+  --border:         rgba(255,255,255,0.07);
+  --border-subtle:  rgba(255,255,255,0.04);
+  --border-default: rgba(255,255,255,0.08);
+  --border-strong:  rgba(255,255,255,0.14);
   --border-accent:  rgba(109,76,250,0.4);
 
   /* Shadows */
@@ -67,10 +69,21 @@
   --radius-md: 6px;
   --radius-lg: 10px;
 
+  /* AI accent */
+  --ai-accent:     #00D4AA;
+  --ai-accent-dim: rgba(0,212,170,0.15);
+
+  /* Utility tokens */
+  --bg-track-header: #0b0b14;
+  --bg-input:        var(--bg-void);
+  --text-on-brand:   #ffffff;
+  --border-focus:    var(--brand);
+  --track-subtitle:  #5ab8d9;
+
   /* Typography */
-  --font-ui:      'DM Sans', system-ui, sans-serif;
+  --font-ui:      'DM Sans', 'Inter', system-ui, sans-serif;
   --font-display: 'Syne', sans-serif;
-  --font-mono:    'DM Mono', 'Fira Code', monospace;
+  --font-mono:    'DM Mono', 'JetBrains Mono', 'Fira Code', monospace;
 
   /* Layout */
   --toolbar-h:     44px;

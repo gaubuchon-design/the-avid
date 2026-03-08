@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, Menu } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import path from 'path';
+import { detectGPU } from './gpu';
 
 // ─── Window Management ─────────────────────────────────────────────────────────
 
@@ -122,7 +123,13 @@ async function openProject() {
   }
 }
 
+// File dialogs
 ipcMain.handle('dialog:open-file', async (_event, opts) => {
+  const result = await dialog.showOpenDialog(opts);
+  return result;
+});
+
+ipcMain.handle('dialog:open', async (_event, opts) => {
   const result = await dialog.showOpenDialog(opts);
   return result;
 });
@@ -132,5 +139,17 @@ ipcMain.handle('dialog:save-file', async (_event, opts) => {
   return result;
 });
 
+ipcMain.handle('dialog:save', async (_event, opts) => {
+  const result = await dialog.showSaveDialog(opts);
+  return result;
+});
+
+// App info
 ipcMain.handle('app:get-version', () => app.getVersion());
 ipcMain.handle('app:get-platform', () => process.platform);
+ipcMain.handle('app:version', () => app.getVersion());
+
+// GPU detection
+ipcMain.handle('gpu:info', async () => {
+  return detectGPU();
+});
