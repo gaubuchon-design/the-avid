@@ -17,7 +17,7 @@ export default function RootLayout() {
             contentStyle: { backgroundColor: '#0f172a' },
           }}
         >
-          <Stack.Screen name="index" options={{ title: 'Media Composer Unified' }} />
+          <Stack.Screen name="index" options={{ title: 'The Avid' }} />
           <Stack.Screen name="editor/[projectId]" options={{ title: 'Editor', headerBackTitle: 'Projects' }} />
         </Stack>
       </SafeAreaProvider>

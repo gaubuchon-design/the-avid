@@ -1,18 +1,37 @@
 import { useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { DashboardPage } from './pages/DashboardPage';
-import { EditorPage } from './pages/EditorPage';
+import { hydrateProject } from '@mcua/core';
+import { DashboardPage } from '../../../web/src/pages/DashboardPage';
+import { EditorPage } from '../../../web/src/pages/EditorPage';
+import { saveProjectToRepository } from '../../../web/src/lib/projectRepository';
 
 export default function App() {
   const navigate = useNavigate();
 
-  // Hook into Electron menu events
   useEffect(() => {
-    window.electronAPI?.onNewProject(() => navigate('/editor/new'));
-    window.electronAPI?.onOpenProject((path) => navigate(`/editor/${encodeURIComponent(path)}`));
+    if (!window.electronAPI) {
+      return;
+    }
+
+    const handleOpenProject = async (filePath: string) => {
+      try {
+        const serialized = await window.electronAPI?.readTextFile(filePath);
+        if (!serialized) {
+          return;
+        }
+        const project = await saveProjectToRepository(hydrateProject(JSON.parse(serialized)));
+        navigate(`/editor/${project.id}`);
+      } catch (error) {
+        console.error('Failed to open project file', error);
+      }
+    };
+
+    const disposeNewProject = window.electronAPI.onNewProject(() => navigate('/editor/new'));
+    const disposeOpenProject = window.electronAPI.onOpenProject(handleOpenProject);
+
     return () => {
-      window.electronAPI?.removeAllListeners('menu:new-project');
-      window.electronAPI?.removeAllListeners('menu:open-project');
+      disposeNewProject();
+      disposeOpenProject();
     };
   }, [navigate]);
 

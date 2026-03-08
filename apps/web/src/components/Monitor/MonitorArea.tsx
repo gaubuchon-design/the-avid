@@ -1,4 +1,5 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useState } from 'react';
+import { getMediaAssetPlaybackUrl, getMediaAssetTechnicalSummary } from '@mcua/core';
 import { useEditorStore } from '../../store/editor.store';
 
 function formatTC(sec: number) {
@@ -70,6 +71,8 @@ function Monitor({ label, labelClass, timecode, isPlaying, onToggle, showSafeZon
 export function MonitorArea() {
   const { isPlaying, togglePlay, playheadTime, showSafeZones, sourceAsset, inPoint, outPoint } = useEditorStore();
   const sourceTC = inPoint !== null ? formatTC(inPoint) : '00:00:00:00';
+  const playbackUrl = sourceAsset ? getMediaAssetPlaybackUrl(sourceAsset) : undefined;
+  const technicalSummary = sourceAsset ? getMediaAssetTechnicalSummary(sourceAsset) : [];
 
   return (
     <div className="monitors-row" style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
@@ -80,16 +83,46 @@ export function MonitorArea() {
         showSafeZones={false}
       >
         {sourceAsset ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, color: 'var(--text-secondary)' }}>
-            <div style={{ fontSize: 36, opacity: 0.4 }}>
-              {sourceAsset.type === 'AUDIO' ? '♪' : '▶'}
-            </div>
-            <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>{sourceAsset.name}</div>
-            {sourceAsset.duration && (
-              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-                {formatTC(sourceAsset.duration)}
+          <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, padding: 12 }}>
+            {playbackUrl && sourceAsset.type === 'VIDEO' ? (
+              <video
+                key={playbackUrl}
+                src={playbackUrl}
+                controls
+                preload="metadata"
+                style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: 10, background: '#05070d' }}
+              />
+            ) : playbackUrl && sourceAsset.type === 'AUDIO' ? (
+              <div style={{ display: 'grid', placeItems: 'center', gap: 12, height: '100%' }}>
+                <div style={{ fontSize: 42, opacity: 0.45, color: 'var(--text-secondary)' }}>♪</div>
+                <audio key={playbackUrl} src={playbackUrl} controls preload="metadata" style={{ width: '100%' }} />
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, color: 'var(--text-secondary)' }}>
+                <div style={{ fontSize: 36, opacity: 0.4 }}>
+                  {sourceAsset.type === 'AUDIO' ? '♪' : sourceAsset.type === 'IMAGE' ? '⬛' : '▶'}
+                </div>
+                <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>
+                  {sourceAsset.name}
+                </div>
               </div>
             )}
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+              <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>
+                {sourceAsset.name}
+              </div>
+              {sourceAsset.duration && (
+                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                  {formatTC(sourceAsset.duration)}
+                </div>
+              )}
+              {technicalSummary.map((item) => (
+                <span key={item} className="badge badge-muted">{item}</span>
+              ))}
+              {sourceAsset.proxyMetadata?.status === 'READY' && <span className="badge badge-accent">Proxy</span>}
+              {sourceAsset.indexStatus && <span className="badge badge-muted">{sourceAsset.indexStatus.toLowerCase()}</span>}
+            </div>
           </div>
         ) : undefined}
       </Monitor>

@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useEffect, useState } from 'react';
+import React, { useRef, useCallback, useEffect } from 'react';
 import { useEditorStore } from '../../store/editor.store';
 import type { Track, Clip } from '../../store/editor.store';
 
@@ -88,7 +88,7 @@ function Ruler({ zoom, scrollLeft, duration, onScrub }: {
 function ClipView({ clip, zoom, trackId, trackColor }: {
   clip: Clip; zoom: number; trackId: string; trackColor: string;
 }) {
-  const { selectedClipIds, selectClip, moveClip, trimClip, splitClip, tracks } = useEditorStore();
+  const { selectedClipIds, selectClip, moveClip, trimClip } = useEditorStore();
   const isSelected = selectedClipIds.includes(clip.id);
   const width = Math.max(2, (clip.endTime - clip.startTime) * zoom);
   const left = clip.startTime * zoom;
@@ -206,11 +206,12 @@ export function Timeline() {
     zoom, setZoom, scrollLeft, setScrollLeft,
     duration, selectedTrackId, selectTrack,
     toggleMute, toggleSolo, toggleLock,
+    matchFrame, razorAtPlayhead, addMarkerAtPlayhead,
+    setInToPlayhead, setOutToPlayhead, clearInOut,
+    liftSelection, extractSelection,
   } = useEditorStore();
 
   const contentRef = useRef<HTMLDivElement>(null);
-  const [isDragging, setIsDragging] = useState(false);
-
   const totalWidth = Math.max(duration * zoom + 200, 800);
 
   // Sync scroll between header and content
@@ -249,24 +250,23 @@ export function Timeline() {
       {/* Toolbar */}
       <div className="timeline-toolbar">
         <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          {[
-            { icon: '⊣⊢', label: 'Match Frame' },
-            { icon: '⊞', label: 'Add Track' },
-            { icon: '⊟', label: 'Remove Track' },
-          ].map(b => (
-            <button key={b.label} className="tl-btn" title={b.label}>{b.icon}</button>
-          ))}
+          <button className="tl-btn" title="Match Frame (F)" onClick={matchFrame}>⊣⊢</button>
+          <button className="tl-btn" title="Razor at Playhead" onClick={razorAtPlayhead}>✂</button>
+          <button className="tl-btn" title="Add Marker (M)" onClick={() => addMarkerAtPlayhead()}>◆</button>
         </div>
         <div className="divider" />
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          {[
-            { icon: 'I', label: 'Set In (I)', active: false },
-            { icon: 'O', label: 'Set Out (O)', active: false },
-            { icon: '⌫', label: 'Clear In/Out', active: false },
-          ].map(b => (
-            <button key={b.label} className={`tl-btn${b.active ? ' active' : ''}`} title={b.label}
-              style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{b.icon}</button>
-          ))}
+          <button className="tl-btn" title="Set In (I)" onClick={setInToPlayhead}
+            style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>I</button>
+          <button className="tl-btn" title="Set Out (O)" onClick={setOutToPlayhead}
+            style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>O</button>
+          <button className="tl-btn" title="Clear In/Out" onClick={clearInOut}
+            style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>⌫</button>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button className="tl-btn" title="Lift (Z)" onClick={liftSelection}>↑</button>
+          <button className="tl-btn" title="Extract (X)" onClick={extractSelection}>⇥</button>
         </div>
 
         <div style={{ flex: 1 }} />

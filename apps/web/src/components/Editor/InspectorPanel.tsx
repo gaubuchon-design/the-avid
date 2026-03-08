@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useEditorStore } from '../../store/editor.store';
+import type { WorkspaceTab } from '../../store/editor.store';
 
 function ColorWheelWidget({ label }: { label: string }) {
   const [dot, setDot] = useState({ x: 50, y: 50 });
@@ -194,7 +195,7 @@ export function InspectorPanel() {
       <div className="panel-tabs">
         {tabs.map(t => (
           <button key={t} className={`panel-tab${activeInspectorTab === t ? ' active' : ''}`}
-            onClick={() => setInspectorTab(t as any)}>
+            onClick={() => setInspectorTab(t as WorkspaceTab)}>
             {t}
           </button>
         ))}

@@ -12,7 +12,7 @@ export function LoginPage() {
   return (
     <div className="login">
       <form className="login__form" onSubmit={handleSubmit}>
-        <h1>Media Composer Unified</h1>
+        <h1>The Avid</h1>
         <input type="email" placeholder="Email" required />
         <input type="password" placeholder="Password" required />
         <button type="submit">Sign In</button>

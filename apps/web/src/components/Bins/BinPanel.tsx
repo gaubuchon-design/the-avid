@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getMediaAssetTechnicalSummary } from '@mcua/core';
 import { useEditorStore } from '../../store/editor.store';
 import type { Bin, MediaAsset } from '../../store/editor.store';
 
@@ -40,9 +41,10 @@ function BinItem({ bin, depth = 0 }: { bin: Bin; depth?: number }) {
 }
 
 function AssetCard({ asset }: { asset: MediaAsset }) {
-  const { setSourceAsset, sourceAsset } = useEditorStore();
+  const { appendAssetToTimeline, setSourceAsset, sourceAsset } = useEditorStore();
   const isSelected = sourceAsset?.id === asset.id;
   const typeClass = asset.type.toLowerCase();
+  const technicalSummary = getMediaAssetTechnicalSummary(asset).slice(0, 2);
 
   const typeIcon: Record<string, string> = { VIDEO: '▶', AUDIO: '♪', IMAGE: '⬛', DOCUMENT: '📄' };
 
@@ -50,7 +52,10 @@ function AssetCard({ asset }: { asset: MediaAsset }) {
     <div
       className={`asset-card${isSelected ? ' selected' : ''}`}
       onClick={() => setSourceAsset(asset)}
-      onDoubleClick={() => setSourceAsset(asset)}
+      onDoubleClick={() => {
+        setSourceAsset(asset);
+        appendAssetToTimeline(asset.id);
+      }}
     >
       <div className="asset-thumb">
         {asset.status === 'PROCESSING' ? (
@@ -63,6 +68,17 @@ function AssetCard({ asset }: { asset: MediaAsset }) {
         {asset.isFavorite && <div className="asset-fav">★</div>}
       </div>
       <div className="asset-name truncate">{asset.name}</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+        {technicalSummary.map((item) => (
+          <span key={item} className="badge badge-muted">{item}</span>
+        ))}
+        {asset.proxyMetadata?.status === 'READY' && <span className="badge badge-accent">Proxy</span>}
+        {asset.indexStatus === 'MISSING' && <span className="badge badge-error">Missing</span>}
+        {asset.waveformMetadata?.status === 'READY' && asset.type !== 'IMAGE' && asset.type !== 'DOCUMENT' && (
+          <span className="badge badge-muted">Waveform</span>
+        )}
+        {asset.ingestMetadata?.storageMode && <span className="badge badge-muted">{asset.ingestMetadata.storageMode}</span>}
+      </div>
     </div>
   );
 }
@@ -70,23 +86,65 @@ function AssetCard({ asset }: { asset: MediaAsset }) {
 type ViewMode = 'grid' | 'list';
 
 export function BinPanel() {
-  const { bins, activeBinAssets } = useEditorStore();
+  const { bins, activeBinAssets, appendAssetToTimeline, selectedBinId, projectId, importAssets, saveProject } = useEditorStore();
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [tab, setTab] = useState<'bins' | 'search'>('bins');
+  const [isImporting, setIsImporting] = useState(false);
+  const selectedBinName = findBinName(bins, selectedBinId) ?? 'Media';
+  const isDesktop = Boolean(window.electronAPI);
 
   const filtered = activeBinAssets.filter(a =>
     !search || a.name.toLowerCase().includes(search.toLowerCase()) ||
-    a.tags.some(t => t.includes(search.toLowerCase()))
+    a.tags.some(t => t.toLowerCase().includes(search.toLowerCase()))
   );
+
+  const handleImportMedia = async () => {
+    if (!window.electronAPI || !projectId || isImporting) {
+      return;
+    }
+
+    setIsImporting(true);
+
+    try {
+      const result = await window.electronAPI.openFile({
+        title: `Import Media into ${selectedBinName}`,
+        properties: ['openFile', 'multiSelections'],
+        filters: [
+          { name: 'Media', extensions: ['mov', 'mp4', 'mxf', 'webm', 'avi', 'm4v', 'mkv', 'mpg', 'mpeg', 'mts', 'm2ts', 'r3d', 'braw', 'ari', 'wav', 'mp3', 'aif', 'aiff', 'aac', 'm4a', 'flac', 'ogg', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'tif', 'tiff', 'dng', 'bmp', 'pdf'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      });
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return;
+      }
+
+      const imported = await window.electronAPI.importMedia(projectId, result.filePaths);
+      importAssets(imported, selectedBinId);
+      await saveProject();
+    } catch (error) {
+      console.error('Failed to import media', error);
+    } finally {
+      setIsImporting(false);
+    }
+  };
 
   return (
     <div className="bin-panel">
       {/* Header */}
       <div className="panel-header">
-        <span className="panel-title">Media</span>
+        <span className="panel-title">{selectedBinName}</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
-          <button className="tl-btn" title="Import Media" style={{ fontSize: 12 }}>+</button>
+          <button
+            className="tl-btn"
+            title={isDesktop ? 'Import Media' : 'Desktop import is available in the macOS and Windows apps'}
+            style={{ fontSize: 12 }}
+            onClick={() => { void handleImportMedia(); }}
+            disabled={!isDesktop || !projectId || isImporting}
+          >
+            {isImporting ? '…' : '+'}
+          </button>
           <button className="tl-btn" title="New Bin">📁</button>
         </div>
       </div>
@@ -131,21 +189,32 @@ export function BinPanel() {
           </div>
         ) : (
           <div style={{ padding: '4px 0' }}>
-            {filtered.map(asset => (
+            {filtered.map((asset) => {
+              const summary = getMediaAssetTechnicalSummary(asset).slice(0, 2).join(' · ');
+              return (
               <div key={asset.id}
                 style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 12px', cursor: 'pointer',
                   borderBottom: '1px solid var(--border-subtle)', fontSize: 11 }}
                 onClick={() => useEditorStore.getState().setSourceAsset(asset)}
+                onDoubleClick={() => appendAssetToTimeline(asset.id)}
               >
                 <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
                   {asset.type === 'VIDEO' ? '▶' : asset.type === 'AUDIO' ? '♪' : '⬛'}
                 </span>
-                <span className="truncate" style={{ flex: 1, color: 'var(--text-secondary)' }}>{asset.name}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="truncate" style={{ color: 'var(--text-secondary)' }}>{asset.name}</div>
+                  {(summary || asset.ingestMetadata?.storageMode || asset.proxyMetadata?.status === 'READY') && (
+                    <div className="truncate" style={{ color: 'var(--text-muted)', fontSize: 9.5 }}>
+                      {[summary, asset.ingestMetadata?.storageMode, asset.proxyMetadata?.status === 'READY' ? 'Proxy ready' : '', asset.indexStatus === 'MISSING' ? 'Missing media' : ''].filter(Boolean).join(' · ')}
+                    </div>
+                  )}
+                </div>
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9.5, color: 'var(--text-muted)' }}>
                   {formatDuration(asset.duration)}
                 </span>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -155,8 +224,28 @@ export function BinPanel() {
         background: 'var(--bg-void)', borderTop: '1px solid var(--border-subtle)',
         fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
         <span>{filtered.length} items</span>
+        <span>Double-click to add to the timeline</span>
         <span style={{ marginLeft: 'auto' }}>{activeBinAssets.filter(a => a.status === 'PROCESSING').length > 0 ? '⟳ Processing…' : '✓ Ready'}</span>
       </div>
     </div>
   );
+}
+
+function findBinName(bins: Bin[], id: string | null): string | null {
+  if (!id) {
+    return null;
+  }
+
+  for (const bin of bins) {
+    if (bin.id === id) {
+      return bin.name;
+    }
+
+    const nested = findBinName(bin.children, id);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return null;
 }

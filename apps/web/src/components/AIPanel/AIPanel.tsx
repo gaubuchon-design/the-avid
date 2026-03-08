@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { flattenAssets } from '@mcua/core';
 import { useEditorStore } from '../../store/editor.store';
 
 const AI_TOOLS = [
@@ -10,38 +11,55 @@ const AI_TOOLS = [
   { id: 'compliance', icon: '✅', label: 'Compliance Scan',   desc: 'Broadcast loudness, gamut, accessibility check',       cost: 10 },
 ] as const;
 
-interface RunningJob {
-  id: string;
-  icon: string;
-  label: string;
-  cost: number;
-  progress: number;
-  status: 'running' | 'done' | 'failed';
-  result?: string;
-}
-
 export function AIPanel() {
-  const { toggleAIPanel, tokenBalance } = useEditorStore();
+  const { toggleAIPanel, tokenBalance, aiJobs, startAIJob, updateAIJob, bins } = useEditorStore();
   const [tab, setTab] = useState<'tools' | 'jobs' | 'search'>('tools');
   const [prompt, setPrompt] = useState('');
   const [role, setRole] = useState('editor');
   const [search, setSearch] = useState('');
-  const [jobs, setJobs] = useState<RunningJob[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const intervalsRef = useRef<Array<ReturnType<typeof window.setInterval>>>([]);
+
+  useEffect(() => {
+    return () => {
+      intervalsRef.current.forEach((id) => window.clearInterval(id));
+    };
+  }, []);
 
   const runJob = (tool: typeof AI_TOOLS[number]) => {
-    const job: RunningJob = { id: `j${Date.now()}`, icon: tool.icon, label: tool.label, cost: tool.cost, progress: 0, status: 'running' };
-    setJobs(prev => [job, ...prev]);
+    const jobId = startAIJob(tool);
+    if (!jobId) {
+      setError('Not enough tokens to run this agent.');
+      return;
+    }
+
+    setError(null);
+    setTab('jobs');
     let p = 0;
     const iv = setInterval(() => {
       p += Math.random() * 18 + 4;
       if (p >= 100) {
         clearInterval(iv);
-        setJobs(prev => prev.map(j => j.id === job.id ? { ...j, progress: 100, status: 'done', result: `${tool.label} complete` } : j));
+        updateAIJob(jobId, {
+          progress: 100,
+          status: 'COMPLETED',
+          resultSummary: `${tool.label} complete`,
+        });
       } else {
-        setJobs(prev => prev.map(j => j.id === job.id ? { ...j, progress: p } : j));
+        updateAIJob(jobId, { progress: p, status: 'RUNNING' });
       }
     }, 280);
+    intervalsRef.current.push(iv);
   };
+
+  const searchResults = flattenAssets(bins).filter((asset) => {
+    if (!search.trim()) {
+      return false;
+    }
+
+    const needle = search.toLowerCase();
+    return asset.name.toLowerCase().includes(needle) || asset.tags.some((tag) => tag.toLowerCase().includes(needle));
+  }).slice(0, 6);
 
   return (
     <div className="ai-panel">
@@ -63,6 +81,11 @@ export function AIPanel() {
       <div className="ai-body">
         {tab === 'tools' && (
           <>
+            {error && (
+              <div className="ai-job-card" style={{ borderColor: 'rgba(239,68,68,0.3)', color: 'var(--error)' }}>
+                {error}
+              </div>
+            )}
             {/* Assembly card */}
             <div style={{ background: 'linear-gradient(135deg,rgba(124,92,252,.12),rgba(176,102,255,.08))', border: '1px solid var(--border-accent)', borderRadius: 8, padding: 12, marginBottom: 4 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
@@ -99,21 +122,21 @@ export function AIPanel() {
         )}
 
         {tab === 'jobs' && (
-          jobs.length === 0
+          aiJobs.length === 0
             ? <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)', fontSize: 11 }}>No jobs yet.</div>
-            : jobs.map(job => (
+            : aiJobs.map(job => (
               <div key={job.id} className="ai-job-card">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                  <span style={{ fontSize: 14 }}>{job.icon}</span>
+                  <span style={{ fontSize: 14 }}>{AI_TOOLS.find(tool => tool.id === job.type)?.icon ?? '✦'}</span>
                   <span className="ai-job-title">{job.label}</span>
-                  <span className={`badge ${job.status === 'done' ? 'badge-success' : job.status === 'failed' ? 'badge-error' : 'badge-accent'}`} style={{ marginLeft: 'auto' }}>{job.status}</span>
+                  <span className={`badge ${job.status === 'COMPLETED' ? 'badge-success' : job.status === 'FAILED' ? 'badge-error' : 'badge-accent'}`} style={{ marginLeft: 'auto' }}>{job.status.toLowerCase()}</span>
                 </div>
-                {job.status === 'running' && (
+                {job.status === 'RUNNING' && (
                   <div className="ai-progress-bar">
-                    <div className="ai-progress-fill" style={{ width: `${job.progress}%`, backgroundImage: 'linear-gradient(90deg,var(--accent),#b066ff)' }} />
+                    <div className="ai-progress-fill" style={{ width: `${job.progress ?? 0}%`, backgroundImage: 'linear-gradient(90deg,var(--accent),#b066ff)' }} />
                   </div>
                 )}
-                {job.result && <div style={{ fontSize: 11, color: 'var(--success)', marginTop: 4 }}>{job.result}</div>}
+                {job.resultSummary && <div style={{ fontSize: 11, color: 'var(--success)', marginTop: 4 }}>{job.resultSummary}</div>}
               </div>
             ))
         )}
@@ -126,11 +149,15 @@ export function AIPanel() {
                 <button key={type} className="btn btn-ghost" style={{ flex: 1, padding: '4px 0', fontSize: 10 }}>{type}</button>
               ))}
             </div>
-            {[{ name: 'Scene 01 Take 01', excerpt: '…she said "thank you" and walked away…', time: 12.4 }, { name: 'Scene 02 Take 01', excerpt: '…nodding: "thank you very much for—"…', time: 34.1 }].map((r, i) => (
-              <div key={i} className="ai-job-card" style={{ cursor: 'pointer' }}>
-                <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 3 }}>{r.name}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>{r.excerpt}</div>
-                <div style={{ fontSize: 10, color: 'var(--text-accent)', fontFamily: 'var(--font-mono)', marginTop: 4 }}>@ {r.time.toFixed(1)}s</div>
+            {searchResults.length === 0 ? (
+              <div className="ai-job-card" style={{ color: 'var(--text-muted)' }}>
+                {search.trim() ? 'No transcript-style matches yet. Try a clip name or tag.' : 'Search project clips, bins, and tags.'}
+              </div>
+            ) : searchResults.map((asset, index) => (
+              <div key={asset.id} className="ai-job-card" style={{ cursor: 'pointer' }}>
+                <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 3 }}>{asset.name}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>{asset.tags.join(' · ') || 'untagged asset'}</div>
+                <div style={{ fontSize: 10, color: 'var(--text-accent)', fontFamily: 'var(--font-mono)', marginTop: 4 }}>Result {index + 1}</div>
               </div>
             ))}
           </>

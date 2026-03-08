@@ -33,9 +33,9 @@
     "typescript": "^5.4.0"
   },
   "build": {
-    "appId": "com.mcua.app",
-    "productName": "Media Composer Unified",
-    "copyright": "Copyright © 2025 MCUA",
+    "appId": "com.theavid.app",
+    "productName": "The Avid",
+    "copyright": "Copyright © 2026 The Avid",
     "directories": {
       "output": "out"
     },

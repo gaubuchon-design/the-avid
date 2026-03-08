@@ -2,8 +2,8 @@ import { ExpoConfig, ConfigContext } from 'expo/config';
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: 'Media Composer Unified',
-  slug: 'media-composer-unified',
+  name: 'The Avid',
+  slug: 'the-avid',
   version: '0.1.0',
   orientation: 'landscape',
   icon: './assets/icon.png',
@@ -16,7 +16,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   assetBundlePatterns: ['**/*'],
   ios: {
     supportsTablet: true,
-    bundleIdentifier: 'com.mcua.app',
+    bundleIdentifier: 'com.theavid.app',
     buildNumber: '1',
     infoPlist: {
       NSCameraUsageDescription: 'Camera access for capturing media',
@@ -29,7 +29,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       foregroundImage: './assets/adaptive-icon.png',
       backgroundColor: '#0f172a',
     },
-    package: 'com.mcua.app',
+    package: 'com.theavid.app',
     versionCode: 1,
     permissions: [
       'android.permission.CAMERA',
