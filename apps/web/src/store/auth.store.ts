@@ -8,11 +8,13 @@ interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
+  isLocalSession: boolean;
 }
 
 interface AuthActions {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, name: string, password: string) => Promise<void>;
+  quickLogin: (email: string) => void;
   loginAsDemo: () => void;
   logout: () => void;
   refreshSession: () => Promise<void>;
@@ -26,6 +28,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
     isAuthenticated: !!getStoredTokens(),
     isLoading: false,
     error: null,
+    isLocalSession: false,
 
     login: async (email, password) => {
       set((s) => { s.isLoading = true; s.error = null; });
@@ -51,6 +54,20 @@ export const useAuthStore = create<AuthState & AuthActions>()(
       }
     },
 
+    quickLogin: (email: string) => {
+      const id = `local-${btoa(email).replace(/[^a-zA-Z0-9]/g, '').slice(0, 12)}`;
+      const name = email.split('@')[0] || 'User';
+      const user: AuthUser = { id, email, name, role: 'editor' };
+      storeTokens({ accessToken: `local-${id}`, refreshToken: `local-refresh-${id}` });
+      set((s) => {
+        s.user = user;
+        s.isAuthenticated = true;
+        s.isLoading = false;
+        s.error = null;
+        s.isLocalSession = true;
+      });
+    },
+
     loginAsDemo: () => {
       const demoUser: AuthUser = {
         id: 'demo-user',
@@ -60,12 +77,12 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         avatarUrl: undefined,
       };
       storeTokens({ accessToken: 'demo-token', refreshToken: 'demo-refresh' });
-      set((s) => { s.user = demoUser; s.isAuthenticated = true; s.isLoading = false; s.error = null; });
+      set((s) => { s.user = demoUser; s.isAuthenticated = true; s.isLoading = false; s.error = null; s.isLocalSession = true; });
     },
 
     logout: () => {
       clearTokens();
-      set((s) => { s.user = null; s.isAuthenticated = false; });
+      set((s) => { s.user = null; s.isAuthenticated = false; s.isLocalSession = false; });
     },
 
     refreshSession: async () => {

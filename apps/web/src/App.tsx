@@ -5,6 +5,8 @@ import { EditorPage } from './pages/EditorPage';
 import { LoginPage } from './pages/LoginPage';
 import { AuthGuard } from './components/AuthGuard';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { useSettingsEffects } from './hooks/useSettingsEffects';
+import { KeyboardProvider } from './components/KeyboardProvider';
 import { LoadingSpinner } from './components/LoadingSpinner';
 import { TimelinePanel } from './components/TimelinePanel/TimelinePanel';
 import { SourceMonitor } from './components/SourceMonitor/SourceMonitor';
@@ -110,30 +112,34 @@ export const workspacePresets: Record<WorkspacePreset, { label: string; panels: 
 };
 
 export default function App() {
+  useSettingsEffects();
+
   return (
-    <Routes>
-      <Route path="/login" element={<ErrorBoundary><LoginPage /></ErrorBoundary>} />
-      <Route
-        path="/"
-        element={
-          <ErrorBoundary>
-            <AuthGuard>
-              <DashboardPage />
-            </AuthGuard>
-          </ErrorBoundary>
-        }
-      />
-      <Route
-        path="/editor/:projectId"
-        element={
-          <ErrorBoundary>
-            <AuthGuard>
-              <EditorPage />
-            </AuthGuard>
-          </ErrorBoundary>
-        }
-      />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <KeyboardProvider>
+      <Routes>
+        <Route path="/login" element={<ErrorBoundary><LoginPage /></ErrorBoundary>} />
+        <Route
+          path="/"
+          element={
+            <ErrorBoundary>
+              <AuthGuard>
+                <DashboardPage />
+              </AuthGuard>
+            </ErrorBoundary>
+          }
+        />
+        <Route
+          path="/editor/:projectId"
+          element={
+            <ErrorBoundary>
+              <AuthGuard>
+                <EditorPage />
+              </AuthGuard>
+            </ErrorBoundary>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </KeyboardProvider>
   );
 }
