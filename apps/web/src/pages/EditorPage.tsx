@@ -178,7 +178,7 @@ export function EditorPage() {
       {/* Page-specific content */}
       {activePage === 'media' && <MediaPage />}
       {activePage === 'cut' && <CutPage />}
-      {activePage === 'color' && <ColorPage />}
+      {activePage === 'color' && <div style={{ gridRow: '2 / 5', overflow: 'hidden' }}><ColorPage /></div>}
       {activePage === 'deliver' && <DeliverPage />}
 
       {activePage === 'edit' && (
