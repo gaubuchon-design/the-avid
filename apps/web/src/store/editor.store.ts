@@ -377,7 +377,6 @@ interface EditorState {
   showSubtitleEditor: boolean;
   showAlphaImportDialog: boolean;
   alphaDialogAssetId: string | null;
-  alphaDialogResolve: ((mode: AlphaMode) => void) | null;
 
   // UI State
   activePanel: PanelType;
@@ -506,7 +505,7 @@ interface EditorActions {
   removeClipGroup: (groupId: string) => void;
 
   // Bins
-  selectBin: (id: string) => void;
+  selectBin: (id: string | null) => void;
   toggleBin: (id: string) => void;
   setSourceAsset: (asset: MediaAsset | null) => void;
 
@@ -934,6 +933,11 @@ function getPreferredTrack(state: Pick<EditorState, 'tracks' | 'selectedTrackId'
   return matchingTrack ?? state.tracks.find((track) => !track.locked) ?? null;
 }
 
+// Module-level holder for the alpha dialog resolve callback.
+// Functions are not compatible with Immer proxies, so we store
+// the resolve callback outside of the store state.
+let _alphaDialogResolve: ((mode: AlphaMode) => void) | null = null;
+
 // ─── Store creation ────────────────────────────────────────────────────────────
 export const useEditorStore = create<EditorState & EditorActions>()(
   immer((set, get) => ({
@@ -988,7 +992,6 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     showSubtitleEditor: false,
     showAlphaImportDialog: false,
     alphaDialogAssetId: null,
-    alphaDialogResolve: null,
     activePanel: 'edit',
     activeInspectorTab: 'video',
     toolbarTab: 'media',
@@ -1140,7 +1143,14 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         if (idx >= 0) {
           const orig = t.clips[idx];
           if (time <= orig.startTime || time >= orig.endTime) return;
-          const newClip: Clip = { ...orig, id: `${orig.id}_split_${Date.now()}`, startTime: time };
+          const newClip: Clip = {
+            ...orig,
+            id: `${orig.id}_split_${Date.now()}`,
+            startTime: time,
+            intrinsicVideo: { ...orig.intrinsicVideo },
+            intrinsicAudio: { ...orig.intrinsicAudio },
+            timeRemap: { ...orig.timeRemap, keyframes: orig.timeRemap.keyframes.map(kf => ({ ...kf })) },
+          };
           orig.endTime = time;
           t.clips.splice(idx + 1, 0, newClip);
         }
@@ -1152,7 +1162,14 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         if (idx >= 0) {
           const orig = t.clips[idx];
           if (time <= orig.startTime || time >= orig.endTime) return;
-          const newClip: Clip = { ...orig, id: newClipId, startTime: time };
+          const newClip: Clip = {
+            ...orig,
+            id: newClipId,
+            startTime: time,
+            intrinsicVideo: { ...orig.intrinsicVideo },
+            intrinsicAudio: { ...orig.intrinsicAudio },
+            timeRemap: { ...orig.timeRemap, keyframes: orig.timeRemap.keyframes.map(kf => ({ ...kf })) },
+          };
           orig.endTime = time;
           t.clips.splice(idx + 1, 0, newClip);
           return;
@@ -1249,6 +1266,10 @@ export const useEditorStore = create<EditorState & EditorActions>()(
             id: `${clipId}_dup_${Date.now()}`,
             startTime: clip.endTime,
             endTime: clip.endTime + dur,
+            intrinsicVideo: { ...clip.intrinsicVideo },
+            intrinsicAudio: { ...clip.intrinsicAudio },
+            timeRemap: { ...clip.timeRemap, keyframes: clip.timeRemap.keyframes.map(kf => ({ ...kf })) },
+            waveformData: clip.waveformData ? [...clip.waveformData] : undefined,
           };
           t.clips.push(newClip);
           s.selectedClipIds = [newClip.id];
@@ -1304,6 +1325,9 @@ export const useEditorStore = create<EditorState & EditorActions>()(
               ...clip,
               id: createId('clip'),
               startTime: splitTime,
+              intrinsicVideo: { ...clip.intrinsicVideo },
+              intrinsicAudio: { ...clip.intrinsicAudio },
+              timeRemap: { ...clip.timeRemap, keyframes: clip.timeRemap.keyframes.map(kf => ({ ...kf })) },
             };
             clip.endTime = splitTime;
             track.clips.splice(index + 1, 0, nextClip);
@@ -1895,36 +1919,47 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     toggleSubtitleEditor: () => set((s) => { s.showSubtitleEditor = !s.showSubtitleEditor; }),
     openAlphaImportDialog: (assetId: string) => {
       return new Promise<AlphaMode>((resolve) => {
+        _alphaDialogResolve = resolve;
         set((s) => {
           s.showAlphaImportDialog = true;
           s.alphaDialogAssetId = assetId;
-          s.alphaDialogResolve = resolve as any;
         });
       });
     },
-    resolveAlphaImportDialog: (mode: AlphaMode) => set((s) => {
-      if (s.alphaDialogResolve) {
-        (s.alphaDialogResolve as (m: AlphaMode) => void)(mode);
+    resolveAlphaImportDialog: (mode: AlphaMode) => {
+      // Call the resolve callback outside of set() since it's not in the Immer draft
+      if (_alphaDialogResolve) {
+        _alphaDialogResolve(mode);
+        _alphaDialogResolve = null;
       }
-      // Store the chosen alphaMode on the asset
-      if (s.alphaDialogAssetId) {
-        for (const bin of s.bins) {
-          const asset = bin.assets.find((a) => a.id === s.alphaDialogAssetId);
-          if (asset) { asset.alphaMode = mode; break; }
+      set((s) => {
+        // Store the chosen alphaMode on the asset (search all bins recursively)
+        if (s.alphaDialogAssetId) {
+          const targetId = s.alphaDialogAssetId;
+          function findAndSetAlpha(bins: Bin[]): boolean {
+            for (const bin of bins) {
+              const asset = bin.assets.find((a) => a.id === targetId);
+              if (asset) { asset.alphaMode = mode; return true; }
+              if (findAndSetAlpha(bin.children)) return true;
+            }
+            return false;
+          }
+          findAndSetAlpha(s.bins);
         }
+        s.showAlphaImportDialog = false;
+        s.alphaDialogAssetId = null;
+      });
+    },
+    cancelAlphaImportDialog: () => {
+      if (_alphaDialogResolve) {
+        _alphaDialogResolve('auto');
+        _alphaDialogResolve = null;
       }
-      s.showAlphaImportDialog = false;
-      s.alphaDialogAssetId = null;
-      s.alphaDialogResolve = null;
-    }),
-    cancelAlphaImportDialog: () => set((s) => {
-      if (s.alphaDialogResolve) {
-        (s.alphaDialogResolve as (m: AlphaMode) => void)('auto');
-      }
-      s.showAlphaImportDialog = false;
-      s.alphaDialogAssetId = null;
-      s.alphaDialogResolve = null;
-    }),
+      set((s) => {
+        s.showAlphaImportDialog = false;
+        s.alphaDialogAssetId = null;
+      });
+    },
 
     // Subtitles
     addSubtitleTrack: (track) => set((s) => { s.subtitleTracks.push(track); }),

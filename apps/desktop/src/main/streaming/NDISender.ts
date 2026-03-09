@@ -189,7 +189,7 @@ export class NDISender {
 /**
  * NDI Receiver for discovering and receiving NDI sources.
  */
-export class NDIReceiver {
+export class NDIDiscovery {
   private grandiose: GrandioseModule | null = null;
   private receiver: NDIReceiver | null = null;
 

@@ -195,6 +195,11 @@ export class AudioDescriptionTrack {
     totalDurationSeconds: number,
   ): SilenceGap[] {
     const gaps: SilenceGap[] = [];
+    if (totalDurationSeconds <= 0 || programAudioPeaks.length === 0) {
+      this.silenceGaps = gaps;
+      this.emit('silence:detected', { count: 0, usable: 0 });
+      return gaps;
+    }
     const samplesPerSecond = programAudioPeaks.length / totalDurationSeconds;
     const thresholdLinear = Math.pow(10, this.config.silenceThresholdDb / 20);
 

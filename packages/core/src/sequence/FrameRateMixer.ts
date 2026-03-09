@@ -474,16 +474,21 @@ export class FrameRateMixer {
 
   private calculateSpeedRatio(clipRate: number, timelineRate: number, method: ConformMethod): number {
     switch (method) {
-      case 'none':
-        return clipRate / timelineRate; // Plays at native speed (pitch/speed will differ)
       case 'speed_adjust':
-        return clipRate / timelineRate;
+        // Clip playback rate is adjusted to match the timeline frame rate.
+        // e.g., 24fps clip on 25fps timeline plays at 25/24 = ~1.042x speed.
+        return timelineRate / clipRate;
+      case 'none':
+        // No conform: clip plays at its native rate on the timeline.
+        // Timeline duration is unchanged; frames may be duplicated or dropped
+        // by the renderer but the clip occupies its declared timeline span.
+        return 1.0;
       case 'pulldown_23':
       case 'pulldown_32':
       case 'pulldown_2332':
       case 'blend':
       case 'nearest':
-        return 1.0; // Duration stays the same
+        return 1.0; // Duration stays the same; frames are interpolated or sampled
       default:
         return 1.0;
     }

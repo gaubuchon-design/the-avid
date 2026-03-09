@@ -61,10 +61,19 @@ export async function listProjectsFromRepository(): Promise<EditorProject[]> {
     return seedProjectStore();
   }
 
-  const projects = await Promise.all(projectFiles.map(async (fileName) => {
+  const results = await Promise.allSettled(projectFiles.map(async (fileName) => {
     const serialized = await FileSystem.readAsStringAsync(`${PROJECT_STORE_DIR}/${fileName}`);
     return hydrateProject(JSON.parse(serialized) as Partial<EditorProject>);
   }));
+
+  const projects: EditorProject[] = [];
+  for (const result of results) {
+    if (result.status === 'fulfilled') {
+      projects.push(result.value);
+    } else {
+      console.warn('[projectRepository] Failed to read project file:', result.reason);
+    }
+  }
 
   return projects.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }

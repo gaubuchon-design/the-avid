@@ -5,6 +5,9 @@ export interface UseMediaPlayerOptions {
   autoPlay?: boolean;
   loop?: boolean;
   volume?: number;
+  onTimeUpdate?: (time: number) => void;
+  onEnded?: () => void;
+  onError?: (error: string) => void;
 }
 
 export interface UseMediaPlayerReturn {
@@ -15,53 +18,168 @@ export interface UseMediaPlayerReturn {
   volume: number;
   isLoading: boolean;
   error: string | null;
+  /** Buffered fraction 0-1 */
+  buffered: number;
   play: () => Promise<void>;
   pause: () => void;
+  stop: () => void;
   seek: (time: number) => void;
   setVolume: (v: number) => void;
   toggleMute: () => void;
-  mediaRef: React.RefObject<HTMLVideoElement | HTMLAudioElement>;
+  clearError: () => void;
+  mediaRef: React.RefObject<HTMLVideoElement | HTMLAudioElement | null>;
 }
 
 export function useMediaPlayer(options: UseMediaPlayerOptions = {}): UseMediaPlayerReturn {
-  const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement>(null);
+  const {
+    src,
+    autoPlay = false,
+    loop = false,
+    volume: initialVolume = 1,
+    onTimeUpdate,
+    onEnded,
+    onError,
+  } = options;
+
+  const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [volume, setVolumeState] = useState(options.volume ?? 1);
+  const [volume, setVolumeState] = useState(initialVolume);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [buffered, setBuffered] = useState(0);
 
+  // Keep callback refs stable to avoid re-subscribing events
+  const callbacksRef = useRef({ onTimeUpdate, onEnded, onError });
+  callbacksRef.current = { onTimeUpdate, onEnded, onError };
+
+  // Track previous volume for mute/unmute restore
+  const prevVolumeRef = useRef(initialVolume);
+
+  // ── Media element event listeners ────────────────────────────────────────
   useEffect(() => {
     const el = mediaRef.current;
     if (!el) return;
 
-    const handlers = {
-      timeupdate: () => setCurrentTime(el.currentTime),
-      durationchange: () => setDuration(el.duration),
-      play: () => setIsPlaying(true),
-      pause: () => setIsPlaying(false),
-      waiting: () => setIsLoading(true),
-      canplay: () => setIsLoading(false),
-      error: () => setError('Media failed to load'),
-      ended: () => setIsPlaying(false),
+    const handleTimeUpdate = () => {
+      const t = el.currentTime;
+      setCurrentTime(t);
+      callbacksRef.current.onTimeUpdate?.(t);
     };
 
-    Object.entries(handlers).forEach(([event, handler]) =>
-      el.addEventListener(event, handler)
-    );
-    return () =>
-      Object.entries(handlers).forEach(([event, handler]) =>
-        el.removeEventListener(event, handler)
-      );
-  }, []);
+    const handleDurationChange = () => {
+      if (Number.isFinite(el.duration)) {
+        setDuration(el.duration);
+      }
+    };
 
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => setIsPlaying(false);
+    const handleWaiting = () => setIsLoading(true);
+    const handleCanPlay = () => setIsLoading(false);
+
+    const handleError = () => {
+      const mediaError = el.error;
+      let message = 'Media failed to load';
+      if (mediaError) {
+        switch (mediaError.code) {
+          case MediaError.MEDIA_ERR_ABORTED:
+            message = 'Playback aborted';
+            break;
+          case MediaError.MEDIA_ERR_NETWORK:
+            message = 'Network error during media load';
+            break;
+          case MediaError.MEDIA_ERR_DECODE:
+            message = 'Media decode error';
+            break;
+          case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+            message = 'Media format not supported';
+            break;
+        }
+      }
+      setError(message);
+      setIsPlaying(false);
+      callbacksRef.current.onError?.(message);
+    };
+
+    const handleEnded = () => {
+      setIsPlaying(false);
+      callbacksRef.current.onEnded?.();
+    };
+
+    const handleProgress = () => {
+      if (el.buffered.length > 0 && el.duration > 0) {
+        setBuffered(el.buffered.end(el.buffered.length - 1) / el.duration);
+      }
+    };
+
+    const handleLoadedMetadata = () => {
+      if (Number.isFinite(el.duration)) {
+        setDuration(el.duration);
+      }
+    };
+
+    const events: [string, EventListener][] = [
+      ['timeupdate', handleTimeUpdate],
+      ['durationchange', handleDurationChange],
+      ['play', handlePlay],
+      ['pause', handlePause],
+      ['waiting', handleWaiting],
+      ['canplay', handleCanPlay],
+      ['error', handleError],
+      ['ended', handleEnded],
+      ['progress', handleProgress],
+      ['loadedmetadata', handleLoadedMetadata],
+    ];
+
+    events.forEach(([event, handler]) => el.addEventListener(event, handler));
+
+    return () => {
+      events.forEach(([event, handler]) => el.removeEventListener(event, handler));
+    };
+  }, [src]); // re-attach when src changes (element may reset)
+
+  // ── Sync src / loop / autoPlay onto the element ──────────────────────────
+  useEffect(() => {
+    const el = mediaRef.current;
+    if (!el) return;
+
+    if (src !== undefined && el.src !== src) {
+      el.src = src;
+      setError(null);
+      setCurrentTime(0);
+      setDuration(0);
+      setBuffered(0);
+    }
+  }, [src]);
+
+  useEffect(() => {
+    const el = mediaRef.current;
+    if (el) el.loop = loop;
+  }, [loop]);
+
+  useEffect(() => {
+    const el = mediaRef.current;
+    if (!el || !autoPlay || !src) return;
+    el.play().catch(() => {
+      // Browser may block autoplay — silently ignore
+    });
+  }, [autoPlay, src]);
+
+  // ── Transport controls ───────────────────────────────────────────────────
   const play = useCallback(async () => {
+    const el = mediaRef.current;
+    if (!el) return;
     try {
-      await mediaRef.current?.play();
+      setError(null);
+      await el.play();
     } catch (err) {
-      setError('Playback failed');
+      const message =
+        err instanceof Error ? err.message : 'Playback failed';
+      setError(message);
+      callbacksRef.current.onError?.(message);
     }
   }, []);
 
@@ -69,24 +187,52 @@ export function useMediaPlayer(options: UseMediaPlayerOptions = {}): UseMediaPla
     mediaRef.current?.pause();
   }, []);
 
+  const stop = useCallback(() => {
+    const el = mediaRef.current;
+    if (!el) return;
+    el.pause();
+    el.currentTime = 0;
+    setCurrentTime(0);
+  }, []);
+
   const seek = useCallback((time: number) => {
-    if (mediaRef.current) {
-      mediaRef.current.currentTime = time;
-      setCurrentTime(time);
-    }
+    const el = mediaRef.current;
+    if (!el) return;
+    const clamped = Math.max(0, Math.min(time, el.duration || Infinity));
+    el.currentTime = clamped;
+    setCurrentTime(clamped);
   }, []);
 
   const setVolume = useCallback((v: number) => {
     const clamped = Math.max(0, Math.min(1, v));
-    if (mediaRef.current) mediaRef.current.volume = clamped;
+    const el = mediaRef.current;
+    if (el) {
+      el.volume = clamped;
+      if (clamped > 0 && el.muted) {
+        el.muted = false;
+        setIsMuted(false);
+      }
+    }
     setVolumeState(clamped);
+    prevVolumeRef.current = clamped;
   }, []);
 
   const toggleMute = useCallback(() => {
-    if (mediaRef.current) {
-      mediaRef.current.muted = !mediaRef.current.muted;
-      setIsMuted(mediaRef.current.muted);
+    const el = mediaRef.current;
+    if (!el) return;
+    const willMute = !el.muted;
+    el.muted = willMute;
+    setIsMuted(willMute);
+    if (!willMute) {
+      // Restore previous volume when unmuting
+      const restored = prevVolumeRef.current > 0 ? prevVolumeRef.current : 1;
+      el.volume = restored;
+      setVolumeState(restored);
     }
+  }, []);
+
+  const clearError = useCallback(() => {
+    setError(null);
   }, []);
 
   return {
@@ -97,11 +243,14 @@ export function useMediaPlayer(options: UseMediaPlayerOptions = {}): UseMediaPla
     volume,
     isLoading,
     error,
+    buffered,
     play,
     pause,
+    stop,
     seek,
     setVolume,
     toggleMute,
+    clearError,
     mediaRef,
   };
 }

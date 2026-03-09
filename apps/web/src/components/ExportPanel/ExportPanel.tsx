@@ -295,7 +295,11 @@ function StepFormat() {
 function PresetCard({ preset, selected, onSelect }: { preset: ExportPreset; selected: boolean; onSelect: () => void }) {
   return (
     <div
+      role="option"
+      aria-selected={selected}
+      tabIndex={0}
       onClick={onSelect}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(); } }}
       style={{
         padding: '10px 12px',
         borderRadius: 'var(--radius-md)',
@@ -345,7 +349,11 @@ function StepDestination() {
         {DESTINATIONS.map((d) => (
           <div
             key={d.key}
+            role="option"
+            aria-selected={destination === d.key}
+            tabIndex={0}
             onClick={() => setDestination(d.key)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDestination(d.key); } }}
             style={{
               display: 'flex',
               flexDirection: 'column',

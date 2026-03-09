@@ -49,9 +49,14 @@ router.get('/productions/:projectId', async (req: Request, res: Response) => {
 });
 
 router.patch('/productions/:projectId', async (req: Request, res: Response) => {
+  const allowed = ['sport', 'competitionName', 'venue', 'homeTeam', 'awayTeam', 'broadcastNetwork', 'evsServerHost', 'statsProvider', 'status'];
+  const data: any = {};
+  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+  if (req.body.gameDate) data.gameDate = new Date(req.body.gameDate);
+
   const production = await db.sportsProduction.update({
     where: { projectId: req.params.projectId },
-    data: req.body,
+    data,
   });
   res.json({ production });
 });
@@ -82,7 +87,10 @@ router.get('/productions/:projectId/highlights', async (req: Request, res: Respo
   const { eventType, minConfidence } = req.query;
   const where: any = { productionId: production.id };
   if (eventType) where.eventType = eventType;
-  if (minConfidence) where.confidence = { gte: parseFloat(minConfidence as string) };
+  if (minConfidence) {
+    const parsed = parseFloat(minConfidence as string);
+    if (!Number.isNaN(parsed)) where.confidence = { gte: parsed };
+  }
 
   const highlights = await db.sportsHighlight.findMany({
     where,
@@ -103,9 +111,13 @@ router.post('/productions/:projectId/highlights', async (req: Request, res: Resp
 });
 
 router.patch('/productions/:projectId/highlights/:id', async (req: Request, res: Response) => {
+  const allowed = ['eventType', 'gameClock', 'period', 'description', 'confidence', 'timestamp', 'players', 'homeScore', 'awayScore', 'isConfirmed'];
+  const data: any = {};
+  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+
   const highlight = await db.sportsHighlight.update({
     where: { id: req.params.id },
-    data: req.body,
+    data,
   });
   res.json({ highlight });
 });
@@ -124,13 +136,17 @@ router.get('/productions/:projectId/growing-files', async (req: Request, res: Re
 });
 
 router.post('/productions/:projectId/growing-files', async (req: Request, res: Response) => {
+  const { filePath } = req.body;
+  if (!filePath || typeof filePath !== 'string') {
+    return res.status(400).json({ error: { message: 'filePath is required', code: 'BAD_REQUEST' } });
+  }
   const production = await db.sportsProduction.findUniqueOrThrow({
     where: { projectId: req.params.projectId },
   });
   const file = await db.growingFile.create({
     data: {
       productionId: production.id,
-      filePath: req.body.filePath,
+      filePath,
       format: req.body.format || 'MXF',
       cameraAngle: req.body.cameraAngle,
     },
@@ -207,9 +223,13 @@ router.post('/productions/:projectId/packages', async (req: Request, res: Respon
 });
 
 router.patch('/productions/:projectId/packages/:id', async (req: Request, res: Response) => {
+  const allowed = ['type', 'name', 'status', 'targetDuration', 'highlightIds', 'timelineId'];
+  const data: any = {};
+  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+
   const pkg = await db.sportsPackage.update({
     where: { id: req.params.id },
-    data: req.body,
+    data,
   });
   res.json({ package: pkg });
 });

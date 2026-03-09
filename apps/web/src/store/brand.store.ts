@@ -381,9 +381,8 @@ export const useBrandStore = create<BrandState & BrandActions>()(
     }),
 
     seedDemoCampaign: () => set((s) => {
-      const { activeBrandKitId } = get();
-      if (!activeBrandKitId) return;
-      const campaign = CampaignManager.seedDemoCampaign(activeBrandKitId);
+      if (!s.activeBrandKitId) return;
+      const campaign = CampaignManager.seedDemoCampaign(s.activeBrandKitId);
       s.campaigns.push(campaign);
       s.activeCampaignId = campaign.id;
     }),

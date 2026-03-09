@@ -104,7 +104,7 @@ router.post('/workspaces/:workspaceId/media', async (req: Request, res: Response
       workspaceId: req.params.workspaceId,
       mediaAssetId: req.body.mediaAssetId,
       nexisPath: req.body.nexisPath,
-      ownerId: (req as any).user.id,
+      ownerId: req.user!.id,
     },
   });
   res.status(201).json({ mediaPath: path });
@@ -113,7 +113,7 @@ router.post('/workspaces/:workspaceId/media', async (req: Request, res: Response
 router.post('/workspaces/:workspaceId/media/:id/lock', async (req: Request, res: Response) => {
   const path = await db.nEXISMediaPath.update({
     where: { id: req.params.id },
-    data: { isLocked: true, ownerId: (req as any).user.id },
+    data: { isLocked: true, ownerId: req.user!.id },
   });
   res.json({ mediaPath: path });
 });

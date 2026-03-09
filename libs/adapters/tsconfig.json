@@ -3,6 +3,8 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
+    "noEmit": false,
+    "baseUrl": ".",
     "paths": {
       "@mcua/contracts": ["../contracts/src"],
       "@mcua/core": ["../../packages/core/src"]

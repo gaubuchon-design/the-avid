@@ -27,20 +27,21 @@ router.post('/sessions', async (req: Request, res: Response) => {
       mediaCentralId: req.body.mediaCentralId,
       proToolsHost: req.body.proToolsHost,
       syncMode: req.body.syncMode || 'AAF',
-      connectedUserId: (req as any).user.id,
+      connectedUserId: req.user!.id,
     },
   });
   res.status(201).json({ session });
 });
 
 router.patch('/sessions/:id', async (req: Request, res: Response) => {
+  const data: any = {};
+  if (req.body.status !== undefined) data.status = req.body.status;
+  if (req.body.lastSyncAt) data.lastSyncAt = new Date(req.body.lastSyncAt);
+  if (req.body.syncMode !== undefined) data.syncMode = req.body.syncMode;
+
   const session = await db.proToolsSession.update({
     where: { id: req.params.id },
-    data: {
-      status: req.body.status,
-      lastSyncAt: req.body.lastSyncAt ? new Date(req.body.lastSyncAt) : undefined,
-      syncMode: req.body.syncMode,
-    },
+    data,
   });
   res.json({ session });
 });
@@ -50,7 +51,7 @@ router.post('/sessions/:id/connect', async (req: Request, res: Response) => {
     where: { id: req.params.id },
     data: {
       status: 'CONNECTING',
-      connectedUserId: (req as any).user.id,
+      connectedUserId: req.user!.id,
     },
   });
   // In production: initiate WebSocket connection to Pro Tools session bridge
@@ -93,6 +94,9 @@ router.post('/sessions/:sessionId/markers', async (req: Request, res: Response) 
 router.post('/sessions/:sessionId/markers/sync', async (req: Request, res: Response) => {
   // Batch sync markers from Avid to Pro Tools or vice versa
   const { direction, markers } = req.body;
+  if (!direction || !Array.isArray(markers) || markers.length === 0) {
+    return res.status(400).json({ error: { message: 'direction and non-empty markers array required', code: 'BAD_REQUEST' } });
+  }
   const created = await Promise.all(
     markers.map((m: any) =>
       db.markerSync.create({

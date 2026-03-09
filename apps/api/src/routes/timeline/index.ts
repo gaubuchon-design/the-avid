@@ -80,9 +80,13 @@ router.get('/:timelineId', requireProjectAccess('VIEWER'), async (req: Request, 
 
 // PATCH /projects/:projectId/timelines/:timelineId
 router.patch('/:timelineId', requireProjectAccess('EDITOR'), async (req: Request, res: Response) => {
+  const allowed = ['name', 'frameRate', 'width', 'height', 'sampleRate', 'duration', 'isPrimary'];
+  const data: any = {};
+  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+
   const timeline = await db.timeline.update({
     where: { id: req.params.timelineId },
-    data: req.body,
+    data,
   });
   res.json({ timeline });
 });
@@ -126,7 +130,17 @@ router.delete('/:timelineId/tracks/:trackId', requireProjectAccess('EDITOR'), as
 // POST reorder tracks
 router.post('/:timelineId/tracks/reorder', requireProjectAccess('EDITOR'), async (req: Request, res: Response) => {
   const { order } = req.body; // Array of { id, sortOrder }
-  await Promise.all(
+  if (!Array.isArray(order) || order.length === 0) {
+    throw new BadRequestError('order array is required');
+  }
+  // Validate each entry has id (string) and sortOrder (number)
+  for (const entry of order) {
+    if (typeof entry.id !== 'string' || typeof entry.sortOrder !== 'number') {
+      throw new BadRequestError('Each order entry must have a string id and numeric sortOrder');
+    }
+  }
+  // Use transaction for atomicity
+  await db.$transaction(
     order.map(({ id, sortOrder }: { id: string; sortOrder: number }) =>
       db.track.update({ where: { id }, data: { sortOrder } })
     )
@@ -196,19 +210,20 @@ router.post('/:timelineId/clips/:clipId/split', requireProjectAccess('EDITOR'), 
   const splitRatio = (splitTime - clip.startTime) / duration;
   const midTrimPoint = clip.trimStart + splitRatio * (clip.endTime - clip.startTime - clip.trimEnd - clip.trimStart);
 
-  // Update original, create new
+  // Update original, create new — only copy the data fields, not Prisma metadata
   const [updatedClip, newClip] = await db.$transaction([
     db.clip.update({ where: { id: clip.id }, data: { endTime: splitTime, trimEnd: midTrimPoint } }),
     db.clip.create({
       data: {
-        ...clip,
-        id: undefined,
+        trackId: clip.trackId,
+        mediaAssetId: clip.mediaAssetId,
         startTime: splitTime,
         endTime: clip.endTime,
         trimStart: midTrimPoint,
         trimEnd: clip.trimEnd,
-        createdAt: undefined,
-        updatedAt: undefined,
+        speed: clip.speed,
+        volume: clip.volume,
+        opacity: clip.opacity,
       },
     }),
   ]);
@@ -229,9 +244,13 @@ router.post('/:timelineId/clips/:clipId/effects', requireProjectAccess('EDITOR')
 
 // PATCH update effect
 router.patch('/:timelineId/clips/:clipId/effects/:effectId', requireProjectAccess('EDITOR'), async (req: Request, res: Response) => {
+  const allowed = ['type', 'params', 'sortOrder', 'enabled'];
+  const data: any = {};
+  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+
   const effect = await db.clipEffect.update({
     where: { id: req.params.effectId },
-    data: req.body,
+    data,
   });
   res.json({ effect });
 });
@@ -246,8 +265,11 @@ router.delete('/:timelineId/clips/:clipId/effects/:effectId', requireProjectAcce
 
 // POST /projects/:projectId/timelines/:timelineId/markers
 router.post('/:timelineId/markers', requireProjectAccess('EDITOR'), async (req: Request, res: Response) => {
+  const { time, label, color, type, notes } = req.body;
+  if (time === undefined || time === null) throw new BadRequestError('time is required for markers');
+
   const marker = await db.timelineMarker.create({
-    data: { ...req.body, timelineId: req.params.timelineId, createdById: req.user!.id },
+    data: { time, label, color, type, notes, timelineId: req.params.timelineId, createdById: req.user!.id },
   });
   res.status(201).json({ marker });
 });

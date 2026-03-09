@@ -13,6 +13,10 @@ router.get('/', validate(paginationQuery, 'query'), async (req: Request, res: Re
   const { type, featured, search } = req.query as any;
   const skip = (page - 1) * limit;
 
+  // Allowlist sortable fields to prevent invalid field injection
+  const allowedSortFields = ['downloadCount', 'createdAt', 'name', 'priceTokens'];
+  const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'downloadCount';
+
   const where: any = {
     isPublished: true,
     ...(type ? { type } : {}),
@@ -33,13 +37,28 @@ router.get('/', validate(paginationQuery, 'query'), async (req: Request, res: Re
       where,
       skip,
       take: limit,
-      orderBy: { [sortBy ?? 'downloadCount']: sortOrder },
+      orderBy: { [safeSortBy]: sortOrder },
       include: { author: { select: { id: true, displayName: true, avatarUrl: true } } },
     }),
     db.marketplaceItem.count({ where }),
   ]);
 
   res.json({ items, pagination: paginate(total, page, limit) });
+});
+
+// ─── GET /marketplace/me/library — user's purchased items ─────────────────────
+// IMPORTANT: This route MUST be before /:slug to avoid being matched as a slug
+router.get('/me/library', authenticate, async (req: Request, res: Response) => {
+  const purchases = await db.marketplacePurchase.findMany({
+    where: { userId: req.user!.id },
+    include: {
+      item: {
+        include: { author: { select: { id: true, displayName: true } } },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+  res.json({ purchases });
 });
 
 // ─── GET /marketplace/:slug ────────────────────────────────────────────────────
@@ -99,24 +118,11 @@ router.post('/:id/purchase', authenticate, async (req: Request, res: Response) =
   res.status(201).json({ purchase, downloadUrl: item.downloadUrl });
 });
 
-// ─── GET /marketplace/me/library — user's purchased items ─────────────────────
-router.get('/me/library', authenticate, async (req: Request, res: Response) => {
-  const purchases = await db.marketplacePurchase.findMany({
-    where: { userId: req.user!.id },
-    include: {
-      item: {
-        include: { author: { select: { id: true, displayName: true } } },
-      },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
-  res.json({ purchases });
-});
-
 // ─── POST /marketplace — publish item (authenticated authors) ──────────────────
 router.post('/', authenticate, async (req: Request, res: Response) => {
+  const { name, type, description, priceTokens, tags, slug } = req.body;
   const item = await db.marketplaceItem.create({
-    data: { ...req.body, authorId: req.user!.id, isPublished: false },
+    data: { name, type, description, priceTokens, tags, slug, authorId: req.user!.id, isPublished: false },
   });
   res.status(201).json({ item });
 });

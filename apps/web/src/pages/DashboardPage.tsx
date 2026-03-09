@@ -105,23 +105,38 @@ export function DashboardPage() {
     time: formatRelativeDate(project.updatedAt),
   }));
 
+  const [isCreating, setIsCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
   const createAndOpenProject = async (template: ProjectTemplate, workspace?: string) => {
-    const project = await createProjectInRepository({ template });
-    await refreshProjects();
-    const ws = workspace ? `?workspace=${workspace}` : '';
-    navigate(`/editor/${project.id}${ws}`);
+    if (isCreating) return;
+    setIsCreating(true);
+    setCreateError(null);
+    try {
+      const project = await createProjectInRepository({ template });
+      await refreshProjects();
+      const ws = workspace ? `?workspace=${workspace}` : '';
+      navigate(`/editor/${project.id}${ws}`);
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Failed to create project');
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   return (
     <div className="dashboard">
       <div className="dashboard-header">
         <div className="dashboard-logo">The <em>Avid</em></div>
-        <nav className="dashboard-nav" style={{ marginLeft: 16 }}>
+        <nav className="dashboard-nav" style={{ marginLeft: 16 }} aria-label="Dashboard navigation">
           {['Projects', 'Templates', 'Marketplace', 'Team'].map((item) => (
-            <div key={item}
+            <button key={item}
               className={`dashboard-nav-item${navItem === item ? ' active' : ''}`}
               onClick={() => setNavItem(item)}
-            >{item}</div>
+              aria-current={navItem === item ? 'page' : undefined}
+              type="button"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', color: 'inherit', fontSize: 'inherit', fontWeight: 'inherit', padding: 'inherit' }}
+            >{item}</button>
           ))}
         </nav>
         <div style={{ flex: 1 }} />
@@ -130,6 +145,7 @@ export function DashboardPage() {
             <input
               type="text"
               placeholder="Search projects…"
+              aria-label="Search projects"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               style={{
@@ -211,8 +227,9 @@ export function DashboardPage() {
             </div>
 
             <div className="projects-grid">
-              <div className="project-card" style={{ border: '1px dashed var(--border-strong)', background: 'transparent' }}
-                onClick={() => toggleNewProjectDialog()}>
+              <div className="project-card" role="button" tabIndex={0} style={{ border: '1px dashed var(--border-strong)', background: 'transparent' }}
+                onClick={() => toggleNewProjectDialog()}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleNewProjectDialog(); } }}>
                 <div style={{ height: 140, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
                   <div style={{ width: 38, height: 38, borderRadius: '50%', border: '2px dashed var(--border-strong)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, color: 'var(--text-muted)' }}>+</div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>New Project</div>
@@ -220,7 +237,9 @@ export function DashboardPage() {
               </div>
 
               {filteredProjects.map((project) => (
-                <div key={project.id} className="project-card" onClick={() => navigate(`/editor/${project.id}`)}>
+                <div key={project.id} className="project-card" role="button" tabIndex={0}
+                  onClick={() => navigate(`/editor/${project.id}`)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/editor/${project.id}`); } }}>
                   <div className="project-card-thumb" style={{ overflow: 'hidden' }}>
                     <div className="project-card-thumb-bg"
                       style={{ background: `linear-gradient(135deg, ${project.color}28, ${project.color}55)` }} />
@@ -281,10 +300,18 @@ export function DashboardPage() {
 
             <div style={{ marginTop: 16 }}>
               <div className="section-header"><span className="section-title">Quick Start</span></div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {createError && (
+                <div role="alert" style={{ padding: '8px 12px', marginBottom: 8, background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: 'var(--radius-md)', fontSize: 11, color: '#ef4444' }}>
+                  {createError}
+                </div>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, opacity: isCreating ? 0.6 : 1, pointerEvents: isCreating ? 'none' : 'auto' }}>
                 {TEMPLATE_OPTIONS.map((option) => (
                   <div key={option.label}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => { void createAndOpenProject(option.template, option.workspace); }}
+                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void createAndOpenProject(option.template, option.workspace); } }}
                     style={{ display: 'flex', gap: 10, padding: '8px 12px', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', cursor: 'pointer', transition: 'all 150ms' }}
                     onMouseEnter={(event) => (event.currentTarget.style.borderColor = 'var(--border-strong)')}
                     onMouseLeave={(event) => (event.currentTarget.style.borderColor = 'var(--border-default)')}

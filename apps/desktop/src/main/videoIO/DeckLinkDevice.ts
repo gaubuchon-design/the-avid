@@ -59,6 +59,8 @@ export class DeckLinkDevice {
   private frameCallbacks: Set<FrameCallback> = new Set();
   private frameCount = 0;
   private droppedFrames = 0;
+  private captureWidth = 1920;
+  private captureHeight = 1080;
   private status: DeviceStatus = {
     deviceId: '',
     state: 'idle',
@@ -145,6 +147,7 @@ export class DeckLinkDevice {
     this.captureRunning = true;
     this.frameCount = 0;
     this.droppedFrames = 0;
+    // Resolution will be detected from the first received frame
     this.status = {
       deviceId: config.deviceId,
       state: 'capturing',
@@ -251,11 +254,28 @@ export class DeckLinkDevice {
         this.status.framesProcessed = this.frameCount;
         this.status.signalDetected = true;
 
+        // Detect resolution from frame data on first frame using the pixel format's bytes-per-pixel
+        // For UYVY (8BitYUV): 2 bytes per pixel, so width = bytesPerRow / 2
+        if (this.frameCount === 1 && rawFrame.video.length > 0) {
+          const bpp = config.pixelFormat === '8BitBGRA' ? 4 : config.pixelFormat === '10BitRGB' ? 4 : 2;
+          // Common resolutions to match against
+          const knownHeights = [480, 576, 720, 1080, 2160];
+          for (const h of knownHeights) {
+            const rowBytes = rawFrame.video.length / h;
+            const w = Math.round(rowBytes / bpp);
+            if (Number.isInteger(rawFrame.video.length / h) && w > 0 && w <= 7680) {
+              this.captureWidth = w;
+              this.captureHeight = h;
+              break;
+            }
+          }
+        }
+
         const frame: CapturedFrame = {
-          width: 1920,  // Determined by display mode
-          height: 1080,
+          width: this.captureWidth,
+          height: this.captureHeight,
           pixelFormat: config.pixelFormat,
-          bytesPerRow: rawFrame.video.length / 1080,
+          bytesPerRow: this.captureHeight > 0 ? rawFrame.video.length / this.captureHeight : rawFrame.video.length,
           timecode: rawFrame.timecode || '00:00:00:00',
           frameNumber: this.frameCount,
           timestamp: performance.now(),

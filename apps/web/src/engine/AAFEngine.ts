@@ -2212,7 +2212,11 @@ class AAFEngine {
 
   /** Notify all listeners. */
   private notify(): void {
-    this.listeners.forEach((fn) => fn());
+    this.listeners.forEach((fn) => {
+      try { fn(); } catch (err) {
+        console.error('[AAFEngine] Listener error:', err);
+      }
+    });
   }
 }
 

@@ -29,5 +29,9 @@ export {
   type CameraAngle as MultiCamCameraAngle,
   type SyncPoint,
   type SyncResult,
+  type MultiCamProgramTrack,
+  type AudioCrossCorrelationResult,
+  type MultiCamSyncEngineConfig,
   MultiCamSyncEngine,
+  createMultiCamSyncEngine,
 } from './MultiCamSyncEngine';

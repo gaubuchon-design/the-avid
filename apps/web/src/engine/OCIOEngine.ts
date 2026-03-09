@@ -2051,7 +2051,11 @@ export class OCIOEngine {
 
   /** Notify all subscribers. */
   private notify(): void {
-    this.subscribers.forEach((cb) => cb());
+    this.subscribers.forEach((cb) => {
+      try { cb(); } catch (err) {
+        console.error('[OCIOEngine] Listener error:', err);
+      }
+    });
   }
 
   // ── Internal: Transform Chain Builder ─────────────────────────────────

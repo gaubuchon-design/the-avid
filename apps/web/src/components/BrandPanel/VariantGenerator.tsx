@@ -2,7 +2,7 @@
 // Content variant generator: master project selector, target platforms checklist,
 // language/market selector, generate-all button with progress, and variant preview cards.
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useBrandStore } from '../../store/brand.store';
 
 // ─── Types ────────────────────────────────────────────────────────────────
@@ -432,6 +432,16 @@ export function VariantGenerator() {
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [variants, setVariants] = useState<VariantPreview[]>([]);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Clean up interval on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, []);
 
   const togglePlatform = useCallback((id: string) => {
     setSelectedPlatforms((prev) =>
@@ -477,7 +487,10 @@ export function VariantGenerator() {
 
     // Simulate generation progress
     let current = 0;
-    const interval = setInterval(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
+    intervalRef.current = setInterval(() => {
       current += 5;
       setProgress(Math.min(current, 100));
       setVariants((prev) =>
@@ -488,7 +501,10 @@ export function VariantGenerator() {
         })),
       );
       if (current >= 100) {
-        clearInterval(interval);
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
         setGenerating(false);
       }
     }, 300);

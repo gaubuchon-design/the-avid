@@ -105,9 +105,12 @@ export class SRTOutput {
     if (config.mode === 'caller') {
       await this.srt.connect(this.socket, config.host, config.port);
     } else if (config.mode === 'listener') {
-      await this.srt.bind(this.socket, config.host, config.port);
-      await this.srt.listen(this.socket, 1);
-      this.socket = await this.srt.accept(this.socket);
+      const listenSocket = this.socket;
+      await this.srt.bind(listenSocket, config.host, config.port);
+      await this.srt.listen(listenSocket, 1);
+      this.socket = await this.srt.accept(listenSocket);
+      // Close the listener socket; we only need the accepted data socket
+      await this.srt.close(listenSocket).catch(() => { /* ignore */ });
     } else {
       // Rendezvous mode
       await this.srt.bind(this.socket, '0.0.0.0', config.port);

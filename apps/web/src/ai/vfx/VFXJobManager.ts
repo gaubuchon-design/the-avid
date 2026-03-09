@@ -142,16 +142,20 @@ class VFXJobManagerClass {
    */
   cleanup(maxAge: number = 300000): void {
     const now = Date.now();
+    const toRemove: string[] = [];
     for (const [id, job] of this.jobs) {
       if (
         (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') &&
         job.completedAt &&
         now - job.completedAt > maxAge
       ) {
-        this.jobs.delete(id);
-        this.subscribers.delete(id);
-        this.abortControllers.delete(id);
+        toRemove.push(id);
       }
+    }
+    for (const id of toRemove) {
+      this.jobs.delete(id);
+      this.subscribers.delete(id);
+      this.abortControllers.delete(id);
     }
     this.notifyGlobalSubscribers();
   }

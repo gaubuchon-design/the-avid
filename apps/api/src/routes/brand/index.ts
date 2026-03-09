@@ -49,9 +49,13 @@ router.post('/brand-kits', async (req: Request, res: Response) => {
 });
 
 router.patch('/brand-kits/:id', async (req: Request, res: Response) => {
+  const allowed = ['brandName', 'primaryColors', 'secondaryColors', 'fonts', 'typography', 'voiceTone', 'approvedMusicIds', 'prohibitedElements', 'logoUrl', 'watermarkUrl'];
+  const data: any = {};
+  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+
   const kit = await db.brandKit.update({
     where: { id: req.params.id },
-    data: req.body,
+    data,
   });
   res.json({ brandKit: kit });
 });
@@ -86,9 +90,13 @@ router.post('/brand-kits/:kitId/templates', async (req: Request, res: Response) 
 });
 
 router.patch('/brand-kits/:kitId/templates/:id', async (req: Request, res: Response) => {
+  const allowed = ['name', 'description', 'elements', 'lockedElementIds', 'category', 'thumbnailUrl'];
+  const data: any = {};
+  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+
   const template = await db.brandTemplate.update({
     where: { id: req.params.id },
-    data: req.body,
+    data,
   });
   res.json({ template });
 });
@@ -152,9 +160,15 @@ router.post('/campaigns', async (req: Request, res: Response) => {
 });
 
 router.patch('/campaigns/:id', async (req: Request, res: Response) => {
+  const allowed = ['name', 'brief', 'objective', 'targetAudience', 'status', 'tokenBudget', 'brandKitId'];
+  const data: any = {};
+  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+  if (req.body.startDate) data.startDate = new Date(req.body.startDate);
+  if (req.body.endDate) data.endDate = new Date(req.body.endDate);
+
   const campaign = await db.campaign.update({
     where: { id: req.params.id },
-    data: req.body,
+    data,
   });
   res.json({ campaign });
 });
@@ -176,9 +190,13 @@ router.post('/campaigns/:campaignId/deliverables', async (req: Request, res: Res
 });
 
 router.patch('/campaigns/:campaignId/deliverables/:id', async (req: Request, res: Response) => {
+  const allowed = ['name', 'type', 'status', 'targetDuration', 'aspectRatio', 'assignedEditorId', 'projectId'];
+  const data: any = {};
+  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+
   const deliverable = await db.campaignDeliverable.update({
     where: { id: req.params.id },
-    data: req.body,
+    data,
   });
   res.json({ deliverable });
 });
@@ -238,7 +256,7 @@ router.get('/compliance/:projectId', async (req: Request, res: Response) => {
 
 router.post('/compliance/:projectId/check', async (req: Request, res: Response) => {
   const { brandKitId } = req.body;
-  const userId = (req as any).user.id;
+  const userId = req.user!.id;
 
   // In production: run AI compliance check
   // For now, create a placeholder report

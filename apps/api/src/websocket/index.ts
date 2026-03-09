@@ -105,7 +105,7 @@ export function initWebSocket(httpServer: HttpServer) {
         // Record collaboration event
         db.collaborationEvent.create({
           data: { projectId, userId: user.id, sessionId: socket.id, eventType: 'JOIN', payload: {} },
-        }).catch(logger.error);
+        }).catch((err) => logger.error('Failed to record JOIN event', err));
 
         callback(true);
         logger.debug(`${user.displayName} joined project:${projectId}`);
@@ -139,14 +139,14 @@ export function initWebSocket(httpServer: HttpServer) {
 
     // Disconnect
     socket.on('disconnect', () => {
-      socketUsers.delete(socket.id);
-      // Leave all joined rooms
+      // Leave all joined rooms BEFORE deleting from socketUsers map
       socket.rooms.forEach((room) => {
         if (room.startsWith('project:')) {
           const projectId = room.slice('project:'.length);
           handleLeave(socket, projectId);
         }
       });
+      socketUsers.delete(socket.id);
       logger.debug(`WS disconnected: ${user.displayName}`);
     });
   });
@@ -168,7 +168,7 @@ export function initWebSocket(httpServer: HttpServer) {
         eventType: 'LEAVE',
         payload: {},
       },
-    }).catch(logger.error);
+    }).catch((err) => logger.error('Failed to record LEAVE event', err));
   }
 
   // ─── Utility: broadcast to project ──────────────────────────────────────────

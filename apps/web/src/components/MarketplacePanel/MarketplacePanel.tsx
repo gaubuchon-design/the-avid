@@ -18,7 +18,7 @@ interface MarketplaceState {
   typeFilter: PluginType | null;
   expandedPluginId: string | null;
   settingsPluginId: string | null;
-  installedIds: Set<string>;
+  installedIds: Record<string, true>;
   installedPlugins: InstalledPlugin[];
   marketplacePlugins: MarketplacePlugin[];
 }
@@ -42,7 +42,7 @@ const useMarketplaceStore = create<MarketplaceState & MarketplaceActions>()(
     typeFilter: null,
     expandedPluginId: null,
     settingsPluginId: null,
-    installedIds: new Set<string>(),
+    installedIds: {} as Record<string, true>,
     installedPlugins: [],
     marketplacePlugins: pluginRegistry.browseMarketplace(),
 
@@ -62,14 +62,14 @@ const useMarketplaceStore = create<MarketplaceState & MarketplaceActions>()(
     installPlugin: (id) => {
       pluginRegistry.installPlugin(id);
       set((s) => {
-        s.installedIds.add(id);
+        s.installedIds[id] = true;
         s.installedPlugins = pluginRegistry.getInstalledPlugins() as any;
       });
     },
     uninstallPlugin: (id) => {
       pluginRegistry.uninstallPlugin(id);
       set((s) => {
-        s.installedIds.delete(id);
+        delete s.installedIds[id];
         s.installedPlugins = pluginRegistry.getInstalledPlugins() as any;
         if (s.settingsPluginId === id) s.settingsPluginId = null;
       });
@@ -93,8 +93,8 @@ const useMarketplaceStore = create<MarketplaceState & MarketplaceActions>()(
           s.searchQuery || undefined,
           s.typeFilter ?? undefined,
         ) as any;
-        const ids = new Set<string>();
-        for (const p of pluginRegistry.getInstalledPlugins()) ids.add(p.id);
+        const ids: Record<string, true> = {};
+        for (const p of pluginRegistry.getInstalledPlugins()) ids[p.id] = true;
         s.installedIds = ids;
       }),
   })),
@@ -278,7 +278,7 @@ function BrowseTab() {
             key={p.id}
             plugin={p}
             expanded={expandedPluginId === p.id}
-            installed={installedIds.has(p.id)}
+            installed={!!installedIds[p.id]}
             onToggleExpand={() => setExpandedPlugin(p.id)}
             onInstall={() => installPlugin(p.id)}
           />
@@ -581,6 +581,7 @@ function InstalledTab() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ color: 'var(--text-muted)' }}>Quality preset</span>
                   <select
+                    defaultValue="High"
                     style={{
                       padding: '3px 6px',
                       borderRadius: 'var(--radius-sm)',
@@ -593,7 +594,7 @@ function InstalledTab() {
                   >
                     <option>Low</option>
                     <option>Medium</option>
-                    <option selected>High</option>
+                    <option>High</option>
                   </select>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -624,10 +625,12 @@ export function MarketplacePanel() {
       <div style={headerStyle}>Plugin Marketplace</div>
 
       {/* Tab bar */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border-default)', flexShrink: 0 }}>
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--border-default)', flexShrink: 0 }} role="tablist">
         {(['browse', 'installed'] as const).map((t) => (
-          <div
+          <button
             key={t}
+            role="tab"
+            aria-selected={tab === t}
             onClick={() => setTab(t)}
             style={{
               flex: 1,
@@ -640,13 +643,17 @@ export function MarketplacePanel() {
               letterSpacing: '0.06em',
               textTransform: 'uppercase',
               color: tab === t ? 'var(--brand-bright)' : 'var(--text-muted)',
+              border: 'none',
               borderBottom: `2px solid ${tab === t ? 'var(--brand)' : 'transparent'}`,
+              background: 'transparent',
               cursor: 'pointer',
               transition: 'all 80ms',
+              fontFamily: 'inherit',
+              padding: 0,
             }}
           >
             {t === 'browse' ? 'Browse' : 'Installed'}
-          </div>
+          </button>
         ))}
       </div>
 

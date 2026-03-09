@@ -15,6 +15,8 @@ export class WebGPUPipeline {
   private context: GPUCanvasContext | null = null;
   private format: GPUTextureFormat = 'bgra8unorm';
   private initialized = false;
+  private deviceLost = false;
+  private listeners = new Set<(event: string) => void>();
 
   async initialize(canvas: HTMLCanvasElement): Promise<boolean> {
     if (!navigator.gpu) {
@@ -37,6 +39,31 @@ export class WebGPUPipeline {
           maxBufferSize: 256 * 1024 * 1024, // 256MB
           maxStorageBufferBindingSize: 128 * 1024 * 1024,
         },
+      });
+
+      // Handle GPU device loss (e.g., driver crash, GPU hang)
+      this.deviceLost = false;
+      this.device.lost.then((info) => {
+        console.error(`[WebGPU] Device lost: ${info.message} (reason: ${info.reason})`);
+        this.deviceLost = true;
+        this.initialized = false;
+        this.notify('device-lost');
+
+        // If the loss was not intentional, attempt recovery
+        if (info.reason !== 'destroyed') {
+          console.log('[WebGPU] Attempting device recovery...');
+          this.device = null;
+          this.initialize(canvas).then((ok) => {
+            if (ok) {
+              console.log('[WebGPU] Device recovered successfully');
+              this.notify('device-recovered');
+            } else {
+              console.error('[WebGPU] Device recovery failed');
+            }
+          }).catch(() => {
+            console.error('[WebGPU] Device recovery failed');
+          });
+        }
       });
 
       this.context = canvas.getContext('webgpu') as GPUCanvasContext;
@@ -128,11 +155,41 @@ export class WebGPUPipeline {
     return this.device.createShaderModule({ code: wgsl });
   }
 
+  isDeviceLost(): boolean {
+    return this.deviceLost;
+  }
+
+  /**
+   * Subscribe to pipeline events (e.g., 'device-lost', 'device-recovered').
+   */
+  subscribe(cb: (event: string) => void): () => void {
+    this.listeners.add(cb);
+    return () => {
+      this.listeners.delete(cb);
+    };
+  }
+
+  private notify(event: string): void {
+    this.listeners.forEach((fn) => {
+      try { fn(event); } catch { /* listener errors must not propagate */ }
+    });
+  }
+
   destroy(): void {
+    // Unconfigure the canvas context before destroying the device
+    if (this.context) {
+      try {
+        (this.context as GPUCanvasContext & { unconfigure?: () => void }).unconfigure?.();
+      } catch {
+        // Context may already be invalid
+      }
+    }
+
     this.device?.destroy();
     this.device = null;
     this.context = null;
     this.initialized = false;
+    this.listeners.clear();
   }
 }
 

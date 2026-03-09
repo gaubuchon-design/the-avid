@@ -143,7 +143,9 @@ export const useAudioStore = create<AudioState & AudioActions>()(
       if (t) {
         t.solo = !t.solo;
         if (t.solo) {
-          s.soloedTrackIds.push(trackId);
+          if (!s.soloedTrackIds.includes(trackId)) {
+            s.soloedTrackIds.push(trackId);
+          }
         } else {
           s.soloedTrackIds = s.soloedTrackIds.filter((id) => id !== trackId);
         }
@@ -172,7 +174,7 @@ export const useAudioStore = create<AudioState & AudioActions>()(
     setCompressorParam: (trackId, param, value) => set((s) => {
       const t = s.tracks.find((t) => t.id === trackId);
       if (t) {
-        (t.compressor as any)[param] = value;
+        t.compressor[param] = value;
         audioEngine.setCompressor(trackId, {
           ...t.compressor,
           attack: t.compressor.attack / 1000,  // ms -> seconds for Web Audio

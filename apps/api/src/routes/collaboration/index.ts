@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { db } from '../../db/client';
 import { authenticate, requireProjectAccess } from '../../middleware/auth';
 import { validate, schemas } from '../../utils/validation';
-import { NotFoundError } from '../../utils/errors';
+import { NotFoundError, BadRequestError, ConflictError } from '../../utils/errors';
 
 // ─── COLLABORATION ROUTER ──────────────────────────────────────────────────────
 const collabRouter = Router({ mergeParams: true });
@@ -66,26 +66,45 @@ collabRouter.get('/approvals', requireProjectAccess('REVIEWER'), async (req: Req
 // POST /projects/:projectId/approvals
 collabRouter.post('/approvals', requireProjectAccess('REVIEWER'), async (req: Request, res: Response) => {
   const { status, version, notes } = req.body;
-  const approval = await db.approval.upsert({
-    where: {
-      id: (
-        await db.approval.findFirst({
-          where: { projectId: req.params.projectId, userId: req.user!.id, version },
-          select: { id: true },
-        })
-      )?.id ?? 'new',
-    },
-    create: { projectId: req.params.projectId, userId: req.user!.id, status, version, notes },
-    update: { status, notes },
-    include: { user: { select: { id: true, displayName: true, avatarUrl: true } } },
+  if (!status || !version) throw new BadRequestError('status and version are required');
+
+  // Check for existing approval by this user for this version
+  const existing = await db.approval.findFirst({
+    where: { projectId: req.params.projectId, userId: req.user!.id, version },
+    select: { id: true },
   });
+
+  let approval;
+  if (existing) {
+    approval = await db.approval.update({
+      where: { id: existing.id },
+      data: { status, notes },
+      include: { user: { select: { id: true, displayName: true, avatarUrl: true } } },
+    });
+  } else {
+    approval = await db.approval.create({
+      data: { projectId: req.params.projectId, userId: req.user!.id, status, version, notes },
+      include: { user: { select: { id: true, displayName: true, avatarUrl: true } } },
+    });
+  }
   res.status(201).json({ approval });
 });
 
 // POST /projects/:projectId/locks — acquire resource lock (collaborative editing)
 collabRouter.post('/locks', requireProjectAccess('EDITOR'), async (req: Request, res: Response) => {
   const { resourceType, resourceId, sessionId } = req.body;
+  if (!resourceType || !resourceId) throw new BadRequestError('resourceType and resourceId are required');
+
   const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 min
+
+  // Check for existing unexpired lock held by another user
+  const existingLock = await db.resourceLock.findUnique({
+    where: { resourceType_resourceId: { resourceType, resourceId } },
+  });
+
+  if (existingLock && existingLock.lockedById !== req.user!.id && existingLock.expiresAt > new Date()) {
+    throw new ConflictError(`Resource is locked by another user until ${existingLock.expiresAt.toISOString()}`);
+  }
 
   const lock = await db.resourceLock.upsert({
     where: { resourceType_resourceId: { resourceType, resourceId } },
@@ -144,9 +163,13 @@ publishRouter.post('/', requireProjectAccess('EDITOR'), validate(schemas.createP
 
 // PATCH /projects/:projectId/publish/:jobId
 publishRouter.patch('/:jobId', requireProjectAccess('EDITOR'), async (req: Request, res: Response) => {
+  const allowed = ['title', 'description', 'tags', 'aspectRatio', 'resolution', 'format', 'autoCaption', 'smartReframe', 'scheduledAt'];
+  const data: any = {};
+  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+
   const job = await db.publishJob.update({
     where: { id: req.params.jobId, projectId: req.params.projectId },
-    data: req.body,
+    data,
   });
   res.json({ job });
 });

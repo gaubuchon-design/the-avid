@@ -682,10 +682,15 @@ export class TransitionEngine {
    */
   removeAllTransitions(trackId?: string): void {
     if (trackId) {
+      // Collect IDs first to avoid modifying the map during iteration
+      const toRemove: string[] = [];
       for (const [id, inst] of this.instances) {
         if (inst.trackId === trackId) {
-          this.instances.delete(id);
+          toRemove.push(id);
         }
+      }
+      for (const id of toRemove) {
+        this.instances.delete(id);
       }
     } else {
       this.instances.clear();

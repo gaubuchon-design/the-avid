@@ -122,7 +122,7 @@ export function generateTokens(user: { id: string; email: string; displayName: s
   );
   const refreshToken = jwt.sign(
     { sub: user.id, type: 'refresh' },
-    config.jwt.secret,
+    config.jwt.refreshSecret,
     { expiresIn: config.jwt.refreshExpiresIn as any }
   );
   return { accessToken, refreshToken };

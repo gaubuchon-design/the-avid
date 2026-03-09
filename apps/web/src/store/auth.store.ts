@@ -36,8 +36,9 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         const { user, tokens } = await loginWithEmail(email, password);
         storeTokens(tokens);
         set((s) => { s.user = user; s.isAuthenticated = true; s.isLoading = false; });
-      } catch (err: any) {
-        set((s) => { s.error = err.message; s.isLoading = false; });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Login failed';
+        set((s) => { s.error = message; s.isLoading = false; });
         throw err;
       }
     },
@@ -48,8 +49,9 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         const { user, tokens } = await registerUser(email, name, password);
         storeTokens(tokens);
         set((s) => { s.user = user; s.isAuthenticated = true; s.isLoading = false; });
-      } catch (err: any) {
-        set((s) => { s.error = err.message; s.isLoading = false; });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Registration failed';
+        set((s) => { s.error = message; s.isLoading = false; });
         throw err;
       }
     },

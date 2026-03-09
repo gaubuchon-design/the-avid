@@ -19,24 +19,58 @@ export class ApiClient {
 
   private async request<T>(
     path: string,
-    options: RequestInit = {}
+    options: RequestInit & { skipContentType?: boolean } = {}
   ): Promise<T> {
     const url = `${this.config.baseUrl}${path}`;
+    const { skipContentType, ...fetchOptions } = options;
+
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
+      ...(skipContentType ? {} : { 'Content-Type': 'application/json' }),
       ...(this.config.token ? { Authorization: `Bearer ${this.config.token}` } : {}),
+      ...(fetchOptions.headers as Record<string, string> ?? {}),
     };
 
-    const response = await fetch(url, {
-      ...options,
-      headers: { ...headers, ...(options.headers as Record<string, string>) },
-    });
+    // Build the fetch init with timeout support via AbortSignal
+    const fetchInit: RequestInit = {
+      ...fetchOptions,
+      headers,
+    };
 
-    if (!response.ok) {
-      throw new Error(`API Error ${response.status}: ${response.statusText}`);
+    const timeoutMs = this.config.timeout;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    if (timeoutMs && timeoutMs > 0) {
+      const controller = new AbortController();
+      fetchInit.signal = controller.signal;
+      timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     }
 
-    return response.json() as Promise<T>;
+    try {
+      const response = await fetch(url, fetchInit);
+
+      if (!response.ok) {
+        let errorBody = '';
+        try {
+          errorBody = await response.text();
+        } catch {
+          // Could not read error body
+        }
+        throw new Error(
+          `API Error ${response.status}: ${response.statusText}${errorBody ? ` — ${errorBody}` : ''}`
+        );
+      }
+
+      return response.json() as Promise<T>;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw new Error(`API request to ${path} timed out after ${timeoutMs}ms`);
+      }
+      throw error;
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+    }
   }
 
   // ─── Auth ──────────────────────────────────────────────────────────────────
@@ -97,7 +131,7 @@ export class ApiClient {
     return this.request(`/projects/${projectId}/assets`, {
       method: 'POST',
       body: formData,
-      headers: {},
+      skipContentType: true,
     });
   }
 

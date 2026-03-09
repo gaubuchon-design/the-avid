@@ -215,40 +215,51 @@ function render() {
   ctx.restore();
 }
 
+// ─── Error handler ───────────────────────────────────────────────────────────
+
+self.onerror = (event) => {
+  console.error('[TimelineRendererWorker] Unhandled error:', event);
+};
+
 // ─── Message handler ─────────────────────────────────────────────────────────
 
 self.onmessage = (e: MessageEvent<MainToWorkerMsg>) => {
   const msg = e.data;
-  switch (msg.type) {
-    case 'init':
-      canvas = msg.canvas;
-      ctx = canvas.getContext('2d');
-      dpr = msg.dpr;
-      (self as unknown as Worker).postMessage({ type: 'ready' });
-      break;
-
-    case 'resize':
-      if (canvas) {
-        canvas.width = msg.width * msg.dpr;
-        canvas.height = msg.height * msg.dpr;
+  try {
+    switch (msg.type) {
+      case 'init':
+        canvas = msg.canvas;
+        ctx = canvas.getContext('2d');
         dpr = msg.dpr;
+        (self as unknown as Worker).postMessage({ type: 'ready' });
+        break;
+
+      case 'resize':
+        if (canvas) {
+          canvas.width = msg.width * msg.dpr;
+          canvas.height = msg.height * msg.dpr;
+          dpr = msg.dpr;
+          render();
+        }
+        break;
+
+      case 'update':
+        currentState = msg.state;
         render();
-      }
-      break;
+        (self as unknown as Worker).postMessage({
+          type: 'frame',
+          time: performance.now(),
+        });
+        break;
 
-    case 'update':
-      currentState = msg.state;
-      render();
-      (self as unknown as Worker).postMessage({
-        type: 'frame',
-        time: performance.now(),
-      });
-      break;
-
-    case 'destroy':
-      canvas = null;
-      ctx = null;
-      currentState = null;
-      break;
+      case 'destroy':
+        canvas = null;
+        ctx = null;
+        currentState = null;
+        self.close();
+        break;
+    }
+  } catch (err) {
+    console.error('[TimelineRendererWorker] Error processing message:', msg.type, err);
   }
 };
