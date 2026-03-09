@@ -71,6 +71,7 @@ export function LoginPage() {
         <div style={styles.modeToggle}>
           <button
             type="button"
+            aria-label="Sign In"
             onClick={() => { if (mode !== 'login') toggleMode(); }}
             style={{
               ...styles.modeBtn,
@@ -81,6 +82,7 @@ export function LoginPage() {
           </button>
           <button
             type="button"
+            aria-label="Register"
             onClick={() => { if (mode !== 'register') toggleMode(); }}
             style={{
               ...styles.modeBtn,
@@ -204,12 +206,6 @@ export function LoginPage() {
         </div>
       </div>
 
-      {/* Inline spinner keyframe */}
-      <style>{`
-        @keyframes avid-spin {
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
     </div>
   );
 }
@@ -242,7 +238,7 @@ const styles: Record<string, React.CSSProperties> = {
     width: 48,
     height: 48,
     borderRadius: '50%',
-    background: 'var(--brand, #4f63f5)',
+    background: 'var(--brand, #6d4cfa)',
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -289,7 +285,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: 'inherit',
   },
   modeBtnActive: {
-    background: 'var(--brand, #4f63f5)',
+    background: 'var(--brand, #6d4cfa)',
     color: '#fff',
   },
   errorBanner: {
@@ -334,7 +330,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '12px 0',
     borderRadius: 'var(--radius-md, 6px)',
     border: 'none',
-    background: 'var(--brand, #4f63f5)',
+    background: 'var(--brand, #6d4cfa)',
     color: '#fff',
     fontSize: 13,
     fontWeight: 700,
@@ -354,7 +350,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: '2px solid rgba(255,255,255,0.3)',
     borderTopColor: '#fff',
     borderRadius: '50%',
-    animation: 'avid-spin 0.7s linear infinite',
+    animation: 'spin 0.7s linear infinite',
   },
   footer: {
     textAlign: 'center' as const,
@@ -402,7 +398,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 8,
   },
   demoBtnIcon: {
-    color: 'var(--brand-bright, #6d7ff5)',
+    color: 'var(--brand-bright, #9b7dff)',
     fontSize: 11,
   },
   demoHint: {
@@ -414,7 +410,7 @@ const styles: Record<string, React.CSSProperties> = {
   footerLink: {
     background: 'none',
     border: 'none',
-    color: 'var(--brand-bright, #6d7ff5)',
+    color: 'var(--brand-bright, #9b7dff)',
     fontSize: 12,
     fontWeight: 600,
     cursor: 'pointer',

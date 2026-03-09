@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#0d0d1a"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7c5cfc"/>
+      <stop offset="100%" style="stop-color:#5a3fd6"/>
+    </linearGradient>
+  </defs>
+  <!-- Rounded square background -->
+  <rect width="1024" height="1024" rx="220" fill="url(#bg)"/>
+  <!-- Film strip left -->
+  <rect x="140" y="280" width="60" height="464" rx="8" fill="#2a2a3e"/>
+  <rect x="152" y="296" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <rect x="152" y="340" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <rect x="152" y="384" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <rect x="152" y="428" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <rect x="152" y="472" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <rect x="152" y="516" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <rect x="152" y="560" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <rect x="152" y="604" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <rect x="152" y="648" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <rect x="152" y="692" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <!-- Play triangle -->
+  <path d="M380 340 L720 512 L380 684 Z" fill="url(#accent)" opacity="0.9"/>
+  <!-- Timeline bars bottom -->
+  <rect x="140" y="760" width="744" height="24" rx="6" fill="#7c5cfc" opacity="0.7"/>
+  <rect x="140" y="796" width="580" height="24" rx="6" fill="#5a3fd6" opacity="0.5"/>
+  <rect x="140" y="832" width="420" height="24" rx="6" fill="#4428b0" opacity="0.3"/>
+  <!-- Film strip right -->
+  <rect x="824" y="280" width="60" height="464" rx="8" fill="#2a2a3e"/>
+  <rect x="836" y="296" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <rect x="836" y="340" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <rect x="836" y="384" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <rect x="836" y="428" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <rect x="836" y="472" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <rect x="836" y="516" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <rect x="836" y="560" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <rect x="836" y="604" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <rect x="836" y="648" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <rect x="836" y="692" width="36" height="28" rx="4" fill="#3d3d5c"/>
+  <!-- "A" letter mark -->
+  <text x="512" y="560" font-family="Helvetica, Arial, sans-serif" font-weight="bold" font-size="280" fill="white" text-anchor="middle" dominant-baseline="central" opacity="0.15">A</text>
+</svg>

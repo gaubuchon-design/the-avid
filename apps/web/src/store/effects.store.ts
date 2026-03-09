@@ -25,7 +25,7 @@ interface EffectsActions {
   addEffect: (clipId: string, definitionId: string) => void;
   removeEffect: (clipId: string, effectId: string) => void;
   toggleEffect: (clipId: string, effectId: string) => void;
-  updateParam: (clipId: string, effectId: string, paramName: string, value: any) => void;
+  updateParam: (clipId: string, effectId: string, paramName: string, value: number | string | boolean) => void;
   addKeyframe: (clipId: string, effectId: string, keyframe: Keyframe) => void;
   removeKeyframe: (clipId: string, effectId: string, frame: number, paramName: string) => void;
   setSearch: (query: string) => void;

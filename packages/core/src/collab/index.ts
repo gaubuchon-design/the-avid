@@ -96,3 +96,37 @@ export {
   // Classes
   ManifestBuilder,
 } from './ProjectManifest';
+
+// ── Bin Lock Manager (FT-05) ────────────────────────────────────────────────
+export {
+  // Types
+  type BinLockStatus,
+  type BinLockReleaseReason,
+  type BinLock,
+  type BinLockAcquisitionResult,
+  type BinLockReleaseResult,
+  type BinConflict,
+  type BinLockIndicator,
+  type BinLockManagerConfig,
+  type BinLockManagerEvents,
+
+  // Classes
+  BinLockManager,
+  BinLockError,
+} from './BinLockManager';
+
+// ── Sequence Diff (FT-06) ───────────────────────────────────────────────────
+export {
+  // Types
+  type SequenceChangeType,
+  type ChangeSeverity,
+  type SequenceChange,
+  type SequenceDiffSummary,
+  type SequenceDiffResult,
+  type SequenceInput,
+  type SequenceDiffOptions,
+
+  // Classes
+  SequenceDiff,
+  SequenceDiffError,
+} from './SequenceDiff';

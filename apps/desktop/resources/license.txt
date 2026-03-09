@@ -1,0 +1,18 @@
+The Avid - Professional Video Editing Software
+Copyright (c) 2026 The Avid, Inc. All rights reserved.
+
+END USER LICENSE AGREEMENT
+
+By installing and using this software, you agree to be bound by the terms of this agreement.
+
+1. LICENSE GRANT: Subject to payment of applicable fees, The Avid, Inc. grants you a non-exclusive, non-transferable license to install and use this software.
+
+2. RESTRICTIONS: You may not reverse engineer, decompile, or disassemble this software.
+
+3. THIRD-PARTY COMPONENTS: This software includes FFmpeg (licensed under LGPL 2.1) and other open-source components. See THIRD-PARTY-LICENSES.txt for details.
+
+4. DISCLAIMER: THIS SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND.
+
+5. LIMITATION OF LIABILITY: IN NO EVENT SHALL THE AVID, INC. BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES.
+
+For full terms, visit: https://theavid.app/legal/eula

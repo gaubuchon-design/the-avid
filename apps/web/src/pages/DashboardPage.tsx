@@ -5,12 +5,16 @@ import {
   createProjectInRepository,
   listProjectSummariesFromRepository,
 } from '../lib/projectRepository';
+import { NewProjectDialog } from '../components/NewProjectDialog/NewProjectDialog';
+import { useEditorStore } from '../store/editor.store';
 
-const TEMPLATE_OPTIONS: Array<{ template: ProjectTemplate; label: string; desc: string; icon: string }> = [
-  { template: 'film', label: 'Blank Timeline', desc: '1920x1080 · 24fps', icon: '🎬' },
-  { template: 'social', label: 'Social Vertical', desc: '1080x1920 · 30fps', icon: '📱' },
-  { template: 'podcast', label: 'Podcast Edit', desc: 'Audio-first layout', icon: '🎙' },
-  { template: 'sports', label: 'Sports Reel', desc: 'Action-optimized', icon: '⚡' },
+const TEMPLATE_OPTIONS: Array<{ template: ProjectTemplate; label: string; desc: string; icon: string; workspace?: string }> = [
+  { template: 'film', label: 'Blank Timeline', desc: '1920x1080 · 24fps', icon: '🎬', workspace: 'filmtv' },
+  { template: 'social', label: 'Social Vertical', desc: '1080x1920 · 30fps', icon: '📱', workspace: 'creator' },
+  { template: 'podcast', label: 'Podcast Edit', desc: 'Audio-first layout', icon: '🎙', workspace: 'creator' },
+  { template: 'sports', label: 'Sports Reel', desc: 'Action-optimized', icon: '⚡', workspace: 'sports' },
+  { template: 'film', label: 'News Package', desc: 'Rundown-ready', icon: '📡', workspace: 'news' },
+  { template: 'social', label: 'Brand Campaign', desc: 'Multi-variant', icon: '🏷', workspace: 'marketing' },
 ];
 
 function iconForProject(icon: string): string {
@@ -55,6 +59,7 @@ function formatRelativeDate(isoDate: string): string {
 
 export function DashboardPage() {
   const navigate = useNavigate();
+  const { showNewProjectDialog, toggleNewProjectDialog } = useEditorStore();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'recent' | 'shared'>('all');
@@ -100,10 +105,11 @@ export function DashboardPage() {
     time: formatRelativeDate(project.updatedAt),
   }));
 
-  const createAndOpenProject = async (template: ProjectTemplate) => {
+  const createAndOpenProject = async (template: ProjectTemplate, workspace?: string) => {
     const project = await createProjectInRepository({ template });
     await refreshProjects();
-    navigate(`/editor/${project.id}`);
+    const ws = workspace ? `?workspace=${workspace}` : '';
+    navigate(`/editor/${project.id}${ws}`);
   };
 
   return (
@@ -137,7 +143,7 @@ export function DashboardPage() {
             />
             <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: 'var(--text-muted)' }}>🔍</span>
           </div>
-          <button className="btn btn-primary" onClick={() => { void createAndOpenProject('film'); }}>
+          <button className="btn btn-primary" onClick={() => toggleNewProjectDialog()}>
             + New Project
           </button>
           <div style={{
@@ -206,7 +212,7 @@ export function DashboardPage() {
 
             <div className="projects-grid">
               <div className="project-card" style={{ border: '1px dashed var(--border-strong)', background: 'transparent' }}
-                onClick={() => { void createAndOpenProject('film'); }}>
+                onClick={() => toggleNewProjectDialog()}>
                 <div style={{ height: 140, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
                   <div style={{ width: 38, height: 38, borderRadius: '50%', border: '2px dashed var(--border-strong)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, color: 'var(--text-muted)' }}>+</div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>New Project</div>
@@ -278,7 +284,7 @@ export function DashboardPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {TEMPLATE_OPTIONS.map((option) => (
                   <div key={option.label}
-                    onClick={() => { void createAndOpenProject(option.template); }}
+                    onClick={() => { void createAndOpenProject(option.template, option.workspace); }}
                     style={{ display: 'flex', gap: 10, padding: '8px 12px', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', cursor: 'pointer', transition: 'all 150ms' }}
                     onMouseEnter={(event) => (event.currentTarget.style.borderColor = 'var(--border-strong)')}
                     onMouseLeave={(event) => (event.currentTarget.style.borderColor = 'var(--border-default)')}
@@ -295,6 +301,7 @@ export function DashboardPage() {
           </div>
         </div>
       </div>
+      {showNewProjectDialog && <NewProjectDialog />}
     </div>
   );
 }

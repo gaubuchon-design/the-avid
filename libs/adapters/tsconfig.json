@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "paths": {
+      "@mcua/contracts": ["../contracts/src"],
+      "@mcua/core": ["../../packages/core/src"]
+    }
+  },
+  "include": ["src"]
+}

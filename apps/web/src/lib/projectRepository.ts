@@ -123,8 +123,9 @@ async function ensureSeedData(): Promise<EditorProject[]> {
 
   const seeded = buildSeedProjectLibrary();
   if (typeof window !== 'undefined' && hasElectronProjectStore(window)) {
-    await Promise.all(seeded.map((project) => window.electronAPI.saveProject(project)));
-    return (await window.electronAPI.listProjects()).map((project) => hydrateProject(project));
+    const api = window.electronAPI;
+    await Promise.all(seeded.map((project) => api.saveProject(project)));
+    return (await api.listProjects()).map((project) => hydrateProject(project));
   }
 
   if (hasIndexedDb()) {

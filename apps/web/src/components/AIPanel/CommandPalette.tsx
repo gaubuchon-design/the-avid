@@ -19,45 +19,71 @@ interface PaletteCommand {
 }
 
 function usePaletteCommands(): PaletteCommand[] {
-  const state = useEditorStore();
+  const {
+    duration,
+    playheadTime,
+    zoom,
+    toggleAIPanel,
+    toggleTranscriptPanel,
+    toggleInspector,
+    toggleExportPanel,
+    setActiveTool,
+    setPlayhead,
+    setInPoint,
+    setOutPoint,
+    setZoom,
+  } = useEditorStore(s => ({
+    duration: s.duration,
+    playheadTime: s.playheadTime,
+    zoom: s.zoom,
+    toggleAIPanel: s.toggleAIPanel,
+    toggleTranscriptPanel: s.toggleTranscriptPanel,
+    toggleInspector: s.toggleInspector,
+    toggleExportPanel: s.toggleExportPanel,
+    setActiveTool: s.setActiveTool,
+    setPlayhead: s.setPlayhead,
+    setInPoint: s.setInPoint,
+    setOutPoint: s.setOutPoint,
+    setZoom: s.setZoom,
+  }));
 
   return useMemo(() => [
     // AI Commands
     {
       id: 'ai-assembly', label: 'AI: Generate Rough Cut', description: 'AI assembles a first-pass edit from bins + transcript',
-      category: 'ai', icon: '⚡', action: () => { state.toggleAIPanel(); },
+      category: 'ai', icon: '⚡', action: () => { toggleAIPanel(); },
     },
     {
       id: 'ai-transcribe', label: 'AI: Transcribe All Media', description: 'Run Whisper across all media in project',
-      category: 'ai', icon: '📝', action: () => { state.toggleTranscriptPanel(); },
+      category: 'ai', icon: '📝', action: () => { toggleTranscriptPanel(); },
     },
     {
       id: 'ai-captions', label: 'AI: Generate Captions', description: 'Auto-generate word-level subtitles',
-      category: 'ai', icon: '💬', action: () => { state.toggleAIPanel(); },
+      category: 'ai', icon: '💬', action: () => { toggleAIPanel(); },
     },
     {
       id: 'ai-color-match', label: 'AI: Match Colors Across Scenes', description: 'Automatically match exposure and color between clips',
-      category: 'ai', icon: '🎨', action: () => { state.toggleAIPanel(); },
+      category: 'ai', icon: '🎨', action: () => { toggleAIPanel(); },
     },
     {
       id: 'ai-audio-mix', label: 'AI: Auto Audio Mix', description: 'Level, EQ, denoise, and duck all audio tracks',
-      category: 'ai', icon: '🎵', action: () => { state.toggleAIPanel(); },
+      category: 'ai', icon: '🎵', action: () => { toggleAIPanel(); },
     },
     {
       id: 'ai-highlights', label: 'AI: Detect Highlights', description: 'Find key moments — action, emotion, beats',
-      category: 'ai', icon: '🎯', action: () => { state.toggleAIPanel(); },
+      category: 'ai', icon: '🎯', action: () => { toggleAIPanel(); },
     },
     {
       id: 'ai-cleanup', label: 'AI: Timeline Cleanup', description: 'Remove gaps, fix sync, consolidate tracks',
-      category: 'ai', icon: '🧹', action: () => { state.toggleAIPanel(); },
+      category: 'ai', icon: '🧹', action: () => { toggleAIPanel(); },
     },
     {
       id: 'ai-social', label: 'AI: Social Media Package', description: 'Generate vertical/square cuts with captions',
-      category: 'ai', icon: '📱', action: () => { state.toggleAIPanel(); },
+      category: 'ai', icon: '📱', action: () => { toggleAIPanel(); },
     },
     {
       id: 'ai-compliance', label: 'AI: Compliance Scan', description: 'Check loudness, gamut, accessibility',
-      category: 'ai', icon: '✅', action: () => { state.toggleAIPanel(); },
+      category: 'ai', icon: '✅', action: () => { toggleAIPanel(); },
     },
 
     // Edit Commands
@@ -101,63 +127,63 @@ function usePaletteCommands(): PaletteCommand[] {
     },
     {
       id: 'edit-tool-select', label: 'Select Tool', description: 'Switch to selection/pointer tool',
-      category: 'edit', icon: '↖', shortcut: 'V', action: () => state.setActiveTool('select'),
+      category: 'edit', icon: '↖', shortcut: 'V', action: () => setActiveTool('select'),
     },
     {
       id: 'edit-tool-trim', label: 'Trim Tool', description: 'Switch to trim/ripple tool',
-      category: 'edit', icon: '⟷', shortcut: 'T', action: () => state.setActiveTool('trim'),
+      category: 'edit', icon: '⟷', shortcut: 'T', action: () => setActiveTool('trim'),
     },
     {
       id: 'edit-tool-razor', label: 'Razor Tool', description: 'Switch to razor/cut tool',
-      category: 'edit', icon: '✂', shortcut: 'C', action: () => state.setActiveTool('razor'),
+      category: 'edit', icon: '✂', shortcut: 'C', action: () => setActiveTool('razor'),
     },
 
     // Navigate Commands
     {
       id: 'nav-start', label: 'Go to Start', description: 'Jump to the beginning of the timeline',
-      category: 'navigate', icon: '⏮', shortcut: 'Home', action: () => state.setPlayhead(0),
+      category: 'navigate', icon: '⏮', shortcut: 'Home', action: () => setPlayhead(0),
     },
     {
       id: 'nav-end', label: 'Go to End', description: 'Jump to the end of the timeline',
-      category: 'navigate', icon: '⏭', shortcut: 'End', action: () => state.setPlayhead(state.duration),
+      category: 'navigate', icon: '⏭', shortcut: 'End', action: () => setPlayhead(duration),
     },
     {
       id: 'nav-mark-in', label: 'Mark In Point', description: 'Set in point at current playhead',
-      category: 'navigate', icon: '⊏', shortcut: 'I', action: () => state.setInPoint(state.playheadTime),
+      category: 'navigate', icon: '⊏', shortcut: 'I', action: () => setInPoint(playheadTime),
     },
     {
       id: 'nav-mark-out', label: 'Mark Out Point', description: 'Set out point at current playhead',
-      category: 'navigate', icon: '⊐', shortcut: 'O', action: () => state.setOutPoint(state.playheadTime),
+      category: 'navigate', icon: '⊐', shortcut: 'O', action: () => setOutPoint(playheadTime),
     },
 
     // View Commands
     {
       id: 'view-inspector', label: 'Toggle Inspector', description: 'Show or hide the inspector panel',
-      category: 'view', icon: '⊞', action: () => state.toggleInspector(),
+      category: 'view', icon: '⊞', action: () => toggleInspector(),
     },
     {
       id: 'view-transcript', label: 'Toggle Transcript', description: 'Show or hide the transcript panel',
-      category: 'view', icon: '📄', action: () => state.toggleTranscriptPanel(),
+      category: 'view', icon: '📄', action: () => toggleTranscriptPanel(),
     },
     {
       id: 'view-ai', label: 'Toggle AI Panel', description: 'Show or hide the AI assistant',
-      category: 'view', icon: '✦', action: () => state.toggleAIPanel(),
+      category: 'view', icon: '✦', action: () => toggleAIPanel(),
     },
     {
       id: 'view-zoom-in', label: 'Zoom In', description: 'Increase timeline zoom level',
-      category: 'view', icon: '🔍', shortcut: '⌘+', action: () => state.setZoom(state.zoom * 1.25),
+      category: 'view', icon: '🔍', shortcut: '⌘+', action: () => setZoom(zoom * 1.25),
     },
     {
       id: 'view-zoom-out', label: 'Zoom Out', description: 'Decrease timeline zoom level',
-      category: 'view', icon: '🔍', shortcut: '⌘-', action: () => state.setZoom(state.zoom / 1.25),
+      category: 'view', icon: '🔍', shortcut: '⌘-', action: () => setZoom(zoom / 1.25),
     },
 
     // Export
     {
       id: 'export-open', label: 'Export / Deliver', description: 'Open the export panel',
-      category: 'export', icon: '📤', action: () => state.toggleExportPanel(),
+      category: 'export', icon: '📤', action: () => toggleExportPanel(),
     },
-  ], [state]);
+  ], [duration, playheadTime, zoom, toggleAIPanel, toggleTranscriptPanel, toggleInspector, toggleExportPanel, setActiveTool, setPlayhead, setInPoint, setOutPoint, setZoom]);
 }
 
 // ─── Category labels ────────────────────────────────────────────────────────
@@ -253,11 +279,22 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     [onClose]
   );
 
-  let globalIdx = 0;
+  // Pre-compute flat list of commands with global indices and category info
+  const indexedItems = useMemo(() => {
+    const items: { cmd: PaletteCommand; globalIdx: number; category: string; isFirstInCategory: boolean }[] = [];
+    let idx = 0;
+    for (const [category, cmds] of Object.entries(grouped)) {
+      cmds.forEach((cmd, i) => {
+        items.push({ cmd, globalIdx: idx, category, isFirstInCategory: i === 0 });
+        idx++;
+      });
+    }
+    return items;
+  }, [grouped]);
 
   return (
     <div className="command-palette-backdrop" onClick={handleBackdropClick}>
-      <div className="command-palette">
+      <div className="command-palette" role="dialog" aria-modal="true" aria-label="Command Palette">
         {/* Search input */}
         <div className="command-palette-input-row">
           <span className="command-palette-icon">✦</span>
@@ -269,47 +306,47 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
             onKeyDown={handleKeyDown}
             placeholder="Type a command or ask AI anything…"
             className="command-palette-input"
+            aria-label="Search commands"
           />
           <kbd className="command-palette-kbd">esc</kbd>
         </div>
 
         {/* Results */}
-        <div className="command-palette-results" ref={listRef}>
+        <div className="command-palette-results" ref={listRef} role="listbox">
           {filtered.length === 0 ? (
             <div className="command-palette-empty">
               No commands found. Try a different search term.
             </div>
           ) : (
-            Object.entries(grouped).map(([category, cmds]) => (
-              <div key={category}>
-                <div className="command-palette-category">
-                  {CATEGORY_LABELS[category] || category}
-                </div>
-                {cmds.map(cmd => {
-                  const idx = globalIdx++;
-                  return (
-                    <button
-                      key={cmd.id}
-                      data-idx={idx}
-                      className={`command-palette-item${idx === selectedIdx ? ' selected' : ''}`}
-                      onClick={() => {
-                        cmd.action();
-                        onClose();
-                      }}
-                      onMouseEnter={() => setSelectedIdx(idx)}
-                    >
-                      <span className="command-palette-item-icon">{cmd.icon}</span>
-                      <div className="command-palette-item-text">
-                        <span className="command-palette-item-label">{cmd.label}</span>
-                        <span className="command-palette-item-desc">{cmd.description}</span>
-                      </div>
-                      {cmd.shortcut && (
-                        <kbd className="command-palette-item-shortcut">{cmd.shortcut}</kbd>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+            indexedItems.map(({ cmd, globalIdx, category, isFirstInCategory }) => (
+              <React.Fragment key={cmd.id}>
+                {isFirstInCategory && (
+                  <div className="command-palette-category">
+                    {CATEGORY_LABELS[category] || category}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={globalIdx === selectedIdx}
+                  data-idx={globalIdx}
+                  className={`command-palette-item${globalIdx === selectedIdx ? ' selected' : ''}`}
+                  onClick={() => {
+                    cmd.action();
+                    onClose();
+                  }}
+                  onMouseEnter={() => setSelectedIdx(globalIdx)}
+                >
+                  <span className="command-palette-item-icon">{cmd.icon}</span>
+                  <div className="command-palette-item-text">
+                    <span className="command-palette-item-label">{cmd.label}</span>
+                    <span className="command-palette-item-desc">{cmd.description}</span>
+                  </div>
+                  {cmd.shortcut && (
+                    <kbd className="command-palette-item-shortcut">{cmd.shortcut}</kbd>
+                  )}
+                </button>
+              </React.Fragment>
             ))
           )}
         </div>

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useEditorStore } from '../../store/editor.store';
 
 const AI_TOOLS = [
@@ -131,12 +131,28 @@ export function AIPanel() {
   const [showBuyDialog, setShowBuyDialog] = useState(false);
   const [runningWorkflows, setRunningWorkflows] = useState<RunningWorkflow[]>([]);
   const [workflowFilter, setWorkflowFilter] = useState<'all' | AIWorkflow['category']>('all');
+  const [purchaseMessage, setPurchaseMessage] = useState<string | null>(null);
+
+  // Track all interval/timeout IDs for cleanup on unmount
+  const timerIds = useRef<number[]>([]);
+
+  useEffect(() => {
+    return () => {
+      timerIds.current.forEach(id => clearInterval(id));
+      timerIds.current = [];
+    };
+  }, []);
+
+  const trackTimer = (id: number) => {
+    timerIds.current.push(id);
+    return id;
+  };
 
   const runJob = (tool: typeof AI_TOOLS[number]) => {
     const job: RunningJob = { id: `j${Date.now()}`, icon: tool.icon, label: tool.label, cost: tool.cost, progress: 0, status: 'running' };
     setJobs(prev => [job, ...prev]);
     let p = 0;
-    const iv = setInterval(() => {
+    const iv = trackTimer(window.setInterval(() => {
       p += Math.random() * 18 + 4;
       if (p >= 100) {
         clearInterval(iv);
@@ -144,7 +160,7 @@ export function AIPanel() {
       } else {
         setJobs(prev => prev.map(j => j.id === job.id ? { ...j, progress: p } : j));
       }
-    }, 280);
+    }, 280));
   };
 
   // ── Run multi-step workflow ──
@@ -197,7 +213,7 @@ export function AIPanel() {
       // Simulate progress
       let p = 0;
       const currentIdx = stepIdx;
-      const iv = setInterval(() => {
+      const iv = trackTimer(window.setInterval(() => {
         p += Math.random() * 15 + 5;
         if (p >= 100) {
           clearInterval(iv);
@@ -211,7 +227,7 @@ export function AIPanel() {
             })
           );
           stepIdx++;
-          setTimeout(runNextStep, 200);
+          trackTimer(window.setTimeout(runNextStep, 200));
         } else {
           setRunningWorkflows(prev =>
             prev.map(w => {
@@ -223,7 +239,7 @@ export function AIPanel() {
             })
           );
         }
-      }, 200 + Math.random() * 300);
+      }, 200 + Math.random() * 300));
     };
 
     runNextStep();
@@ -240,18 +256,18 @@ export function AIPanel() {
         <div className="ai-logo">✦</div>
         <span className="ai-title">Avid AI</span>
         <div className="ai-status"><div className="ai-status-dot" />Ready</div>
-        <button onClick={toggleAIPanel} style={{ marginLeft: 8, background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14 }}>✕</button>
+        <button className="ai-close-btn" onClick={toggleAIPanel} aria-label="Close AI Panel">✕</button>
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+      <div className="ai-tab-bar" role="tablist">
         {(['tools', 'workflows', 'jobs', 'search'] as const).map(t => (
-          <div key={t} onClick={() => setTab(t)} style={{ flex: 1, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: tab === t ? 'var(--accent)' : 'var(--text-muted)', borderBottom: `2px solid ${tab === t ? 'var(--accent)' : 'transparent'}`, cursor: 'pointer', transition: 'all 80ms' }}>
+          <button key={t} className="ai-tab" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
             {t === 'workflows' ? '✦ Flows' : t}
             {t === 'jobs' && runningWorkflows.some(w => w.status === 'running') && (
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', marginLeft: 4, animation: 'pulse 1.5s infinite' }} />
+              <span className="ai-tab-dot" />
             )}
-          </div>
+          </button>
         ))}
       </div>
 
@@ -259,34 +275,34 @@ export function AIPanel() {
         {tab === 'tools' && (
           <>
             {/* Assembly card */}
-            <div style={{ background: 'linear-gradient(135deg, var(--accent-muted), rgba(176,102,255,.08))', border: '1px solid var(--border-accent)', borderRadius: 8, padding: 12, marginBottom: 4 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                <span style={{ fontSize: 16 }}>⚡</span>
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Agentic Assembly</span>
+            <div className="ai-assembly-card">
+              <div className="ai-assembly-header">
+                <span className="ai-assembly-icon">⚡</span>
+                <span className="ai-assembly-label">Agentic Assembly</span>
                 <span className="badge badge-accent" style={{ marginLeft: 'auto' }}>New</span>
               </div>
-              <textarea value={prompt} onChange={e => setPrompt(e.target.value)} placeholder="Describe your film: 'Create a 3-min documentary cut focusing on the emotional arc...'" style={{ width: '100%', minHeight: 72, background: 'var(--bg-void)', border: '1px solid var(--border)', borderRadius: 5, color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', fontSize: 11, padding: '7px 9px', resize: 'vertical', outline: 'none', lineHeight: 1.5, marginBottom: 8 }} />
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8 }}>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Role:</span>
-                <select value={role} onChange={e => setRole(e.target.value)} style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', fontSize: 11, padding: '3px 6px', flex: 1, outline: 'none' }}>
+              <textarea className="ai-assembly-textarea" value={prompt} onChange={e => setPrompt(e.target.value)} placeholder="Describe your film: 'Create a 3-min documentary cut focusing on the emotional arc...'" />
+              <div className="ai-assembly-role-row">
+                <span className="ai-assembly-role-label">Role:</span>
+                <select className="ai-assembly-role-select" value={role} onChange={e => setRole(e.target.value)}>
                   {['Editor (Craft)', 'Producer (Story)', 'Sports (Action)', 'Marketing (Brand)', 'Social (Short-form)'].map(o => <option key={o}>{o}</option>)}
                 </select>
               </div>
-              <button className="ai-run-btn" onClick={() => runJob(AI_TOOLS[0])} style={{ background: 'var(--accent)', color: '#fff', borderColor: 'var(--accent)' }}>⚡  Generate Assembly · 50 ✦</button>
+              <button className="ai-run-btn ai-run-btn--primary" onClick={() => runJob(AI_TOOLS[0])}>⚡  Generate Assembly · 50 ✦</button>
             </div>
 
             {AI_TOOLS.slice(1).map(tool => (
               <div key={tool.id} className="ai-job-card">
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                  <span style={{ fontSize: 18, lineHeight: 1 }}>{tool.icon}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="ai-card-row">
+                  <span className="ai-card-icon">{tool.icon}</span>
+                  <div className="ai-card-body">
                     <div className="ai-job-title">{tool.label}</div>
                     <div className="ai-job-desc">{tool.desc}</div>
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
+                <div className="ai-card-footer">
                   <span className="ai-job-cost">✦ {tool.cost} tokens</span>
-                  <button className="ai-run-btn" onClick={() => runJob(tool)} style={{ width: 'auto', padding: '4px 12px' }}>Run</button>
+                  <button className="ai-run-btn ai-run-btn--inline" onClick={() => runJob(tool)}>Run</button>
                 </div>
               </div>
             ))}
@@ -296,44 +312,40 @@ export function AIPanel() {
         {tab === 'workflows' && (
           <>
             {/* Category filter */}
-            <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+            <div className="ai-filter-bar">
               {(['all', 'editing', 'audio', 'color', 'delivery'] as const).map(cat => (
                 <button key={cat}
-                  className={`btn btn-ghost${workflowFilter === cat ? ' active' : ''}`}
-                  style={{
-                    flex: 1, padding: '3px 0', fontSize: 9, textTransform: 'uppercase',
-                    background: workflowFilter === cat ? 'var(--accent-muted)' : undefined,
-                    color: workflowFilter === cat ? 'var(--accent)' : undefined,
-                  }}
+                  className={`btn btn-ghost ai-filter-btn${workflowFilter === cat ? ' active' : ''}`}
+                  style={workflowFilter === cat ? { background: 'var(--accent-muted)', color: 'var(--accent)' } : undefined}
                   onClick={() => setWorkflowFilter(cat)}
                 >{cat}</button>
               ))}
             </div>
 
             {filteredWorkflows.map(wf => (
-              <div key={wf.id} className="ai-job-card" style={{ border: '1px solid var(--border)', marginBottom: 6 }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
-                  <span style={{ fontSize: 18, lineHeight: 1 }}>{wf.icon}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
+              <div key={wf.id} className="ai-job-card ai-workflow-card">
+                <div className="ai-workflow-card-header">
+                  <span className="ai-card-icon">{wf.icon}</span>
+                  <div className="ai-card-body">
                     <div className="ai-job-title">{wf.name}</div>
                     <div className="ai-job-desc">{wf.description}</div>
                   </div>
                 </div>
                 {/* Steps preview */}
-                <div style={{ marginBottom: 8 }}>
+                <div className="ai-step-list">
                   {wf.steps.map((step, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
-                      <span style={{ width: 14, height: 14, borderRadius: '50%', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: 'var(--text-muted)', flexShrink: 0 }}>
+                    <div key={i} className="ai-step-row">
+                      <span className="ai-step-number">
                         {i + 1}
                       </span>
-                      <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{step.label}</span>
+                      <span className="ai-step-label">{step.label}</span>
                     </div>
                   ))}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div className="ai-card-footer">
                   <span className="ai-job-cost">✦ {wf.cost} tokens · {wf.steps.length} steps</span>
-                  <button className="ai-run-btn" onClick={() => runWorkflow(wf)}
-                    style={{ width: 'auto', padding: '4px 14px', background: 'var(--accent)', color: '#fff', borderColor: 'var(--accent)' }}>
+                  <button className="ai-run-btn ai-run-btn--inline ai-run-btn--primary" onClick={() => runWorkflow(wf)}
+                    style={{ padding: '4px 14px' }}>
                     Run ⚡
                   </button>
                 </div>
@@ -344,36 +356,31 @@ export function AIPanel() {
 
         {tab === 'jobs' && (
           (jobs.length === 0 && runningWorkflows.length === 0)
-            ? <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)', fontSize: 11 }}>No jobs yet. Run a tool or workflow to see progress here.</div>
+            ? <div className="ai-empty-state">No jobs yet. Run a tool or workflow to see progress here.</div>
             : <>
               {/* Running/completed workflows */}
               {runningWorkflows.map((rw, wi) => (
-                <div key={wi} className="ai-job-card" style={{ border: '1px solid var(--border-accent)', marginBottom: 6 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                    <span style={{ fontSize: 16 }}>{rw.icon}</span>
-                    <span className="ai-job-title" style={{ flex: 1 }}>{rw.name}</span>
+                <div key={wi} className="ai-job-card ai-workflow-active">
+                  <div className="ai-workflow-active-header">
+                    <span className="ai-card-icon--md">{rw.icon}</span>
+                    <span className="ai-job-title ai-card-body">{rw.name}</span>
                     <span className={`badge ${rw.status === 'done' ? 'badge-success' : rw.status === 'failed' ? 'badge-error' : 'badge-accent'}`}>
                       {rw.status === 'running' ? `Step ${rw.currentStep + 1}/${rw.steps.length}` : rw.status}
                     </span>
                   </div>
                   {/* Step progress */}
                   {rw.steps.map((step, si) => (
-                    <div key={step.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0' }}>
-                      <span style={{
-                        width: 16, height: 16, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, flexShrink: 0,
-                        background: step.status === 'done' ? 'var(--success)' : step.status === 'running' ? 'var(--accent)' : 'var(--bg-void)',
-                        color: step.status === 'pending' ? 'var(--text-muted)' : '#fff',
-                        border: step.status === 'pending' ? '1px solid var(--border)' : 'none',
-                      }}>
+                    <div key={step.id} className="ai-wf-step-row">
+                      <span className={`ai-wf-step-indicator ai-wf-step-indicator--${step.status === 'failed' ? 'pending' : step.status}`}>
                         {step.status === 'done' ? '✓' : step.status === 'running' ? '▶' : si + 1}
                       </span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 10, color: step.status === 'running' ? 'var(--accent)' : step.status === 'done' ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: step.status === 'running' ? 600 : 400 }}>
+                      <div className="ai-card-body">
+                        <div className={`ai-wf-step-text ai-wf-step-text--${step.status === 'failed' ? 'pending' : step.status}`}>
                           {step.label}
                         </div>
                         {step.status === 'running' && (
-                          <div className="ai-progress-bar" style={{ marginTop: 3, height: 3 }}>
-                            <div className="ai-progress-fill" style={{ width: `${step.progress}%`, backgroundImage: 'linear-gradient(90deg,var(--accent),#b066ff)' }} />
+                          <div className="ai-progress-bar ai-progress-bar--thin">
+                            <div className="ai-progress-fill ai-progress-fill--gradient" style={{ width: `${step.progress}%` }} />
                           </div>
                         )}
                       </div>
@@ -385,17 +392,17 @@ export function AIPanel() {
               {/* Simple jobs */}
               {jobs.map(job => (
                 <div key={job.id} className="ai-job-card">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                    <span style={{ fontSize: 14 }}>{job.icon}</span>
+                  <div className="ai-job-header">
+                    <span className="ai-card-icon--sm">{job.icon}</span>
                     <span className="ai-job-title">{job.label}</span>
                     <span className={`badge ${job.status === 'done' ? 'badge-success' : job.status === 'failed' ? 'badge-error' : 'badge-accent'}`} style={{ marginLeft: 'auto' }}>{job.status}</span>
                   </div>
                   {job.status === 'running' && (
                     <div className="ai-progress-bar">
-                      <div className="ai-progress-fill" style={{ width: `${job.progress}%`, backgroundImage: 'linear-gradient(90deg,var(--accent),#b066ff)' }} />
+                      <div className="ai-progress-fill ai-progress-fill--gradient" style={{ width: `${job.progress}%` }} />
                     </div>
                   )}
-                  {job.result && <div style={{ fontSize: 11, color: 'var(--success)', marginTop: 4 }}>{job.result}</div>}
+                  {job.result && <div className="ai-job-result">{job.result}</div>}
                 </div>
               ))}
             </>
@@ -403,16 +410,12 @@ export function AIPanel() {
 
         {tab === 'search' && (
           <>
-            <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder='Search: "close-up of face", "says thank you"...' style={{ width: '100%', background: 'var(--bg-void)', border: '1px solid var(--border)', borderRadius: 5, color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', fontSize: 12, padding: '8px 10px', outline: 'none', marginBottom: 8 }} />
-            <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
+            <input className="ai-search-input" type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder='Search: "close-up of face", "says thank you"...' />
+            <div className="ai-search-filter-bar">
               {(['semantic', 'phonetic', 'visual'] as const).map(type => (
                 <button key={type}
-                  className={`btn btn-ghost${searchFilterType === type ? ' active' : ''}`}
-                  style={{ flex: 1, padding: '4px 0', fontSize: 10,
-                    background: searchFilterType === type ? 'var(--accent-muted)' : undefined,
-                    color: searchFilterType === type ? 'var(--accent)' : undefined,
-                    borderColor: searchFilterType === type ? 'var(--accent)' : undefined,
-                  }}
+                  className={`btn btn-ghost ai-search-filter-btn${searchFilterType === type ? ' active' : ''}`}
+                  style={searchFilterType === type ? { background: 'var(--accent-muted)', color: 'var(--accent)', borderColor: 'var(--accent)' } : undefined}
                   onClick={() => setSearchFilterType(type)}
                 >{type.charAt(0).toUpperCase() + type.slice(1)}</button>
               ))}
@@ -422,9 +425,9 @@ export function AIPanel() {
                 onClick={() => { setPlayhead(r.time); toggleAIPanel(); }}
                 title="Click to jump to this timecode"
               >
-                <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 3 }}>{r.name}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>{r.excerpt}</div>
-                <div style={{ fontSize: 10, color: 'var(--text-accent)', fontFamily: 'var(--font-mono)', marginTop: 4 }}>@ {r.time.toFixed(1)}s</div>
+                <div className="ai-result-name">{r.name}</div>
+                <div className="ai-result-excerpt">{r.excerpt}</div>
+                <div className="ai-result-timecode">@ {r.time.toFixed(1)}s</div>
               </div>
             ))}
           </>
@@ -433,32 +436,43 @@ export function AIPanel() {
 
       {/* Token purchase dialog */}
       {showBuyDialog && (
-        <div style={{
-          padding: 12, margin: '0 8px 8px', background: 'var(--bg-raised)',
-          border: '1px solid var(--border-accent)', borderRadius: 8,
-        }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>Purchase Tokens</div>
+        <div className="ai-buy-dialog">
+          <div className="ai-buy-title">Purchase Tokens</div>
           {[
             { amount: 100, price: '$4.99' },
             { amount: 500, price: '$19.99' },
             { amount: 2000, price: '$59.99' },
           ].map(pkg => (
-            <button key={pkg.amount} className="ai-run-btn" style={{ marginBottom: 4, background: 'var(--bg-void)' }}
-              onClick={() => { setShowBuyDialog(false); alert(`Purchase ${pkg.amount} tokens for ${pkg.price} — Stripe checkout not connected in demo`); }}>
+            <button key={pkg.amount} className="ai-run-btn ai-buy-option"
+              onClick={() => { setShowBuyDialog(false); console.info(`Purchase ${pkg.amount} tokens for ${pkg.price} — Stripe checkout not connected in demo`); setPurchaseMessage(`Demo mode — Stripe checkout not connected. Would purchase ${pkg.amount} tokens for ${pkg.price}.`); }}>
               ✦ {pkg.amount} tokens — {pkg.price}
             </button>
           ))}
-          <button className="btn btn-ghost" style={{ width: '100%', marginTop: 4, fontSize: 10 }}
+          <button className="btn btn-ghost ai-buy-cancel"
             onClick={() => setShowBuyDialog(false)}>Cancel</button>
+        </div>
+      )}
+
+      {/* Purchase feedback message */}
+      {purchaseMessage && (
+        <div className="ai-purchase-msg">
+          <span className="ai-purchase-msg-text">{purchaseMessage}</span>
+          <button
+            className="ai-purchase-msg-close"
+            onClick={() => setPurchaseMessage(null)}
+            aria-label="Dismiss message"
+          >
+            ✕
+          </button>
         </div>
       )}
 
       {/* Token footer */}
       <div className="ai-token-bar">
         <div className="ai-token-label">Token balance</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className="ai-token-footer-right">
           <span className="ai-token-count">✦ {tokenBalance}</span>
-          <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: 10 }}
+          <button className="btn btn-ghost ai-buy-btn"
             onClick={() => setShowBuyDialog(!showBuyDialog)}>Buy</button>
         </div>
       </div>

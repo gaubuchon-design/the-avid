@@ -4,7 +4,7 @@ import { immer } from 'zustand/middleware/immer';
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 export type TrackType = 'VIDEO' | 'AUDIO' | 'EFFECT' | 'SUBTITLE' | 'GRAPHIC';
-export type PanelType = 'edit' | 'color' | 'audio' | 'effects' | 'publish' | 'timeline' | 'script' | 'review';
+export type PanelType = 'edit' | 'color' | 'audio' | 'effects' | 'publish' | 'timeline' | 'script' | 'review' | 'news';
 export type ToolbarTab = 'media' | 'effects';
 export type WorkspaceTab = 'video' | 'audio' | 'color' | 'info' | 'effects';
 export type TimelineViewMode = 'timeline' | 'list' | 'waveform';
@@ -154,6 +154,73 @@ export interface ProjectSettings {
   exportFormat: string;
 }
 
+export interface SequenceSettings {
+  name: string;
+  fps: number;
+  dropFrame: boolean;
+  startTC: number; // starting timecode offset in frames
+  width: number;
+  height: number;
+  sampleRate: number;
+}
+
+export interface SubtitleCue {
+  id: string;
+  start: number; // seconds
+  end: number;
+  text: string;
+  speaker?: string;
+  style?: {
+    fontSize?: number;
+    fontFamily?: string;
+    color?: string;
+    position?: 'top' | 'bottom' | 'custom';
+    y?: number;
+    bgOpacity?: number;
+  };
+}
+
+export interface SubtitleTrack {
+  id: string;
+  name: string;
+  language: string;
+  cues: SubtitleCue[];
+}
+
+export interface TitleClipData {
+  id: string;
+  templateId?: string;
+  text: string;
+  style: {
+    fontFamily: string;
+    fontSize: number;
+    fontWeight: number;
+    color: string;
+    outlineColor?: string;
+    outlineWidth?: number;
+    shadowColor?: string;
+    shadowBlur?: number;
+    opacity: number;
+    textAlign: 'left' | 'center' | 'right';
+  };
+  position: {
+    x: number; // 0-1 normalized
+    y: number; // 0-1 normalized
+    width: number;
+    height: number;
+  };
+  background?: {
+    type: 'none' | 'solid' | 'gradient';
+    color?: string;
+    gradientColors?: string[];
+    opacity?: number;
+  };
+  animation?: {
+    type: 'none' | 'fade-in' | 'slide-up' | 'typewriter' | 'scale-in';
+    duration: number; // frames
+  };
+}
+
 export interface WatchFolder {
   id: string;
   name: string;
@@ -198,6 +265,11 @@ interface EditorState {
   smartBins: SmartBin[];
   selectedSmartBinId: string | null;
 
+  // Sequence
+  sequenceSettings: SequenceSettings;
+  subtitleTracks: SubtitleTrack[];
+  titleClips: TitleClipData[];
+
   // Monitors
   sourceAsset: MediaAsset | null;
   inPoint: number | null;
@@ -205,6 +277,12 @@ interface EditorState {
   showSafeZones: boolean;
   showWaveforms: boolean;
   snapToGrid: boolean;
+
+  // Dialog visibility
+  showNewProjectDialog: boolean;
+  showSequenceDialog: boolean;
+  showTitleTool: boolean;
+  showSubtitleEditor: boolean;
 
   // UI State
   activePanel: PanelType;
@@ -351,6 +429,28 @@ interface EditorActions {
   // Enhanced trim operations
   rippleDelete: (clipId: string) => void;
   slideClip: (clipId: string, delta: number) => void;
+
+  // Sequence
+  updateSequenceSettings: (settings: Partial<SequenceSettings>) => void;
+
+  // Media import
+  importMediaFiles: (files: FileList, binId?: string) => void;
+
+  // Dialogs
+  toggleNewProjectDialog: () => void;
+  toggleSequenceDialog: () => void;
+  toggleTitleTool: () => void;
+  toggleSubtitleEditor: () => void;
+
+  // Subtitles
+  addSubtitleTrack: (track: SubtitleTrack) => void;
+  addSubtitleCue: (trackId: string, cue: SubtitleCue) => void;
+  removeSubtitleCue: (trackId: string, cueId: string) => void;
+
+  // Titles
+  addTitleClip: (title: TitleClipData) => void;
+  removeTitleClip: (titleId: string) => void;
+  updateTitleClip: (titleId: string, data: Partial<TitleClipData>) => void;
 
   // Init
   loadProject: (projectId: string) => void;
@@ -635,12 +735,27 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     activeBinAssets: DEMO_BINS[0].children[0].assets,
     smartBins: DEMO_SMART_BINS,
     selectedSmartBinId: null,
+    sequenceSettings: {
+      name: 'Sequence 1',
+      fps: 24,
+      dropFrame: false,
+      startTC: 0,
+      width: 1920,
+      height: 1080,
+      sampleRate: 48000,
+    },
+    subtitleTracks: [],
+    titleClips: [],
     sourceAsset: null,
     inPoint: null,
     outPoint: null,
     showSafeZones: false,
     showWaveforms: true,
     snapToGrid: true,
+    showNewProjectDialog: false,
+    showSequenceDialog: false,
+    showTitleTool: false,
+    showSubtitleEditor: false,
     activePanel: 'edit',
     activeInspectorTab: 'video',
     toolbarTab: 'media',
@@ -1122,5 +1237,88 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     }),
 
     loadProject: (id) => set((s) => { s.projectId = id; }),
+
+    // Sequence settings
+    updateSequenceSettings: (settings) => set((s) => {
+      Object.assign(s.sequenceSettings, settings);
+      // Sync project settings with sequence settings
+      if (settings.width !== undefined) s.projectSettings.width = settings.width;
+      if (settings.height !== undefined) s.projectSettings.height = settings.height;
+      if (settings.fps !== undefined) s.projectSettings.frameRate = settings.fps;
+    }),
+
+    // Media import
+    importMediaFiles: (files, binId) => set((s) => {
+      const targetBin = binId
+        ? (function findBin(bins: Bin[]): Bin | null {
+            for (const b of bins) {
+              if (b.id === binId) return b;
+              const child = findBin(b.children);
+              if (child) return child;
+            }
+            return null;
+          })(s.bins)
+        : s.bins[0] ?? null;
+
+      if (!targetBin) return;
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const isVideo = file.type.startsWith('video/');
+        const isAudio = file.type.startsWith('audio/');
+        const isImage = file.type.startsWith('image/');
+        const url = URL.createObjectURL(file);
+
+        const asset: MediaAsset = {
+          id: createId('asset'),
+          name: file.name,
+          type: isVideo ? 'VIDEO' : isAudio ? 'AUDIO' : isImage ? 'IMAGE' : 'DOCUMENT',
+          duration: 0, // will be updated when loaded
+          status: 'READY',
+          playbackUrl: url,
+          tags: [],
+          isFavorite: false,
+        };
+
+        targetBin.assets.push(asset);
+      }
+
+      // Update active bin assets if viewing this bin
+      if (s.selectedBinId === targetBin.id) {
+        s.activeBinAssets = [...targetBin.assets];
+      }
+    }),
+
+    // Dialogs
+    toggleNewProjectDialog: () => set((s) => { s.showNewProjectDialog = !s.showNewProjectDialog; }),
+    toggleSequenceDialog: () => set((s) => { s.showSequenceDialog = !s.showSequenceDialog; }),
+    toggleTitleTool: () => set((s) => { s.showTitleTool = !s.showTitleTool; }),
+    toggleSubtitleEditor: () => set((s) => { s.showSubtitleEditor = !s.showSubtitleEditor; }),
+
+    // Subtitles
+    addSubtitleTrack: (track) => set((s) => { s.subtitleTracks.push(track); }),
+    addSubtitleCue: (trackId, cue) => set((s) => {
+      const track = s.subtitleTracks.find((t) => t.id === trackId);
+      if (track) {
+        track.cues.push(cue);
+        track.cues.sort((a, b) => a.start - b.start);
+      }
+    }),
+    removeSubtitleCue: (trackId, cueId) => set((s) => {
+      const track = s.subtitleTracks.find((t) => t.id === trackId);
+      if (track) {
+        track.cues = track.cues.filter((c) => c.id !== cueId);
+      }
+    }),
+
+    // Titles
+    addTitleClip: (title) => set((s) => { s.titleClips.push(title); }),
+    removeTitleClip: (titleId) => set((s) => {
+      s.titleClips = s.titleClips.filter((t) => t.id !== titleId);
+    }),
+    updateTitleClip: (titleId, data) => set((s) => {
+      const title = s.titleClips.find((t) => t.id === titleId);
+      if (title) Object.assign(title, data);
+    }),
   }))
 );

@@ -1,17 +1,16 @@
 import React from 'react';
 import { useEditorStore } from '../../store/editor.store';
-
-function formatTC(sec: number) {
-  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
-  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-}
+import { Timecode } from '../../lib/timecode';
 
 export function StatusBar() {
-  const { tracks, duration, zoom, playheadTime, isPlaying, projectName, activePanel } = useEditorStore();
+  const { tracks, duration, zoom, playheadTime, isPlaying, projectName, activePanel, projectSettings, sequenceSettings } = useEditorStore();
+  const tc = new Timecode({ fps: sequenceSettings?.fps || projectSettings?.frameRate || 24, dropFrame: sequenceSettings?.dropFrame });
   const clipCount = tracks.reduce((n, t) => n + t.clips.length, 0);
   const isDesktop = Boolean(window.electronAPI);
   const saveLabel = isDesktop ? 'Local project package' : 'Connected';
-  const projectFormatLabel = '3840x2160 · 24fps · MOV';
+  const projectFormatLabel = projectSettings
+    ? `${projectSettings.width}x${projectSettings.height} · ${projectSettings.frameRate}fps · ${projectSettings.exportFormat.toUpperCase()}`
+    : '';
 
   return (
     <div className="status-bar">
@@ -33,10 +32,10 @@ export function StatusBar() {
         <span>{clipCount} clips</span>
       </div>
       <div className="status-item">
-        <span>Duration: {formatTC(duration)}</span>
+        <span>Duration: {tc.secondsToTC(duration)}</span>
       </div>
       <div className="status-item">
-        <span>Playhead: {formatTC(playheadTime)}</span>
+        <span>Playhead: {tc.secondsToTC(playheadTime)}</span>
       </div>
       <div className="status-spacer" />
       <div className="status-item">
@@ -65,6 +64,9 @@ export function StatusBar() {
       </div>
       <div className="status-item">
         <span>{projectFormatLabel}</span>
+      </div>
+      <div className="status-item">
+        <span>{tc.fps}fps{tc.dropFrame ? ' DF' : ' NDF'}</span>
       </div>
     </div>
   );

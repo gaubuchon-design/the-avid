@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import React, { useEffect, useRef, useState, Suspense, lazy } from 'react';
+import { LoadingSpinner } from '../components/LoadingSpinner';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { Toolbar } from '../components/Toolbar/Toolbar';
 import { BinPanel } from '../components/Bins/BinPanel';
 import { MonitorArea } from '../components/Monitor/MonitorArea';
@@ -10,7 +11,25 @@ import { TranscriptPanel } from '../components/TranscriptPanel/TranscriptPanel';
 import { CommandPalette } from '../components/AIPanel/CommandPalette';
 import { ExportPanel } from '../components/ExportPanel/ExportPanel';
 import { StatusBar } from '../components/Editor/StatusBar';
+import { NewProjectDialog } from '../components/NewProjectDialog/NewProjectDialog';
+import { SequenceDialog } from '../components/SequenceDialog/SequenceDialog';
+import { TitleTool } from '../components/TitleTool/TitleTool';
+import { SubtitleEditor } from '../components/SubtitleEditor/SubtitleEditor';
 import { useEditorStore } from '../store/editor.store';
+import { type WorkspacePreset, workspacePresets } from '../App';
+
+// Lazy-loaded vertical panels
+// NOTE: These lazy imports are intentionally separate from the ones in App.tsx.
+// App.tsx uses its lazy references for the route-level panel registry, while
+// EditorPage uses its own so each code-split boundary resolves independently.
+const RundownPanel = lazy(() => import('../components/RundownPanel/RundownPanel').then(m => ({ default: m.RundownPanel })));
+const StoryScriptPanel = lazy(() => import('../components/StoryScriptPanel/StoryScriptPanel').then(m => ({ default: m.StoryScriptPanel })));
+const SportsPanel = lazy(() => import('../components/SportsPanel/SportsPanel').then(m => ({ default: m.SportsPanel })));
+const CreatorPanel = lazy(() => import('../components/CreatorPanel/CreatorPanel').then(m => ({ default: m.CreatorPanel })));
+const BrandPanel = lazy(() => import('../components/BrandPanel/BrandPanel').then(m => ({ default: m.BrandPanel })));
+const MultiCamPanel = lazy(() => import('../components/MultiCamPanel/MultiCamPanel').then(m => ({ default: m.MultiCamPanel })));
+const AccessibilityPanel = lazy(() => import('../components/AccessibilityPanel/AccessibilityPanel').then(m => ({ default: m.AccessibilityPanel })));
+const SportsWorkspace = lazy(() => import('../components/SportsWorkspace/SportsWorkspace').then(m => ({ default: m.SportsWorkspace })));
 
 function usePlaybackEngine() {
   const { isPlaying, playheadTime, setPlayhead, duration, togglePlay } = useEditorStore();
@@ -37,10 +56,79 @@ function usePlaybackEngine() {
   }, [isPlaying]);
 }
 
+// ─── Workspace Preset Selector ──────────────────────────────────────────────
+
+function WorkspaceSelector({
+  workspace,
+  switchWorkspace,
+  presets,
+}: {
+  workspace: WorkspacePreset;
+  switchWorkspace: (key: WorkspacePreset) => void;
+  presets: Record<WorkspacePreset, { label: string; panels: string[] }>;
+}) {
+  if (!presets) return null;
+  return (
+    <div className="workspace-selector">
+      {(Object.entries(presets) as [WorkspacePreset, { label: string; panels: string[] }][]).map(([key, preset]) => (
+        <button
+          key={key}
+          className={`ws-tab ${workspace === key ? 'ws-tab-active' : ''}`}
+          onClick={() => switchWorkspace(key)}
+          title={preset.label}
+          aria-pressed={workspace === key}
+        >
+          {preset.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── Vertical Side Panel ────────────────────────────────────────────────────
+
+function VerticalSidePanel({ workspace }: { workspace: WorkspacePreset }) {
+  switch (workspace) {
+    case 'news':
+      return (
+        <Suspense fallback={<LoadingSpinner />}>
+          <RundownPanel />
+          <StoryScriptPanel />
+        </Suspense>
+      );
+    case 'sports':
+      return (
+        <Suspense fallback={<LoadingSpinner />}>
+          <SportsPanel />
+        </Suspense>
+      );
+    case 'creator':
+      return (
+        <Suspense fallback={<LoadingSpinner />}>
+          <CreatorPanel />
+          <AccessibilityPanel />
+        </Suspense>
+      );
+    case 'marketing':
+      return (
+        <Suspense fallback={<LoadingSpinner />}>
+          <BrandPanel />
+        </Suspense>
+      );
+    default:
+      return null;
+  }
+}
+
 export function EditorPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const { showAIPanel, showExportPanel, showTranscriptPanel, toggleExportPanel, loadProject, showInspector } = useEditorStore();
+  const [searchParams] = useSearchParams();
+  const { showAIPanel, showExportPanel, showTranscriptPanel, toggleExportPanel, loadProject, showInspector, showNewProjectDialog, showSequenceDialog, showTitleTool, showSubtitleEditor } = useEditorStore();
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [workspace, setWorkspace] = useState<WorkspacePreset>(
+    (searchParams.get('workspace') as WorkspacePreset) || 'filmtv'
+  );
+  const [showMultiCam, setShowMultiCam] = useState(false);
   usePlaybackEngine();
 
   useEffect(() => {
@@ -54,26 +142,62 @@ export function EditorPage() {
         e.preventDefault();
         setShowCommandPalette(prev => !prev);
       }
+      // ⌘M / Ctrl+M to toggle multicam
+      if ((e.metaKey || e.ctrlKey) && e.key === 'm') {
+        e.preventDefault();
+        setShowMultiCam(prev => !prev);
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  const hasVerticalPanel = workspace !== 'filmtv' && workspace !== 'sports';
+  const isSportsWorkspace = workspace === 'sports';
+
   return (
     <div className="editor-shell" onContextMenu={e => e.preventDefault()}>
       <Toolbar />
-      <div className={`workspace${showInspector ? '' : ' no-inspector'}`}>
-        <div className="left-panels">
-          <BinPanel />
-          {showTranscriptPanel && <TranscriptPanel />}
-        </div>
-        <div className="canvas-area" style={{ position: 'relative' }}>
-          <MonitorArea />
-          {showAIPanel && <AIPanel />}
-        </div>
-        {showInspector && <InspectorPanel />}
-      </div>
-      <TimelinePanel />
+      <WorkspaceSelector workspace={workspace} switchWorkspace={setWorkspace} presets={workspacePresets} />
+      {isSportsWorkspace ? (
+        /* Sports workspace uses its own full-screen layout with integrated
+           EVS Browser, Multi-Cam, Highlights, Package Builder, and Timeline */
+        <Suspense fallback={<LoadingSpinner />}>
+          <SportsWorkspace />
+        </Suspense>
+      ) : (
+        <>
+          <div className={`workspace${showInspector ? '' : ' no-inspector'}`}>
+            <div className="left-panels">
+              <BinPanel />
+              {showTranscriptPanel && <TranscriptPanel />}
+            </div>
+            <div className="canvas-area" style={{ position: 'relative' }}>
+              {showMultiCam ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <MultiCamPanel />
+                </Suspense>
+              ) : (
+                <MonitorArea />
+              )}
+              {showAIPanel && <AIPanel />}
+            </div>
+            {hasVerticalPanel && (
+              <div className="vertical-panel" style={{
+                width: 340,
+                overflowY: 'auto',
+                borderLeft: '1px solid var(--border-subtle)',
+                display: 'flex',
+                flexDirection: 'column',
+              }}>
+                <VerticalSidePanel workspace={workspace} />
+              </div>
+            )}
+            {showInspector && <InspectorPanel />}
+          </div>
+          <TimelinePanel />
+        </>
+      )}
       <StatusBar />
 
       {/* Command Palette (⌘K) */}
@@ -84,6 +208,9 @@ export function EditorPage() {
       {showExportPanel && (
         <div
           className="export-overlay"
+          role="dialog"
+          aria-label="Export Panel"
+          tabIndex={0}
           onClick={(e) => { if (e.target === e.currentTarget) toggleExportPanel(); }}
           onKeyDown={(e) => { if (e.key === 'Escape') toggleExportPanel(); }}
           style={{
@@ -110,6 +237,32 @@ export function EditorPage() {
             >✕</button>
             <ExportPanel />
           </div>
+        </div>
+      )}
+
+      {/* New dialogs & panels */}
+      {showNewProjectDialog && <NewProjectDialog />}
+      {showSequenceDialog && <SequenceDialog />}
+      {showTitleTool && (
+        <div style={{
+          position: 'fixed', top: 40, right: showInspector ? 340 : 0, bottom: 40,
+          width: 360, zIndex: 900,
+          background: 'var(--bg-surface)',
+          borderLeft: '1px solid var(--border-default)',
+          overflow: 'auto',
+        }}>
+          <TitleTool />
+        </div>
+      )}
+      {showSubtitleEditor && (
+        <div style={{
+          position: 'fixed', top: 40, right: showInspector ? 340 : 0, bottom: 40,
+          width: 380, zIndex: 900,
+          background: 'var(--bg-surface)',
+          borderLeft: '1px solid var(--border-default)',
+          overflow: 'auto',
+        }}>
+          <SubtitleEditor />
         </div>
       )}
     </div>

@@ -141,6 +141,51 @@ class AudioEngine {
     return routing;
   }
 
+  // ── Video Source Connection ────────────────────────────────────────────
+
+  private videoSources: Map<string, MediaElementAudioSourceNode> = new Map();
+
+  /**
+   * Connect a video element's audio output through this track's audio chain.
+   * The video element should have its own `muted = true` so audio routes
+   * through Web Audio API instead of playing directly.
+   *
+   * @param trackId       Track identifier.
+   * @param videoElement  The HTMLVideoElement to route audio from.
+   * @returns The MediaElementAudioSourceNode, or null on failure.
+   */
+  connectVideoSource(trackId: string, videoElement: HTMLVideoElement): MediaElementAudioSourceNode | null {
+    this.ensureContext();
+    if (!this.context) return null;
+
+    // Disconnect previous source for this track
+    this.disconnectVideoSource(trackId);
+
+    try {
+      const source = this.context.createMediaElementSource(videoElement);
+      const routing = this.getOrCreateTrack(trackId);
+      source.connect(routing.gain);
+      this.videoSources.set(trackId, source);
+      this.notify();
+      return source;
+    } catch (err) {
+      console.error('[AudioEngine] Failed to connect video source:', err);
+      return null;
+    }
+  }
+
+  /**
+   * Disconnect the video source from a track.
+   * @param trackId Track identifier.
+   */
+  disconnectVideoSource(trackId: string): void {
+    const source = this.videoSources.get(trackId);
+    if (source) {
+      try { source.disconnect(); } catch { /* already disconnected */ }
+      this.videoSources.delete(trackId);
+    }
+  }
+
   /**
    * Set the gain level for a track.
    * @param trackId Track identifier.

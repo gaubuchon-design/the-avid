@@ -8,7 +8,7 @@
 export interface EffectParamDef {
   name: string;
   type: 'number' | 'color' | 'boolean' | 'select';
-  default: any;
+  default: number | string | boolean;
   min?: number;
   max?: number;
   step?: number;
@@ -28,7 +28,7 @@ export interface EffectDefinition {
 export interface Keyframe {
   frame: number;
   paramName: string;
-  value: any;
+  value: number | string | boolean;
   interpolation: 'linear' | 'bezier' | 'hold';
 }
 
@@ -36,7 +36,7 @@ export interface Keyframe {
 export interface EffectInstance {
   id: string;
   definitionId: string;
-  params: Record<string, any>;
+  params: Record<string, number | string | boolean>;
   enabled: boolean;
   keyframes: Keyframe[];
 }
@@ -180,6 +180,19 @@ const BUILT_IN_EFFECTS: EffectDefinition[] = [
   },
 ];
 
+// ─── Effect Processors ────────────────────────────────────────────────────
+import { applyBrightnessContrast } from './effects/brightness-contrast';
+import { applyHueSaturation } from './effects/hue-saturation';
+import { applyColorBalance, type ColorBalanceParams } from './effects/color-balance';
+import { applyGaussianBlur } from './effects/blur';
+import { applySharpen } from './effects/sharpen';
+import { applyChromaKey } from './effects/chroma-key';
+import { applyVignette, applyFilmGrain, applyGlow, applyDropShadow } from './effects/stylize';
+import { applyLetterbox } from './effects/transform';
+
+// ─── WebGPU Pipeline ──────────────────────────────────────────────────────
+import { WebGPUPipeline } from './gpu/WebGPUPipeline';
+
 // ─── Engine Class ──────────────────────────────────────────────────────────
 
 /**
@@ -194,6 +207,7 @@ class EffectsEngine {
   private instances: Map<string, EffectInstance> = new Map();
   private clipEffectsMap: Map<string, string[]> = new Map(); // clipId -> instanceIds
   private nextInstanceId = 1;
+  private gpuPipeline: WebGPUPipeline | null = null;
 
   /** Initialise with built-in effect definitions. */
   constructor() {
@@ -255,7 +269,7 @@ class EffectsEngine {
       return null;
     }
 
-    const params: Record<string, any> = {};
+    const params: Record<string, number | string | boolean> = {};
     for (const p of def.params) {
       params[p.name] = p.default;
     }
@@ -309,7 +323,7 @@ class EffectsEngine {
    * @example
    * effectsEngine.updateParam('fx_1', 'radius', 10);
    */
-  updateParam(instanceId: string, paramName: string, value: any): void {
+  updateParam(instanceId: string, paramName: string, value: number | string | boolean): void {
     const inst = this.instances.get(instanceId);
     if (inst) {
       inst.params[paramName] = value;
@@ -367,7 +381,7 @@ class EffectsEngine {
    * @example
    * const radius = effectsEngine.getInterpolatedValue(blurInstance, 'radius', 48);
    */
-  getInterpolatedValue(instance: EffectInstance, paramName: string, frame: number): any {
+  getInterpolatedValue(instance: EffectInstance, paramName: string, frame: number): number | string | boolean {
     const keyframes = instance.keyframes
       .filter((kf) => kf.paramName === paramName)
       .sort((a, b) => a.frame - b.frame);
@@ -456,18 +470,247 @@ class EffectsEngine {
     this.clipEffectsMap.set(clipId, ids);
   }
 
-  // ── Processing (stub) ──────────────────────────────────────────────────
+  // ── WebGPU Integration ───────────────────────────────────────────────
+
+  /**
+   * Whether the GPU pipeline is initialised and ready.
+   */
+  get isGPUReady(): boolean {
+    return this.gpuPipeline?.isReady ?? false;
+  }
+
+  /**
+   * Initialise the WebGPU compute pipeline.
+   * Safe to call even when WebGPU is not available — returns false
+   * and the engine continues using Canvas 2D.
+   *
+   * @returns `true` if the GPU pipeline was initialised successfully.
+   */
+  async initGPU(): Promise<boolean> {
+    try {
+      const pipeline = new WebGPUPipeline();
+      const success = await pipeline.init();
+      if (success) {
+        this.gpuPipeline = pipeline;
+        console.info('[EffectsEngine] GPU pipeline active');
+        return true;
+      }
+      console.info('[EffectsEngine] GPU init failed — using Canvas 2D fallback');
+      return false;
+    } catch (err) {
+      console.warn('[EffectsEngine] GPU init error — using Canvas 2D fallback:', err);
+      return false;
+    }
+  }
+
+  /**
+   * Shut down the GPU pipeline and release GPU resources.
+   */
+  destroyGPU(): void {
+    if (this.gpuPipeline) {
+      this.gpuPipeline.cleanup();
+      this.gpuPipeline = null;
+    }
+  }
+
+  /**
+   * Resolve all interpolated parameter values for an effect at a given frame.
+   * Used by the GPU pipeline to get a flat Record of resolved params.
+   */
+  private resolveEffectParams(
+    effect: EffectInstance,
+    frame: number,
+  ): Record<string, number | string | boolean> {
+    const def = this.definitions.get(effect.definitionId);
+    if (!def) return { ...effect.params };
+
+    const resolved: Record<string, number | string | boolean> = {};
+    for (const p of def.params) {
+      resolved[p.name] = this.getInterpolatedValue(effect, p.name, frame);
+    }
+    return resolved;
+  }
+
+  // ── Processing (REAL) ─────────────────────────────────────────────────
 
   /**
    * Process a frame through a stack of effects.
-   * Stub -- returns unmodified image data in the demo build.
-   * @param imageData Source image data.
+   *
+   * When the WebGPU pipeline is ready, delegates to GPU compute shaders.
+   * Falls back to Canvas 2D pixel manipulation if GPU is unavailable
+   * or encounters an error.
+   *
+   * @param imageData Source image data (modified in place for Canvas 2D path).
    * @param effects   Ordered array of effect instances to apply.
+   * @param frame     Current frame number (for animated effects / keyframes).
+   * @returns The processed ImageData (may be a new object from GPU path).
+   */
+  async processFrameAsync(
+    imageData: ImageData,
+    effects: EffectInstance[],
+    frame = 0,
+  ): Promise<ImageData> {
+    // Try GPU pipeline first
+    if (this.gpuPipeline?.isReady) {
+      try {
+        return await this.gpuPipeline.processFrame(
+          imageData,
+          effects,
+          frame,
+          (effect, f) => this.resolveEffectParams(effect, f),
+        );
+      } catch (err) {
+        console.warn('[EffectsEngine] GPU processFrame failed, falling back to Canvas 2D:', err);
+        // Fall through to Canvas 2D
+      }
+    }
+
+    // Canvas 2D fallback (synchronous)
+    return this.processFrame(imageData, effects, frame);
+  }
+
+  /**
+   * Process a frame through a stack of effects (synchronous, Canvas 2D only).
+   * Applies each enabled effect in order using Canvas 2D pixel manipulation.
+   *
+   * @param imageData Source image data (modified in place).
+   * @param effects   Ordered array of effect instances to apply.
+   * @param frame     Current frame number (for animated effects / keyframes).
    * @returns The processed ImageData.
    */
-  processFrame(imageData: ImageData, effects: EffectInstance[]): ImageData {
+  processFrame(imageData: ImageData, effects: EffectInstance[], frame = 0): ImageData {
     try {
-      void effects;
+      for (const effect of effects) {
+        if (!effect.enabled) continue;
+
+        const def = this.definitions.get(effect.definitionId);
+        if (!def) continue;
+
+        // Get current parameter values (with keyframe interpolation)
+        const getNum = (name: string): number =>
+          this.getInterpolatedValue(effect, name, frame) as number;
+        const getStr = (name: string): string =>
+          this.getInterpolatedValue(effect, name, frame) as string;
+        const getBool = (name: string): boolean =>
+          this.getInterpolatedValue(effect, name, frame) as boolean;
+
+        switch (effect.definitionId) {
+          case 'brightness-contrast':
+            applyBrightnessContrast(
+              imageData.data,
+              getNum('brightness'),
+              getNum('contrast'),
+              getBool('useLegacy'),
+            );
+            break;
+
+          case 'hue-saturation':
+            applyHueSaturation(
+              imageData.data,
+              getNum('hue'),
+              getNum('saturation'),
+              getNum('lightness'),
+              getBool('colorize'),
+            );
+            break;
+
+          case 'color-balance':
+            applyColorBalance(imageData.data, {
+              shadowsR: getNum('shadowsR'),
+              shadowsG: getNum('shadowsG'),
+              shadowsB: getNum('shadowsB'),
+              midtonesR: getNum('midtonesR'),
+              midtonesG: getNum('midtonesG'),
+              midtonesB: getNum('midtonesB'),
+              highlightsR: getNum('highlightsR'),
+              highlightsG: getNum('highlightsG'),
+              highlightsB: getNum('highlightsB'),
+              preserveLuminosity: getBool('preserveLuminosity'),
+            } as ColorBalanceParams);
+            break;
+
+          case 'blur-gaussian':
+            applyGaussianBlur(imageData, getNum('radius'), getNum('iterations'));
+            break;
+
+          case 'sharpen':
+            applySharpen(imageData, getNum('amount'), getNum('radius'), getNum('threshold'));
+            break;
+
+          case 'chroma-key':
+            applyChromaKey(
+              imageData.data,
+              getStr('keyColor'),
+              getNum('tolerance'),
+              getNum('softness'),
+              getNum('spillSuppression'),
+            );
+            break;
+
+          case 'vignette':
+            applyVignette(
+              imageData.data,
+              imageData.width,
+              imageData.height,
+              getNum('amount'),
+              getNum('midpoint'),
+              getNum('roundness'),
+              getNum('feather'),
+            );
+            break;
+
+          case 'film-grain':
+            applyFilmGrain(
+              imageData.data,
+              getNum('amount'),
+              getNum('size'),
+              getNum('softness'),
+              getBool('animated') ? frame : 0,
+            );
+            break;
+
+          case 'glow':
+            applyGlow(
+              imageData,
+              getNum('radius'),
+              getNum('intensity'),
+              getNum('threshold'),
+              getStr('color'),
+            );
+            break;
+
+          case 'drop-shadow':
+            applyDropShadow(
+              imageData,
+              getStr('color'),
+              getNum('opacity'),
+              getNum('angle'),
+              getNum('distance'),
+              getNum('blur'),
+            );
+            break;
+
+          case 'letterbox':
+            applyLetterbox(
+              imageData.data,
+              imageData.width,
+              imageData.height,
+              getStr('ratio'),
+              getStr('color'),
+              getNum('opacity'),
+            );
+            break;
+
+          case 'speed-ramp':
+            // Speed ramp is a metadata effect — handled by PlaybackEngine, not pixel data
+            break;
+
+          default:
+            // Unknown effect — skip
+            break;
+        }
+      }
+
       return imageData;
     } catch (err) {
       console.error('[EffectsEngine] processFrame error:', err);

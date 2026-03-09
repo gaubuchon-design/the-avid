@@ -7,6 +7,7 @@ import path from 'path';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { flattenAssets, getMediaAssetPrimaryPath } from '@mcua/core';
+import { detectGPU, getHWAccelDecodeArgs, getHWAccelFFmpegArgs } from './gpu';
 import type {
   EditorBin,
   EditorClip,
@@ -162,14 +163,29 @@ async function pathExists(filePath: string | undefined): Promise<boolean> {
   }
 }
 
+function getPlatformBinDir(): string {
+  const platformMap: Record<string, string> = {
+    darwin: 'mac',
+    win32: 'win',
+    linux: 'linux',
+  };
+  return platformMap[process.platform] ?? process.platform;
+}
+
 function getToolCandidates(toolName: 'ffmpeg' | 'ffprobe'): string[] {
   const executableName = process.platform === 'win32' ? `${toolName}.exe` : toolName;
   const envVar = toolName === 'ffmpeg' ? 'THE_AVID_FFMPEG_PATH' : 'THE_AVID_FFPROBE_PATH';
+  const platformDir = getPlatformBinDir();
   const candidates = [
+    // 1. Environment variable override
     process.env[envVar],
-    path.join(process.cwd(), 'apps/desktop/resources/bin', executableName),
-    path.join(process.cwd(), 'resources/bin', executableName),
-    path.join(process.resourcesPath || '', 'bin', executableName),
+    // 2. Platform-specific bundled path (development - monorepo root)
+    path.join(process.cwd(), 'apps/desktop/resources/bin', platformDir, executableName),
+    // 3. Platform-specific bundled path (development - desktop root)
+    path.join(process.cwd(), 'resources/bin', platformDir, executableName),
+    // 4. Packaged app resources path
+    path.join(process.resourcesPath || '', 'bin', platformDir, executableName),
+    // 5. Fall back to system PATH
     executableName,
   ];
 
@@ -471,18 +487,33 @@ async function generateProxy(filePath: string, assetId: string, mediaType: Edito
 
   const proxyFilePath = path.join(paths.proxyPath, `${assetId}.proxy.mp4`);
   try {
+    const gpu = await detectGPU();
+    const hwDecodeArgs = getHWAccelDecodeArgs(gpu);
+    const hwEncodeArgs = getHWAccelFFmpegArgs(gpu, 'h264');
+
+    // Extract the encoder name from the hwEncodeArgs (always contains `-c:v <name>`).
+    const cvIndex = hwEncodeArgs.indexOf('-c:v');
+    const encoderName = cvIndex >= 0 ? hwEncodeArgs[cvIndex + 1] : 'libx264';
+    // Any args before `-c:v` are hwaccel input flags (e.g. `-hwaccel cuda`).
+    const hwaccelInputFlags = cvIndex > 0 ? hwEncodeArgs.slice(0, cvIndex) : [];
+    const isSoftwareEncoder = encoderName === 'libx264' || encoderName === 'libx265';
+
+    // Quality flags differ between software and hardware encoders.
+    const qualityArgs = isSoftwareEncoder
+      ? ['-preset', 'veryfast', '-crf', '22']
+      : ['-b:v', '5M'];
+
     await execFileAsync(toolPaths.ffmpeg, [
       '-y',
+      ...hwDecodeArgs,
+      ...hwaccelInputFlags,
       '-i',
       filePath,
       '-vf',
       'scale=1280:-2:flags=lanczos',
       '-c:v',
-      'libx264',
-      '-preset',
-      'veryfast',
-      '-crf',
-      '22',
+      encoderName,
+      ...qualityArgs,
       '-pix_fmt',
       'yuv420p',
       '-c:a',
@@ -1169,6 +1200,15 @@ async function renderTimelineScreener(project: EditorProject, exportDir: string)
     audioMixFilter,
   ].join(';');
 
+  const gpu = await detectGPU();
+  const hwEncodeArgs = getHWAccelFFmpegArgs(gpu, 'h264');
+  const cvIdx = hwEncodeArgs.indexOf('-c:v');
+  const screenerEncoder = cvIdx >= 0 ? hwEncodeArgs[cvIdx + 1] : 'libx264';
+  const isSWEncoder = screenerEncoder === 'libx264' || screenerEncoder === 'libx265';
+  const screenerQualityArgs = isSWEncoder
+    ? ['-preset', 'veryfast', '-crf', '20']
+    : ['-b:v', '8M'];
+
   const finalVideoLabel = overlayLabels.length > 0 ? '[vout]' : '[0:v]';
   args.push(
     '-filter_complex',
@@ -1178,11 +1218,8 @@ async function renderTimelineScreener(project: EditorProject, exportDir: string)
     '-map',
     audioMixLabel,
     '-c:v',
-    'libx264',
-    '-preset',
-    'veryfast',
-    '-crf',
-    '20',
+    screenerEncoder,
+    ...screenerQualityArgs,
     '-pix_fmt',
     'yuv420p',
     '-c:a',

@@ -6,6 +6,9 @@ import path from 'path';
 import { flattenAssets, PROJECT_SCHEMA_VERSION } from '@mcua/core';
 import type { EditorMediaAsset, EditorProject } from '@mcua/core';
 import { detectGPU } from './gpu';
+import { VideoIOManager } from './videoIO/VideoIOManager';
+import { StreamManager } from './streaming/StreamManager';
+import { DeckControlManager } from './deckControl/DeckControlManager';
 import {
   createProjectMediaPaths,
   ensureProjectMediaPaths,
@@ -23,6 +26,9 @@ import {
 // ─── Window Management ─────────────────────────────────────────────────────────
 
 let mainWindow: BrowserWindow | null = null;
+const videoIOManager = new VideoIOManager();
+const streamManager = new StreamManager();
+const deckControlManager = new DeckControlManager();
 const PROJECT_STORE_DIR = 'projects';
 const PROJECT_FILE_EXTENSION = '.avidproj.json';
 const PROJECT_MANIFEST_FILE = 'project.avid.json';
@@ -445,11 +451,12 @@ function createMainWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      webSecurity: true,
     },
   });
 
   // Dev vs production
-  if (process.env.NODE_ENV === 'development') {
+  if (!app.isPackaged) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL ?? process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:3000');
     win.webContents.openDevTools();
   } else {
@@ -457,27 +464,93 @@ function createMainWindow(): BrowserWindow {
   }
 
   win.on('closed', () => { mainWindow = null; });
+
+  // Content Security Policy
+  win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          app.isPackaged
+            ? "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: file:; connect-src 'self' ws://localhost:* http://localhost:*; font-src 'self' data:"
+            : "default-src 'self' 'unsafe-inline' 'unsafe-eval'; img-src 'self' data: blob: http: https:; media-src 'self' blob: file:; connect-src 'self' ws: wss: http: https:; font-src 'self' data:"
+        ]
+      }
+    });
+  });
+
   return win;
 }
 
 // ─── App Lifecycle ─────────────────────────────────────────────────────────────
 
-app.whenReady().then(() => {
-  mainWindow = createMainWindow();
-  createAppMenu();
-  void syncAllProjectWatchers();
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createMainWindow();
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (_event, _argv, _workingDir) => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
     }
   });
 
-  // Auto-updater (production only)
-  if (app.isPackaged) {
-    autoUpdater.checkForUpdatesAndNotify();
-  }
-});
+  app.whenReady().then(async () => {
+    mainWindow = createMainWindow();
+    createAppMenu();
+    void syncAllProjectWatchers();
+
+    // Initialize professional I/O subsystems (non-blocking — missing modules are OK)
+    videoIOManager.registerIPCHandlers();
+    streamManager.registerIPCHandlers();
+    deckControlManager.registerIPCHandlers();
+
+    await Promise.allSettled([
+      videoIOManager.init(mainWindow),
+      streamManager.init(mainWindow),
+      deckControlManager.init(mainWindow),
+    ]);
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        mainWindow = createMainWindow();
+      }
+    });
+
+    // Auto-updater (production only)
+    if (app.isPackaged) {
+      autoUpdater.logger = {
+        info: (msg: string) => console.log('[AutoUpdater]', msg),
+        warn: (msg: string) => console.warn('[AutoUpdater]', msg),
+        error: (msg: string) => console.error('[AutoUpdater]', msg),
+        debug: (msg: string) => console.log('[AutoUpdater:debug]', msg),
+      } as unknown as typeof autoUpdater.logger;
+
+      autoUpdater.on('checking-for-update', () => {
+        console.log('[AutoUpdater] Checking for updates...');
+      });
+      autoUpdater.on('update-available', (info) => {
+        console.log('[AutoUpdater] Update available:', info.version);
+      });
+      autoUpdater.on('update-not-available', () => {
+        console.log('[AutoUpdater] Application is up to date.');
+      });
+      autoUpdater.on('download-progress', (progress) => {
+        console.log(`[AutoUpdater] Download progress: ${Math.round(progress.percent)}%`);
+      });
+      autoUpdater.on('update-downloaded', (info) => {
+        console.log('[AutoUpdater] Update downloaded:', info.version);
+      });
+      autoUpdater.on('error', (err) => {
+        console.error('[AutoUpdater] Error:', err.message);
+      });
+
+      autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+        console.error('[AutoUpdater] Failed to check for updates:', err);
+      });
+    }
+  });
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
@@ -485,6 +558,9 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   projectWatchers.forEach((_watchers, projectId) => disposeProjectWatchers(projectId));
+  void videoIOManager.dispose();
+  void streamManager.dispose();
+  void deckControlManager.dispose();
 });
 
 // ─── App Menu ──────────────────────────────────────────────────────────────────

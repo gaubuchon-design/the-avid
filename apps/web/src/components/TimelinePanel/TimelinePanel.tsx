@@ -121,11 +121,11 @@ function useKeyboardShortcuts() {
         // Frame stepping (Left/Right arrows)
         case 'ArrowLeft':
           e.preventDefault();
-          state.setPlayhead(Math.max(0, state.playheadTime - (e.shiftKey ? 1 : 1 / 24)));
+          state.setPlayhead(Math.max(0, state.playheadTime - (e.shiftKey ? 1 : (1 / 24))));
           break;
         case 'ArrowRight':
           e.preventDefault();
-          state.setPlayhead(Math.min(state.duration, state.playheadTime + (e.shiftKey ? 1 : 1 / 24)));
+          state.setPlayhead(Math.min(state.duration, state.playheadTime + (e.shiftKey ? 1 : (1 / 24))));
           break;
 
         // Home/End — jump to start/end
@@ -160,16 +160,14 @@ function useKeyboardShortcuts() {
   }, []);
 }
 
-// ─── Track ID generator ──────────────────────────────────────────────────────
-
-let nextTrackNum = 100;
-function makeTrackId(): string {
-  return `t_${Date.now()}_${nextTrackNum++}`;
-}
-
 // ─── TimelinePanel ───────────────────────────────────────────────────────────
 
 export function TimelinePanel() {
+  // Track ID generator — persists across renders without causing re-renders
+  const nextTrackNumRef = useRef(100);
+  const makeTrackId = useCallback((): string => {
+    return `t_${Date.now()}_${nextTrackNumRef.current++}`;
+  }, []);
   const {
     tracks,
     markers,
@@ -276,6 +274,7 @@ export function TimelinePanel() {
               key={v.mode}
               className={`tl-btn${timelineViewMode === v.mode ? ' active' : ''}`}
               title={v.title}
+              aria-label={v.title}
               onClick={() => setTimelineViewMode(v.mode)}
             >
               {v.icon}
@@ -289,6 +288,7 @@ export function TimelinePanel() {
         <button
           className="tl-btn"
           title="Split Clip (S)"
+          aria-label="Split Clip (S)"
           onClick={() => {
             if (selectedClipIds.length > 0) splitClip(selectedClipIds[0], playheadTime);
           }}
@@ -301,12 +301,12 @@ export function TimelinePanel() {
         </button>
 
         {/* Add / Remove track */}
-        <button className="tl-btn" title="Add Track" onClick={handleAddTrack}>
+        <button className="tl-btn" title="Add Track" aria-label="Add Track" onClick={handleAddTrack}>
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
           </svg>
         </button>
-        <button className="tl-btn" title="Remove Track" onClick={handleRemoveTrack}>
+        <button className="tl-btn" title="Remove Track" aria-label="Remove Track" onClick={handleRemoveTrack}>
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
@@ -316,7 +316,7 @@ export function TimelinePanel() {
 
         {/* Transport controls */}
         <div className="tl-group">
-          <button className="tl-btn" title="Step Back" onClick={() => setPlayhead(Math.max(0, playheadTime - 1/24))}>
+          <button className="tl-btn" title="Step Back" aria-label="Step Back" onClick={() => setPlayhead(Math.max(0, playheadTime - 1/24))}>
             <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
               <rect x="4" y="5" width="3" height="14" rx="1" /><polygon points="20 5 10 12 20 19" />
             </svg>
@@ -324,6 +324,7 @@ export function TimelinePanel() {
           <button
             className={`tl-btn tl-play-btn${isPlaying ? ' active' : ''}`}
             title="Play/Pause (Space)"
+            aria-label="Play/Pause (Space)"
             onClick={togglePlay}
           >
             {isPlaying ? (
@@ -336,7 +337,7 @@ export function TimelinePanel() {
               </svg>
             )}
           </button>
-          <button className="tl-btn" title="Step Forward" onClick={() => setPlayhead(Math.min(duration, playheadTime + 1/24))}>
+          <button className="tl-btn" title="Step Forward" aria-label="Step Forward" onClick={() => setPlayhead(Math.min(duration, playheadTime + 1/24))}>
             <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
               <polygon points="4 5 14 12 4 19" /><rect x="17" y="5" width="3" height="14" rx="1" />
             </svg>
@@ -366,15 +367,15 @@ export function TimelinePanel() {
         {/* Zoom controls */}
         <div className="tl-group">
           <span className="zoom-label">{Math.round(zoom)}px/s</span>
-          <button className="tl-btn" onClick={() => setZoom(Math.max(10, zoom / 1.5))} title="Zoom Out">
+          <button className="tl-btn" onClick={() => setZoom(Math.max(10, zoom / 1.5))} title="Zoom Out" aria-label="Zoom Out">
             <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="5" y1="12" x2="19" y2="12" /></svg>
           </button>
           <input type="range" className="range-slider zoom-slider" min={10} max={400} step={1} value={zoom}
             onChange={(e) => setZoom(+e.target.value)} style={{ width: 72 }} />
-          <button className="tl-btn" onClick={() => setZoom(Math.min(400, zoom * 1.5))} title="Zoom In">
+          <button className="tl-btn" onClick={() => setZoom(Math.min(400, zoom * 1.5))} title="Zoom In" aria-label="Zoom In">
             <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
           </button>
-          <button className="tl-btn" title="Fit Timeline" onClick={() => setZoom(60)}>
+          <button className="tl-btn" title="Fit Timeline" aria-label="Fit Timeline" onClick={() => setZoom(60)}>
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
               <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
