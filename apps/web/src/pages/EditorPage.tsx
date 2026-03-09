@@ -4,6 +4,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { Toolbar } from '../components/Toolbar/Toolbar';
 import { BinPanel } from '../components/Bins/BinPanel';
 import { MonitorArea } from '../components/Monitor/MonitorArea';
+import { ComposerPanel } from '../components/ComposerPanel/ComposerPanel';
 import { TimelinePanel } from '../components/TimelinePanel/TimelinePanel';
 import { InspectorPanel } from '../components/Editor/InspectorPanel';
 import { AIPanel } from '../components/AIPanel/AIPanel';
@@ -178,7 +179,7 @@ export function EditorPage() {
                   <MultiCamPanel />
                 </Suspense>
               ) : (
-                <MonitorArea />
+                <ComposerPanel />
               )}
               {showAIPanel && <AIPanel />}
             </div>

@@ -691,7 +691,7 @@ export async function setOFXParam(
   value: unknown,
 ): Promise<void> {
   // Update the app-side param immediately for responsiveness.
-  effectsEngine.updateParam(instanceId, paramName, value);
+  effectsEngine.updateParam(instanceId, paramName, value as string | number | boolean);
 
   const entry = ofxInstanceRegistry.get(instanceId);
   if (!entry) return;
@@ -1558,7 +1558,8 @@ export class OFXIPCBridge {
     this.initialized = true;
 
     // Listen for async render completions.
-    this.ipcRenderer.on('ofx:render-complete', (_event: unknown, response: OFXIPCResponse<OFXImage>) => {
+    this.ipcRenderer.on('ofx:render-complete', ((...args: unknown[]) => {
+      const [_event, response] = args as [unknown, OFXIPCResponse<OFXImage>];
       // The render ID is embedded in the response for correlation.
       const renderId = (response as any).renderId as string | undefined;
       if (!renderId) return;
@@ -1572,7 +1573,7 @@ export class OFXIPCBridge {
       } else {
         pending.reject(new Error((response as { success: false; error: string }).error));
       }
-    });
+    }) as (...args: unknown[]) => void);
 
     console.log('[OFXIPCBridge] Initialized');
     return true;
