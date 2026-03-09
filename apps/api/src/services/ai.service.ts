@@ -32,6 +32,23 @@ interface JobResult {
 const jobQueue: QueuedAIJob[] = [];
 let isProcessing = false;
 const MAX_RETRIES = 2;
+const MAX_CONCURRENT_JOBS = 3; // Process up to 3 AI jobs concurrently
+let activeJobCount = 0;
+
+// ─── Job metrics tracking ───────────────────────────────────────────────────
+interface AIJobMetrics {
+  totalProcessed: number;
+  totalFailed: number;
+  totalDurationMs: number;
+  byType: Map<string, { count: number; totalMs: number }>;
+}
+
+const jobMetrics: AIJobMetrics = {
+  totalProcessed: 0,
+  totalFailed: 0,
+  totalDurationMs: 0,
+  byType: new Map(),
+};
 
 class AIService {
   /**
@@ -40,7 +57,7 @@ class AIService {
   async enqueue(job: QueuedAIJob): Promise<void> {
     jobQueue.push(job);
     logger.info('AI job enqueued', { jobId: job.id, type: job.type, queueLength: jobQueue.length });
-    if (!isProcessing) this.processNext();
+    this.drainQueue();
   }
 
   /**
@@ -48,6 +65,13 @@ class AIService {
    */
   getQueueDepth(): number {
     return jobQueue.length;
+  }
+
+  /**
+   * Get the number of actively processing jobs.
+   */
+  getActiveJobCount(): number {
+    return activeJobCount;
   }
 
   /**
@@ -64,13 +88,46 @@ class AIService {
     return openaiBreaker.getState();
   }
 
-  private async processNext(): Promise<void> {
-    if (jobQueue.length === 0) {
-      isProcessing = false;
-      return;
+  /**
+   * Get job processing metrics for monitoring.
+   */
+  getJobMetrics(): {
+    totalProcessed: number;
+    totalFailed: number;
+    avgDurationMs: number;
+    queueDepth: number;
+    activeJobs: number;
+  } {
+    return {
+      totalProcessed: jobMetrics.totalProcessed,
+      totalFailed: jobMetrics.totalFailed,
+      avgDurationMs: jobMetrics.totalProcessed > 0
+        ? Math.round(jobMetrics.totalDurationMs / jobMetrics.totalProcessed)
+        : 0,
+      queueDepth: jobQueue.length,
+      activeJobs: activeJobCount,
+    };
+  }
+
+  /**
+   * Drain the queue by starting jobs up to the concurrency limit.
+   */
+  private drainQueue(): void {
+    while (jobQueue.length > 0 && activeJobCount < MAX_CONCURRENT_JOBS) {
+      const job = jobQueue.shift()!;
+      activeJobCount++;
+      void this.processJob(job).finally(() => {
+        activeJobCount--;
+        // Try to pick up the next job after one finishes
+        if (jobQueue.length > 0) {
+          setImmediate(() => this.drainQueue());
+        }
+      });
     }
-    isProcessing = true;
-    const job = jobQueue.shift()!;
+  }
+
+  private async processJob(job: QueuedAIJob): Promise<void> {
+    const startMs = Date.now();
 
     try {
       await db.aIJob.update({
@@ -78,7 +135,16 @@ class AIService {
         data: { status: 'RUNNING', startedAt: new Date() },
       });
 
-      const result = await this.processJob(job);
+      const result = await this.dispatchJob(job);
+
+      const durationMs = Date.now() - startMs;
+      jobMetrics.totalProcessed++;
+      jobMetrics.totalDurationMs += durationMs;
+
+      const typeMetrics = jobMetrics.byType.get(job.type) ?? { count: 0, totalMs: 0 };
+      typeMetrics.count++;
+      typeMetrics.totalMs += durationMs;
+      jobMetrics.byType.set(job.type, typeMetrics);
 
       await db.aIJob.update({
         where: { id: job.id },
@@ -90,8 +156,9 @@ class AIService {
         },
       });
 
-      logger.info('AI job completed', { jobId: job.id, type: job.type, summary: result.summary });
+      logger.info('AI job completed', { jobId: job.id, type: job.type, summary: result.summary, durationMs });
     } catch (err: any) {
+      jobMetrics.totalFailed++;
       logger.error('AI job failed', { jobId: job.id, type: job.type, error: err.message });
       await db.aIJob.update({
         where: { id: job.id },
@@ -102,12 +169,9 @@ class AIService {
         },
       }).catch((dbErr: Error) => logger.error('Failed to update AI job status', { jobId: job.id, error: dbErr.message }));
     }
-
-    // Process next job in queue
-    setImmediate(() => this.processNext());
   }
 
-  private async processJob(job: QueuedAIJob): Promise<JobResult> {
+  private async dispatchJob(job: QueuedAIJob): Promise<JobResult> {
     const params = (job.inputParams ?? {}) as Record<string, any>;
 
     switch (job.type) {

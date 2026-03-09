@@ -4,6 +4,7 @@ import React, {
   useCallback,
   useRef,
   useEffect,
+  memo,
   type KeyboardEvent,
 } from 'react';
 
@@ -70,7 +71,7 @@ function cx(...parts: Array<string | undefined | false>): string {
  * - Click-outside to close dropdown
  * - Step count display
  */
-export const PlaybookBuilder = forwardRef<HTMLDivElement, PlaybookBuilderProps>(
+export const PlaybookBuilder = memo(forwardRef<HTMLDivElement, PlaybookBuilderProps>(
   function PlaybookBuilder(
     {
       name,
@@ -570,4 +571,4 @@ export const PlaybookBuilder = forwardRef<HTMLDivElement, PlaybookBuilderProps>(
       </div>
     );
   },
-);
+));

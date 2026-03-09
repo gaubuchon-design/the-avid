@@ -4,6 +4,7 @@ import React, {
   useRef,
   useCallback,
   useEffect,
+  memo,
   type KeyboardEvent,
 } from 'react';
 
@@ -69,7 +70,7 @@ function cx(...parts: Array<string | undefined | false>): string {
  * - Escape: clear input or close suggestions
  * - ArrowDown/ArrowUp: navigate suggestions
  */
-export const PromptBar = forwardRef<HTMLDivElement, PromptBarProps>(
+export const PromptBar = memo(forwardRef<HTMLDivElement, PromptBarProps>(
   function PromptBar(
     {
       onSubmit,
@@ -453,4 +454,4 @@ export const PromptBar = forwardRef<HTMLDivElement, PromptBarProps>(
       </div>
     );
   },
-);
+));

@@ -23,6 +23,12 @@ const FLAG_READ = 2;
 const TC_OFFSET = 24;
 const TC_MAX_LEN = 32;
 
+// ── Cached Encoder/Decoder instances ────────────────────────────────────────
+// TextEncoder and TextDecoder are stateless, so a single shared instance
+// avoids the overhead of constructing new objects on every frame write/read.
+const sharedTextEncoder = new TextEncoder();
+const sharedTextDecoder = new TextDecoder();
+
 export interface FrameMetadata {
   width: number;
   height: number;
@@ -115,7 +121,7 @@ export class FrameTransport {
     this.float64View[(byteOffset + 16) >> 3] = metadata.timestamp;
 
     // Write timecode string (UTF-8, null-padded)
-    const tcBytes = new TextEncoder().encode(metadata.timecode);
+    const tcBytes = sharedTextEncoder.encode(metadata.timecode);
     this.uint8View.fill(0, byteOffset + TC_OFFSET, byteOffset + TC_OFFSET + TC_MAX_LEN);
     this.uint8View.set(
       tcBytes.subarray(0, Math.min(tcBytes.length, TC_MAX_LEN)),
@@ -165,7 +171,7 @@ export class FrameTransport {
           byteOffset + TC_OFFSET + TC_MAX_LEN,
         );
         const nullIdx = tcSlice.indexOf(0);
-        const timecode = new TextDecoder().decode(
+        const timecode = sharedTextDecoder.decode(
           tcSlice.subarray(0, nullIdx >= 0 ? nullIdx : TC_MAX_LEN),
         );
 

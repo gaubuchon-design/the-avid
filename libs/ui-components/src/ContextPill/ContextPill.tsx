@@ -1,4 +1,4 @@
-import React, { forwardRef, useRef, useState, useEffect, useCallback } from 'react';
+import React, { forwardRef, useRef, useState, useEffect, useCallback, memo } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -112,7 +112,10 @@ function ContextIcon({ type }: { type: ContextPillType }) {
  * - Enter/exit animations via CSS classes
  * - Active state highlighting
  */
-export const ContextPill = forwardRef<HTMLSpanElement, ContextPillProps>(
+/** Memoized icon to avoid re-rendering SVGs on parent re-render. */
+const MemoContextIcon = memo(ContextIcon);
+
+export const ContextPill = memo(forwardRef<HTMLSpanElement, ContextPillProps>(
   function ContextPill({ type, label, onClick, onRemove, isActive, className }, ref) {
     const labelRef = useRef<HTMLSpanElement>(null);
     const [isTruncated, setIsTruncated] = useState(false);
@@ -186,7 +189,7 @@ export const ContextPill = forwardRef<HTMLSpanElement, ContextPillProps>(
           tabIndex={onClick || onRemove ? 0 : undefined}
           aria-label={onClick ? `Inspect ${humanType}: ${label}` : undefined}
         >
-          <ContextIcon type={type} />
+          <MemoContextIcon type={type} />
           <span
             ref={labelRef}
             className="context-pill-label"
@@ -226,4 +229,4 @@ export const ContextPill = forwardRef<HTMLSpanElement, ContextPillProps>(
       </span>
     );
   },
-);
+));

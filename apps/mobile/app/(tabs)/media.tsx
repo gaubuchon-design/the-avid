@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, memo } from 'react';
 import {
   View,
   Text,
@@ -89,7 +89,7 @@ interface MediaAssetCardProps {
   isCompact: boolean;
 }
 
-function MediaAssetCard({ asset, theme, isCompact }: MediaAssetCardProps) {
+const MediaAssetCard = memo(function MediaAssetCard({ asset, theme, isCompact }: MediaAssetCardProps) {
   const typeIcon = MEDIA_TYPE_ICON[asset.type] ?? '\u{1F4C1}';
   const statusColor = MEDIA_STATUS_COLOR[asset.status] ?? theme.colors.textMuted;
 
@@ -166,7 +166,7 @@ function MediaAssetCard({ asset, theme, isCompact }: MediaAssetCardProps) {
       ) : null}
     </Pressable>
   );
-}
+});
 
 const assetCardStyles = StyleSheet.create({
   card: {
@@ -245,7 +245,7 @@ interface FilterBarProps {
   theme: AppTheme;
 }
 
-function FilterBar({ activeFilter, onFilterChange, counts, theme }: FilterBarProps) {
+const FilterBar = memo(function FilterBar({ activeFilter, onFilterChange, counts, theme }: FilterBarProps) {
   const filters: Array<{ key: MediaFilter; label: string }> = [
     { key: 'all', label: `All (${counts['all']})` },
     { key: 'VIDEO', label: `Video (${counts['VIDEO']})` },
@@ -292,7 +292,7 @@ function FilterBar({ activeFilter, onFilterChange, counts, theme }: FilterBarPro
       })}
     </View>
   );
-}
+});
 
 const filterStyles = StyleSheet.create({
   container: {
@@ -326,7 +326,7 @@ interface ImportBarProps {
   theme: AppTheme;
 }
 
-function ImportBar({ onImportCamera, onImportGallery, onImportFile, theme }: ImportBarProps) {
+const ImportBar = memo(function ImportBar({ onImportCamera, onImportGallery, onImportFile, theme }: ImportBarProps) {
   const actions = [
     { label: 'Camera', icon: '\u{1F4F7}', onPress: onImportCamera },
     { label: 'Gallery', icon: '\u{1F5BC}', onPress: onImportGallery },
@@ -362,7 +362,7 @@ function ImportBar({ onImportCamera, onImportGallery, onImportFile, theme }: Imp
       ))}
     </View>
   );
-}
+});
 
 const importStyles = StyleSheet.create({
   container: {

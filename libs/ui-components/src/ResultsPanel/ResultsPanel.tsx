@@ -1,4 +1,4 @@
-import React, { forwardRef, useRef, useState, useCallback, type KeyboardEvent } from 'react';
+import React, { forwardRef, useRef, useState, useCallback, memo, type KeyboardEvent } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -139,7 +139,10 @@ function SourceIcon({ type }: { type: string }) {
  * - Improved empty state with search icon
  * - Screen reader announcements for result count
  */
-export const ResultsPanel = forwardRef<HTMLDivElement, ResultsPanelProps>(
+/** Memoized source icon to avoid re-rendering SVGs on parent re-render. */
+const MemoSourceIcon = memo(SourceIcon);
+
+export const ResultsPanel = memo(forwardRef<HTMLDivElement, ResultsPanelProps>(
   function ResultsPanel(
     {
       results,
@@ -214,7 +217,7 @@ export const ResultsPanel = forwardRef<HTMLDivElement, ResultsPanelProps>(
     );
 
     return (
-      <div ref={ref} className={cx('results-panel', className)} role="region" aria-label="Search results">
+      <div ref={ref} className={cx('results-panel', className)} role="region" aria-label="Search results" style={{ contain: 'layout style' }}>
         {/* -- Summary bar ----------------------------------------------- */}
         {(query || totalHits !== undefined) && (
           <div className="results-panel-summary">
@@ -329,7 +332,7 @@ export const ResultsPanel = forwardRef<HTMLDivElement, ResultsPanelProps>(
                     className={`result-source result-source--${item.sourceType}`}
                     title={sourceLabel(item.sourceType)}
                   >
-                    <SourceIcon type={item.sourceType} />
+                    <MemoSourceIcon type={item.sourceType} />
                     <span className="result-source-label">
                       {sourceLabel(item.sourceType)}
                     </span>
@@ -381,4 +384,4 @@ export const ResultsPanel = forwardRef<HTMLDivElement, ResultsPanelProps>(
       </div>
     );
   },
-);
+));

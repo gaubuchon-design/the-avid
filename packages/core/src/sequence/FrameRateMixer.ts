@@ -179,6 +179,28 @@ export class FrameRateMixer {
   private assetMap: Map<string, EditorMediaAsset>;
   private conformOverrides: Map<string, ConformMethod> = new Map();
 
+  // ── Performance caches ──────────────────────────────────────────────────
+  /** Pre-built lookup from frame rate preset values to labels for O(1) access. */
+  private static readonly frameRateLabelCache: Map<number, string> = new Map(
+    Object.entries(FRAME_RATE_PRESETS).map(([label, value]) => [value, label]),
+  );
+
+  /** Pre-computed conversion lookup table for common frame rate pairs. */
+  private static readonly conversionLUT: Map<string, number> = (() => {
+    const lut = new Map<string, number>();
+    for (const from of STANDARD_FRAME_RATES) {
+      for (const to of STANDARD_FRAME_RATES) {
+        if (from !== to) {
+          lut.set(`${from}:${to}`, to / from);
+        }
+      }
+    }
+    return lut;
+  })();
+
+  /** Cache for clip frame rates to avoid repeated asset map lookups. */
+  private clipFrameRateCache: Map<string, number> = new Map();
+
   /**
    * @param project - The editor project to analyse. Must have valid settings.frameRate.
    * @throws {FrameRateMixerError} if the project has an invalid frame rate.
@@ -199,6 +221,14 @@ export class FrameRateMixer {
     for (const asset of flattenAssets(project.bins ?? [])) {
       this.assetMap.set(asset.id, asset);
     }
+  }
+
+  /**
+   * Look up the pre-computed conversion ratio between two standard frame rates.
+   * Returns undefined if the pair is not in the lookup table.
+   */
+  static getConversionRatio(fromRate: number, toRate: number): number | undefined {
+    return FrameRateMixer.conversionLUT.get(`${fromRate}:${toRate}`);
   }
 
   // ── Analysis ────────────────────────────────────────────────────────────
@@ -469,6 +499,11 @@ export class FrameRateMixer {
         'INVALID_FRAME_RATE',
       );
     }
+    // Use pre-computed ratio from LUT for standard frame rate pairs
+    const lutRatio = FrameRateMixer.conversionLUT.get(`${fromRate}:${toRate}`);
+    if (lutRatio !== undefined) {
+      return Math.round(frames * lutRatio);
+    }
     const seconds = frames / fromRate;
     return Math.round(seconds * toRate);
   }
@@ -476,13 +511,19 @@ export class FrameRateMixer {
   // ── Private helpers ─────────────────────────────────────────────────────
 
   private getClipFrameRate(clip: EditorClip): number {
+    // Check per-instance cache first for repeated lookups
+    const cached = this.clipFrameRateCache.get(clip.id);
+    if (cached !== undefined) return cached;
+
+    let rate = this.project.settings.frameRate;
     if (clip.assetId) {
       const asset = this.assetMap.get(clip.assetId);
       if (asset?.technicalMetadata?.frameRate) {
-        return asset.technicalMetadata.frameRate;
+        rate = asset.technicalMetadata.frameRate;
       }
     }
-    return this.project.settings.frameRate;
+    this.clipFrameRateCache.set(clip.id, rate);
+    return rate;
   }
 
   private isFrameRateMatch(rateA: number, rateB: number): boolean {
@@ -576,7 +617,12 @@ export class FrameRateMixer {
   }
 
   private getFrameRateLabel(rate: number): string {
-    for (const [label, value] of Object.entries(FRAME_RATE_PRESETS)) {
+    // O(1) lookup for exact matches via pre-built cache
+    const exact = FrameRateMixer.frameRateLabelCache.get(rate);
+    if (exact) return exact;
+
+    // Fall back to fuzzy match for non-exact rates
+    for (const [value, label] of FrameRateMixer.frameRateLabelCache) {
       if (this.isFrameRateMatch(rate, value)) return label;
     }
     return `${rate}fps`;

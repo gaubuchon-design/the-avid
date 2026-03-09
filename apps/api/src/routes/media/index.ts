@@ -37,15 +37,31 @@ router.get(
   async (req: Request, res: Response) => {
     const bins = await db.bin.findMany({
       where: { projectId: req.params['projectId']!, parentId: null },
-      include: {
+      select: {
+        id: true,
+        name: true,
+        color: true,
+        sortOrder: true,
+        parentId: true,
+        projectId: true,
         children: {
-          include: { _count: { select: { mediaAssets: true } } },
+          select: {
+            id: true,
+            name: true,
+            color: true,
+            sortOrder: true,
+            parentId: true,
+            _count: { select: { mediaAssets: true } },
+          },
           orderBy: { sortOrder: 'asc' },
         },
         _count: { select: { mediaAssets: true } },
       },
       orderBy: { sortOrder: 'asc' },
     });
+
+    // Bin structure is relatively stable -- cache for 15 seconds
+    res.setHeader('Cache-Control', 'private, max-age=15, stale-while-revalidate=30');
     res.json({ bins });
   }
 );
@@ -91,14 +107,14 @@ router.delete(
   requireProjectAccess('EDITOR'),
   validate(projectIdAndBinIdParams, 'params'),
   async (req: Request, res: Response) => {
-    // Check for child bins
-    const childCount = await db.bin.count({ where: { parentId: req.params['binId']! } });
+    // Check for child bins and media assets in parallel to avoid sequential queries
+    const [childCount, assetCount] = await Promise.all([
+      db.bin.count({ where: { parentId: req.params['binId']! } }),
+      db.mediaAsset.count({ where: { binId: req.params['binId']! } }),
+    ]);
     if (childCount > 0) {
       throw new BadRequestError('Cannot delete bin with child bins. Move or delete children first.');
     }
-
-    // Check for media assets
-    const assetCount = await db.mediaAsset.count({ where: { binId: req.params['binId']! } });
     if (assetCount > 0) {
       throw new BadRequestError(`Cannot delete bin with ${assetCount} media assets. Move or delete assets first.`);
     }
@@ -145,6 +161,24 @@ router.get(
     const [assets, total] = await Promise.all([
       db.mediaAsset.findMany({
         where,
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          status: true,
+          mimeType: true,
+          fileSize: true,
+          duration: true,
+          s3Key: true,
+          proxyS3Key: true,
+          thumbnailS3Key: true,
+          waveformS3Key: true,
+          isFavorite: true,
+          tags: true,
+          binId: true,
+          createdAt: true,
+          updatedAt: true,
+        },
         skip,
         take: limit,
         orderBy: { [orderField]: sortOrder },
@@ -152,9 +186,11 @@ router.get(
       db.mediaAsset.count({ where }),
     ]);
 
-    // Enrich with signed URLs
+    // Enrich with signed URLs (batch to avoid N+1 URL generation)
     const enriched = await Promise.all(assets.map(mediaService.enrichWithUrls));
 
+    // Media list is dynamic but can tolerate 5 second staleness
+    res.setHeader('Cache-Control', 'private, max-age=5, stale-while-revalidate=15');
     res.json({ assets: enriched, pagination: paginate(total, page, limit) });
   }
 );
@@ -242,6 +278,9 @@ router.get(
     });
     if (!asset) throw new NotFoundError('Media asset');
     const enriched = await mediaService.enrichWithUrls(asset);
+
+    // Cache single asset for 10 seconds
+    res.setHeader('Cache-Control', 'private, max-age=10, stale-while-revalidate=30');
     res.json({ asset: enriched });
   }
 );

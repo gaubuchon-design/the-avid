@@ -29,13 +29,31 @@ function isoNow(): string {
 /** Naive relevance score: fraction of query words that appear in the text. */
 function textRelevance(text: string, query: string): number {
   const lowerText = text.toLowerCase();
-  const words = query
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((w) => w.length > 0);
-  if (words.length === 0) return 0;
-  const hits = words.filter((w) => lowerText.includes(w)).length;
-  return hits / words.length;
+  const lowerQuery = query.toLowerCase();
+
+  // Count words and hits inline to avoid creating intermediate arrays
+  let wordCount = 0;
+  let hits = 0;
+  let start = 0;
+  const len = lowerQuery.length;
+
+  while (start < len) {
+    // Skip whitespace
+    while (start < len && lowerQuery.charCodeAt(start) <= 32) start++;
+    if (start >= len) break;
+
+    // Find end of word
+    let end = start;
+    while (end < len && lowerQuery.charCodeAt(end) > 32) end++;
+
+    wordCount++;
+    if (lowerText.includes(lowerQuery.slice(start, end))) {
+      hits++;
+    }
+    start = end;
+  }
+
+  return wordCount === 0 ? 0 : hits / wordCount;
 }
 
 // ---------------------------------------------------------------------------
@@ -296,6 +314,8 @@ export class MockContentCoreAdapter implements IContentCoreAdapter {
   private readonly assets: Map<string, ArchiveResult>;
   private readonly usageRecords: Map<string, UsageRecord[]>;
   private readonly availability: Map<string, boolean>;
+  /** Pre-computed lowercase search corpus per asset to avoid rebuilding on every query. */
+  private readonly searchCorpus: Map<string, string>;
 
   constructor() {
     const list = seedAssets();
@@ -305,6 +325,14 @@ export class MockContentCoreAdapter implements IContentCoreAdapter {
     // All assets online except the archival one
     this.availability = new Map(list.map((a) => [a.id, true]));
     this.availability.set('arc_010', false); // nearline / tape
+
+    // Pre-compute search corpus for each asset (lowercased, joined once)
+    this.searchCorpus = new Map(
+      list.map((a) => [
+        a.id,
+        [a.name, a.description ?? '', a.tags.join(' '), JSON.stringify(a.metadata)].join(' ').toLowerCase(),
+      ]),
+    );
   }
 
   // -----------------------------------------------------------------------
@@ -318,12 +346,7 @@ export class MockContentCoreAdapter implements IContentCoreAdapter {
     const results: Array<{ asset: ArchiveResult; score: number }> = [];
 
     for (const asset of this.assets.values()) {
-      const corpus = [
-        asset.name,
-        asset.description ?? '',
-        asset.tags.join(' '),
-        JSON.stringify(asset.metadata),
-      ].join(' ');
+      const corpus = this.searchCorpus.get(asset.id) ?? '';
 
       const score = textRelevance(corpus, query);
       if (score > 0) {

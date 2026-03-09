@@ -926,15 +926,37 @@ function seedTracksFromBins(tracks: EditorTrack[], bins: EditorBin[]): EditorTra
  * Recursively flatten all media assets from a bin hierarchy.
  * Handles empty bins, missing children, and missing asset arrays gracefully.
  *
+ * Uses an iterative stack-based approach instead of recursive flatMap
+ * to avoid stack overflow on deeply nested bin hierarchies and reduce
+ * intermediate array allocations.
+ *
  * @param bins - Array of editor bins to flatten.
  * @returns All media assets across all bins and nested children.
  */
 export function flattenAssets(bins: EditorBin[]): EditorMediaAsset[] {
   if (!bins || bins.length === 0) return [];
-  return bins.flatMap((bin) => [
-    ...(bin.assets ?? []),
-    ...flattenAssets(bin.children ?? []),
-  ]);
+
+  const result: EditorMediaAsset[] = [];
+  // Use an explicit stack to avoid recursion overhead
+  const stack: EditorBin[] = [...bins];
+
+  while (stack.length > 0) {
+    const bin = stack.pop()!;
+    const assets = bin.assets;
+    if (assets && assets.length > 0) {
+      for (let i = 0; i < assets.length; i++) {
+        result.push(assets[i]!);
+      }
+    }
+    const children = bin.children;
+    if (children && children.length > 0) {
+      for (let i = children.length - 1; i >= 0; i--) {
+        stack.push(children[i]!);
+      }
+    }
+  }
+
+  return result;
 }
 
 /**
@@ -949,14 +971,19 @@ export function getProjectDuration(project: Pick<EditorProject, 'tracks'>): numb
   const tracks = project.tracks ?? [];
   if (tracks.length === 0) return 0;
 
-  const allClips = tracks.flatMap((track) => track.clips ?? []);
-  if (allClips.length === 0) return 0;
-
-  const lastClipEnd = allClips.reduce((max, clip) => {
-    const endTime = Number.isFinite(clip.endTime) ? clip.endTime : 0;
-    return Math.max(max, endTime);
-  }, 0);
-  return Math.max(lastClipEnd, 0);
+  // Avoid intermediate array allocation from flatMap + reduce.
+  // Iterate tracks and clips inline for O(n) with zero allocations.
+  let maxEnd = 0;
+  for (let t = 0; t < tracks.length; t++) {
+    const clips = tracks[t]!.clips ?? [];
+    for (let c = 0; c < clips.length; c++) {
+      const endTime = clips[c]!.endTime;
+      if (Number.isFinite(endTime) && endTime > maxEnd) {
+        maxEnd = endTime;
+      }
+    }
+  }
+  return maxEnd;
 }
 
 function normalizeProject(project: EditorProject): EditorProject {

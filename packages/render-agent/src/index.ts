@@ -255,6 +255,7 @@ class WorkerRouter {
     }
 
     try {
+      // Pass the job-scoped signal to workers that support cancellation
       const jobSignal = controller.signal;
 
       switch (job.type) {
@@ -262,7 +263,7 @@ class WorkerRouter {
           return await this.ingestWorker.process(job, (p) => onProgress?.(p.percent, p));
 
         case 'transcode':
-          return await this.renderWorker.process(job, (p) => onProgress?.(p.percent, p));
+          return await this.renderWorker.process(job, (p) => onProgress?.(p.percent, p), jobSignal);
 
         case 'transcribe':
           return await this.transcribeWorker.process(job, (p) => onProgress?.(p.percent, p));
@@ -272,10 +273,10 @@ class WorkerRouter {
 
         case 'render':
         case 'encode':
-          return await this.renderWorker.process(job, (p) => onProgress?.(p.percent, p));
+          return await this.renderWorker.process(job, (p) => onProgress?.(p.percent, p), jobSignal);
 
         case 'effects':
-          return await this.renderWorker.process(job, (p) => onProgress?.(p.percent, p));
+          return await this.renderWorker.process(job, (p) => onProgress?.(p.percent, p), jobSignal);
 
         default:
           throw new Error(`Unknown job type: ${(job as WorkerJob).type}`);

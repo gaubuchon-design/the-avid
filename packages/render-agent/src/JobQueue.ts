@@ -148,6 +148,10 @@ export class JobQueue {
   private totalWaitTimeMs = 0;
   private completedJobCount = 0;
 
+  /** Tracked status counters to avoid O(n) scans on every access. */
+  private _pendingCount = 0;
+  private _runningCount = 0;
+
   /** Fair scheduling reorder timer. */
   private fairScheduleTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -172,14 +176,14 @@ export class JobQueue {
   // Public API
   // -----------------------------------------------------------------------
 
-  /** Number of pending (not yet started) jobs. */
+  /** Number of pending (not yet started) jobs. O(1) via tracked counter. */
   get pendingCount(): number {
-    return this.queue.filter((q) => q.status === 'queued').length;
+    return this._pendingCount;
   }
 
-  /** Number of currently running jobs. */
+  /** Number of currently running jobs. O(1) via tracked counter. */
   get runningCount(): number {
-    return this.queue.filter((q) => q.status === 'running').length;
+    return this._runningCount;
   }
 
   /** Maximum queue size. */
@@ -264,6 +268,7 @@ export class JobQueue {
       }
     }
     this.queue.splice(insertIdx, 0, entry);
+    this._pendingCount++;
 
     return entry;
   }
@@ -297,6 +302,8 @@ export class JobQueue {
 
     const entry = this.queue[bestIdx]!;
     entry.status = 'running';
+    this._pendingCount--;
+    this._runningCount++;
     entry.startedAt = isoNow();
 
     // Record wait time
@@ -339,6 +346,8 @@ export class JobQueue {
     const entry = this.queue.find((q) => q.job.id === jobId);
     if (entry) {
       this.clearJobTimeout(entry);
+      if (entry.status === 'running') this._runningCount--;
+      else if (entry.status === 'queued') this._pendingCount--;
       entry.status = 'completed';
       entry.completedAt = isoNow();
       this.completedJobCount++;
@@ -361,6 +370,9 @@ export class JobQueue {
 
     this.clearJobTimeout(entry);
 
+    // Track the previous status for counter adjustment
+    const prevStatus = entry.status;
+
     // Detect non-retryable failures
     const isOOM = error.includes('OOM') || error.includes('code 137') || error.includes('SIGKILL');
     const isDiskFull = error.includes('No space left on device') || error.includes('ENOSPC') || error.includes('Disk full');
@@ -376,6 +388,8 @@ export class JobQueue {
     // Check if retries are available and error is retryable
     if (!isNonRetryable && entry.retryCount < entry.maxRetries) {
       entry.retryCount++;
+      // Transition from running back to queued
+      if (prevStatus === 'running') { this._runningCount--; this._pendingCount++; }
       entry.status = 'queued';
       entry.startedAt = undefined;
       entry.error = `Retry ${entry.retryCount}/${entry.maxRetries}: ${error}`;
@@ -383,6 +397,8 @@ export class JobQueue {
     }
 
     // Exhausted retries or non-retryable failure
+    if (prevStatus === 'running') this._runningCount--;
+    else if (prevStatus === 'queued') this._pendingCount--;
     entry.status = 'failed';
     entry.completedAt = isoNow();
     if (isNonRetryable) {
@@ -409,6 +425,7 @@ export class JobQueue {
 
     const entry = this.queue[idx]!;
     this.clearJobTimeout(entry);
+    this._pendingCount--;
     entry.status = 'cancelled';
     entry.completedAt = isoNow();
     this.moveToHistory(jobId);
@@ -428,6 +445,7 @@ export class JobQueue {
     if (!entry) return false;
 
     this.clearJobTimeout(entry);
+    this._runningCount--;
     entry.status = 'cancelled';
     entry.completedAt = isoNow();
     entry.error = reason;
@@ -440,13 +458,7 @@ export class JobQueue {
    * Return aggregate queue statistics.
    */
   getStats(): QueueStats {
-    let pending = 0;
-    let running = 0;
-    for (const q of this.queue) {
-      if (q.status === 'queued') pending++;
-      if (q.status === 'running') running++;
-    }
-
+    // Use tracked counters for pending/running (O(1) instead of O(n))
     let completed = 0;
     let failed = 0;
     for (const h of this.history) {
@@ -459,8 +471,8 @@ export class JobQueue {
       : 0;
 
     return {
-      pending,
-      running,
+      pending: this._pendingCount,
+      running: this._runningCount,
       completed,
       failed,
       timedOut: this.timedOutCount,
@@ -502,6 +514,7 @@ export class JobQueue {
     const pendingJobs = this.queue.filter((q) => q.status === 'queued');
     for (const entry of pendingJobs) {
       this.clearJobTimeout(entry);
+      this._pendingCount--;
       entry.status = 'cancelled';
       entry.completedAt = isoNow();
       entry.error = 'Queue draining';
@@ -524,6 +537,7 @@ export class JobQueue {
         const stillRunning = this.queue.filter((q) => q.status === 'running');
         for (const entry of stillRunning) {
           this.clearJobTimeout(entry);
+          this._runningCount--;
           entry.status = 'failed';
           entry.completedAt = isoNow();
           entry.error = 'Drain timeout exceeded';

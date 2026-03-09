@@ -65,9 +65,57 @@ function generateS3Key(projectId: string, binId: string, fileName: string): stri
   return `projects/${projectId}/bins/${binId}/media/${uuidv4()}_${sanitized}`;
 }
 
+// ─── Signed URL Cache ───────────────────────────────────────────────────────
+// Cache signed URLs to avoid generating new URLs on every request.
+// URLs are cached for half of their expiry time to ensure they remain valid.
+const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
+const SIGNED_URL_CACHE_MAX = 5000;
+
+/** Periodically prune expired entries to prevent memory leaks. */
+let signedUrlPruneTimer: ReturnType<typeof setInterval> | null = null;
+
+function startSignedUrlPruner(): void {
+  if (signedUrlPruneTimer) return;
+  signedUrlPruneTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of signedUrlCache) {
+      if (entry.expiresAt <= now) {
+        signedUrlCache.delete(key);
+      }
+    }
+  }, 60_000); // Prune every minute
+  if (typeof signedUrlPruneTimer === 'object' && 'unref' in signedUrlPruneTimer) {
+    signedUrlPruneTimer.unref();
+  }
+}
+startSignedUrlPruner();
+
 function getSignedUrl(s3Key: string, bucket: string, expiresIn = 3600): string {
   if (!config.aws.accessKeyId) return `https://cdn.placeholder.dev/${s3Key}`;
-  return s3.getSignedUrl('getObject', { Bucket: bucket, Key: s3Key, Expires: expiresIn });
+
+  const cacheKey = `${bucket}:${s3Key}:${expiresIn}`;
+  const cached = signedUrlCache.get(cacheKey);
+  const now = Date.now();
+
+  if (cached && cached.expiresAt > now) {
+    return cached.url;
+  }
+
+  const url = s3.getSignedUrl('getObject', { Bucket: bucket, Key: s3Key, Expires: expiresIn });
+
+  // Cache for half the expiry time (ensures URLs are still valid when served)
+  const cacheDurationMs = (expiresIn * 1000) / 2;
+
+  // Evict oldest entries if cache is too large
+  if (signedUrlCache.size >= SIGNED_URL_CACHE_MAX) {
+    const firstKey = signedUrlCache.keys().next().value;
+    if (firstKey !== undefined) {
+      signedUrlCache.delete(firstKey);
+    }
+  }
+
+  signedUrlCache.set(cacheKey, { url, expiresAt: now + cacheDurationMs });
+  return url;
 }
 
 // ─── Max upload size (5 GB) ─────────────────────────────────────────────────
@@ -256,7 +304,11 @@ class MediaService {
    * Get waveform data for audio visualization.
    */
   async getWaveform(assetId: string) {
-    const asset = await db.mediaAsset.findUnique({ where: { id: assetId } });
+    // Only select the field we need to avoid over-fetching
+    const asset = await db.mediaAsset.findUnique({
+      where: { id: assetId },
+      select: { id: true, waveformS3Key: true },
+    });
     if (!asset) throw new NotFoundError('Media asset');
 
     if (asset.waveformS3Key) {
@@ -282,7 +334,11 @@ class MediaService {
    * Delete asset and clean up S3.
    */
   async deleteAsset(assetId: string): Promise<void> {
-    const asset = await db.mediaAsset.findUnique({ where: { id: assetId } });
+    // Only select the S3 key fields needed for cleanup
+    const asset = await db.mediaAsset.findUnique({
+      where: { id: assetId },
+      select: { id: true, s3Key: true, proxyS3Key: true, thumbnailS3Key: true, waveformS3Key: true },
+    });
     if (!asset) throw new NotFoundError('Media asset');
 
     // Delete S3 objects
@@ -312,7 +368,11 @@ class MediaService {
    * Generate presigned download URL.
    */
   async getDownloadUrl(assetId: string, useProxy = false): Promise<string> {
-    const asset = await db.mediaAsset.findUnique({ where: { id: assetId } });
+    // Only select the S3 key fields we need
+    const asset = await db.mediaAsset.findUnique({
+      where: { id: assetId },
+      select: { id: true, s3Key: true, proxyS3Key: true },
+    });
     if (!asset) throw new NotFoundError('Media asset');
 
     const key = useProxy ? asset.proxyS3Key : asset.s3Key;

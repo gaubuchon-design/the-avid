@@ -1,3 +1,12 @@
+// ─── Pre-computed Constants ────────────────────────────────────────────────────
+
+/** Pre-computed file size unit thresholds to avoid repeated division. */
+const FILE_SIZE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const;
+const FILE_SIZE_THRESHOLDS = [1, 1024, 1024 * 1024, 1024 * 1024 * 1024, 1024 * 1024 * 1024 * 1024] as const;
+
+/** Hex lookup table for UUID generation - avoids repeated toString(16) calls. */
+const HEX_CHARS = '0123456789abcdef';
+
 // ─── Validation Helpers ────────────────────────────────────────────────────────
 
 /**
@@ -83,12 +92,8 @@ export function formatTimecode(seconds: number, frameRate = 30): string {
   const mins = Math.floor(totalSeconds / 60) % 60;
   const hours = Math.floor(totalSeconds / 3600);
 
-  return [
-    hours.toString().padStart(2, '0'),
-    mins.toString().padStart(2, '0'),
-    secs.toString().padStart(2, '0'),
-    frames.toString().padStart(2, '0'),
-  ].join(':');
+  // Use template literal instead of array.join for fewer allocations
+  return `${hours < 10 ? '0' : ''}${hours}:${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}:${frames < 10 ? '0' : ''}${frames}`;
 }
 
 /**
@@ -101,14 +106,17 @@ export function formatTimecode(seconds: number, frameRate = 30): string {
  */
 export function formatFileSize(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '0.0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'] as const;
-  let size = bytes;
+
+  // Use pre-computed thresholds to find the right unit without a loop
   let unitIndex = 0;
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex++;
+  for (let i = FILE_SIZE_THRESHOLDS.length - 1; i > 0; i--) {
+    if (bytes >= FILE_SIZE_THRESHOLDS[i]!) {
+      unitIndex = i;
+      break;
+    }
   }
-  const unit = units[unitIndex] ?? 'B';
+  const size = unitIndex > 0 ? bytes / FILE_SIZE_THRESHOLDS[unitIndex]! : bytes;
+  const unit = FILE_SIZE_UNITS[unitIndex] ?? 'B';
   return `${size.toFixed(1)} ${unit}`;
 }
 
@@ -118,11 +126,19 @@ export function formatFileSize(bytes: number): string {
  * When called with a prefix string, returns `prefix-uuid`.
  */
 export function generateId(prefix?: string): string {
-  const uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+  // Optimized UUID v4 generation using pre-computed hex lookup
+  // instead of regex replacement with per-char toString(16)
+  let uuid = '';
+  for (let i = 0; i < 36; i++) {
+    if (i === 8 || i === 13 || i === 18 || i === 23) {
+      uuid += '-';
+    } else if (i === 14) {
+      uuid += '4';
+    } else {
+      const r = (Math.random() * 16) | 0;
+      uuid += HEX_CHARS[i === 19 ? (r & 0x3) | 0x8 : r]!;
+    }
+  }
   return prefix ? `${prefix}-${uuid}` : uuid;
 }
 

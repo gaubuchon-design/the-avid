@@ -1,4 +1,4 @@
-import React, { forwardRef, useRef, useCallback, useState, type KeyboardEvent } from 'react';
+import React, { forwardRef, useRef, useCallback, useState, memo, type KeyboardEvent } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -94,7 +94,7 @@ function getCompletionPercent(steps: PlanStepSummary[]): number {
  * - Step-level approve via keyboard (Enter on focused step)
  * - Screen reader announcements for progress changes
  */
-export const PlanPreview = forwardRef<HTMLDivElement, PlanPreviewProps>(
+export const PlanPreview = memo(forwardRef<HTMLDivElement, PlanPreviewProps>(
   function PlanPreview(
     {
       plan,
@@ -187,6 +187,7 @@ export const PlanPreview = forwardRef<HTMLDivElement, PlanPreviewProps>(
         className={cx('plan-preview', `plan-preview--${statusModifier(plan.status)}`, className)}
         role="region"
         aria-label="Plan preview"
+        style={{ contain: 'layout style' }}
       >
         {/* -- Header --------------------------------------------------- */}
         <div className="plan-preview-header">
@@ -358,4 +359,4 @@ export const PlanPreview = forwardRef<HTMLDivElement, PlanPreviewProps>(
       </div>
     );
   },
-);
+));

@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from './config';
 import { logger, requestLogger } from './utils/logger';
-import { connectDb, disconnectDb, checkDbHealth } from './db/client';
+import { connectDb, disconnectDb, checkDbHealth, getQueryMetrics } from './db/client';
 import { errorHandler, notFoundHandler, requireJsonContentType, requestDuration } from './middleware/errorHandler';
 import { initWebSocket } from './websocket';
 import exportRoutes from './routes/export';
@@ -67,7 +67,22 @@ app.use(cors({
   exposedHeaders: ['X-Request-ID', 'X-RateLimit-Remaining'],
 }));
 
-app.use(compression());
+// ─── Response Compression ────────────────────────────────────────────────────
+// Configure compression with threshold and level tuning:
+// - threshold: minimum response size to compress (1KB avoids overhead on tiny responses)
+// - level: zlib compression level (6 = good balance of speed/ratio for API JSON)
+// - filter: skip compression for already-compressed formats and event-stream
+app.use(compression({
+  threshold: 1024,
+  level: 6,
+  filter: (req, res) => {
+    const contentType = res.getHeader('Content-Type');
+    if (typeof contentType === 'string' && contentType.includes('text/event-stream')) {
+      return false;
+    }
+    return compression.filter(req, res);
+  },
+}));
 app.use(requestDuration);
 app.use(requireJsonContentType);
 app.use(express.json({ limit: '50mb' }));
@@ -104,6 +119,9 @@ const uploadLimiter = rateLimit({
 
 /** Liveness probe -- always responds if the process is running */
 app.get('/health', (_req, res) => {
+  const mem = process.memoryUsage();
+  // Cache health response for 5 seconds to avoid per-request overhead
+  res.setHeader('Cache-Control', 'public, max-age=5');
   res.json({
     status: 'ok',
     version: process.env['npm_package_version'] ?? '0.1.0',
@@ -111,9 +129,13 @@ app.get('/health', (_req, res) => {
     uptime: process.uptime(),
     env: config.env,
     memoryUsage: {
-      rss: Math.round(process.memoryUsage().rss / 1024 / 1024),
-      heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+      rss: Math.round(mem.rss / 1024 / 1024),
+      heapUsed: Math.round(mem.heapUsed / 1024 / 1024),
+      heapTotal: Math.round(mem.heapTotal / 1024 / 1024),
+      external: Math.round(mem.external / 1024 / 1024),
+      arrayBuffers: Math.round(mem.arrayBuffers / 1024 / 1024),
     },
+    queryMetrics: getQueryMetrics(),
   });
 });
 
@@ -203,12 +225,57 @@ app.use(errorHandler);
 // ─── WebSocket ─────────────────────────────────────────────────────────────────
 const ws = initWebSocket(httpServer);
 
+// ─── Periodic Memory Monitoring ─────────────────────────────────────────────
+let memoryLogTimer: ReturnType<typeof setInterval> | null = null;
+const MEMORY_LOG_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const HEAP_WARNING_THRESHOLD = 0.85; // 85% of heap limit
+
+function startMemoryMonitoring(): void {
+  memoryLogTimer = setInterval(() => {
+    const mem = process.memoryUsage();
+    const heapUsedMB = Math.round(mem.heapUsed / 1024 / 1024);
+    const heapTotalMB = Math.round(mem.heapTotal / 1024 / 1024);
+    const rssMB = Math.round(mem.rss / 1024 / 1024);
+    const heapRatio = mem.heapUsed / mem.heapTotal;
+
+    if (heapRatio > HEAP_WARNING_THRESHOLD) {
+      logger.warn('High heap usage detected', {
+        heapUsedMB,
+        heapTotalMB,
+        rssMB,
+        heapPercent: Math.round(heapRatio * 100),
+        externalMB: Math.round(mem.external / 1024 / 1024),
+      });
+    } else {
+      logger.debug('Memory usage', {
+        heapUsedMB,
+        heapTotalMB,
+        rssMB,
+        heapPercent: Math.round(heapRatio * 100),
+      });
+    }
+  }, MEMORY_LOG_INTERVAL_MS);
+
+  // Don't keep process alive for monitoring
+  if (typeof memoryLogTimer === 'object' && 'unref' in memoryLogTimer) {
+    memoryLogTimer.unref();
+  }
+}
+
+function stopMemoryMonitoring(): void {
+  if (memoryLogTimer) {
+    clearInterval(memoryLogTimer);
+    memoryLogTimer = null;
+  }
+}
+
 // ─── Start ─────────────────────────────────────────────────────────────────────
 let isShuttingDown = false;
 
 async function start() {
   try {
     await connectDb();
+    startMemoryMonitoring();
 
     httpServer.listen(config.server.port, () => {
       logger.info(`
@@ -238,6 +305,8 @@ const shutdown = async (signal: string) => {
     try {
       // Close WebSocket connections
       ws.io.close();
+      // Stop memory monitoring
+      stopMemoryMonitoring();
       // Disconnect database
       await disconnectDb();
       logger.info('Server closed cleanly');

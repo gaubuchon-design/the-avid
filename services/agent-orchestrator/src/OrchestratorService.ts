@@ -122,6 +122,14 @@ const DEFAULT_STEP_BACKOFF_DELAYS_MS: readonly number[] = [1_000, 2_000, 4_000];
 /** Default max dead-letter queue size. */
 const DEFAULT_DEAD_LETTER_MAX_SIZE = 100;
 
+/**
+ * Pre-built set of destructive tool names to avoid reallocating on every step.
+ * Destructive tools are not retried at the orchestrator level.
+ */
+const DESTRUCTIVE_TOOLS: ReadonlySet<string> = new Set([
+  'extract', 'lift', 'split_clip', 'overwrite', 'ripple_trim', 'remove_silence',
+]);
+
 // ---------------------------------------------------------------------------
 // OrchestratorService
 // ---------------------------------------------------------------------------
@@ -150,6 +158,8 @@ export class OrchestratorService {
   private readonly contextCache: ContextCache;
   private readonly analyticsLogger: AnalyticsLogger;
   private readonly tools: ToolDefinition[];
+  /** Indexed tool definitions for O(1) lookup by name instead of linear scan. */
+  private readonly toolsByName: Map<string, ToolDefinition>;
   private readonly executionMode: ExecutionMode;
   private readonly parallelConcurrency: number;
   private readonly stepRetryCount: number;
@@ -189,6 +199,7 @@ export class OrchestratorService {
     this.contextCache = new ContextCache();
     this.analyticsLogger = new AnalyticsLogger();
     this.tools = [...DEFAULT_TOOLS];
+    this.toolsByName = new Map(this.tools.map((t) => [t.name, t]));
     this.executionMode = config.executionMode ?? 'sequential';
     this.parallelConcurrency = DEFAULT_PARALLEL_CONCURRENCY;
     this.stepRetryCount = config.stepRetryCount ?? DEFAULT_STEP_RETRY_COUNT;
@@ -569,6 +580,39 @@ export class OrchestratorService {
   }
 
   /**
+   * Get a snapshot of execution metrics for monitoring dashboards.
+   */
+  getExecutionMetrics(): {
+    activePlans: number;
+    executingPlans: number;
+    historySize: number;
+    deadLetterSize: number;
+    subscriberCount: number;
+    cancelledPlanIds: number;
+  } {
+    return {
+      activePlans: this.plans.size,
+      executingPlans: this.executingPlanCount,
+      historySize: this.history.length,
+      deadLetterSize: this.deadLetterQueue.length,
+      subscriberCount: this.subscribers.size,
+      cancelledPlanIds: this.cancelledPlanIds.size,
+    };
+  }
+
+  /**
+   * Dispose of the orchestrator, cleaning up internal state.
+   * Should be called during graceful shutdown.
+   */
+  dispose(): void {
+    this.subscribers.clear();
+    this.cancelledPlanIds.clear();
+    this.planStartTimes.clear();
+    this.contextCache.clear();
+    // Don't clear plans/history -- they may be needed for final status reporting.
+  }
+
+  /**
    * Get circuit breaker states for all adapters via the tool router.
    */
   getCircuitStates(): Record<string, string> {
@@ -859,8 +903,8 @@ export class OrchestratorService {
     if (!this.tokenBudgetEnabled) return false;
     if (plan.tokensEstimated <= 0) return false;
 
-    // Find the tool definition to estimate the upcoming cost.
-    const toolDef = this.tools.find((t) => t.name === toolName);
+    // O(1) tool definition lookup for token cost estimation.
+    const toolDef = this.toolsByName.get(toolName);
     const estimatedStepCost = toolDef?.tokenCost ?? 10;
 
     const budgetCeiling = plan.tokensEstimated * (1 + TOKEN_BUDGET_HEADROOM);
@@ -899,10 +943,7 @@ export class OrchestratorService {
     this.notify(plan);
 
     // Destructive tools should not be retried at the orchestrator level.
-    const destructiveTools = new Set([
-      'extract', 'lift', 'split_clip', 'overwrite', 'ripple_trim', 'remove_silence',
-    ]);
-    const isDestructive = destructiveTools.has(step.toolName);
+    const isDestructive = DESTRUCTIVE_TOOLS.has(step.toolName);
     const maxAttempts = isDestructive ? 1 : Math.max(1, this.stepRetryCount + 1);
     let result: ToolCallResult | null = null;
 

@@ -1,4 +1,4 @@
-import React, { forwardRef } from 'react';
+import React, { forwardRef, memo } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,7 +37,7 @@ function cx(...parts: Array<string | undefined | false>): string {
  * operation alongside the user's remaining balance. Enters a warning
  * state when the balance is insufficient or when explicitly flagged.
  */
-export const TokenBadge = forwardRef<HTMLElement, TokenBadgeProps>(
+export const TokenBadge = memo(forwardRef<HTMLElement, TokenBadgeProps>(
   function TokenBadge(
     {
       estimatedTokens,
@@ -124,4 +124,4 @@ export const TokenBadge = forwardRef<HTMLElement, TokenBadgeProps>(
       </span>
     );
   },
-);
+));

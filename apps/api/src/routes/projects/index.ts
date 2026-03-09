@@ -47,6 +47,9 @@ router.get('/', validate(projectListQuery, 'query'), async (req: Request, res: R
   const lastItem = result.data[result.data.length - 1];
   const firstItem = result.data[0];
 
+  // Cache project list for 10 seconds (private since it's user-specific)
+  res.setHeader('Cache-Control', 'private, max-age=10, stale-while-revalidate=30');
+
   res.json({
     projects: result.data,
     pagination: {
@@ -158,9 +161,20 @@ router.delete(
 router.get('/:projectId/versions', requireProjectAccess('VIEWER'), validate(projectIdParam, 'params'), async (req: Request, res: Response) => {
   const versions = await db.projectVersion.findMany({
     where: { projectId: req.params['projectId']! },
+    select: {
+      id: true,
+      version: true,
+      notes: true,
+      snapshotUrl: true,
+      createdAt: true,
+      createdById: true,
+    },
     orderBy: { createdAt: 'desc' },
     take: 50,
   });
+
+  // Versions rarely change -- cache for 30 seconds
+  res.setHeader('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
   res.json({ versions });
 });
 

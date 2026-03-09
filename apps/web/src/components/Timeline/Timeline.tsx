@@ -1,9 +1,9 @@
-import React, { useRef, useCallback, useEffect } from 'react';
+import React, { useRef, useCallback, useEffect, useMemo, memo } from 'react';
 import { useEditorStore } from '../../store/editor.store';
 import type { Track, Clip } from '../../store/editor.store';
 
 // ─── Waveform ─────────────────────────────────────────────────────────────────
-function Waveform({ data, width, height, color }: { data: number[]; width: number; height: number; color: string }) {
+const Waveform = memo(function Waveform({ data, width, height, color }: { data: number[]; width: number; height: number; color: string }) {
   if (!data.length) return null;
   const hw = height / 2, step = width / data.length;
   const pathD = data.map((v, i) => {
@@ -15,7 +15,7 @@ function Waveform({ data, width, height, color }: { data: number[]; width: numbe
       <path d={pathD} stroke={color} strokeWidth="1.2" opacity="0.55" fill="none" />
     </svg>
   );
-}
+});
 
 // ─── Ruler ────────────────────────────────────────────────────────────────────
 function Ruler({ zoom, scrollLeft, duration, onScrub }: {
@@ -85,10 +85,13 @@ function Ruler({ zoom, scrollLeft, duration, onScrub }: {
 }
 
 // ─── Clip Component ───────────────────────────────────────────────────────────
-function ClipView({ clip, zoom, trackId, trackColor }: {
+const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor }: {
   clip: Clip; zoom: number; trackId: string; trackColor: string;
 }) {
-  const { selectedClipIds, selectClip, moveClip, trimClip } = useEditorStore();
+  const selectedClipIds = useEditorStore((s) => s.selectedClipIds);
+  const selectClip = useEditorStore((s) => s.selectClip);
+  const moveClip = useEditorStore((s) => s.moveClip);
+  const trimClip = useEditorStore((s) => s.trimClip);
   const isSelected = selectedClipIds.includes(clip.id);
   const width = Math.max(2, (clip.endTime - clip.startTime) * zoom);
   const left = clip.startTime * zoom;
@@ -173,11 +176,17 @@ function ClipView({ clip, zoom, trackId, trackColor }: {
       )}
     </div>
   );
-}
+}, (prev, next) => {
+  // Custom comparison: only re-render if clip data, zoom, or track context changed
+  return prev.clip === next.clip
+    && prev.zoom === next.zoom
+    && prev.trackId === next.trackId
+    && prev.trackColor === next.trackColor;
+});
 
 // ─── Track Lane ───────────────────────────────────────────────────────────────
-function TrackLane({ track, zoom, totalWidth }: { track: Track; zoom: number; totalWidth: number }) {
-  const { clearSelection } = useEditorStore();
+const TrackLane = memo(function TrackLane({ track, zoom, totalWidth }: { track: Track; zoom: number; totalWidth: number }) {
+  const clearSelection = useEditorStore((s) => s.clearSelection);
   return (
     <div
       className="track-lane"
@@ -190,29 +199,42 @@ function TrackLane({ track, zoom, totalWidth }: { track: Track; zoom: number; to
       ))}
     </div>
   );
-}
+});
 
 // ─── Playhead Line ────────────────────────────────────────────────────────────
-function PlayheadLine({ time, zoom, scrollLeft }: { time: number; zoom: number; scrollLeft: number }) {
+const PlayheadLine = memo(function PlayheadLine({ time, zoom, scrollLeft }: { time: number; zoom: number; scrollLeft: number }) {
   const left = time * zoom - scrollLeft;
   if (left < 0 || left > 10000) return null;
   return <div className="playhead" style={{ left }} />;
-}
+});
 
 // ─── Main Timeline ────────────────────────────────────────────────────────────
 export function Timeline() {
-  const {
-    tracks, markers, playheadTime, setPlayhead,
-    zoom, setZoom, scrollLeft, setScrollLeft,
-    duration, selectedTrackId, selectTrack,
-    toggleMute, toggleSolo, toggleLock,
-    matchFrame, razorAtPlayhead, addMarkerAtPlayhead,
-    setInToPlayhead, setOutToPlayhead, clearInOut,
-    liftSelection, extractSelection,
-  } = useEditorStore();
+  const tracks = useEditorStore((s) => s.tracks);
+  const markers = useEditorStore((s) => s.markers);
+  const playheadTime = useEditorStore((s) => s.playheadTime);
+  const setPlayhead = useEditorStore((s) => s.setPlayhead);
+  const zoom = useEditorStore((s) => s.zoom);
+  const setZoom = useEditorStore((s) => s.setZoom);
+  const scrollLeft = useEditorStore((s) => s.scrollLeft);
+  const setScrollLeft = useEditorStore((s) => s.setScrollLeft);
+  const duration = useEditorStore((s) => s.duration);
+  const selectedTrackId = useEditorStore((s) => s.selectedTrackId);
+  const selectTrack = useEditorStore((s) => s.selectTrack);
+  const toggleMute = useEditorStore((s) => s.toggleMute);
+  const toggleSolo = useEditorStore((s) => s.toggleSolo);
+  const toggleLock = useEditorStore((s) => s.toggleLock);
+  const matchFrame = useEditorStore((s) => s.matchFrame);
+  const razorAtPlayhead = useEditorStore((s) => s.razorAtPlayhead);
+  const addMarkerAtPlayhead = useEditorStore((s) => s.addMarkerAtPlayhead);
+  const setInToPlayhead = useEditorStore((s) => s.setInToPlayhead);
+  const setOutToPlayhead = useEditorStore((s) => s.setOutToPlayhead);
+  const clearInOut = useEditorStore((s) => s.clearInOut);
+  const liftSelection = useEditorStore((s) => s.liftSelection);
+  const extractSelection = useEditorStore((s) => s.extractSelection);
 
   const contentRef = useRef<HTMLDivElement>(null);
-  const totalWidth = Math.max(duration * zoom + 200, 800);
+  const totalWidth = useMemo(() => Math.max(duration * zoom + 200, 800), [duration, zoom]);
 
   // Sync scroll between header and content
   const handleScroll = (e: React.UIEvent) => {
@@ -236,14 +258,14 @@ export function Timeline() {
     return () => el.removeEventListener('wheel', handler);
   }, [zoom, setZoom]);
 
-  const trackTypeColor = (type: Track['type']) => {
+  const trackTypeColor = useCallback((type: Track['type']) => {
     const map: Record<string, string> = {
       VIDEO: 'var(--track-video)', AUDIO: 'var(--track-audio)',
       EFFECT: 'var(--track-effect)', SUBTITLE: 'var(--track-sub)',
       GRAPHIC: 'var(--track-gfx)',
     };
     return map[type] ?? 'var(--text-muted)';
-  };
+  }, []);
 
   return (
     <div className="timeline-panel">

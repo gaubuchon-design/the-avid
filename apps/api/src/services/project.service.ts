@@ -57,7 +57,20 @@ class ProjectService {
     const [items, total] = await Promise.all([
       db.project.findMany({
         where,
-        include: {
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          status: true,
+          frameRate: true,
+          width: true,
+          height: true,
+          sampleRate: true,
+          colorSpace: true,
+          tags: true,
+          createdAt: true,
+          updatedAt: true,
+          lastEditedAt: true,
           members: { select: { userId: true, role: true } },
           _count: { select: { bins: true, timelines: true } },
         },

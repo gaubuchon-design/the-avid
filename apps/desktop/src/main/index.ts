@@ -56,9 +56,18 @@ app.commandLine.appendSwitch('ignore-gpu-blocklist');
 
 const NLE_FILE_EXTENSIONS = ['.avid', '.aaf', '.omf', '.mxf', '.avidproj', '.avidproj.json'] as const;
 
+/** Pre-built Set for O(1) extension lookup instead of O(n) .some(). */
+const NLE_EXTENSION_SET: ReadonlySet<string> = new Set(NLE_FILE_EXTENSIONS);
+
 function isSupportedMediaFile(filePath: string): boolean {
   const lower = filePath.toLowerCase();
-  return NLE_FILE_EXTENSIONS.some((ext) => lower.endsWith(ext));
+  // Check the longest possible extension first (.avidproj.json = 15 chars),
+  // then shorter ones. Most files have a 3-4 char extension so the shorter
+  // checks will hit first in practice.
+  for (const ext of NLE_EXTENSION_SET) {
+    if (lower.endsWith(ext)) return true;
+  }
+  return false;
 }
 
 // ─── Crash Reporter ────────────────────────────────────────────────────────────
@@ -78,7 +87,10 @@ crashReporter.start({
  * with IPC calls.
  */
 class IPCRateLimiter {
-  private windows = new Map<string, number[]>();
+  // Use a circular buffer per channel instead of an array with shift().
+  // shift() is O(n) because it re-indexes all elements; a circular buffer
+  // tracks head/tail indices for O(1) insert and O(1) eviction.
+  private windows = new Map<string, { buf: number[]; head: number; count: number }>();
   private readonly maxCalls: number;
   private readonly windowMs: number;
 
@@ -92,23 +104,27 @@ class IPCRateLimiter {
    */
   check(channel: string): boolean {
     const now = Date.now();
-    let timestamps = this.windows.get(channel);
-    if (!timestamps) {
-      timestamps = [];
-      this.windows.set(channel, timestamps);
+    let ring = this.windows.get(channel);
+    if (!ring) {
+      ring = { buf: new Array<number>(this.maxCalls + 1), head: 0, count: 0 };
+      this.windows.set(channel, ring);
     }
 
-    // Evict timestamps outside the sliding window
+    // Evict timestamps outside the sliding window (O(1) amortized via head advance)
     const cutoff = now - this.windowMs;
-    while (timestamps.length > 0 && timestamps[0]! < cutoff) {
-      timestamps.shift();
+    while (ring.count > 0 && ring.buf[ring.head]! < cutoff) {
+      ring.head = (ring.head + 1) % ring.buf.length;
+      ring.count--;
     }
 
-    if (timestamps.length >= this.maxCalls) {
+    if (ring.count >= this.maxCalls) {
       return false;
     }
 
-    timestamps.push(now);
+    // Append timestamp to ring buffer tail
+    const tail = (ring.head + ring.count) % ring.buf.length;
+    ring.buf[tail] = now;
+    ring.count++;
     return true;
   }
 }

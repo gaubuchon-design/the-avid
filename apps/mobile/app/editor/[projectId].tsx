@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
 import {
   View,
   Text,
@@ -507,7 +507,7 @@ function TimelineArea({
   );
 }
 
-function TimelineTrackRow({ track, theme }: { track: EditorTrack; theme: AppTheme }) {
+const TimelineTrackRow = memo(function TimelineTrackRow({ track, theme }: { track: EditorTrack; theme: AppTheme }) {
   return (
     <View
       style={[styles.timelineTrack, { backgroundColor: theme.colors.border }]}
@@ -531,9 +531,9 @@ function TimelineTrackRow({ track, theme }: { track: EditorTrack; theme: AppThem
       </Text>
     </View>
   );
-}
+});
 
-function ReviewCommentCard({ comment, theme }: { comment: EditorReviewComment; theme: AppTheme }) {
+const ReviewCommentCard = memo(function ReviewCommentCard({ comment, theme }: { comment: EditorReviewComment; theme: AppTheme }) {
   return (
     <View style={[styles.feedCard, { backgroundColor: theme.colors.border }]}>
       <View style={styles.feedHeader}>
@@ -553,9 +553,9 @@ function ReviewCommentCard({ comment, theme }: { comment: EditorReviewComment; t
       </Text>
     </View>
   );
-}
+});
 
-function TranscriptCueCard({ cue, theme }: { cue: EditorTranscriptCue; theme: AppTheme }) {
+const TranscriptCueCard = memo(function TranscriptCueCard({ cue, theme }: { cue: EditorTranscriptCue; theme: AppTheme }) {
   return (
     <View style={[styles.feedCard, { backgroundColor: theme.colors.border }]}>
       <Text style={[styles.trackLabel, { color: theme.colors.text }]}>{cue.speaker}</Text>
@@ -564,9 +564,9 @@ function TranscriptCueCard({ cue, theme }: { cue: EditorTranscriptCue; theme: Ap
       </Text>
     </View>
   );
-}
+});
 
-function PublishJobCard({ job, theme }: { job: EditorPublishJob; theme: AppTheme }) {
+const PublishJobCard = memo(function PublishJobCard({ job, theme }: { job: EditorPublishJob; theme: AppTheme }) {
   return (
     <View style={[styles.feedCard, { backgroundColor: theme.colors.border }]}>
       <Text style={[styles.trackLabel, { color: theme.colors.text }]}>{job.label}</Text>
@@ -575,7 +575,7 @@ function PublishJobCard({ job, theme }: { job: EditorPublishJob; theme: AppTheme
       </Text>
     </View>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // Main editor screen

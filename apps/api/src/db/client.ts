@@ -8,6 +8,63 @@ declare global {
   var __prisma: PrismaClient | undefined;
 }
 
+// ─── Connection Pool Configuration ───────────────────────────────────────────
+// Prisma connection pool is configured via the DATABASE_URL query params:
+//   ?connection_limit=10&pool_timeout=20
+// These defaults can be overridden by setting:
+//   DATABASE_POOL_SIZE (default: 10 for production, 5 for dev)
+//   DATABASE_POOL_TIMEOUT (default: 20 seconds)
+//
+// Recommended indexes for optimal query performance:
+//   CREATE INDEX idx_project_member_user ON "ProjectMember"("userId");
+//   CREATE INDEX idx_project_deleted_at ON "Project"("deletedAt") WHERE "deletedAt" IS NULL;
+//   CREATE INDEX idx_project_updated_at ON "Project"("updatedAt" DESC);
+//   CREATE INDEX idx_media_asset_bin ON "MediaAsset"("binId");
+//   CREATE INDEX idx_media_asset_status ON "MediaAsset"("status");
+//   CREATE INDEX idx_media_asset_type ON "MediaAsset"("type");
+//   CREATE INDEX idx_bin_project ON "Bin"("projectId");
+//   CREATE INDEX idx_bin_parent ON "Bin"("parentId");
+//   CREATE INDEX idx_clip_media_asset ON "Clip"("mediaAssetId");
+//   CREATE INDEX idx_ai_job_status ON "AIJob"("status");
+//   CREATE INDEX idx_project_version_project ON "ProjectVersion"("projectId", "createdAt" DESC);
+//   CREATE INDEX idx_media_asset_transcript_search ON "MediaAsset" USING gin(to_tsvector('english', "transcript"));
+
+// ─── Query metrics tracking ─────────────────────────────────────────────────
+interface QueryMetrics {
+  totalQueries: number;
+  slowQueries: number;
+  totalDurationMs: number;
+  avgDurationMs: number;
+  lastResetAt: number;
+}
+
+const queryMetrics: QueryMetrics = {
+  totalQueries: 0,
+  slowQueries: 0,
+  totalDurationMs: 0,
+  avgDurationMs: 0,
+  lastResetAt: Date.now(),
+};
+
+/** Get a snapshot of query performance metrics. */
+export function getQueryMetrics(): Readonly<QueryMetrics> {
+  return {
+    ...queryMetrics,
+    avgDurationMs: queryMetrics.totalQueries > 0
+      ? Math.round(queryMetrics.totalDurationMs / queryMetrics.totalQueries)
+      : 0,
+  };
+}
+
+/** Reset query metrics (e.g. after collecting for monitoring). */
+export function resetQueryMetrics(): void {
+  queryMetrics.totalQueries = 0;
+  queryMetrics.slowQueries = 0;
+  queryMetrics.totalDurationMs = 0;
+  queryMetrics.avgDurationMs = 0;
+  queryMetrics.lastResetAt = Date.now();
+}
+
 function createPrismaClient(): PrismaClient {
   const client = new PrismaClient({
     log:
@@ -21,6 +78,9 @@ function createPrismaClient(): PrismaClient {
             { emit: 'event', level: 'warn' },
             { emit: 'event', level: 'error' },
           ],
+    // Prisma 5 datasource configuration is done via the DATABASE_URL,
+    // but we document the recommended pool settings here:
+    // datasourceUrl: config.db.url + '?connection_limit=10&pool_timeout=20'
   });
 
   return client;
@@ -30,11 +90,16 @@ function createPrismaClient(): PrismaClient {
 export const db: PrismaClient =
   global.__prisma ?? (global.__prisma = createPrismaClient());
 
-// ─── Query logging (dev only) ────────────────────────────────────────────────
+// ─── Query logging & metrics (dev only for detailed, all envs for slow) ─────
+const SLOW_QUERY_THRESHOLD_MS = config.isDev ? 200 : 500;
+
 if (config.isDev) {
-  const SLOW_QUERY_THRESHOLD_MS = 200;
   db.$on('query' as any, (e: any) => {
+    queryMetrics.totalQueries++;
+    queryMetrics.totalDurationMs += (e.duration ?? 0);
+
     if (e.duration > SLOW_QUERY_THRESHOLD_MS) {
+      queryMetrics.slowQueries++;
       logger.warn('Slow query detected', {
         query: e.query?.slice(0, 500),
         params: e.params?.slice(0, 200),

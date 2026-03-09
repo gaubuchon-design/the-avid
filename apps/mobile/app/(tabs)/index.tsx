@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, memo } from 'react';
 import {
   View,
   Text,
@@ -98,7 +98,7 @@ interface ProjectCardProps {
   theme: AppTheme;
 }
 
-function ProjectCard({ project, onPress, onLongPress, theme }: ProjectCardProps) {
+const ProjectCard = memo(function ProjectCard({ project, onPress, onLongPress, theme }: ProjectCardProps) {
   const templateColor = TEMPLATE_COLOR_MAP[project.template] ?? theme.colors.primary;
   const templateIcon = TEMPLATE_ICON_MAP[project.template] ?? '?';
 
@@ -211,7 +211,7 @@ function ProjectCard({ project, onPress, onLongPress, theme }: ProjectCardProps)
       </View>
     </Pressable>
   );
-}
+});
 
 const cardStyles = StyleSheet.create({
   card: {

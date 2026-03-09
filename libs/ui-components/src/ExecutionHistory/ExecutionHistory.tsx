@@ -1,4 +1,4 @@
-import React, { forwardRef } from 'react';
+import React, { forwardRef, memo } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -130,7 +130,10 @@ function formatTimestamp(iso: string): string {
  * Scrollable history of past agent executions. Shows status, progress,
  * token usage, and provides undo and inspect affordances.
  */
-export const ExecutionHistory = forwardRef<HTMLDivElement, ExecutionHistoryProps>(
+/** Memoized sub-component to avoid re-rendering status icons on every parent render. */
+const MemoStatusIcon = memo(StatusIcon);
+
+export const ExecutionHistory = memo(forwardRef<HTMLDivElement, ExecutionHistoryProps>(
   function ExecutionHistory(
     {
       entries,
@@ -142,7 +145,7 @@ export const ExecutionHistory = forwardRef<HTMLDivElement, ExecutionHistoryProps
     ref,
   ) {
     return (
-      <div ref={ref} className={cx('execution-history', className)} role="region" aria-label="Execution history">
+      <div ref={ref} className={cx('execution-history', className)} role="region" aria-label="Execution history" style={{ contain: 'layout style' }}>
         {/* -- Header --------------------------------------------------- */}
         <div className="execution-history-header">
           <span className="execution-history-title">History</span>
@@ -174,7 +177,7 @@ export const ExecutionHistory = forwardRef<HTMLDivElement, ExecutionHistoryProps
               return (
                 <li key={entry.id} className="history-entry" aria-label={`${entry.intent} - ${entry.status}`}>
                   <span className={`history-entry-status history-entry-status--${variant}`}>
-                    <StatusIcon status={entry.status} />
+                    <MemoStatusIcon status={entry.status} />
                   </span>
 
                   <div className="history-entry-body">
@@ -231,4 +234,4 @@ export const ExecutionHistory = forwardRef<HTMLDivElement, ExecutionHistoryProps
       </div>
     );
   },
-);
+));
