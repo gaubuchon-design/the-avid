@@ -5,6 +5,7 @@ import { db } from '../db/client';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import type { JwtPayload } from '../middleware/auth';
+import { renderFarmService } from '../services/renderfarm.service';
 
 // ─── Event types ───────────────────────────────────────────────────────────────
 export interface ServerToClientEvents {
@@ -24,6 +25,18 @@ export interface ServerToClientEvents {
   'lock:acquired': (payload: { resourceType: string; resourceId: string; userId: string }) => void;
   'lock:released': (payload: { resourceType: string; resourceId: string }) => void;
   error: (payload: { message: string; code: string }) => void;
+
+  // Render Farm events
+  'render:worker:registered': (payload: { node: any }) => void;
+  'render:worker:updated': (payload: { nodeId: string; patch: any }) => void;
+  'render:worker:disconnected': (payload: { nodeId: string }) => void;
+  'render:worker:heartbeat': (payload: { nodeId: string; metrics: any }) => void;
+  'render:job:queued': (payload: { job: any }) => void;
+  'render:job:progress': (payload: { jobId: string; progress: number; segmentId?: string }) => void;
+  'render:job:status': (payload: { jobId: string; status: string; error?: string }) => void;
+  'render:job:complete': (payload: { jobId: string; outputPath: string; outputSize?: number }) => void;
+  'render:job:failed': (payload: { jobId: string; error: string }) => void;
+  'render:farm:stats': (payload: any) => void;
 }
 
 export interface ClientToServerEvents {
@@ -32,6 +45,15 @@ export interface ClientToServerEvents {
   'timeline:operation': (payload: TimelineOperation) => void;
   'playhead:move': (payload: { timelineId: string; position: number }) => void;
   'cursor:move': (payload: { x: number; y: number }) => void;
+
+  // Render Farm client events
+  'render:join': (callback: (ok: boolean) => void) => void;
+  'render:worker:add': (payload: { hostname: string; port: number }) => void;
+  'render:worker:remove': (payload: { nodeId: string }) => void;
+  'render:job:submit': (payload: any) => void;
+  'render:job:cancel': (payload: { jobId: string }) => void;
+  'render:queue:start': () => void;
+  'render:queue:pause': () => void;
 }
 
 export interface TimelineOperation {
@@ -137,6 +159,50 @@ export function initWebSocket(httpServer: HttpServer) {
       });
     });
 
+    // ── Render Farm Events ─────────────────────────────────────────────────
+    socket.on('render:join', (callback) => {
+      socket.join('render');
+      logger.debug(`${user.displayName} joined render farm room`);
+      callback(true);
+    });
+
+    socket.on('render:worker:add', (payload) => {
+      const node = renderFarmService.registerWorker({
+        hostname: payload.hostname,
+        ip: '0.0.0.0',
+        port: payload.port,
+        workerTypes: ['render'],
+      });
+      socket.emit('render:worker:registered', { node });
+    });
+
+    socket.on('render:worker:remove', (payload) => {
+      renderFarmService.removeWorker(payload.nodeId);
+    });
+
+    socket.on('render:job:submit', (payload) => {
+      const job = renderFarmService.submitJob(payload);
+      socket.emit('render:job:queued', { job });
+    });
+
+    socket.on('render:job:cancel', (payload) => {
+      renderFarmService.cancelJob(payload.jobId);
+    });
+
+    socket.on('render:queue:start', () => {
+      renderFarmService.scheduleNext();
+    });
+
+    socket.on('render:queue:pause', () => {
+      // Pause all queued jobs
+      const jobs = renderFarmService.getJobs();
+      for (const job of jobs) {
+        if (job.status === 'queued') {
+          renderFarmService.pauseJob(job.id);
+        }
+      }
+    });
+
     // Disconnect
     socket.on('disconnect', () => {
       socketUsers.delete(socket.id);
@@ -171,6 +237,11 @@ export function initWebSocket(httpServer: HttpServer) {
     }).catch(logger.error);
   }
 
+  // ─── Render Farm broadcast wiring ──────────────────────────────────────────
+  renderFarmService.onBroadcast = (event: string, payload: any) => {
+    io.to('render').emit(event as any, payload);
+  };
+
   // ─── Utility: broadcast to project ──────────────────────────────────────────
   return {
     io,
@@ -178,5 +249,8 @@ export function initWebSocket(httpServer: HttpServer) {
       io.to(`project:${projectId}`).emit(event as any, payload);
     },
     getProjectUsers: (projectId: string) => projectSessions.get(projectId) ?? new Set<string>(),
+    broadcastToRender: (event: keyof ServerToClientEvents, payload: unknown) => {
+      io.to('render').emit(event as any, payload);
+    },
   };
 }

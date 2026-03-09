@@ -25,6 +25,7 @@ import brandRoutes from './routes/brand';
 import protoolsRoutes from './routes/protools';
 import nexisRoutes from './routes/nexis';
 import creatorRoutes from './routes/creator';
+import renderRoutes from './routes/render';
 
 // ─── App Setup ─────────────────────────────────────────────────────────────────
 const app = express();
@@ -115,6 +116,7 @@ api.use('/brand', brandRoutes);
 api.use('/protools', protoolsRoutes);
 api.use('/nexis', nexisRoutes);
 api.use('/creator', creatorRoutes);
+api.use('/render', renderRoutes);
 
 app.use('/api/v1', api);
 

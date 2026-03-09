@@ -70,7 +70,7 @@ class VideoSourceManager {
     // Wait for metadata
     return new Promise<VideoSource>((resolve, reject) => {
       video.addEventListener('loadedmetadata', () => {
-        source.duration = video.duration;
+        source.duration = isFinite(video.duration) ? video.duration : 0;
         source.width = video.videoWidth;
         source.height = video.videoHeight;
         source.ready = true;
@@ -166,7 +166,9 @@ class VideoSourceManager {
   seekTo(time: number): void {
     const source = this.getActiveSource();
     if (!source?.element || !source.ready) return;
-    const clampedTime = Math.max(0, Math.min(time, source.duration));
+    if (!isFinite(time)) return;
+    const maxDur = isFinite(source.duration) && source.duration > 0 ? source.duration : Infinity;
+    const clampedTime = Math.max(0, Math.min(time, maxDur));
     if (Math.abs(source.element.currentTime - clampedTime) > 0.01) {
       source.element.currentTime = clampedTime;
     }
@@ -179,9 +181,11 @@ class VideoSourceManager {
   async seekToExactFrame(assetId: string, timeSeconds: number): Promise<ImageBitmap | null> {
     const source = this.sources.get(assetId);
     if (!source?.element || !source.ready) return null;
+    if (!isFinite(timeSeconds)) return null;
 
     const video = source.element;
-    const clampedTime = Math.max(0, Math.min(timeSeconds, source.duration));
+    const maxDur = isFinite(source.duration) && source.duration > 0 ? source.duration : video.duration;
+    const clampedTime = Math.max(0, isFinite(maxDur) ? Math.min(timeSeconds, maxDur) : timeSeconds);
 
     // If already at the right time (within half-frame tolerance), capture directly
     if (Math.abs(video.currentTime - clampedTime) < 0.01 && video.readyState >= 2) {

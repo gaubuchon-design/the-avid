@@ -1,8 +1,12 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import { playbackEngine } from '../engine/PlaybackEngine';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
+//
+// Player store manages SOURCE MONITOR state only.
+// Timeline playback is managed by editor.store.ts via PlaybackEngine.
+// This store is decoupled — it just sets boolean flags. The SourceMonitor
+// component reacts to isPlaying by calling video.play()/pause() directly.
 
 export type ScopeType = 'waveform' | 'vectorscope' | 'histogram' | 'parade';
 
@@ -52,101 +56,20 @@ export const usePlayerStore = create<PlayerState & PlayerActions>()(
     showSafeZones: false,
     activeScope: null,
 
-    // Actions
-    play: () => {
-      playbackEngine.play();
-      set((s) => {
-        s.isPlaying = true;
-      });
-    },
-
-    pause: () => {
-      playbackEngine.pause();
-      set((s) => {
-        s.isPlaying = false;
-      });
-    },
-
-    stop: () => {
-      playbackEngine.stop();
-      set((s) => {
-        s.isPlaying = false;
-        s.speed = 1;
-        s.currentFrame = playbackEngine.currentFrame;
-      });
-    },
-
-    seekFrame: (frame) => {
-      playbackEngine.seekToFrame(frame);
-      set((s) => {
-        s.currentFrame = frame;
-      });
-    },
-
-    setSpeed: (speed) => {
-      playbackEngine.setSpeed(speed);
-      set((s) => {
-        s.speed = speed;
-      });
-    },
-
-    setInPoint: (frame) => {
-      if (frame !== null) playbackEngine.setInPoint(frame);
-      set((s) => {
-        s.inPoint = frame;
-      });
-    },
-
-    setOutPoint: (frame) => {
-      if (frame !== null) playbackEngine.setOutPoint(frame);
-      set((s) => {
-        s.outPoint = frame;
-      });
-    },
-
-    clearInOut: () => {
-      playbackEngine.clearInOut();
-      set((s) => {
-        s.inPoint = null;
-        s.outPoint = null;
-      });
-    },
-
-    toggleLoop: () =>
-      set((s) => {
-        s.loopPlayback = !s.loopPlayback;
-      }),
-
-    setSourceClip: (clipId) =>
-      set((s) => {
-        s.sourceClipId = clipId;
-      }),
-
-    setActiveMonitor: (monitor) =>
-      set((s) => {
-        s.activeMonitor = monitor;
-      }),
-
-    toggleSafeZones: () =>
-      set((s) => {
-        s.showSafeZones = !s.showSafeZones;
-      }),
-
-    setActiveScope: (scope) =>
-      set((s) => {
-        s.activeScope = scope;
-      }),
-
-    syncFromEngine: (frame) =>
-      set((s) => {
-        s.currentFrame = frame;
-        s.isPlaying = playbackEngine.isPlaying;
-        s.speed = playbackEngine.speed;
-      }),
+    // Actions — pure state setters; SourceMonitor reacts via useEffect
+    play: () => set((s) => { s.isPlaying = true; }),
+    pause: () => set((s) => { s.isPlaying = false; }),
+    stop: () => set((s) => { s.isPlaying = false; s.speed = 1; s.currentFrame = 0; }),
+    seekFrame: (frame) => set((s) => { s.currentFrame = frame; }),
+    setSpeed: (speed) => set((s) => { s.speed = Math.max(-8, Math.min(8, speed)); }),
+    setInPoint: (frame) => set((s) => { s.inPoint = frame; }),
+    setOutPoint: (frame) => set((s) => { s.outPoint = frame; }),
+    clearInOut: () => set((s) => { s.inPoint = null; s.outPoint = null; }),
+    toggleLoop: () => set((s) => { s.loopPlayback = !s.loopPlayback; }),
+    setSourceClip: (clipId) => set((s) => { s.sourceClipId = clipId; }),
+    setActiveMonitor: (monitor) => set((s) => { s.activeMonitor = monitor; }),
+    toggleSafeZones: () => set((s) => { s.showSafeZones = !s.showSafeZones; }),
+    setActiveScope: (scope) => set((s) => { s.activeScope = scope; }),
+    syncFromEngine: (frame) => set((s) => { s.currentFrame = frame; }),
   }))
 );
-
-// Wire up engine -> store sync
-playbackEngine.subscribe((frame) => {
-  usePlayerStore.getState().syncFromEngine(frame);
-});
