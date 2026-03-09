@@ -260,7 +260,7 @@ class MediaProbeEngineClass {
       fps,
       codec,
       colorSpace,
-      hasAlpha: false, // Video alpha rare in browser-playable formats
+      hasAlpha: await this.detectVideoAlpha(file),
       audioChannels,
       sampleRate,
       fileSize: file.size,
@@ -333,6 +333,42 @@ class MediaProbeEngineClass {
       mimeType: file.type,
       waveformData,
     };
+  }
+
+  /**
+   * Detect if a video file contains an alpha channel.
+   * Uses WebCodecs VideoFrame API when available to check pixel format,
+   * and falls back to extension-based heuristics for known alpha-capable codecs.
+   */
+  private async detectVideoAlpha(file: File): Promise<boolean> {
+    // Extension-based heuristic: formats known to support alpha
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+    const alphaCapableExts = ['mov', 'webm', 'mkv', 'avi']; // ProRes 4444, VP9, etc.
+    const alphaCodecHints = ['prores', '4444', 'vp9', 'vp09', 'hap'];
+
+    // Check if format can carry alpha at all
+    if (!alphaCapableExts.includes(ext)) return false;
+
+    // Try WebCodecs VideoFrame API to detect actual pixel format
+    if (typeof VideoFrame !== 'undefined') {
+      try {
+        const blob = file.slice(0, 2 * 1024 * 1024); // Read first 2MB
+        const bitmap = await createImageBitmap(blob);
+        const frame = new VideoFrame(bitmap, { timestamp: 0 });
+        const format = (frame as any).format as string | undefined;
+        frame.close();
+        bitmap.close();
+        // RGBA/BGRA formats have alpha; RGBX/I420/NV12 do not
+        if (format && (format.includes('RGBA') || format.includes('BGRA'))) {
+          return true;
+        }
+        if (format) return false; // Known format without alpha
+      } catch { /* fall through to heuristic */ }
+    }
+
+    // Codec name heuristic — if codec suggests alpha capability
+    const codec = EXTENSION_CODEC_MAP[ext]?.toLowerCase() ?? '';
+    return alphaCodecHints.some((hint) => codec.includes(hint));
   }
 
   private async extractImage(file: File, onProgress?: (p: number) => void): Promise<ExtractedMetadata> {

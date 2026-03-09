@@ -17,6 +17,9 @@ import { SequenceDialog } from '../components/SequenceDialog/SequenceDialog';
 import { TitleTool } from '../components/TitleTool/TitleTool';
 import { SubtitleEditor } from '../components/SubtitleEditor/SubtitleEditor';
 import { useEditorStore } from '../store/editor.store';
+import { AlphaImportDialog } from '../components/AlphaImportDialog/AlphaImportDialog';
+import { TrackerPanel } from '../components/TrackerPanel/TrackerPanel';
+import { TrackingOverlay } from '../components/TrackerPanel/TrackingOverlay';
 import { type WorkspacePreset, workspacePresets } from '../App';
 import { PageNavigation, type EditorPage as PageId } from '../components/PageNavigation/PageNavigation';
 import { MediaPage } from './MediaPage';
@@ -129,7 +132,8 @@ function VerticalSidePanel({ workspace }: { workspace: WorkspacePreset }) {
 export function EditorPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams] = useSearchParams();
-  const { showAIPanel, showExportPanel, showTranscriptPanel, toggleExportPanel, loadProject, showInspector, showNewProjectDialog, showSequenceDialog, showTitleTool, showSubtitleEditor } = useEditorStore();
+  const { showAIPanel, showExportPanel, showTranscriptPanel, toggleExportPanel, loadProject, showInspector, showNewProjectDialog, showSequenceDialog, showTitleTool, showSubtitleEditor, showAlphaImportDialog } = useEditorStore();
+  const [showTracker, setShowTracker] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [workspace, setWorkspace] = useState<WorkspacePreset>(
     (searchParams.get('workspace') as WorkspacePreset) || 'filmtv'
@@ -153,6 +157,11 @@ export function EditorPage() {
       if ((e.metaKey || e.ctrlKey) && e.key === 'm') {
         e.preventDefault();
         setShowMultiCam(prev => !prev);
+      }
+      // ⌘T / Ctrl+T to toggle planar tracker panel
+      if ((e.metaKey || e.ctrlKey) && e.key === 't') {
+        e.preventDefault();
+        setShowTracker(prev => !prev);
       }
       // Shift+1-5 to switch pages (Resolve-style)
       if (e.shiftKey && !e.metaKey && !e.ctrlKey) {
@@ -201,8 +210,12 @@ export function EditorPage() {
                 ) : (
                   <ComposerPanel />
                 )}
+                {/* Tracking ROI overlay on top of monitor canvas */}
+                {showTracker && <TrackingOverlay width={1920} height={1080} />}
                 {showAIPanel && <AIPanel />}
               </div>
+              {/* Planar tracker side panel */}
+              {showTracker && <TrackerPanel />}
               {hasVerticalPanel && (
                 <div className="vertical-panel" style={{
                   width: 340,
@@ -267,6 +280,9 @@ export function EditorPage() {
       {/* New dialogs & panels */}
       {showNewProjectDialog && <NewProjectDialog />}
       {showSequenceDialog && <SequenceDialog />}
+
+      {/* Alpha channel import dialog (shown when alpha detected on media ingest) */}
+      {showAlphaImportDialog && <AlphaImportDialog />}
       {showTitleTool && (
         <div style={{
           position: 'fixed', top: 40, right: showInspector ? 340 : 0, bottom: 40,
