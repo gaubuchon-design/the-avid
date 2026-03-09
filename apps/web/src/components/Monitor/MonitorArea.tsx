@@ -1,21 +1,26 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react';
 import { useEditorStore } from '../../store/editor.store';
-import { Timecode } from '../../lib/timecode';
-import { videoSourceManager } from '../../engine/VideoSourceManager';
-import { effectsEngine } from '../../engine/EffectsEngine';
-import { renderTitle } from '../../engine/TitleRenderer';
 import { useTitleStore } from '../../store/title.store';
+import { Timecode } from '../../lib/timecode';
+import {
+  compositeRecordFrame,
+  findActiveClip,
+  syncVideoPlayback,
+  pauseVideoSource,
+  tryLoadClipSource,
+} from '../../engine/compositeRecordFrame';
 
 /**
- * MonitorArea — Real video playback and compositing.
+ * MonitorArea — Full-record mode composited monitor.
  *
- * Renders video frames onto a <canvas> element, applies effects via
- * EffectsEngine pixel processing, and composites titles/subtitles on top.
+ * Uses the shared compositing pipeline for full compositing:
+ * intrinsic transforms + effects + titles + subtitles + safe zones.
+ * Identical output to RecordMonitor (dual mode).
  */
 export function MonitorArea() {
   const {
     isPlaying, togglePlay, playheadTime, setPlayhead, showSafeZones, duration,
-    tracks, selectedClipIds, sourceAsset, inPoint, outPoint, isFullscreen,
+    tracks, selectedClipIds, inPoint, outPoint, isFullscreen,
     projectSettings,
   } = useEditorStore();
 
@@ -25,10 +30,9 @@ export function MonitorArea() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
   const scrubRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>();
-  const [videoLoaded, setVideoLoaded] = useState(false);
+  const lastClipIdRef = useRef<string | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 640, h: 360 });
 
   // Calculate progress
@@ -49,11 +53,9 @@ export function MonitorArea() {
         const containerAR = cw / ch;
         let w: number, h: number;
         if (containerAR > aspectRatio) {
-          // Container is wider — fit to height
           h = Math.floor(ch);
           w = Math.floor(h * aspectRatio);
         } else {
-          // Container is taller — fit to width
           w = Math.floor(cw);
           h = Math.floor(w / aspectRatio);
         }
@@ -65,224 +67,83 @@ export function MonitorArea() {
     return () => observer.disconnect();
   }, [aspectRatio]);
 
-  // ── Load video when sourceAsset changes ────────────────────────────────
+  // ── Continuous RAF render loop ─────────────────────────────────────────
+  // Uses the shared compositing pipeline for full compositing:
+  // intrinsic transforms + effects + titles + subtitles + safe zones.
   useEffect(() => {
-    const asset = sourceAsset;
-    if (!asset?.playbackUrl) {
-      setVideoLoaded(false);
-      return;
-    }
-
-    const video = videoRef.current;
-    if (!video) return;
-
-    video.src = asset.playbackUrl;
-    video.load();
-
-    const onLoaded = () => {
-      setVideoLoaded(true);
-      // Set active source in manager
-      videoSourceManager.setActiveSource(asset.id);
-    };
-
-    video.addEventListener('loadedmetadata', onLoaded, { once: true });
-    return () => video.removeEventListener('loadedmetadata', onLoaded);
-  }, [sourceAsset?.playbackUrl, sourceAsset?.id]);
-
-  // ── Find active video clip at playhead ──────────────────────────────────
-  const getActiveVideoClip = useCallback(() => {
-    // Find the topmost video track with a clip at the playhead
-    const videoTracks = tracks
-      .filter((t) => t.type === 'VIDEO' && !t.muted)
-      .sort((a, b) => a.sortOrder - b.sortOrder);
-
-    for (const track of videoTracks) {
-      for (const clip of track.clips) {
-        if (playheadTime >= clip.startTime && playheadTime < clip.endTime) {
-          return clip;
-        }
-      }
-    }
-    return null;
-  }, [tracks, playheadTime]);
-
-  // ── Render loop — draw video frame + effects onto canvas ───────────────
-  const renderFrame = useCallback(() => {
     const canvas = canvasRef.current;
-    const video = videoRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const render = () => {
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { rafRef.current = requestAnimationFrame(render); return; }
 
-    const { w, h } = canvasSize;
-    canvas.width = w;
-    canvas.height = h;
+      const { w, h } = canvasSize;
+      canvas.width = w;
+      canvas.height = h;
 
-    // Clear canvas
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, w, h);
+      // Read latest state (non-reactive inside RAF)
+      const state = useEditorStore.getState();
+      const titleState = useTitleStore.getState();
 
-    // Draw video frame if available
-    if (video && videoLoaded && video.readyState >= 2) {
-      // Calculate letterboxing
-      const videoAR = video.videoWidth / video.videoHeight;
-      let drawW = w, drawH = h, drawX = 0, drawY = 0;
+      // Sync video playback for the active clip
+      const activeClip = findActiveClip(state.tracks, state.playheadTime);
 
-      if (videoAR > aspectRatio) {
-        drawH = Math.floor(w / videoAR);
-        drawY = Math.floor((h - drawH) / 2);
-      } else if (videoAR < aspectRatio) {
-        drawW = Math.floor(h * videoAR);
-        drawX = Math.floor((w - drawW) / 2);
+      // Handle clip transitions: pause old clip, start new
+      if (activeClip?.assetId !== lastClipIdRef.current) {
+        if (lastClipIdRef.current) {
+          pauseVideoSource(lastClipIdRef.current);
+        }
+        lastClipIdRef.current = activeClip?.assetId ?? null;
       }
 
-      ctx.drawImage(video, drawX, drawY, drawW, drawH);
-
-      // Apply effects if any clip is selected
-      const activeClip = getActiveVideoClip();
+      // Sync playback for the active clip
       if (activeClip) {
-        const clipEffects = effectsEngine.getClipEffects(activeClip.id);
-        if (clipEffects.length > 0) {
-          const imageData = ctx.getImageData(0, 0, w, h);
-          const currentFrame = Math.floor(playheadTime * (projectSettings?.frameRate || 24));
-          effectsEngine.processFrame(imageData, clipEffects, currentFrame);
-          ctx.putImageData(imageData, 0, 0);
-        }
+        syncVideoPlayback(activeClip, state.isPlaying, state.playheadTime, state.sequenceSettings.fps);
       }
-    } else if (sourceAsset) {
-      // No video loaded but asset selected — show info
-      ctx.fillStyle = '#1a1a2e';
-      ctx.fillRect(0, 0, w, h);
-      ctx.fillStyle = 'rgba(124, 92, 252, 0.3)';
-      ctx.font = `${Math.max(24, w * 0.05)}px system-ui`;
-      ctx.textAlign = 'center';
-      ctx.fillText(sourceAsset.type === 'AUDIO' ? '♪' : '▶', w / 2, h / 2 - 10);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-      ctx.font = `${Math.max(11, w * 0.02)}px system-ui`;
-      ctx.fillText(sourceAsset.name, w / 2, h / 2 + 20);
-    }
 
-    // ── Composite title graphics (GRAPHIC track) ────────────────
-    const currentTitle = useTitleStore.getState().currentTitle;
-    if (currentTitle && useTitleStore.getState().isEditing) {
-      const currentFrame = Math.floor(playheadTime * (projectSettings?.frameRate || 24));
-      renderTitle(ctx, currentTitle, w, h, currentFrame, projectSettings?.frameRate || 24);
-    }
-
-    // Render title clips from store
-    const { titleClips } = useEditorStore.getState();
-    const graphicTracks = tracks.filter(t => t.type === 'GRAPHIC' && !t.muted);
-    for (const gTrack of graphicTracks) {
-      for (const clip of gTrack.clips) {
-        if (playheadTime >= clip.startTime && playheadTime < clip.endTime) {
-          const titleData = titleClips.find(tc => tc.id === clip.assetId);
-          if (titleData) {
-            const clipFrame = Math.floor((playheadTime - clip.startTime) * (projectSettings?.frameRate || 24));
-            renderTitle(ctx, titleData as any, w, h, clipFrame, projectSettings?.frameRate || 24);
-          }
-        }
+      // Try loading unloaded clip sources
+      if (activeClip?.assetId) {
+        tryLoadClipSource(activeClip.assetId, state.bins as any);
       }
-    }
 
-    // ── Composite subtitles (SUBTITLE track) ─────────────────────
-    const { subtitleTracks } = useEditorStore.getState();
-    const subTracks = tracks.filter(t => t.type === 'SUBTITLE' && !t.muted);
-    for (const sTrack of subTracks) {
-      for (const clip of sTrack.clips) {
-        if (playheadTime >= clip.startTime && playheadTime < clip.endTime) {
-          // Find matching subtitle cue
-          for (const subTrack of subtitleTracks) {
-            for (const cue of subTrack.cues) {
-              if (playheadTime >= cue.start && playheadTime < cue.end) {
-                // Render subtitle text
-                const fontSize = cue.style?.fontSize || Math.max(16, w * 0.028);
-                const yPos = cue.style?.position === 'top' ? h * 0.08 : h * 0.88;
-                ctx.save();
-                ctx.font = `${fontSize}px system-ui, sans-serif`;
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                // Background bar
-                const textWidth = ctx.measureText(cue.text).width;
-                const bgOpacity = cue.style?.bgOpacity ?? 0.7;
-                ctx.fillStyle = `rgba(0, 0, 0, ${bgOpacity})`;
-                ctx.fillRect(
-                  w / 2 - textWidth / 2 - 12,
-                  yPos - fontSize / 2 - 4,
-                  textWidth + 24,
-                  fontSize + 8,
-                );
-                // Text
-                ctx.fillStyle = cue.style?.color || '#ffffff';
-                ctx.fillText(cue.text, w / 2, yPos);
-                ctx.restore();
-              }
-            }
-          }
-          break; // Only render first matching subtitle track clip
-        }
-      }
-    }
+      // Composite the full frame
+      compositeRecordFrame({
+        ctx,
+        canvasW: w,
+        canvasH: h,
+        playheadTime: state.playheadTime,
+        tracks: state.tracks,
+        fps: state.sequenceSettings.fps,
+        aspectRatio: 16 / 9,
+        showSafeZones: state.showSafeZones,
+        isPlaying: state.isPlaying,
+        titleClips: state.titleClips,
+        subtitleTracks: state.subtitleTracks,
+        currentTitle: titleState.currentTitle,
+        isTitleEditing: titleState.isEditing,
+      });
 
-    // Safe zones overlay
-    if (showSafeZones) {
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
-      // Action safe (90%)
-      const actionInset = 0.05;
-      ctx.strokeRect(
-        w * actionInset, h * actionInset,
-        w * (1 - 2 * actionInset), h * (1 - 2 * actionInset)
-      );
-      // Title safe (80%)
-      const titleInset = 0.1;
-      ctx.strokeRect(
-        w * titleInset, h * titleInset,
-        w * (1 - 2 * titleInset), h * (1 - 2 * titleInset)
-      );
-      ctx.setLineDash([]);
-    }
-  }, [canvasSize, videoLoaded, sourceAsset, showSafeZones, playheadTime, getActiveVideoClip, projectSettings?.frameRate, aspectRatio]);
-
-  // ── Sync video seek with playhead ──────────────────────────────────────
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !videoLoaded) return;
-    if (!isPlaying) {
-      // When scrubbing, seek the video to match the playhead
-      const activeClip = getActiveVideoClip();
-      if (activeClip) {
-        const clipTime = playheadTime - activeClip.startTime + activeClip.trimStart;
-        if (Math.abs(video.currentTime - clipTime) > 0.05) {
-          video.currentTime = Math.max(0, clipTime);
-        }
-      }
-    }
-  }, [playheadTime, isPlaying, videoLoaded, getActiveVideoClip]);
-
-  // ── Play/pause video with transport ────────────────────────────────────
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !videoLoaded) return;
-    if (isPlaying) {
-      video.play().catch(() => {});
-    } else {
-      video.pause();
-    }
-  }, [isPlaying, videoLoaded]);
-
-  // ── Continuous render loop ─────────────────────────────────────────────
-  useEffect(() => {
-    const tick = () => {
-      renderFrame();
-      rafRef.current = requestAnimationFrame(tick);
+      rafRef.current = requestAnimationFrame(render);
     };
-    rafRef.current = requestAnimationFrame(tick);
+
+    rafRef.current = requestAnimationFrame(render);
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [renderFrame]);
+  }, [canvasSize]);
+
+  // Auto-inspect clip at playhead (Premiere Pro behavior — Inspector shows
+  // properties for the clip currently visible in the record monitor)
+  useEffect(() => {
+    const state = useEditorStore.getState();
+    if (state.selectedClipIds.length === 0) {
+      const clip = findActiveClip(state.tracks, playheadTime);
+      if (clip) {
+        state.setInspectedClip(clip.id);
+      }
+    }
+  }, [playheadTime]);
 
   // ── Scrub bar ──────────────────────────────────────────────────────────
   const handleScrub = useCallback((e: React.MouseEvent) => {
@@ -339,15 +200,6 @@ export function MonitorArea() {
     <div className="composer-monitor" ref={containerRef} role="region" aria-label="Program Monitor">
       {/* Video canvas */}
       <div className="composer-canvas">
-        {/* Hidden video element — audio routes through Web Audio API */}
-        <video
-          ref={videoRef}
-          style={{ display: 'none' }}
-          playsInline
-          crossOrigin="anonymous"
-          preload="auto"
-        />
-
         {/* Visible canvas for composited output */}
         <canvas
           ref={canvasRef}

@@ -2,6 +2,10 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { mediaProbeEngine } from '../engine/MediaProbeEngine';
 import { mediaDatabaseEngine } from '../engine/MediaDatabaseEngine';
+import { videoSourceManager } from '../engine/VideoSourceManager';
+import { playbackEngine } from '../engine/PlaybackEngine';
+import { trackPatchingEngine } from '../engine/TrackPatchingEngine';
+import { usePlayerStore } from './player.store';
 import type { ProjectMediaSettings } from '../engine/MediaDatabaseEngine';
 export type { ProjectMediaSettings } from '../engine/MediaDatabaseEngine';
 
@@ -338,6 +342,7 @@ interface EditorState {
   // Selection
   selectedClipIds: string[];
   selectedTrackId: string | null;
+  inspectedClipId: string | null; // Decoupled from selection — set by match frame, auto-playhead, etc.
 
   // Bins
   bins: Bin[];
@@ -487,6 +492,7 @@ interface EditorActions {
   slipClip: (clipId: string, delta: number) => void;
   selectClip: (clipId: string, multi?: boolean) => void;
   clearSelection: () => void;
+  setInspectedClip: (clipId: string | null) => void;
 
   // Clip groups
   setClipGroup: (groupId: string, clipIds: string[]) => void;
@@ -531,6 +537,8 @@ interface EditorActions {
   deleteSelectedClips: () => void;
   duplicateClip: (clipId: string) => void;
   appendAssetToTimeline: (assetId: string) => void;
+  overwriteEdit: () => void;
+  insertEdit: () => void;
   razorAtPlayhead: () => void;
   matchFrame: () => void;
   addMarkerAtPlayhead: (label?: string) => void;
@@ -673,177 +681,26 @@ export function makeClip(base: Omit<Clip, 'intrinsicVideo' | 'intrinsicAudio' | 
   };
 }
 
-const DEMO_TRACKS: Track[] = [
-  {
-    id: 't-v3', name: 'V3', type: 'VIDEO', sortOrder: 0, muted: false, locked: true, solo: false, volume: 1,
-    color: '#5bbfc7',
-    clips: [
-      makeClip({ id: 'c-v3-1', trackId: 't-v3', name: 'day 1 take 5', startTime: 2, endTime: 14, trimStart: 0, trimEnd: 0, type: 'video' }),
-    ],
-  },
-  {
-    id: 't-v4', name: 'V4', type: 'VIDEO', sortOrder: 1, muted: false, locked: false, solo: false, volume: 1,
-    color: '#4ecdc4',
-    clips: [
-      makeClip({ id: 'c-v4-1', trackId: 't-v4', name: 'drone up', startTime: 14, endTime: 20, trimStart: 0, trimEnd: 0, type: 'video' }),
-      makeClip({ id: 'c-v4-2', trackId: 't-v4', name: 'timescope', startTime: 26, endTime: 32, trimStart: 0, trimEnd: 0, type: 'video' }),
-      makeClip({ id: 'c-v4-3', trackId: 't-v4', name: 'day 2 take 1', startTime: 32, endTime: 40, trimStart: 0, trimEnd: 0, type: 'video' }),
-    ],
-  },
-  {
-    id: 't-v2', name: 'V2', type: 'VIDEO', sortOrder: 2, muted: false, locked: false, solo: false, volume: 1,
-    color: '#818cf8',
-    clips: [
-      makeClip({ id: 'c-v2-1', trackId: 't-v2', name: 'Clip name', startTime: 8, endTime: 16, trimStart: 0, trimEnd: 0, type: 'video' }),
-    ],
-  },
-  {
-    id: 't-v1', name: 'V1', type: 'VIDEO', sortOrder: 3, muted: false, locked: false, solo: false, volume: 1,
-    color: '#5b6af5',
-    clips: [
-      makeClip({ id: 'c-v1-1', trackId: 't-v1', name: 'b-roll', startTime: 12, endTime: 22, trimStart: 0, trimEnd: 0, type: 'video' }),
-      makeClip({ id: 'c-v1-2', trackId: 't-v1', name: 'b-roll', startTime: 24, endTime: 30, trimStart: 0, trimEnd: 0, type: 'video' }),
-      makeClip({ id: 'c-v1-3', trackId: 't-v1', name: 'Clip name', startTime: 30, endTime: 38, trimStart: 0, trimEnd: 0, type: 'video' }),
-    ],
-  },
-  {
-    id: 't-a1', name: 'A1', type: 'AUDIO', sortOrder: 4, muted: false, locked: false, solo: false, volume: 0.85,
-    color: '#e05b8e',
-    clips: [
-      makeClip({ id: 'c-a1-1', trackId: 't-a1', name: 'My clip', startTime: 4, endTime: 16, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) }),
-      makeClip({ id: 'c-a1-2', trackId: 't-a1', name: 'My clip', startTime: 20, endTime: 38, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) }),
-    ],
-  },
-  {
-    id: 't-a2', name: 'A2', type: 'AUDIO', sortOrder: 5, muted: false, locked: false, solo: false, volume: 0.6,
-    color: '#4ade80',
-    clips: [
-      makeClip({ id: 'c-a2-1', trackId: 't-a2', name: 'My clip', startTime: 0, endTime: 10, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) }),
-      makeClip({ id: 'c-a2-2', trackId: 't-a2', name: 'My clip', startTime: 16, endTime: 28, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) }),
-    ],
-  },
-  {
-    id: 't-a3', name: 'A3', type: 'AUDIO', sortOrder: 6, muted: false, locked: false, solo: false, volume: 0.7,
-    color: '#e8943a',
-    clips: [
-      makeClip({ id: 'c-a3-1', trackId: 't-a3', name: 'My clip', startTime: 6, endTime: 18, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) }),
-      makeClip({ id: 'c-a3-2', trackId: 't-a3', name: 'My clip', startTime: 22, endTime: 40, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) }),
-    ],
-  },
-  {
-    id: 't-a4', name: 'A4', type: 'AUDIO', sortOrder: 7, muted: false, locked: false, solo: false, volume: 0.8,
-    color: '#f59e0b',
-    clips: [
-      makeClip({ id: 'c-a4-1', trackId: 't-a4', name: 'Music Track', startTime: 0, endTime: 40, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) }),
-    ],
-  },
+const INITIAL_TRACKS: Track[] = [
+  { id: 't-v1', name: 'V1', type: 'VIDEO', sortOrder: 0, muted: false, locked: false, solo: false, volume: 1, color: '#5b6af5', clips: [] },
+  { id: 't-v2', name: 'V2', type: 'VIDEO', sortOrder: 1, muted: false, locked: false, solo: false, volume: 1, color: '#818cf8', clips: [] },
+  { id: 't-a1', name: 'A1', type: 'AUDIO', sortOrder: 2, muted: false, locked: false, solo: false, volume: 0.85, color: '#e05b8e', clips: [] },
+  { id: 't-a2', name: 'A2', type: 'AUDIO', sortOrder: 3, muted: false, locked: false, solo: false, volume: 0.6, color: '#4ade80', clips: [] },
 ];
 
-const DEMO_BINS: Bin[] = [
-  {
-    id: 'b1', name: 'Rushes', color: '#5b6af5', isOpen: true, children: [
-      { id: 'b1a', name: 'Day 1', color: '#818cf8', isOpen: false, children: [], assets: [
-        { id: 'a1', name: 'Scene 01 - Take 01', type: 'VIDEO', duration: 45.2, status: 'READY', tags: ['dialogue'], isFavorite: true },
-        { id: 'a2', name: 'Scene 01 - Take 02', type: 'VIDEO', duration: 48.7, status: 'READY', tags: ['dialogue'], isFavorite: false },
-        { id: 'a3', name: 'Scene 02 - Take 01', type: 'VIDEO', duration: 22.1, status: 'READY', tags: ['action'], isFavorite: false },
-      ]},
-      { id: 'b1b', name: 'Day 2', color: '#818cf8', isOpen: false, children: [], assets: [
-        { id: 'a4', name: 'Scene 03 - Wide', type: 'VIDEO', duration: 67.5, status: 'READY', tags: ['wide-shot'], isFavorite: false },
-        { id: 'a5', name: 'Scene 03 - Close', type: 'VIDEO', duration: 31.2, status: 'READY', tags: ['close-up'], isFavorite: false },
-      ]},
-      { id: 'b1c', name: 'B-Roll', color: '#818cf8', isOpen: false, children: [], assets: [
-        { id: 'a6', name: 'City Timelapse', type: 'VIDEO', duration: 12.0, status: 'READY', tags: ['broll', 'city'], isFavorite: true },
-        { id: 'a7', name: 'Sky Clouds', type: 'VIDEO', duration: 8.5, status: 'READY', tags: ['broll'], isFavorite: false },
-      ]},
-    ],
-    assets: [],
-  },
-  {
-    id: 'b2', name: 'Music', color: '#2bb672', isOpen: false, children: [], assets: [
-      { id: 'a8', name: 'Main Theme', type: 'AUDIO', duration: 180.0, status: 'READY', tags: ['music'], isFavorite: true },
-      { id: 'a9', name: 'Tension Underscore', type: 'AUDIO', duration: 90.0, status: 'READY', tags: ['music', 'tension'], isFavorite: false },
-    ],
-  },
-  {
-    id: 'b3', name: 'Graphics', color: '#e8943a', isOpen: false, children: [], assets: [
-      { id: 'a10', name: 'Title Card', type: 'IMAGE', status: 'READY', tags: ['graphics'], isFavorite: false },
-      { id: 'a11', name: 'Lower Third', type: 'IMAGE', status: 'READY', tags: ['graphics'], isFavorite: false },
-    ],
-  },
-  { id: 'b4', name: 'Selects', color: '#e05b8e', isOpen: false, children: [], assets: [] },
+const INITIAL_BINS: Bin[] = [
+  { id: 'b-master', name: 'Master', color: '#5b6af5', isOpen: true, children: [], assets: [] },
+  { id: 'b-selects', name: 'Selects', color: '#e05b8e', isOpen: false, children: [], assets: [] },
 ];
 
-// ─── Smart Bins demo data ─────────────────────────────────────────────────────
-const DEMO_SMART_BINS: SmartBin[] = [
-  {
-    id: 'sb1', name: 'All Video', color: '#5bbfc7',
-    rules: [{ field: 'type', operator: 'equals', value: 'VIDEO' }],
-    matchAll: true,
-  },
-  {
-    id: 'sb2', name: 'Favorites', color: '#f59e0b',
-    rules: [{ field: 'favorite', operator: 'is', value: 'true' }],
-    matchAll: true,
-  },
-  {
-    id: 'sb3', name: 'Long Takes (>30s)', color: '#e05b8e',
-    rules: [{ field: 'duration', operator: 'greaterThan', value: '30' }],
-    matchAll: true,
-  },
-  {
-    id: 'sb4', name: 'Dialogue Clips', color: '#818cf8',
-    rules: [{ field: 'tag', operator: 'contains', value: 'dialogue' }],
-    matchAll: true,
-  },
-  {
-    id: 'sb5', name: 'Music & Audio', color: '#2bb672',
-    rules: [{ field: 'type', operator: 'equals', value: 'AUDIO' }],
-    matchAll: true,
-  },
+const INITIAL_SMART_BINS: SmartBin[] = [
+  { id: 'sb-favs', name: 'Favorites', color: '#f59e0b', rules: [{ field: 'favorite', operator: 'is', value: 'true' }], matchAll: true },
+  { id: 'sb-video', name: 'All Video', color: '#5bbfc7', rules: [{ field: 'type', operator: 'equals', value: 'VIDEO' }], matchAll: true },
 ];
 
-const DEMO_TRANSCRIPT: TranscriptCue[] = [
-  {
-    id: 'cue-1',
-    assetId: 'a1',
-    speaker: 'Director',
-    text: 'Hold on the wide a beat longer before the turn.',
-    startTime: 3.4,
-    endTime: 7.8,
-    source: 'SCRIPT',
-  },
-  {
-    id: 'cue-2',
-    assetId: 'a4',
-    speaker: 'Producer',
-    text: 'This is the clean establishing beat we use for the act break.',
-    startTime: 14.2,
-    endTime: 19.5,
-    source: 'TRANSCRIPT',
-  },
-];
-
-const DEMO_APPROVALS: Approval[] = [
-  {
-    id: 'approval-1',
-    reviewer: 'Sarah K.',
-    role: 'Executive Producer',
-    status: 'PENDING',
-    notes: 'Waiting on VFX temp and final music stem.',
-  },
-];
-
-const DEMO_REVIEW_COMMENTS: ReviewComment[] = [
-  {
-    id: 'comment-1',
-    author: 'Marcus T.',
-    role: 'Editor',
-    body: 'Try a shorter lead-in before the wide reveal.',
-    color: '#7c5cfc',
-    time: 12.4,
-    status: 'OPEN',
-  },
-];
+const INITIAL_TRANSCRIPT: TranscriptCue[] = [];
+const INITIAL_APPROVALS: Approval[] = [];
+const INITIAL_REVIEW_COMMENTS: ReviewComment[] = [];
 
 const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   width: 3840,
@@ -917,34 +774,36 @@ function getPreferredTrack(state: Pick<EditorState, 'tracks' | 'selectedTrackId'
   return matchingTrack ?? state.tracks.find((track) => !track.locked) ?? null;
 }
 
+// ─── Playback ────────────────────────────────────────────────────────────────
+// Timeline playback is driven by PlaybackEngine (RAF-based).
+// The store subscribes to frame updates and converts frames → seconds.
+
 // ─── Store creation ────────────────────────────────────────────────────────────
 export const useEditorStore = create<EditorState & EditorActions>()(
   immer((set, get) => ({
     // Initial state
     projectId: null,
-    projectName: 'Demo Feature Film',
+    projectName: 'Untitled Project',
     projectSettings: DEFAULT_PROJECT_SETTINGS,
     projectMediaSettings: { organizationMode: 'keep-in-place', generateProxies: false, proxyResolution: '1/2' as const },
     lastSavedAt: null,
     saveStatus: 'idle' as SaveStatus,
     ingestProgress: {},
     timelineId: null,
-    tracks: DEMO_TRACKS,
-    markers: [
-      { id: 'm1', time: 8.5, label: 'Scene 1 End', color: '#f59e0b' },
-      { id: 'm2', time: 22, label: 'Act Break', color: '#ef4444' },
-    ],
+    tracks: INITIAL_TRACKS,
+    markers: [],
     playheadTime: 0,
     isPlaying: false,
     zoom: 60,
     scrollLeft: 0,
-    duration: 40,
+    duration: 0,
     selectedClipIds: [],
     selectedTrackId: null,
-    bins: DEMO_BINS,
-    selectedBinId: 'b1a',
-    activeBinAssets: DEMO_BINS[0].children[0].assets,
-    smartBins: DEMO_SMART_BINS,
+    inspectedClipId: null,
+    bins: INITIAL_BINS,
+    selectedBinId: 'b-master',
+    activeBinAssets: [],
+    smartBins: INITIAL_SMART_BINS,
     selectedSmartBinId: null,
     sequenceSettings: {
       name: 'Sequence 1',
@@ -983,9 +842,9 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       { id: 'u2', displayName: 'Marcus T.', color: '#2bb672' },
     ],
     aiJobs: [],
-    transcript: DEMO_TRANSCRIPT,
-    reviewComments: DEMO_REVIEW_COMMENTS,
-    approvals: DEMO_APPROVALS,
+    transcript: INITIAL_TRANSCRIPT,
+    reviewComments: INITIAL_REVIEW_COMMENTS,
+    approvals: INITIAL_APPROVALS,
     publishJobs: [],
     desktopJobs: [],
     watchFolders: [],
@@ -1007,7 +866,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     recordOutPoint: null,
 
     // Track Patching State
-    enabledTrackIds: DEMO_TRACKS.map(t => t.id),
+    enabledTrackIds: INITIAL_TRACKS.map(t => t.id),
     syncLockedTrackIds: [],
 
     // Trim Mode State
@@ -1047,7 +906,21 @@ export const useEditorStore = create<EditorState & EditorActions>()(
 
     // Actions
     setPlayhead: (t) => set((s) => { s.playheadTime = Math.max(0, Math.min(t, s.duration)); }),
-    togglePlay: () => set((s) => { s.isPlaying = !s.isPlaying; }),
+    togglePlay: () => {
+      const wasPlaying = get().isPlaying;
+      set((s) => { s.isPlaying = !wasPlaying; });
+
+      if (!wasPlaying) {
+        // Start: sync PlaybackEngine from store and start RAF loop
+        const fps = get().sequenceSettings.fps;
+        playbackEngine.fps = fps;
+        playbackEngine.currentFrame = get().playheadTime * fps;
+        playbackEngine.play();
+      } else {
+        // Stop
+        playbackEngine.pause();
+      }
+    },
     setZoom: (z) => set((s) => { s.zoom = Math.max(10, Math.min(300, z)); }),
     setScrollLeft: (x) => set((s) => { s.scrollLeft = Math.max(0, x); }),
 
@@ -1156,8 +1029,11 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       } else {
         s.selectedClipIds = [clipId];
       }
+      // Clear inspected clip when user explicitly selects — selection takes precedence
+      s.inspectedClipId = null;
     }),
-    clearSelection: () => set((s) => { s.selectedClipIds = []; }),
+    clearSelection: () => set((s) => { s.selectedClipIds = []; s.inspectedClipId = null; }),
+    setInspectedClip: (clipId) => set((s) => { s.inspectedClipId = clipId; }),
 
     selectBin: (id) => set((s) => {
       s.selectedBinId = id;
@@ -1183,7 +1059,37 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     setClipGroup: (groupId, clipIds) => set((s) => { s.clipGroups[groupId] = clipIds; }),
     removeClipGroup: (groupId) => set((s) => { delete s.clipGroups[groupId]; }),
 
-    setSourceAsset: (asset) => set((s) => { s.sourceAsset = asset; }),
+    setSourceAsset: (asset) => {
+      set((s) => {
+        s.sourceAsset = asset;
+        s.sourceInPoint = null;
+        s.sourceOutPoint = null;
+        s.sourcePlayhead = 0;
+      });
+      // Load the video into VideoSourceManager for real playback
+      if (asset && (asset.fileHandle || asset.playbackUrl)) {
+        const urlOrFile = asset.fileHandle ?? asset.playbackUrl!;
+        videoSourceManager.loadSource(asset.id, urlOrFile).then((source) => {
+          videoSourceManager.setActiveSource(asset.id);
+          // Update duration from real video metadata if not already set
+          const dur = isFinite(source.duration) ? source.duration : 0;
+          if (dur > 0 && (!asset.duration || !isFinite(asset.duration) || asset.duration === 0)) {
+            set((s) => {
+              if (s.sourceAsset?.id === asset.id) {
+                s.sourceAsset.duration = dur;
+              }
+            });
+          }
+        }).catch((err) => {
+          console.warn('[setSourceAsset] Failed to load video:', err.message);
+        });
+        // Also set the player store source clip for SourceMonitor rendering
+        usePlayerStore.getState().setSourceClip(asset.id);
+      } else {
+        videoSourceManager.setActiveSource(null);
+        usePlayerStore.getState().setSourceClip(null);
+      }
+    },
     setInPoint: (t) => set((s) => { s.inPoint = t; }),
     setOutPoint: (t) => set((s) => { s.outPoint = t; }),
     toggleSafeZones: () => set((s) => { s.showSafeZones = !s.showSafeZones; }),
@@ -1266,8 +1172,206 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       targetTrack.clips.push(clip);
       s.selectedClipIds = [clip.id];
       s.sourceAsset = asset;
+      // Update timeline duration
+      if (clip.endTime > s.duration) s.duration = clip.endTime + 5;
       s.playheadTime = clip.endTime;
     }),
+
+    // Overwrite edit — places source clip at playhead, overwriting existing material
+    overwriteEdit: () => set((s) => {
+      const asset = s.sourceAsset;
+      if (!asset) return;
+
+      // Use source in/out points if set, otherwise use full clip duration
+      const srcIn = s.sourceInPoint ?? 0;
+      const srcOut = s.sourceOutPoint ?? (asset.duration ?? 6);
+      const editDuration = srcOut - srcIn;
+      if (editDuration <= 0) return;
+
+      const startTime = s.playheadTime;
+      const endTime = startTime + editDuration;
+
+      // Determine target tracks via track patching engine.
+      // If patches exist and are enabled, use only patched+enabled tracks.
+      // Otherwise fall back to the preferred track.
+      const patches = trackPatchingEngine.getPatches();
+      const enabledPatches = patches.filter((p) => p.enabled && trackPatchingEngine.isRecordTrackEnabled(p.recordTrackId));
+
+      const targetTracks: Track[] = [];
+      if (enabledPatches.length > 0) {
+        // Use patching — only edit onto patched+enabled record tracks
+        for (const patch of enabledPatches) {
+          const track = s.tracks.find((t) => t.id === patch.recordTrackId);
+          if (track && !track.locked) targetTracks.push(track);
+        }
+      } else {
+        // Fallback: use the preferred track (backward compat)
+        const fallback = getPreferredTrack(s, asset);
+        if (fallback) targetTracks.push(fallback);
+      }
+
+      if (targetTracks.length === 0) return;
+
+      const newClipIds: string[] = [];
+
+      for (const targetTrack of targetTracks) {
+        // Remove or trim overlapping clips in the target range
+        targetTrack.clips = targetTrack.clips.filter((c) => {
+          if (c.endTime <= startTime || c.startTime >= endTime) return true;
+          if (c.startTime >= startTime && c.endTime <= endTime) return false;
+          if (c.startTime < startTime && c.endTime > startTime && c.endTime <= endTime) {
+            c.endTime = startTime;
+            return true;
+          }
+          if (c.startTime >= startTime && c.startTime < endTime && c.endTime > endTime) {
+            c.trimStart += (endTime - c.startTime);
+            c.startTime = endTime;
+            return true;
+          }
+          if (c.startTime < startTime && c.endTime > endTime) {
+            const tailClip: Clip = makeClip({
+              id: createId('clip'),
+              trackId: targetTrack.id,
+              name: c.name,
+              startTime: endTime,
+              endTime: c.endTime,
+              trimStart: c.trimStart + (endTime - c.startTime),
+              trimEnd: c.trimEnd,
+              type: c.type,
+              assetId: c.assetId,
+              color: c.color,
+              waveformData: c.waveformData,
+            });
+            c.endTime = startTime;
+            targetTrack.clips.push(tailClip);
+            return true;
+          }
+          return true;
+        });
+
+        // Insert the new clip
+        const newClip: Clip = makeClip({
+          id: createId('clip'),
+          trackId: targetTrack.id,
+          name: asset.name,
+          startTime,
+          endTime,
+          trimStart: srcIn,
+          trimEnd: (asset.duration ?? srcOut) - srcOut,
+          type: getClipTypeForAsset(asset),
+          assetId: asset.id,
+          color: targetTrack.color,
+          waveformData: asset.waveformData,
+        });
+        targetTrack.clips.push(newClip);
+        targetTrack.clips.sort((a, b) => a.startTime - b.startTime);
+        newClipIds.push(newClip.id);
+      }
+
+      s.selectedClipIds = newClipIds;
+      if (endTime > s.duration) s.duration = endTime + 5;
+      s.playheadTime = endTime;
+    }),
+
+    // Insert edit — places source clip at playhead, pushing downstream clips forward.
+    // Patching-aware: uses trackPatchingEngine for target track selection.
+    // Sync-locked tracks receive compensating filler insertions.
+    insertEdit: () => set((s) => {
+      const asset = s.sourceAsset;
+      if (!asset) return;
+
+      const srcIn = s.sourceInPoint ?? 0;
+      const srcOut = s.sourceOutPoint ?? (asset.duration ?? 6);
+      const editDuration = srcOut - srcIn;
+      if (editDuration <= 0) return;
+
+      const startTime = s.playheadTime;
+      const endTime = startTime + editDuration;
+
+      // Determine target tracks via track patching
+      const patches = trackPatchingEngine.getPatches();
+      const enabledPatches = patches.filter((p) => p.enabled && trackPatchingEngine.isRecordTrackEnabled(p.recordTrackId));
+
+      const targetTracks: Track[] = [];
+      if (enabledPatches.length > 0) {
+        for (const patch of enabledPatches) {
+          const track = s.tracks.find((t) => t.id === patch.recordTrackId);
+          if (track && !track.locked) targetTracks.push(track);
+        }
+      } else {
+        const fallback = getPreferredTrack(s, asset);
+        if (fallback) targetTracks.push(fallback);
+      }
+
+      if (targetTracks.length === 0) return;
+
+      const editedTrackIds = targetTracks.map((t) => t.id);
+      const newClipIds: string[] = [];
+
+      for (const targetTrack of targetTracks) {
+        // Push all clips that start at or after the insert point forward
+        for (const c of targetTrack.clips) {
+          if (c.startTime >= startTime) {
+            c.startTime += editDuration;
+            c.endTime += editDuration;
+          } else if (c.startTime < startTime && c.endTime > startTime) {
+            const tailClip: Clip = makeClip({
+              id: createId('clip'),
+              trackId: targetTrack.id,
+              name: c.name,
+              startTime: endTime,
+              endTime: c.endTime + editDuration,
+              trimStart: c.trimStart + (startTime - c.startTime),
+              trimEnd: c.trimEnd,
+              type: c.type,
+              assetId: c.assetId,
+              color: c.color,
+              waveformData: c.waveformData,
+            });
+            c.endTime = startTime;
+            targetTrack.clips.push(tailClip);
+          }
+        }
+
+        // Insert the new clip
+        const newClip: Clip = makeClip({
+          id: createId('clip'),
+          trackId: targetTrack.id,
+          name: asset.name,
+          startTime,
+          endTime,
+          trimStart: srcIn,
+          trimEnd: (asset.duration ?? srcOut) - srcOut,
+          type: getClipTypeForAsset(asset),
+          assetId: asset.id,
+          color: targetTrack.color,
+          waveformData: asset.waveformData,
+        });
+        targetTrack.clips.push(newClip);
+        targetTrack.clips.sort((a, b) => a.startTime - b.startTime);
+        newClipIds.push(newClip.id);
+      }
+
+      // Sync lock compensation: push clips on sync-locked non-edited tracks
+      const syncTracks = trackPatchingEngine.getTracksNeedingSyncCompensation(editedTrackIds);
+      for (const syncTrackId of syncTracks) {
+        const syncTrack = s.tracks.find((t) => t.id === syncTrackId);
+        if (!syncTrack) continue;
+        for (const c of syncTrack.clips) {
+          if (c.startTime >= startTime) {
+            c.startTime += editDuration;
+            c.endTime += editDuration;
+          }
+        }
+      }
+
+      s.selectedClipIds = newClipIds;
+      const allEnds = targetTracks.flatMap((t) => t.clips.map((c) => c.endTime));
+      const maxEnd = Math.max(endTime, ...allEnds);
+      if (maxEnd > s.duration) s.duration = maxEnd + 5;
+      s.playheadTime = endTime;
+    }),
+
     razorAtPlayhead: () => set((s) => {
       const splitTime = s.playheadTime;
       for (const track of s.tracks) {
@@ -1558,7 +1662,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     // ─── Source Monitor ──────────────────────────────────────────────────────────
     setSourceInPoint: (t) => set((s) => { s.sourceInPoint = t; }),
     setSourceOutPoint: (t) => set((s) => { s.sourceOutPoint = t; }),
-    setSourcePlayhead: (t) => set((s) => { s.sourcePlayhead = Math.max(0, t); }),
+    setSourcePlayhead: (t) => set((s) => { s.sourcePlayhead = isFinite(t) ? Math.max(0, t) : 0; }),
     setSourceInToPlayhead: () => set((s) => { s.sourceInPoint = s.sourcePlayhead; }),
     setSourceOutToPlayhead: () => set((s) => { s.sourceOutPoint = s.sourcePlayhead; }),
     clearSourceInOut: () => set((s) => { s.sourceInPoint = null; s.sourceOutPoint = null; }),
@@ -1785,7 +1889,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
             const asset = findAsset(s.bins);
             if (asset) {
               asset.status = 'READY';
-              asset.duration = metadata.duration;
+              asset.duration = isFinite(metadata.duration) ? metadata.duration : 0;
               asset.width = metadata.width;
               asset.height = metadata.height;
               asset.fps = metadata.fps;
@@ -1874,3 +1978,21 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     }),
   }))
 );
+
+// ─── PlaybackEngine → Store sync ─────────────────────────────────────────────
+// Convert engine frame updates into time-based playhead position.
+playbackEngine.subscribe((frame) => {
+  const state = useEditorStore.getState();
+  if (!state.isPlaying) return;
+  const fps = state.sequenceSettings.fps || 24;
+  const time = frame / fps;
+  if (time >= state.duration && state.duration > 0) {
+    playbackEngine.pause();
+    useEditorStore.setState((s: any) => {
+      s.playheadTime = s.duration;
+      s.isPlaying = false;
+    });
+  } else {
+    useEditorStore.setState((s: any) => { s.playheadTime = Math.max(0, time); });
+  }
+});
