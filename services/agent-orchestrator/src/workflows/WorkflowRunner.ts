@@ -137,7 +137,7 @@ export class WorkflowRunner {
 
       // Phase 3: Collect per-step results
       for (let i = 0; i < executedPlan.steps.length; i++) {
-        const step = executedPlan.steps[i];
+        const step = executedPlan.steps[i]!;
 
         outputs.push({
           stepIndex: i,

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, memo } from 'react';
 import { usePlayerStore, ScopeType } from '../../store/player.store';
 import { useEditorStore } from '../../store/editor.store';
 import { playbackEngine } from '../../engine/PlaybackEngine';
@@ -53,6 +53,16 @@ export function SourceMonitor() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const lastBitmapRef = useRef<ImageBitmap | null>(null);
 
+  // Clean up bitmap on unmount
+  useEffect(() => {
+    return () => {
+      if (lastBitmapRef.current) {
+        lastBitmapRef.current.close();
+        lastBitmapRef.current = null;
+      }
+    };
+  }, []);
+
   // Get the source asset to load video from (look up through bins or use sourceAsset)
   const sourceAsset = useEditorStore((s) => {
     if (!sourceClipId) return s.sourceAsset;
@@ -98,6 +108,10 @@ export function SourceMonitor() {
       const timeSeconds = currentFrame / playbackEngine.fps;
       frameCompositor.renderSourceFrame(sourceClipId, timeSeconds, w, h).then((bitmap) => {
         if (bitmap) {
+          // Clean up previous bitmap before storing new one
+          if (lastBitmapRef.current) {
+            lastBitmapRef.current.close();
+          }
           lastBitmapRef.current = bitmap;
           ctx.clearRect(0, 0, w, h);
           ctx.drawImage(bitmap, 0, 0, w, h);
@@ -225,10 +239,10 @@ export function SourceMonitor() {
   const tc = frameToTimecode(currentFrame);
 
   return (
-    <div className="monitor" onClick={handleFocus}>
+    <div className="monitor" onClick={handleFocus} role="region" aria-label="Source Monitor">
       {/* Header */}
       <div className="monitor-header">
-        <span className="monitor-label source">SOURCE</span>
+        <span className="monitor-label source" aria-hidden="true">SOURCE</span>
         {sourceClipId && (
           <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 4 }}>
             {sourceClipId}
@@ -266,8 +280,8 @@ export function SourceMonitor() {
         </button>
 
         {/* Transport controls */}
-        <div className="transport-controls">
-          <button className="transport-btn" onClick={handleGoToIn} title="Go to In (Shift+I)">
+        <div className="transport-controls" role="group" aria-label="Source transport controls">
+          <button className="transport-btn" onClick={handleGoToIn} title="Go to In (Shift+I)" aria-label="Go to In point">
             |&laquo;
           </button>
           <button className="transport-btn" onClick={handleRewind} title="Rewind (J)">

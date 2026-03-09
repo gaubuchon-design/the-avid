@@ -15,6 +15,8 @@
     "postinstall": "electron-builder install-app-deps",
     "lint": "eslint src --ext .ts,.tsx",
     "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "clean": "rm -rf dist out",
     "download-ffmpeg": "node scripts/download-ffmpeg.js",
     "generate-icons": "node scripts/generate-icons.js"
@@ -22,31 +24,32 @@
   "dependencies": {
     "@mcua/core": "*",
     "@mcua/ui": "*",
+    "@eyevinn/srt": "^0.8.3",
+    "electron-updater": "^6.2.0",
+    "grandiose": "^0.0.4",
+    "immer": "^10.1.0",
+    "macadam": "^2.0.18",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
-    "react-router-dom": "^6.23.0",
-    "zustand": "^4.5.0",
-    "immer": "^10.1.0",
-    "electron-updater": "^6.2.0",
-    "macadam": "^2.0.18",
-    "grandiose": "^0.0.4",
-    "@eyevinn/srt": "^0.8.3",
-    "serialport": "^12.0.0"
+    "react-router-dom": "^6.24.0",
+    "serialport": "^12.0.0",
+    "zustand": "^4.5.0"
   },
   "devDependencies": {
-    "electron": "^31.0.0",
-    "electron-builder": "^24.13.0",
-    "electron-vite": "^2.3.0",
     "@electron/notarize": "^2.3.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
-    "typescript": "^5.4.0"
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.0",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.4.0",
+    "vitest": "^2.0.0"
   },
   "build": {
     "appId": "com.theavid.app",
     "productName": "The Avid",
-    "copyright": "Copyright © 2026 The Avid, Inc.",
+    "copyright": "Copyright 2026 The Avid, Inc.",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "out",

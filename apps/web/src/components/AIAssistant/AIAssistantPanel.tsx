@@ -2,7 +2,7 @@
 // Three-tab panel: Chat (agentic conversation), Transcript (phrase search),
 // and Tools (quick AI actions). Wired to real Gemini API when configured.
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { useAIStore } from '../../store/ai.store';
 import { useEditorStore } from '../../store/editor.store';
 import { agentEngine, type AgentPlan, type AgentStep } from '../../ai/AgentEngine';
@@ -276,7 +276,7 @@ function ChatTab() {
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
 
       {/* Message list */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '8px 4px' }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: '8px 4px' }} role="log" aria-label="Chat messages" aria-live="polite">
         {messages.map((msg) => (
           <div
             key={msg.id}
@@ -511,11 +511,12 @@ function ChatTab() {
       </div>
 
       {/* Input area */}
-      <div style={{ padding: '8px', borderTop: '1px solid var(--border-default)', flexShrink: 0 }}>
+      <div style={{ padding: '8px', borderTop: '1px solid var(--border-default)', flexShrink: 0 }} role="form" aria-label="Chat input">
         <div style={{ display: 'flex', gap: 6 }}>
           <button
             onClick={() => setShowSettings(!showSettings)}
             title="Settings"
+            aria-label="AI Settings"
             style={{
               padding: '8px',
               borderRadius: 'var(--radius-md)',
@@ -540,6 +541,7 @@ function ChatTab() {
             onKeyDown={handleKeyDown}
             placeholder="Ask ✦ AI to edit your timeline..."
             disabled={isProcessing}
+            aria-label="Chat message input"
             style={{
               flex: 1,
               padding: '8px 12px',
@@ -811,12 +813,13 @@ function TranscriptTab() {
   };
 
   return (
-    <div style={{ padding: 4 }}>
+    <div style={{ padding: 4 }} role="search" aria-label="Transcript search">
       <input
         type="text"
         value={transcriptSearchQuery}
         onChange={(e) => handleSearch(e.target.value)}
         placeholder="Search across all transcripts..."
+        aria-label="Search transcripts"
         style={{
           width: '100%',
           padding: '8px 12px',
@@ -852,6 +855,10 @@ function TranscriptTab() {
         <div
           key={`${result.clipId}-${result.startTime}-${i}`}
           onClick={() => handleResultClick(result)}
+          role="button"
+          tabIndex={0}
+          aria-label={`${result.clipName}: ${result.text.slice(0, 40)}`}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleResultClick(result); } }}
           style={{
             padding: '8px 10px',
             borderRadius: 'var(--radius-md)',
@@ -949,10 +956,13 @@ function ToolsTab() {
         gap: 6,
         padding: 4,
       }}
+      role="list"
+      aria-label="AI tools"
     >
       {AI_TOOL_CARDS.map((tool) => (
         <div
           key={tool.id}
+          role="listitem"
           style={{
             padding: '10px',
             borderRadius: 'var(--radius-md)',
@@ -980,6 +990,7 @@ function ToolsTab() {
             <button
               onClick={() => handleRun(tool)}
               disabled={runningTool !== null}
+              aria-label={`Run ${tool.name}`}
               style={{
                 padding: '3px 10px',
                 borderRadius: 'var(--radius-sm)',
@@ -1018,7 +1029,7 @@ function getToolResult(toolId: string): string {
 
 // ─── Main Panel ─────────────────────────────────────────────────────────────
 
-export function AIAssistantPanel() {
+export const AIAssistantPanel = memo(function AIAssistantPanel() {
   const { activeTab, setActiveTab, tokenBalance, tokenUsedSession } = useAIStore();
   const { toggleAIPanel } = useEditorStore();
 
@@ -1027,16 +1038,16 @@ export function AIAssistantPanel() {
     : 100;
 
   return (
-    <div style={S.panel}>
+    <div style={S.panel} role="complementary" aria-label="AI Assistant">
       {/* Header */}
       <div style={S.header}>
-        <span style={S.logo}>✦</span>
+        <span style={S.logo} aria-hidden="true">✦</span>
         <span style={S.title}>AI Assistant</span>
-        <button onClick={toggleAIPanel} style={S.closeBtn}>✕</button>
+        <button onClick={toggleAIPanel} style={S.closeBtn} aria-label="Close AI Assistant">✕</button>
       </div>
 
       {/* Tab bar */}
-      <div style={S.tabBar}>
+      <div style={S.tabBar} role="tablist" aria-label="AI Assistant tabs">
         {([
           { key: 'chat' as const, label: '✦ Chat' },
           { key: 'transcript' as const, label: 'Transcript' },
@@ -1046,6 +1057,9 @@ export function AIAssistantPanel() {
             key={t.key}
             onClick={() => setActiveTab(t.key)}
             style={S.tab(activeTab === t.key)}
+            role="tab"
+            aria-selected={activeTab === t.key}
+            aria-controls={`ai-panel-${t.key}`}
           >
             {t.label}
           </button>
@@ -1053,16 +1067,16 @@ export function AIAssistantPanel() {
       </div>
 
       {/* Body */}
-      <div style={S.body}>
+      <div style={S.body} role="tabpanel" id={`ai-panel-${activeTab}`}>
         {activeTab === 'chat' && <ChatTab />}
         {activeTab === 'transcript' && <TranscriptTab />}
         {activeTab === 'tools' && <ToolsTab />}
       </div>
 
       {/* Token bar */}
-      <div style={S.tokenBar}>
+      <div style={S.tokenBar} role="status" aria-label="Token balance">
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ color: AI_TEAL, fontWeight: 700, fontSize: 12 }}>✦</span>
+          <span style={{ color: AI_TEAL, fontWeight: 700, fontSize: 12 }} aria-hidden="true">✦</span>
           <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Tokens: {tokenBalance}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1079,6 +1093,11 @@ export function AIAssistantPanel() {
               background: 'var(--bg-void)',
               overflow: 'hidden',
             }}
+            role="meter"
+            aria-valuenow={Math.round(100 - usagePercent)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label="Token usage"
           >
             <div
               style={{
@@ -1094,4 +1113,4 @@ export function AIAssistantPanel() {
       </div>
     </div>
   );
-}
+});

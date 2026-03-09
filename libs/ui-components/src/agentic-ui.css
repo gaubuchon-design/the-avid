@@ -1,45 +1,53 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    AGENTIC EDITING UI — Shared component styles
-   @mcua/ui-components v0.1.0
+   @mcua/ui-components v0.2.0
 
-   Uses design-system CSS custom properties from the host app. Falls back to
-   sane defaults when variables are undefined so the library works standalone.
+   Uses design-system CSS custom properties from the host app (v3 tokens).
+   Falls back to sane defaults when variables are undefined so the library
+   works standalone.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Fallback tokens (overridden by host app's :root) ─────────────────── */
 :root {
-  --agentic-bg-void:       var(--bg-void, #000);
-  --agentic-bg-surface:    var(--bg-surface, #0e0e1a);
-  --agentic-bg-raised:     var(--bg-raised, #141420);
-  --agentic-bg-elevated:   var(--bg-elevated, #1a1a2e);
-  --agentic-bg-overlay:    var(--bg-overlay, #222240);
-  --agentic-bg-hover:      var(--bg-hover, rgba(255,255,255,0.05));
-  --agentic-bg-active:     var(--bg-active, rgba(255,255,255,0.09));
+  --agentic-bg-void:       var(--bg-void, #000000);
+  --agentic-bg-surface:    var(--bg-surface, #13131e);
+  --agentic-bg-raised:     var(--bg-raised, #181826);
+  --agentic-bg-elevated:   var(--bg-elevated, #1e1e30);
+  --agentic-bg-overlay:    var(--bg-overlay, #26263e);
+  --agentic-bg-hover:      var(--bg-hover, rgba(255, 255, 255, 0.04));
+  --agentic-bg-active:     var(--bg-active, rgba(255, 255, 255, 0.07));
   --agentic-accent:        var(--accent, #7c5cfc);
   --agentic-accent-dim:    var(--accent-dim, #5a3fd4);
-  --agentic-accent-muted:  var(--accent-muted, rgba(124,92,252,0.14));
+  --agentic-accent-muted:  var(--accent-muted, rgba(124, 92, 252, 0.12));
+  --agentic-accent-glow:   var(--accent-glow, rgba(124, 92, 252, 0.28));
   --agentic-brand:         var(--brand, #6d4cfa);
   --agentic-brand-bright:  var(--brand-bright, #9b7dff);
-  --agentic-text-primary:  var(--text-primary, #e0e6ef);
+  --agentic-text-primary:  var(--text-primary, #e2e8f0);
   --agentic-text-secondary:var(--text-secondary, #8a9cb5);
   --agentic-text-tertiary: var(--text-tertiary, #556880);
-  --agentic-text-muted:    var(--text-muted, #384a5e);
+  --agentic-text-muted:    var(--text-muted, #3d4f64);
   --agentic-text-accent:   var(--text-accent, #9b7dff);
-  --agentic-border:        var(--border-default, rgba(255,255,255,0.08));
-  --agentic-border-subtle: var(--border-subtle, rgba(255,255,255,0.04));
-  --agentic-border-accent: var(--border-accent, rgba(109,76,250,0.4));
-  --agentic-radius-sm:     var(--radius-sm, 4px);
-  --agentic-radius-md:     var(--radius-md, 6px);
-  --agentic-radius-lg:     var(--radius-lg, 10px);
+  --agentic-border:        var(--border-default, rgba(255, 255, 255, 0.08));
+  --agentic-border-subtle: var(--border-subtle, rgba(255, 255, 255, 0.04));
+  --agentic-border-accent: var(--border-accent, rgba(109, 76, 250, 0.40));
+  --agentic-radius-sm:     var(--radius-sm, 3px);
+  --agentic-radius-md:     var(--radius-md, 5px);
+  --agentic-radius-lg:     var(--radius-lg, 8px);
   --agentic-dur-fast:      var(--dur-fast, 75ms);
   --agentic-dur-mid:       var(--dur-mid, 150ms);
-  --agentic-ease:          var(--ease-snap, cubic-bezier(0.2, 0, 0, 1));
-  --agentic-shadow-sm:     var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.4));
-  --agentic-shadow-md:     var(--shadow-md, 0 4px 12px rgba(0,0,0,0.5));
-  --agentic-shadow-brand:  var(--shadow-brand, 0 0 16px rgba(109,76,250,0.3));
+  --agentic-dur-slow:      var(--dur-slow, 250ms);
+  --agentic-ease:          var(--ease-default, cubic-bezier(0.2, 0, 0, 1));
+  --agentic-ease-spring:   var(--ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1));
+  --agentic-shadow-sm:     var(--shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.40));
+  --agentic-shadow-md:     var(--shadow-md, 0 4px 12px rgba(0, 0, 0, 0.50));
+  --agentic-shadow-lg:     var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.60));
+  --agentic-shadow-brand:  var(--shadow-brand, 0 0 16px rgba(109, 76, 250, 0.25));
   --agentic-success:       var(--success, #22c55e);
+  --agentic-success-50:    var(--success-50, rgba(34, 197, 94, 0.10));
   --agentic-warning:       var(--warning, #f59e0b);
+  --agentic-warning-50:    var(--warning-50, rgba(245, 158, 11, 0.10));
   --agentic-error:         var(--error, #ef4444);
+  --agentic-error-50:      var(--error-50, rgba(239, 68, 68, 0.10));
   --agentic-font-ui:       var(--font-ui, 'DM Sans', 'Inter', system-ui, sans-serif);
   --agentic-font-mono:     var(--font-mono, 'DM Mono', 'JetBrains Mono', monospace);
 }
@@ -1192,4 +1200,126 @@ button.token-badge--warning:hover {
   background: rgba(245,158,11,0.12);
   color: var(--agentic-warning);
   border-color: rgba(245,158,11,0.3);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   8. SHARED UTILITIES & ENHANCEMENTS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Screen-reader-only utility (if not provided by host app) */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Character counter for PromptBar */
+.prompt-bar-char-count {
+  font-size: 9px;
+  font-family: var(--agentic-font-mono);
+  color: var(--agentic-text-muted);
+  text-align: right;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.prompt-bar-char-count--over {
+  color: var(--agentic-error);
+  font-weight: 700;
+}
+
+/* Active context pill */
+.context-pill--active {
+  outline: 1px solid var(--agentic-accent);
+  outline-offset: 1px;
+}
+
+/* Focused dropdown option for PlaybookBuilder */
+.playbook-add-option--focused {
+  background: var(--agentic-bg-hover);
+  outline: 2px solid var(--agentic-accent);
+  outline-offset: -2px;
+}
+
+/* Focus-visible for all interactive elements */
+.prompt-bar-submit:focus-visible,
+.prompt-bar-voice:focus-visible,
+.prompt-bar-input:focus-visible,
+.context-pill-body[role="button"]:focus-visible,
+.context-pill-remove:focus-visible,
+.plan-step-approve:focus-visible,
+.plan-preview-approve:focus-visible,
+.plan-preview-reject:focus-visible,
+.plan-preview-cancel:focus-visible,
+.result-item[role="button"]:focus-visible,
+.result-jump-btn:focus-visible,
+.playbook-builder-name-input:focus-visible,
+.playbook-step-btn:focus-visible,
+.playbook-add-trigger:focus-visible,
+.playbook-add-btn:focus-visible,
+.playbook-save-btn:focus-visible,
+.playbook-run-btn:focus-visible,
+.execution-history-clear:focus-visible,
+.history-view-btn:focus-visible,
+.history-undo-btn:focus-visible,
+.token-badge:focus-visible {
+  outline: 2px solid var(--agentic-accent);
+  outline-offset: 1px;
+}
+
+/* Reduce motion support */
+@media (prefers-reduced-motion: reduce) {
+  .prompt-bar-spinner,
+  .history-entry-spinner {
+    animation: none;
+  }
+
+  .plan-step-status--active {
+    animation: none;
+  }
+
+  .token-badge-warn-icon {
+    animation: none;
+  }
+
+  .result-score--skeleton,
+  .result-text--skeleton {
+    animation: none;
+  }
+
+  /* Reduce transitions */
+  .prompt-bar,
+  .prompt-bar-input,
+  .prompt-bar-submit,
+  .prompt-bar-voice,
+  .context-pill,
+  .context-pill-remove,
+  .plan-step,
+  .plan-step-approve,
+  .plan-preview-approve,
+  .plan-preview-reject,
+  .plan-preview-cancel,
+  .result-item,
+  .result-jump-btn,
+  .playbook-step,
+  .playbook-step-btn,
+  .playbook-add-trigger,
+  .playbook-add-option,
+  .playbook-add-btn,
+  .playbook-save-btn,
+  .playbook-run-btn,
+  .token-badge,
+  .history-entry,
+  .history-view-btn,
+  .history-undo-btn,
+  .execution-history-clear {
+    transition-duration: 0ms !important;
+  }
 }

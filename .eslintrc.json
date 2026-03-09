@@ -2,17 +2,143 @@
   "root": true,
   "extends": [
     "eslint:recommended",
-    "plugin:@typescript-eslint/recommended"
+    "plugin:@typescript-eslint/recommended",
+    "plugin:@typescript-eslint/stylistic"
   ],
   "parser": "@typescript-eslint/parser",
-  "plugins": ["@typescript-eslint"],
-  "rules": {
-    "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
-    "@typescript-eslint/no-explicit-any": "warn"
+  "parserOptions": {
+    "ecmaVersion": 2022,
+    "sourceType": "module",
+    "ecmaFeatures": {
+      "jsx": true
+    }
   },
+  "plugins": ["@typescript-eslint", "import"],
+  "settings": {
+    "react": {
+      "version": "detect"
+    },
+    "import/resolver": {
+      "typescript": true,
+      "node": true
+    }
+  },
+  "rules": {
+    "@typescript-eslint/no-unused-vars": [
+      "warn",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "destructuredArrayIgnorePattern": "^_"
+      }
+    ],
+    "@typescript-eslint/no-explicit-any": "warn",
+    "@typescript-eslint/consistent-type-imports": [
+      "warn",
+      { "prefer": "type-imports", "fixStyle": "inline-type-imports" }
+    ],
+    "@typescript-eslint/no-import-type-side-effects": "warn",
+    "@typescript-eslint/consistent-type-definitions": ["warn", "interface"],
+    "@typescript-eslint/no-non-null-assertion": "warn",
+    "@typescript-eslint/prefer-nullish-coalescing": "off",
+    "@typescript-eslint/prefer-optional-chain": "warn",
+    "@typescript-eslint/no-empty-interface": ["warn", { "allowSingleExtends": true }],
+    "@typescript-eslint/no-inferrable-types": "warn",
+
+    "import/order": [
+      "warn",
+      {
+        "groups": [
+          "builtin",
+          "external",
+          "internal",
+          ["parent", "sibling"],
+          "index",
+          "type"
+        ],
+        "pathGroups": [
+          {
+            "pattern": "@mcua/**",
+            "group": "internal",
+            "position": "before"
+          }
+        ],
+        "pathGroupsExcludedImportTypes": ["type"],
+        "newlines-between": "always",
+        "alphabetize": {
+          "order": "asc",
+          "caseInsensitive": true
+        }
+      }
+    ],
+    "import/no-duplicates": ["warn", { "prefer-inline": true }],
+
+    "no-console": ["warn", { "allow": ["warn", "error", "info"] }],
+    "no-debugger": "warn",
+    "no-alert": "warn",
+    "prefer-const": "warn",
+    "no-var": "error",
+    "eqeqeq": ["error", "always", { "null": "ignore" }],
+    "curly": ["warn", "multi-line", "consistent"],
+    "no-throw-literal": "error",
+    "no-return-await": "warn",
+    "no-param-reassign": ["warn", { "props": false }],
+    "no-nested-ternary": "warn",
+    "object-shorthand": "warn",
+    "prefer-template": "warn"
+  },
+  "overrides": [
+    {
+      "files": ["*.tsx", "*.jsx"],
+      "extends": ["plugin:react/recommended", "plugin:react-hooks/recommended"],
+      "rules": {
+        "react/react-in-jsx-scope": "off",
+        "react/prop-types": "off",
+        "react/display-name": "off",
+        "react/no-unescaped-entities": "warn",
+        "react/jsx-no-target-blank": "error",
+        "react/self-closing-comp": "warn",
+        "react/jsx-curly-brace-presence": ["warn", { "props": "never", "children": "never" }],
+        "react-hooks/rules-of-hooks": "error",
+        "react-hooks/exhaustive-deps": "warn"
+      }
+    },
+    {
+      "files": ["*.test.ts", "*.test.tsx", "*.spec.ts", "*.spec.tsx"],
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "off",
+        "no-console": "off",
+        "@typescript-eslint/no-non-null-assertion": "off"
+      }
+    },
+    {
+      "files": [
+        "vite.config.*",
+        "vitest.config.*",
+        "electron.vite.config.*",
+        "tailwind.config.*",
+        "postcss.config.*",
+        "scripts/**"
+      ],
+      "rules": {
+        "no-console": "off",
+        "@typescript-eslint/no-require-imports": "off"
+      }
+    }
+  ],
   "env": {
     "node": true,
     "browser": true,
     "es2022": true
-  }
+  },
+  "ignorePatterns": [
+    "node_modules",
+    "dist",
+    "build",
+    "out",
+    "coverage",
+    ".turbo",
+    "*.min.js",
+    "*.generated.*"
+  ]
 }

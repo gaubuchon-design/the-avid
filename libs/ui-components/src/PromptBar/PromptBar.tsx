@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, type KeyboardEvent } from 'react';
+import React, { useState, useRef, useCallback, useEffect, forwardRef, type KeyboardEvent } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -17,6 +17,16 @@ export interface PromptBarProps {
   disabled?: boolean;
   /** Displays a context pill next to the input. */
   contextPill?: { type: string; label: string };
+  /** Additional CSS class names for the root element. */
+  className?: string;
+  /** Unique identifier for the root element. */
+  id?: string;
+  /** Called when the input value changes (controlled/monitored mode). */
+  onChange?: (text: string) => void;
+  /** Auto-focus the textarea on mount. */
+  autoFocus?: boolean;
+  /** Maximum character count. Displays a counter when set. */
+  maxLength?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -30,17 +40,33 @@ export interface PromptBarProps {
  * Keyboard shortcuts:
  * - Enter: submit
  * - Shift+Enter: newline
+ * - Escape: clear input
  */
-export function PromptBar({
-  onSubmit,
-  onVoiceTrigger,
-  placeholder = 'Describe what you want to do\u2026',
-  isProcessing = false,
-  disabled = false,
-  contextPill,
-}: PromptBarProps) {
+export const PromptBar = forwardRef<HTMLDivElement, PromptBarProps>(function PromptBar(
+  {
+    onSubmit,
+    onVoiceTrigger,
+    placeholder = 'Describe what you want to do\u2026',
+    isProcessing = false,
+    disabled = false,
+    contextPill,
+    className,
+    id,
+    onChange,
+    autoFocus = false,
+    maxLength,
+  },
+  ref,
+) {
   const [text, setText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-focus on mount if requested
+  useEffect(() => {
+    if (autoFocus && textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, [autoFocus]);
 
   const handleSubmit = useCallback(() => {
     const trimmed = text.trim();
@@ -59,6 +85,13 @@ export function PromptBar({
         e.preventDefault();
         handleSubmit();
       }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setText('');
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+        }
+      }
     },
     [handleSubmit],
   );
@@ -66,18 +99,29 @@ export function PromptBar({
   const handleInput = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const el = e.currentTarget;
-      setText(el.value);
+      const value = maxLength ? el.value.slice(0, maxLength) : el.value;
+      setText(value);
+      onChange?.(value);
       // Auto-resize textarea
       el.style.height = 'auto';
       el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
     },
-    [],
+    [maxLength, onChange],
   );
 
   const isDisabled = disabled || isProcessing;
+  const charCount = text.length;
+  const isOverLimit = maxLength ? charCount > maxLength : false;
 
   return (
-    <div className="prompt-bar" role="search" aria-label="Agent prompt">
+    <div
+      ref={ref}
+      id={id}
+      className={`prompt-bar${className ? ` ${className}` : ''}`}
+      role="search"
+      aria-label="Agent prompt"
+      data-testid="prompt-bar"
+    >
       {contextPill && (
         <span className="prompt-bar-context" aria-label={`Context: ${contextPill.label}`}>
           <span className="prompt-bar-context-type">{contextPill.type}</span>
@@ -115,10 +159,13 @@ export function PromptBar({
           disabled={isDisabled}
           rows={1}
           aria-label="Prompt input"
+          aria-describedby={id ? `${id}-hint` : 'prompt-bar-hint'}
+          aria-invalid={isOverLimit || undefined}
+          maxLength={maxLength}
         />
 
         {isProcessing ? (
-          <span className="prompt-bar-processing" role="status" aria-label="Processing">
+          <span className="prompt-bar-processing" role="status" aria-live="polite" aria-label="Processing">
             <svg className="prompt-bar-spinner" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
               <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="28" strokeDashoffset="8" />
             </svg>
@@ -140,6 +187,26 @@ export function PromptBar({
           </button>
         )}
       </div>
+
+      {/* Keyboard hint (screen reader accessible) */}
+      <span
+        id={id ? `${id}-hint` : 'prompt-bar-hint'}
+        className="sr-only"
+        aria-hidden="false"
+      >
+        Press Enter to submit. Shift+Enter for new line. Escape to clear.
+      </span>
+
+      {/* Character counter */}
+      {maxLength && (
+        <span
+          className={`prompt-bar-char-count${isOverLimit ? ' prompt-bar-char-count--over' : ''}`}
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {charCount}/{maxLength}
+        </span>
+      )}
     </div>
   );
-}
+});

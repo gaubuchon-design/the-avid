@@ -357,6 +357,11 @@ export class PeerDiscovery {
         timestamp: new Date().toISOString(),
       });
     }, interval);
+
+    // Unref the timer so it does not prevent process exit during shutdown
+    if (typeof this.heartbeatTimer === 'object' && 'unref' in this.heartbeatTimer) {
+      this.heartbeatTimer.unref();
+    }
   }
 
   /**
@@ -367,6 +372,18 @@ export class PeerDiscovery {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
+  }
+
+  /**
+   * Destroy the peer discovery layer: stop heartbeat and disconnect
+   * all peers. Call this during graceful shutdown.
+   */
+  destroy(): void {
+    this.stopHeartbeat();
+    for (const peer of Array.from(this.peers.values())) {
+      this.disconnectPeer(peer.nodeId);
+    }
+    this.handlers.length = 0;
   }
 
   // ── Handler Registration ─────────────────────────────────────────────────

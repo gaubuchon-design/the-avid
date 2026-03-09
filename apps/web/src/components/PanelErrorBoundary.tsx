@@ -40,6 +40,8 @@ export class PanelErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         <div
+          role="alert"
+          aria-live="assertive"
           style={{
             display: 'flex',
             flexDirection: 'column',

@@ -56,7 +56,7 @@ export class PlanGenerator {
    * @param options - Generator configuration.
    */
   constructor(options: PlanGeneratorOptions = {}) {
-    this.apiKey = options.apiKey ?? process.env.GEMINI_API_KEY ?? '';
+    this.apiKey = options.apiKey ?? process.env['GEMINI_API_KEY'] ?? '';
     this.model = options.model ?? DEFAULT_MODEL;
     this.contextAssembler = new ContextAssembler();
   }

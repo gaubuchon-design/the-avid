@@ -60,7 +60,7 @@ export async function generateEmbeddings(
   });
 
   const embeddings = (result.output.embeddings ?? []) as number[][];
-  const dimensions = embeddings.length > 0 ? embeddings[0].length : 0;
+  const dimensions = embeddings.length > 0 ? (embeddings[0]?.length ?? 0) : 0;
 
   return {
     embeddings,

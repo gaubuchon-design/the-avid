@@ -1,8 +1,11 @@
-import React from 'react';
+import React, { forwardRef, useCallback, type KeyboardEvent } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+/** Valid source types for search results. */
+export type ResultSourceType = 'transcript' | 'visual' | 'audio' | 'metadata' | string;
 
 export interface ResultItem {
   /** Unique identifier for this result. */
@@ -10,7 +13,7 @@ export interface ResultItem {
   /** Relevance score (0-1). */
   score: number;
   /** Origin type (e.g. "transcript", "visual", "audio", "metadata"). */
-  sourceType: string;
+  sourceType: ResultSourceType;
   /** Matching text excerpt. */
   text?: string;
   /** Start time in seconds (for timeline-linked results). */
@@ -40,6 +43,10 @@ export interface ResultsPanelProps {
   totalHits?: number;
   /** Server-side query time in milliseconds. */
   queryTimeMs?: number;
+  /** Additional CSS class names for the root element. */
+  className?: string;
+  /** Unique identifier for the root element. */
+  id?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -111,19 +118,50 @@ function SourceIcon({ type }: { type: string }) {
 /**
  * Displays search or execution results with score badges, source icons,
  * text previews, and optional timeline-jump affordances.
+ *
+ * Uses `aria-live` to announce result changes and `aria-busy` during loading.
+ * Result items support keyboard navigation when `onSelectResult` is provided.
  */
-export function ResultsPanel({
-  results,
-  isLoading = false,
-  query,
-  onJumpToTimeline,
-  onSelectResult,
-  totalHits,
-  queryTimeMs,
-}: ResultsPanelProps) {
+export const ResultsPanel = forwardRef<HTMLDivElement, ResultsPanelProps>(function ResultsPanel(
+  {
+    results,
+    isLoading = false,
+    query,
+    onJumpToTimeline,
+    onSelectResult,
+    totalHits,
+    queryTimeMs,
+    className,
+    id,
+  },
+  ref,
+) {
+  const handleItemKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLLIElement>, item: ResultItem) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onSelectResult?.(item);
+      }
+    },
+    [onSelectResult],
+  );
+
+  const resultCount = totalHits ?? results.length;
+  const summaryText = query
+    ? `${resultCount.toLocaleString()} results for "${query}"${queryTimeMs !== undefined ? ` in ${queryTimeMs}ms` : ''}`
+    : `${resultCount.toLocaleString()} results`;
+
   return (
-    <div className="results-panel" role="region" aria-label="Search results">
-      {/* ── Summary bar ─────────────────────────────────────────────── */}
+    <div
+      ref={ref}
+      id={id}
+      className={`results-panel${className ? ` ${className}` : ''}`}
+      role="region"
+      aria-label="Search results"
+      aria-busy={isLoading}
+      data-testid="results-panel"
+    >
+      {/* -- Summary bar --------------------------------------------------- */}
       {(query || totalHits !== undefined) && (
         <div className="results-panel-summary">
           {query && <span className="results-panel-query">Results for &ldquo;{query}&rdquo;</span>}
@@ -134,9 +172,10 @@ export function ResultsPanel({
         </div>
       )}
 
-      {/* ── Loading state ───────────────────────────────────────────── */}
+      {/* -- Loading state ------------------------------------------------- */}
       {isLoading && (
         <div className="results-panel-loading" role="status" aria-label="Loading results">
+          <span className="sr-only">Loading search results...</span>
           {[1, 2, 3].map((i) => (
             <div key={i} className="result-item result-item--skeleton" aria-hidden="true">
               <span className="result-score result-score--skeleton" />
@@ -146,66 +185,69 @@ export function ResultsPanel({
         </div>
       )}
 
-      {/* ── Result list ─────────────────────────────────────────────── */}
+      {/* -- Result list --------------------------------------------------- */}
       {!isLoading && results.length === 0 && (
-        <div className="results-panel-empty" role="status">
+        <div className="results-panel-empty" role="status" aria-live="polite">
           No results found.
         </div>
       )}
 
       {!isLoading && results.length > 0 && (
-        <ul className="results-panel-list" aria-label="Result list">
-          {results.map((item) => (
-            <li
-              key={item.id}
-              className="result-item"
-              onClick={() => onSelectResult?.(item)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  onSelectResult?.(item);
-                }
-              }}
-              role={onSelectResult ? 'button' : 'listitem'}
-              tabIndex={onSelectResult ? 0 : undefined}
-              aria-label={`Result: ${item.text ?? item.sourceType} - ${formatScore(item.score)} relevance`}
-            >
-              <span className="result-score" title={`Relevance: ${formatScore(item.score)}`}>
-                {formatScore(item.score)}
-              </span>
+        <>
+          {/* Screen reader summary */}
+          <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+            {summaryText}
+          </div>
 
-              <span className="result-source" title={item.sourceType}>
-                <SourceIcon type={item.sourceType} />
-              </span>
+          <ul className="results-panel-list" aria-label="Result list">
+            {results.map((item) => (
+              <li
+                key={item.id}
+                className="result-item"
+                onClick={onSelectResult ? () => onSelectResult(item) : undefined}
+                onKeyDown={onSelectResult ? (e) => handleItemKeyDown(e, item) : undefined}
+                role={onSelectResult ? 'button' : 'listitem'}
+                tabIndex={onSelectResult ? 0 : undefined}
+                aria-label={`Result: ${item.text ?? item.sourceType} - ${formatScore(item.score)} relevance${item.startTime !== undefined ? ` at ${formatTime(item.startTime)}` : ''}`}
+                data-testid="result-item"
+              >
+                <span className="result-score" title={`Relevance: ${formatScore(item.score)}`}>
+                  {formatScore(item.score)}
+                </span>
 
-              <div className="result-body">
-                {item.text && <span className="result-text">{item.text}</span>}
-                {item.provenance && (
-                  <span className="result-provenance">{item.provenance}</span>
+                <span className="result-source" title={item.sourceType}>
+                  <SourceIcon type={item.sourceType} />
+                </span>
+
+                <div className="result-body">
+                  {item.text && <span className="result-text">{item.text}</span>}
+                  {item.provenance && (
+                    <span className="result-provenance">{item.provenance}</span>
+                  )}
+                </div>
+
+                {item.startTime !== undefined && onJumpToTimeline && (
+                  <button
+                    type="button"
+                    className="result-jump-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onJumpToTimeline(item.startTime!);
+                    }}
+                    aria-label={`Jump to timeline at ${formatTime(item.startTime)}`}
+                    title={`Jump to ${formatTime(item.startTime)}`}
+                  >
+                    {formatTime(item.startTime)}
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <polygon points="5 3 19 12 5 21 5 3" />
+                    </svg>
+                  </button>
                 )}
-              </div>
-
-              {item.startTime !== undefined && onJumpToTimeline && (
-                <button
-                  type="button"
-                  className="result-jump-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onJumpToTimeline(item.startTime!);
-                  }}
-                  aria-label={`Jump to ${formatTime(item.startTime)}`}
-                  title={`Jump to ${formatTime(item.startTime)}`}
-                >
-                  {formatTime(item.startTime)}
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <polygon points="5 3 19 12 5 21 5 3" />
-                  </svg>
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );
-}
+});

@@ -1,8 +1,28 @@
-import React from 'react';
+import React, { forwardRef, useMemo } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+/** Valid lifecycle statuses for a plan step. */
+export type PlanStepStatus =
+  | 'pending'
+  | 'approved'
+  | 'executing'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'compensated';
+
+/** Valid lifecycle statuses for a plan. */
+export type PlanStatus =
+  | 'preview'
+  | 'planning'
+  | 'executing'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'compensated';
 
 /** Subset of AgentStep needed for plan preview rendering. */
 export interface PlanStepSummary {
@@ -10,7 +30,7 @@ export interface PlanStepSummary {
   index: number;
   description: string;
   toolName: string;
-  status: string;
+  status: PlanStepStatus;
 }
 
 /** Subset of AgentPlan needed for preview rendering. */
@@ -18,7 +38,7 @@ export interface PlanSummary {
   id: string;
   intent: string;
   steps: PlanStepSummary[];
-  status: string;
+  status: PlanStatus;
   tokensEstimated: number;
 }
 
@@ -33,6 +53,10 @@ export interface PlanPreviewProps {
   onApproveStep?: (planId: string, stepId: string) => void;
   /** Called when the user cancels an in-flight plan. */
   onCancel?: (planId: string) => void;
+  /** Additional CSS class names for the root element. */
+  className?: string;
+  /** Unique identifier for the root element. */
+  id?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -71,20 +95,44 @@ function statusLabel(status: string): string {
  * Drawer-style panel that displays a plan's intent, ordered steps, and
  * approve/reject controls. Designed for human-in-the-loop confirmation
  * before any agentic action executes.
+ *
+ * Uses `aria-live="polite"` on the steps list to announce status changes.
+ * Provides keyboard-accessible approve/reject actions.
  */
-export function PlanPreview({
-  plan,
-  onApprove,
-  onReject,
-  onApproveStep,
-  onCancel,
-}: PlanPreviewProps) {
+export const PlanPreview = forwardRef<HTMLDivElement, PlanPreviewProps>(function PlanPreview(
+  {
+    plan,
+    onApprove,
+    onReject,
+    onApproveStep,
+    onCancel,
+    className,
+    id,
+  },
+  ref,
+) {
   const isActionable = plan.status === 'preview';
   const isExecuting = plan.status === 'executing';
 
+  // Calculate progress for screen readers
+  const completedSteps = useMemo(
+    () => plan.steps.filter((s) => s.status === 'completed' || s.status === 'approved').length,
+    [plan.steps],
+  );
+  const progressText = `${completedSteps} of ${plan.steps.length} steps completed`;
+
   return (
-    <div className="plan-preview" role="region" aria-label="Plan preview">
-      {/* ── Header ──────────────────────────────────────────────────── */}
+    <div
+      ref={ref}
+      id={id}
+      className={`plan-preview${className ? ` ${className}` : ''}`}
+      role="region"
+      aria-label="Plan preview"
+      aria-busy={isExecuting}
+      data-testid="plan-preview"
+      data-plan-status={plan.status}
+    >
+      {/* -- Header -------------------------------------------------------- */}
       <div className="plan-preview-header">
         <div className="plan-preview-intent">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -94,7 +142,11 @@ export function PlanPreview({
         </div>
 
         <div className="plan-preview-meta">
-          <span className={`plan-preview-status plan-preview-status--${statusModifier(plan.status)}`}>
+          <span
+            className={`plan-preview-status plan-preview-status--${statusModifier(plan.status)}`}
+            role="status"
+            aria-live="polite"
+          >
             {statusLabel(plan.status)}
           </span>
           <span className="plan-preview-token-cost" title="Estimated token cost">
@@ -103,12 +155,27 @@ export function PlanPreview({
         </div>
       </div>
 
-      {/* ── Steps ───────────────────────────────────────────────────── */}
+      {/* -- Progress (screen reader only) --------------------------------- */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {progressText}
+      </div>
+
+      {/* -- Steps --------------------------------------------------------- */}
       <ol className="plan-preview-steps" aria-label="Plan steps">
         {plan.steps.map((step) => (
-          <li key={step.id} className="plan-step" aria-label={`Step ${step.index + 1}: ${step.description}`}>
-            <span className={`plan-step-status plan-step-status--${statusModifier(step.status)}`} aria-label={statusLabel(step.status)} title={statusLabel(step.status)} />
-            <span className="plan-step-index">{step.index + 1}</span>
+          <li
+            key={step.id}
+            className="plan-step"
+            aria-label={`Step ${step.index + 1}: ${step.description} (${statusLabel(step.status)})`}
+            data-step-status={step.status}
+          >
+            <span
+              className={`plan-step-status plan-step-status--${statusModifier(step.status)}`}
+              role="img"
+              aria-label={statusLabel(step.status)}
+              title={statusLabel(step.status)}
+            />
+            <span className="plan-step-index" aria-hidden="true">{step.index + 1}</span>
             <div className="plan-step-body">
               <span className="plan-step-description">{step.description}</span>
               <span className="plan-step-tool">{step.toolName}</span>
@@ -118,7 +185,7 @@ export function PlanPreview({
                 type="button"
                 className="plan-step-approve"
                 onClick={() => onApproveStep(plan.id, step.id)}
-                aria-label={`Approve step ${step.index + 1}`}
+                aria-label={`Approve step ${step.index + 1}: ${step.description}`}
                 title="Approve this step"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -130,8 +197,8 @@ export function PlanPreview({
         ))}
       </ol>
 
-      {/* ── Actions ─────────────────────────────────────────────────── */}
-      <div className="plan-preview-actions">
+      {/* -- Actions ------------------------------------------------------- */}
+      <div className="plan-preview-actions" role="group" aria-label="Plan actions">
         {isActionable && (
           <>
             <button
@@ -172,4 +239,4 @@ export function PlanPreview({
       </div>
     </div>
   );
-}
+});

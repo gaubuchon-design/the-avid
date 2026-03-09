@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, memo } from 'react';
 import { useEditorStore } from '../../store/editor.store';
 import type { Clip } from '../../store/editor.store';
 import { editEngine } from '../../engine/EditEngine';
@@ -11,9 +11,16 @@ import {
 
 // ─── Context Menu ──────────────────────────────────────────────────────────────
 
+interface ClipContextMenuProps {
+  x: number;
+  y: number;
+  clipId: string;
+  onClose: () => void;
+}
+
 function ClipContextMenu({
   x, y, clipId, onClose,
-}: { x: number; y: number; clipId: string; onClose: () => void }) {
+}: ClipContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -40,14 +47,14 @@ function ClipContextMenu({
   ];
 
   return (
-    <div ref={menuRef} className="clip-context-menu" style={{ left: x, top: y }}>
+    <div ref={menuRef} className="clip-context-menu" style={{ left: x, top: y }} role="menu" aria-label="Clip actions">
       {actions.map((a, i) => a.label === '—' ? (
-        <div key={i} className="clip-context-divider" />
+        <div key={i} className="clip-context-divider" role="separator" />
       ) : (
-        <button key={i} className="clip-context-item"
+        <button key={i} className="clip-context-item" role="menuitem"
           onClick={() => { a.action(); onClose(); }}>
           <span>{a.label}</span>
-          {a.shortcut && <span className="clip-context-shortcut">{a.shortcut}</span>}
+          {a.shortcut && <span className="clip-context-shortcut" aria-label={`Keyboard shortcut: ${a.shortcut}`}>{a.shortcut}</span>}
         </button>
       ))}
     </div>
@@ -56,17 +63,19 @@ function ClipContextMenu({
 
 // ─── Waveform SVG ────────────────────────────────────────────────────────────
 
-function Waveform({
-  data,
-  width,
-  height,
-  color,
-}: {
+interface WaveformProps {
   data: number[];
   width: number;
   height: number;
   color: string;
-}) {
+}
+
+const Waveform = memo(function Waveform({
+  data,
+  width,
+  height,
+  color,
+}: WaveformProps) {
   if (!data.length) return null;
   const hw = height / 2;
   const step = width / data.length;
@@ -83,11 +92,12 @@ function Waveform({
       height={height}
       style={{ position: 'absolute', inset: 0 }}
       preserveAspectRatio="none"
+      aria-hidden="true"
     >
       <path d={pathD} stroke={color} strokeWidth="1.2" opacity="0.55" fill="none" />
     </svg>
   );
-}
+});
 
 // ─── ClipView ────────────────────────────────────────────────────────────────
 
@@ -98,7 +108,7 @@ interface ClipViewProps {
   trackColor: string;
 }
 
-export function ClipView({ clip, zoom, trackId, trackColor }: ClipViewProps) {
+export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor }: ClipViewProps) {
   const { selectedClipIds, selectClip, tracks, markers, playheadTime } =
     useEditorStore();
   const isSelected = selectedClipIds.includes(clip.id);
@@ -244,11 +254,21 @@ export function ClipView({ clip, zoom, trackId, trackColor }: ClipViewProps) {
           bottom: 3,
           position: 'absolute',
         }}
+        role="gridcell"
+        aria-label={`${clip.name} (${clip.type}, ${(clip.endTime - clip.startTime).toFixed(2)}s)`}
+        aria-selected={isSelected}
+        tabIndex={0}
         onMouseDown={handleMouseDown}
         onContextMenu={handleContextMenu}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            selectClip(clip.id, e.ctrlKey || e.metaKey);
+          }
+        }}
       >
         {width > 18 && (
-          <div className="clip-trim-handle left" onMouseDown={handleTrimLeft} />
+          <div className="clip-trim-handle left" onMouseDown={handleTrimLeft} role="separator" aria-label="Trim left edge" />
         )}
 
         {clip.waveformData && clip.type === 'audio' && (
@@ -263,7 +283,7 @@ export function ClipView({ clip, zoom, trackId, trackColor }: ClipViewProps) {
         {width > 30 && <div className="clip-label">{clip.name}</div>}
 
         {width > 18 && (
-          <div className="clip-trim-handle right" onMouseDown={handleTrimRight} />
+          <div className="clip-trim-handle right" onMouseDown={handleTrimRight} role="separator" aria-label="Trim right edge" />
         )}
       </div>
 
@@ -277,4 +297,4 @@ export function ClipView({ clip, zoom, trackId, trackColor }: ClipViewProps) {
       )}
     </>
   );
-}
+});

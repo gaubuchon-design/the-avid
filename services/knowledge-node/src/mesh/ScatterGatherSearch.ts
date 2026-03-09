@@ -318,7 +318,7 @@ export class ScatterGatherSearch {
 
     for (let i = 0; i < chars.length; i++) {
       const idx = i % dimensions;
-      vector[idx] += chars.charCodeAt(i) / 256;
+      vector[idx] = (vector[idx] ?? 0) + chars.charCodeAt(i) / 256;
     }
 
     // Normalise to unit length.
@@ -328,7 +328,7 @@ export class ScatterGatherSearch {
 
     if (norm > 0) {
       for (let i = 0; i < vector.length; i++) {
-        vector[i] /= norm;
+        vector[i] = vector[i]! / norm;
       }
     }
 

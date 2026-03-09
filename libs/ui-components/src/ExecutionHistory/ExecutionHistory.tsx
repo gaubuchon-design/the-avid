@@ -1,8 +1,17 @@
-import React from 'react';
+import React, { forwardRef, useMemo } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+/** Valid lifecycle statuses for a history entry. */
+export type HistoryEntryStatus =
+  | 'completed'
+  | 'failed'
+  | 'executing'
+  | 'planning'
+  | 'cancelled'
+  | 'compensated';
 
 export interface HistoryEntry {
   /** Unique entry identifier. */
@@ -12,7 +21,7 @@ export interface HistoryEntry {
   /** The original user intent. */
   intent: string;
   /** Lifecycle status of the plan. */
-  status: string;
+  status: HistoryEntryStatus;
   /** Number of steps that completed successfully. */
   stepsCompleted: number;
   /** Total number of steps in the plan. */
@@ -34,6 +43,10 @@ export interface ExecutionHistoryProps {
   onViewPlan?: (planId: string) => void;
   /** Called when the user clears the history. */
   onClearHistory?: () => void;
+  /** Additional CSS class names for the root element. */
+  className?: string;
+  /** Unique identifier for the root element. */
+  id?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -53,6 +66,11 @@ function statusVariant(status: string): 'success' | 'error' | 'active' | 'muted'
     default:
       return 'muted';
   }
+}
+
+/** Human-readable status label. */
+function statusLabel(status: string): string {
+  return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
 /** Status icon SVG based on variant. */
@@ -115,6 +133,13 @@ function formatTimestamp(iso: string): string {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+/** Format token count in compact form. */
+function formatTokens(count: number): string {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+  if (count >= 10_000) return `${(count / 1_000).toFixed(1)}K`;
+  return count.toLocaleString();
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -122,18 +147,43 @@ function formatTimestamp(iso: string): string {
 /**
  * Scrollable history of past agent executions. Shows status, progress,
  * token usage, and provides undo and inspect affordances.
+ *
+ * Uses `aria-live` to announce new entries and status changes.
+ * All action buttons are keyboard accessible.
  */
-export function ExecutionHistory({
-  entries,
-  onUndo,
-  onViewPlan,
-  onClearHistory,
-}: ExecutionHistoryProps) {
+export const ExecutionHistory = forwardRef<HTMLDivElement, ExecutionHistoryProps>(function ExecutionHistory(
+  {
+    entries,
+    onUndo,
+    onViewPlan,
+    onClearHistory,
+    className,
+    id,
+  },
+  ref,
+) {
+  // Compute summary for screen readers
+  const summary = useMemo(() => {
+    const completed = entries.filter((e) => e.status === 'completed').length;
+    const failed = entries.filter((e) => e.status === 'failed').length;
+    const active = entries.filter((e) => e.status === 'executing' || e.status === 'planning').length;
+    return `${entries.length} executions: ${completed} completed, ${failed} failed, ${active} in progress`;
+  }, [entries]);
+
   return (
-    <div className="execution-history" role="region" aria-label="Execution history">
-      {/* ── Header ──────────────────────────────────────────────────── */}
+    <div
+      ref={ref}
+      id={id}
+      className={`execution-history${className ? ` ${className}` : ''}`}
+      role="region"
+      aria-label="Execution history"
+      data-testid="execution-history"
+    >
+      {/* -- Header -------------------------------------------------------- */}
       <div className="execution-history-header">
-        <span className="execution-history-title">History</span>
+        <span className="execution-history-title" id={id ? `${id}-title` : 'execution-history-title'}>
+          History
+        </span>
         {onClearHistory && entries.length > 0 && (
           <button
             type="button"
@@ -147,21 +197,40 @@ export function ExecutionHistory({
         )}
       </div>
 
-      {/* ── Empty state ─────────────────────────────────────────────── */}
+      {/* -- Screen reader summary ----------------------------------------- */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {summary}
+      </div>
+
+      {/* -- Empty state --------------------------------------------------- */}
       {entries.length === 0 && (
         <div className="execution-history-empty" role="status">
           No executions yet.
         </div>
       )}
 
-      {/* ── Entry list ──────────────────────────────────────────────── */}
+      {/* -- Entry list ---------------------------------------------------- */}
       {entries.length > 0 && (
-        <ul className="execution-history-list" aria-label="Past executions">
+        <ul
+          className="execution-history-list"
+          aria-label="Past executions"
+          aria-describedby={id ? `${id}-title` : 'execution-history-title'}
+        >
           {entries.map((entry) => {
             const variant = statusVariant(entry.status);
             return (
-              <li key={entry.id} className="history-entry" aria-label={`${entry.intent} - ${entry.status}`}>
-                <span className={`history-entry-status history-entry-status--${variant}`}>
+              <li
+                key={entry.id}
+                className="history-entry"
+                aria-label={`${entry.intent} - ${statusLabel(entry.status)}: ${entry.stepsCompleted} of ${entry.totalSteps} steps, ${formatTokens(entry.tokensUsed)} tokens`}
+                data-testid="history-entry"
+                data-entry-status={entry.status}
+              >
+                <span
+                  className={`history-entry-status history-entry-status--${variant}`}
+                  role="img"
+                  aria-label={statusLabel(entry.status)}
+                >
                   <StatusIcon status={entry.status} />
                 </span>
 
@@ -173,15 +242,15 @@ export function ExecutionHistory({
                       {entry.stepsCompleted}/{entry.totalSteps} steps
                     </span>
                     <span className="history-entry-tokens">
-                      {entry.tokensUsed.toLocaleString()} tokens
+                      {formatTokens(entry.tokensUsed)} tokens
                     </span>
-                    <span className="history-entry-time">
+                    <span className="history-entry-time" title={new Date(entry.createdAt).toLocaleString()}>
                       {formatTimestamp(entry.createdAt)}
                     </span>
                   </div>
                 </div>
 
-                <div className="history-entry-actions">
+                <div className="history-entry-actions" role="group" aria-label={`Actions for: ${entry.intent}`}>
                   {onViewPlan && (
                     <button
                       type="button"
@@ -218,4 +287,4 @@ export function ExecutionHistory({
       )}
     </div>
   );
-}
+});

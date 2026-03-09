@@ -1,26 +1,48 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": ["**/.env.*local"],
+  "globalDependencies": ["**/.env.*local", "tsconfig.base.json"],
+  "globalPassThroughEnv": [
+    "NODE_ENV",
+    "CI",
+    "GITHUB_ACTIONS",
+    "VERCEL",
+    "npm_lifecycle_event"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "out/**", "build/**"]
+      "outputs": ["dist/**", ".next/**", "out/**", "build/**"],
+      "env": ["NODE_ENV"]
     },
     "dev": {
+      "dependsOn": ["^build"],
       "cache": false,
       "persistent": true
     },
     "lint": {
+      "dependsOn": ["^build"],
       "outputs": []
     },
     "type-check": {
+      "dependsOn": ["^build"],
       "outputs": []
     },
     "test": {
+      "dependsOn": ["^build"],
       "outputs": ["coverage/**"],
-      "cache": false
+      "env": ["NODE_ENV", "DATABASE_URL"]
+    },
+    "test:watch": {
+      "cache": false,
+      "persistent": true
     },
     "clean": {
+      "cache": false
+    },
+    "db:generate": {
+      "cache": false
+    },
+    "db:migrate": {
       "cache": false
     }
   }

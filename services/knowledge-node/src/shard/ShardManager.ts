@@ -429,7 +429,7 @@ export class ShardManager {
       // 7. SQLite integrity check
       try {
         const result = db.db.pragma('integrity_check') as Array<{ integrity_check: string }>;
-        const ok = result.length === 1 && result[0].integrity_check === 'ok';
+        const ok = result.length === 1 && result[0]?.integrity_check === 'ok';
         if (!ok) {
           errors.push(
             `SQLite integrity check failed: ${result.map((r) => r.integrity_check).join(', ')}`,

@@ -118,6 +118,12 @@ export class BruteForceIndex implements IANNIndex {
 
   /** @inheritdoc */
   add(id: string, vector: number[]): void {
+    if (!id || typeof id !== 'string') {
+      throw new Error('Vector ID must be a non-empty string');
+    }
+    if (vector.length === 0) {
+      throw new Error('Vector must have at least one dimension');
+    }
     if (this.dimensions === null) {
       this.dimensions = vector.length;
     } else if (vector.length !== this.dimensions) {
@@ -220,7 +226,8 @@ export class BruteForceIndex implements IANNIndex {
 function computeNorm(v: Float32Array): number {
   let sum = 0;
   for (let i = 0; i < v.length; i++) {
-    sum += v[i] * v[i];
+    const val = v[i]!;
+    sum += val * val;
   }
   return Math.sqrt(sum);
 }
@@ -236,7 +243,7 @@ function dotProduct(a: Float32Array, b: Float32Array): number {
   let sum = 0;
   const len = Math.min(a.length, b.length);
   for (let i = 0; i < len; i++) {
-    sum += a[i] * b[i];
+    sum += a[i]! * b[i]!;
   }
   return sum;
 }

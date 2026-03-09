@@ -1,10 +1,10 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, memo } from 'react';
 import { useEditorStore } from '../../store/editor.store';
 import type { RenderState, RenderTrack } from '../../workers/renderer-protocol';
 
 const TRACK_H = 40;
 
-export function TimelineCanvas() {
+export const TimelineCanvas = memo(function TimelineCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const workerRef = useRef<Worker | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -121,6 +121,7 @@ export function TimelineCanvas() {
         pointerEvents: 'none',
         zIndex: 0,
       }}
+      aria-hidden="true"
     />
   );
-}
+});

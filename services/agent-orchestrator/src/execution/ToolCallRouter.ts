@@ -97,6 +97,12 @@ export class ToolCallRouter {
    * @param handler - Function that executes tool calls for this adapter.
    */
   registerAdapter(name: string, handler: ToolHandler): void {
+    if (!name || typeof name !== 'string') {
+      throw new Error('Adapter name must be a non-empty string.');
+    }
+    if (typeof handler !== 'function') {
+      throw new Error('Adapter handler must be a function.');
+    }
     this.adapters.set(name, handler);
   }
 
@@ -139,7 +145,14 @@ export class ToolCallRouter {
     }
 
     try {
-      const result = await handler(toolName, args);
+      // Execute with a 60-second timeout to prevent indefinite hangs
+      const timeoutMs = 60_000;
+      const result = await Promise.race([
+        handler(toolName, args),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Tool "${toolName}" timed out after ${timeoutMs}ms`)), timeoutMs),
+        ),
+      ]);
       const durationMs = Date.now() - start;
 
       return {

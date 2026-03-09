@@ -31,7 +31,7 @@
 
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { createServer } from 'http';
-import { WebSocketServer, type WebSocket } from 'ws';
+import { WebSocketServer, WebSocket } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import { SERVICE_NAME, SERVICE_VERSION } from './index';
 import { OrchestratorService } from './OrchestratorService';
@@ -41,15 +41,15 @@ import type { AgentContext } from './types';
 // Configuration
 // ---------------------------------------------------------------------------
 
-const PORT = Number(process.env.PORT) || 4100;
+const PORT = Number(process.env['PORT']) || 4100;
 
 // ---------------------------------------------------------------------------
 // Service instance
 // ---------------------------------------------------------------------------
 
 const orchestrator = new OrchestratorService({
-  geminiApiKey: process.env.GEMINI_API_KEY,
-  geminiModel: process.env.GEMINI_MODEL,
+  geminiApiKey: process.env['GEMINI_API_KEY'],
+  geminiModel: process.env['GEMINI_MODEL'],
 });
 
 // ---------------------------------------------------------------------------
@@ -106,6 +106,16 @@ app.post('/intent', async (req: Request, res: Response) => {
       return;
     }
 
+    if (intent.length > 10_000) {
+      res.status(400).json({ error: 'Intent exceeds maximum length of 10,000 characters.' });
+      return;
+    }
+
+    if (sessionId !== undefined && typeof sessionId !== 'string') {
+      res.status(400).json({ error: 'Invalid "sessionId" field: must be a string.' });
+      return;
+    }
+
     const resolvedContext: AgentContext = context ?? { projectId: 'default' };
     const resolvedSessionId = sessionId ?? uuidv4();
 
@@ -134,9 +144,10 @@ app.get('/plans', (_req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 
 app.get('/plans/:id', (req: Request, res: Response) => {
-  const plan = orchestrator.getPlan(req.params.id);
+  const planId = req.params['id'] as string;
+  const plan = orchestrator.getPlan(planId);
   if (!plan) {
-    res.status(404).json({ error: `Plan "${req.params.id}" not found.` });
+    res.status(404).json({ error: `Plan "${planId}" not found.` });
     return;
   }
   res.json({ plan });
@@ -148,7 +159,8 @@ app.get('/plans/:id', (req: Request, res: Response) => {
 
 app.post('/plans/:id/approve', async (req: Request, res: Response) => {
   try {
-    const plan = await orchestrator.approvePlan(req.params.id);
+    const planId = req.params['id'] as string;
+    const plan = await orchestrator.approvePlan(planId);
     res.json({ plan });
   } catch (error) {
     const status = (error instanceof Error && error.message.includes('not found')) ? 404 : 400;
@@ -164,9 +176,10 @@ app.post('/plans/:id/approve', async (req: Request, res: Response) => {
 
 app.post('/plans/:id/reject', async (req: Request, res: Response) => {
   try {
+    const planId = req.params['id'] as string;
     const { reason } = req.body as { reason?: string };
-    await orchestrator.rejectPlan(req.params.id, reason);
-    res.json({ status: 'rejected', planId: req.params.id });
+    await orchestrator.rejectPlan(planId, reason);
+    res.json({ status: 'rejected', planId });
   } catch (error) {
     const status = (error instanceof Error && error.message.includes('not found')) ? 404 : 400;
     res.status(status).json({
@@ -181,8 +194,9 @@ app.post('/plans/:id/reject', async (req: Request, res: Response) => {
 
 app.post('/plans/:id/cancel', async (req: Request, res: Response) => {
   try {
-    await orchestrator.cancelPlan(req.params.id);
-    res.json({ status: 'cancelled', planId: req.params.id });
+    const planId = req.params['id'] as string;
+    await orchestrator.cancelPlan(planId);
+    res.json({ status: 'cancelled', planId });
   } catch (error) {
     const status = (error instanceof Error && error.message.includes('not found')) ? 404 : 400;
     res.status(status).json({
@@ -197,8 +211,9 @@ app.post('/plans/:id/cancel', async (req: Request, res: Response) => {
 
 app.post('/plans/:id/compensate', async (req: Request, res: Response) => {
   try {
-    const result = await orchestrator.compensatePlan(req.params.id);
-    res.json({ planId: req.params.id, ...result });
+    const planId = req.params['id'] as string;
+    const result = await orchestrator.compensatePlan(planId);
+    res.json({ planId, ...result });
   } catch (error) {
     const status = (error instanceof Error && error.message.includes('not found')) ? 404 : 400;
     res.status(status).json({
@@ -213,7 +228,9 @@ app.post('/plans/:id/compensate', async (req: Request, res: Response) => {
 
 app.post('/plans/:id/steps/:stepId/approve', async (req: Request, res: Response) => {
   try {
-    const step = await orchestrator.approveStep(req.params.id, req.params.stepId);
+    const planId = req.params['id'] as string;
+    const stepId = req.params['stepId'] as string;
+    const step = await orchestrator.approveStep(planId, stepId);
     res.json({ step });
   } catch (error) {
     const status = (error instanceof Error && error.message.includes('not found')) ? 404 : 400;
@@ -228,16 +245,14 @@ app.post('/plans/:id/steps/:stepId/approve', async (req: Request, res: Response)
 // ---------------------------------------------------------------------------
 
 app.get('/analytics', (req: Request, res: Response) => {
-  const { sessionId, planId, type } = req.query as {
-    sessionId?: string;
-    planId?: string;
-    type?: string;
-  };
+  const sessionId = req.query['sessionId'] as string | undefined;
+  const planId = req.query['planId'] as string | undefined;
+  const type = req.query['type'] as string | undefined;
 
   const filter: Record<string, string> = {};
-  if (sessionId) filter.sessionId = sessionId;
-  if (planId) filter.planId = planId;
-  if (type) filter.type = type;
+  if (sessionId) filter['sessionId'] = sessionId;
+  if (planId) filter['planId'] = planId;
+  if (type) filter['type'] = type;
 
   const entries = orchestrator.getAnalytics().getEntries(
     Object.keys(filter).length > 0 ? (filter as any) : undefined,
@@ -311,7 +326,7 @@ function broadcastPlanUpdate(plan: unknown): void {
   const message = JSON.stringify({ type: 'plan-update', plan });
 
   for (const ws of wsClients) {
-    if (ws.readyState === 1 /* OPEN */) {
+    if (ws.readyState === WebSocket.OPEN) {
       try {
         ws.send(message);
       } catch (error) {
@@ -327,13 +342,86 @@ orchestrator.subscribe((plan) => {
 });
 
 // ---------------------------------------------------------------------------
+// WebSocket heartbeat — detect dead connections
+// ---------------------------------------------------------------------------
+
+const WS_PING_INTERVAL_MS = 30_000;
+const wsAlive = new WeakMap<WebSocket, boolean>();
+
+const heartbeatInterval = setInterval(() => {
+  for (const ws of wsClients) {
+    if (wsAlive.get(ws) === false) {
+      console.log(`[${SERVICE_NAME}] Terminating unresponsive WebSocket client`);
+      wsClients.delete(ws);
+      ws.terminate();
+      continue;
+    }
+    wsAlive.set(ws, false);
+    ws.ping();
+  }
+}, WS_PING_INTERVAL_MS);
+
+// Listen for pong responses to mark connections as alive
+wss.on('connection', (ws: WebSocket) => {
+  wsAlive.set(ws, true);
+  ws.on('pong', () => {
+    wsAlive.set(ws, true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Graceful shutdown
+// ---------------------------------------------------------------------------
+
+let isShuttingDown = false;
+
+async function gracefulShutdown(signal: string): Promise<void> {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  console.log(`[${SERVICE_NAME}] Received ${signal}, shutting down gracefully...`);
+
+  clearInterval(heartbeatInterval);
+
+  // Close all WebSocket connections
+  for (const ws of wsClients) {
+    try {
+      ws.close(1001, 'Server shutting down');
+    } catch {
+      // Ignore errors during shutdown
+    }
+  }
+  wsClients.clear();
+
+  // Close WebSocket server
+  wss.close(() => {
+    console.log(`[${SERVICE_NAME}] WebSocket server closed`);
+  });
+
+  // Close HTTP server (stop accepting new connections)
+  server.close(() => {
+    console.log(`[${SERVICE_NAME}] HTTP server closed`);
+    process.exit(0);
+  });
+
+  // Force exit after 10 seconds if graceful shutdown stalls
+  setTimeout(() => {
+    console.error(`[${SERVICE_NAME}] Forced exit after shutdown timeout`);
+    process.exit(1);
+  }, 10_000).unref();
+}
+
+process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
+
+// ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
 
 server.listen(PORT, () => {
   console.log(`[${SERVICE_NAME}] v${SERVICE_VERSION} listening on http://localhost:${PORT}`);
   console.log(`[${SERVICE_NAME}] WebSocket available on ws://localhost:${PORT}`);
-  console.log(`[${SERVICE_NAME}] Gemini API key: ${process.env.GEMINI_API_KEY ? 'configured' : 'not set (using template fallback)'}`);
+  console.log(`[${SERVICE_NAME}] Gemini API key: ${process.env['GEMINI_API_KEY'] ? 'configured' : 'not set (using template fallback)'}`);
   console.log(`[${SERVICE_NAME}] Registered tools: ${orchestrator.getTools().length}`);
 });
 

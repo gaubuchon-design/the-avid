@@ -14,6 +14,7 @@
  * ```
  */
 
+import { unlinkSync } from 'node:fs';
 import { KnowledgeDB, bufferToVector } from '../db/KnowledgeDB.js';
 import { BruteForceIndex, type IANNIndex } from './ANNIndex.js';
 
@@ -87,7 +88,6 @@ export class IndexBuilder {
 
       // Clean up temp file best-effort.
       try {
-        const { unlinkSync } = require('node:fs');
         unlinkSync(tmpPath);
       } catch {
         // Non-critical cleanup failure.

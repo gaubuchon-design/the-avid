@@ -24,11 +24,11 @@ export function Toolbar() {
   // Undo/Redo now handled by global KeyboardEngine via EditorPage registrations
 
   return (
-    <div className="toolbar-wrapper">
+    <div className="toolbar-wrapper" role="banner">
       {/* Main toolbar row */}
-      <div className="toolbar">
+      <div className="toolbar" role="toolbar" aria-label="Main toolbar">
         {/* Mac-style window dots */}
-        <div className="toolbar-window-dots">
+        <div className="toolbar-window-dots" aria-hidden="true">
           <span className="dot dot-close" />
           <span className="dot dot-minimize" />
           <span className="dot dot-maximize" />
@@ -48,11 +48,14 @@ export function Toolbar() {
 
         <div className="toolbar-divider" />
 
-        {/* Media / Effects tabs — Figma style */}
-        <div className="toolbar-nav-tabs">
+        {/* Media / Effects tabs -- Figma style */}
+        <div className="toolbar-nav-tabs" role="tablist" aria-label="Content tabs">
           <button
             className={`toolbar-nav-tab${toolbarTab === 'media' ? ' active' : ''}`}
             onClick={() => setToolbarTab('media')}
+            role="tab"
+            aria-selected={toolbarTab === 'media'}
+            aria-label="Media tab"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="2" y="2" width="20" height="20" rx="2" /><circle cx="12" cy="12" r="3" />
@@ -62,6 +65,9 @@ export function Toolbar() {
           <button
             className={`toolbar-nav-tab${toolbarTab === 'effects' ? ' active' : ''}`}
             onClick={() => setToolbarTab('effects')}
+            role="tab"
+            aria-selected={toolbarTab === 'effects'}
+            aria-label="Effects tab"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
@@ -147,9 +153,9 @@ export function Toolbar() {
         <UserAvatarMenu />
       </div>
 
-      {/* Sub-bar: Timecode | Sequence Name ✦ | Clip name + TC */}
-      <div className="toolbar-sub-bar">
-        <div className="toolbar-sub-timecode">{tc.secondsToTC(playheadTime)}</div>
+      {/* Sub-bar: Timecode | Sequence Name | Clip name + TC */}
+      <div className="toolbar-sub-bar" role="status" aria-label="Playback status">
+        <div className="toolbar-sub-timecode" aria-live="polite" aria-label="Playhead timecode">{tc.secondsToTC(playheadTime)}</div>
         <div className="toolbar-sub-spacer" />
         <div className="toolbar-sub-sequence">{projectName ? `${projectName} – edit` : 'Untitled Sequence'}</div>
         <span className="toolbar-sub-diamond">✦</span>

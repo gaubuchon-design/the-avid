@@ -1,11 +1,13 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": false,
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": {
       "@mcua/core": ["../../packages/core/src"]
     }
   },
-  "include": ["app", "app.config.ts"]
+  "include": ["app", "app.config.ts", "**/*.d.ts"]
 }

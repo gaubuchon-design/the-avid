@@ -187,7 +187,7 @@ export class ConflictHandler {
       );
     }
 
-    const existing = this.conflicts[index];
+    const existing = this.conflicts[index]!;
     this.conflicts[index] = {
       ...existing,
       resolved: true,

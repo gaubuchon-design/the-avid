@@ -73,6 +73,8 @@ export class ErrorBoundary extends Component<Props, State> {
 
       return (
         <div
+          role="alert"
+          aria-live="assertive"
           style={{
             padding: 40,
             textAlign: 'center',

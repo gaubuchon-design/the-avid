@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef, forwardRef, type KeyboardEvent } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,6 +34,10 @@ export interface PlaybookBuilderProps {
   onSave: () => void;
   /** Called to run/execute the playbook. */
   onRun?: () => void;
+  /** Additional CSS class names for the root element. */
+  className?: string;
+  /** Unique identifier for the root element. */
+  id?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -43,50 +47,180 @@ export interface PlaybookBuilderProps {
 /**
  * Builder UI for composing automation playbooks from available tools.
  * Allows naming, ordering, adding, removing, and saving step sequences.
+ *
+ * Keyboard support:
+ * - Escape: close the tool dropdown
+ * - Arrow keys: navigate dropdown options
+ * - Enter/Space: select a dropdown option
  */
-export function PlaybookBuilder({
-  name,
-  steps,
-  availableTools,
-  onNameChange,
-  onAddStep,
-  onRemoveStep,
-  onReorderStep,
-  onSave,
-  onRun,
-}: PlaybookBuilderProps) {
+export const PlaybookBuilder = forwardRef<HTMLDivElement, PlaybookBuilderProps>(function PlaybookBuilder(
+  {
+    name,
+    steps,
+    availableTools,
+    onNameChange,
+    onAddStep,
+    onRemoveStep,
+    onReorderStep,
+    onSave,
+    onRun,
+    className,
+    id,
+  },
+  ref,
+) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [selectedTool, setSelectedTool] = useState('');
+  const [focusedOptionIndex, setFocusedOptionIndex] = useState(-1);
+  const dropdownRef = useRef<HTMLUListElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!isDropdownOpen) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        dropdownRef.current && !dropdownRef.current.contains(target) &&
+        triggerRef.current && !triggerRef.current.contains(target)
+      ) {
+        setIsDropdownOpen(false);
+        setFocusedOptionIndex(-1);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isDropdownOpen]);
+
+  // Close dropdown on Escape key (global handler)
+  useEffect(() => {
+    if (!isDropdownOpen) return;
+
+    const handleEscape = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setIsDropdownOpen(false);
+        setFocusedOptionIndex(-1);
+        triggerRef.current?.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isDropdownOpen]);
 
   const handleAddStep = useCallback(() => {
     if (!selectedTool) return;
     onAddStep(selectedTool);
     setSelectedTool('');
     setIsDropdownOpen(false);
+    setFocusedOptionIndex(-1);
   }, [selectedTool, onAddStep]);
 
+  const selectOption = useCallback((toolName: string) => {
+    setSelectedTool(toolName);
+    setIsDropdownOpen(false);
+    setFocusedOptionIndex(-1);
+  }, []);
+
+  const handleTriggerKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLButtonElement>) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (!isDropdownOpen) {
+          setIsDropdownOpen(true);
+        }
+        setFocusedOptionIndex(0);
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!isDropdownOpen) {
+          setIsDropdownOpen(true);
+        }
+        setFocusedOptionIndex(availableTools.length - 1);
+      }
+    },
+    [isDropdownOpen, availableTools.length],
+  );
+
+  const handleOptionKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLLIElement>, toolName: string, index: number) => {
+      switch (e.key) {
+        case 'Enter':
+        case ' ':
+          e.preventDefault();
+          selectOption(toolName);
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          setFocusedOptionIndex(Math.min(index + 1, availableTools.length - 1));
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          if (index === 0) {
+            triggerRef.current?.focus();
+            setFocusedOptionIndex(-1);
+          } else {
+            setFocusedOptionIndex(index - 1);
+          }
+          break;
+        case 'Home':
+          e.preventDefault();
+          setFocusedOptionIndex(0);
+          break;
+        case 'End':
+          e.preventDefault();
+          setFocusedOptionIndex(availableTools.length - 1);
+          break;
+      }
+    },
+    [availableTools.length, selectOption],
+  );
+
+  // Focus the option when focusedOptionIndex changes
+  useEffect(() => {
+    if (focusedOptionIndex >= 0 && dropdownRef.current) {
+      const options = dropdownRef.current.querySelectorAll<HTMLLIElement>('[role="option"]');
+      options[focusedOptionIndex]?.focus();
+    }
+  }, [focusedOptionIndex]);
+
+  const dropdownId = id ? `${id}-dropdown` : 'playbook-tool-dropdown';
+
   return (
-    <div className="playbook-builder" role="region" aria-label="Playbook builder">
-      {/* ── Name ────────────────────────────────────────────────────── */}
+    <div
+      ref={ref}
+      id={id}
+      className={`playbook-builder${className ? ` ${className}` : ''}`}
+      role="region"
+      aria-label="Playbook builder"
+      data-testid="playbook-builder"
+    >
+      {/* -- Name ---------------------------------------------------------- */}
       <div className="playbook-builder-name">
-        <label htmlFor="playbook-name" className="playbook-builder-label">
+        <label htmlFor={id ? `${id}-name` : 'playbook-name'} className="playbook-builder-label">
           Playbook Name
         </label>
         <input
-          id="playbook-name"
+          id={id ? `${id}-name` : 'playbook-name'}
           type="text"
           className="playbook-builder-name-input"
           value={name}
           onChange={(e) => onNameChange(e.currentTarget.value)}
           placeholder="My automation playbook"
-          aria-label="Playbook name"
         />
       </div>
 
-      {/* ── Step list ───────────────────────────────────────────────── */}
-      <div className="playbook-steps" role="list" aria-label="Playbook steps">
+      {/* -- Step list ----------------------------------------------------- */}
+      <div
+        className="playbook-steps"
+        role="list"
+        aria-label={`Playbook steps (${steps.length} total)`}
+      >
         {steps.length === 0 && (
-          <div className="playbook-steps-empty">
+          <div className="playbook-steps-empty" role="status">
             No steps yet. Add a tool below to get started.
           </div>
         )}
@@ -96,16 +230,17 @@ export function PlaybookBuilder({
             key={step.id}
             className="playbook-step"
             role="listitem"
-            aria-label={`Step ${index + 1}: ${step.toolName}`}
+            aria-label={`Step ${index + 1}: ${step.toolName} - ${step.description}`}
+            data-testid="playbook-step"
           >
-            <span className="playbook-step-index">{index + 1}</span>
+            <span className="playbook-step-index" aria-hidden="true">{index + 1}</span>
 
             <div className="playbook-step-body">
               <span className="playbook-step-tool">{step.toolName}</span>
               <span className="playbook-step-desc">{step.description}</span>
             </div>
 
-            <div className="playbook-step-controls">
+            <div className="playbook-step-controls" role="group" aria-label={`Step ${index + 1} controls`}>
               <button
                 type="button"
                 className="playbook-step-btn"
@@ -134,7 +269,7 @@ export function PlaybookBuilder({
                 type="button"
                 className="playbook-step-btn playbook-step-btn--danger"
                 onClick={() => onRemoveStep(step.id)}
-                aria-label={`Remove step ${index + 1}`}
+                aria-label={`Remove step ${index + 1}: ${step.toolName}`}
                 title="Remove step"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -147,15 +282,21 @@ export function PlaybookBuilder({
         ))}
       </div>
 
-      {/* ── Add step ────────────────────────────────────────────────── */}
+      {/* -- Add step ------------------------------------------------------ */}
       <div className="playbook-add-row">
         <div className="playbook-add-select-wrap">
           <button
+            ref={triggerRef}
             type="button"
             className="playbook-add-trigger"
-            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+            onClick={() => {
+              setIsDropdownOpen(!isDropdownOpen);
+              setFocusedOptionIndex(-1);
+            }}
+            onKeyDown={handleTriggerKeyDown}
             aria-haspopup="listbox"
             aria-expanded={isDropdownOpen}
+            aria-controls={dropdownId}
             aria-label="Select tool to add"
           >
             {selectedTool || 'Select a tool\u2026'}
@@ -165,25 +306,22 @@ export function PlaybookBuilder({
           </button>
 
           {isDropdownOpen && (
-            <ul className="playbook-add-dropdown" role="listbox" aria-label="Available tools">
-              {availableTools.map((tool) => (
+            <ul
+              ref={dropdownRef}
+              id={dropdownId}
+              className="playbook-add-dropdown"
+              role="listbox"
+              aria-label="Available tools"
+            >
+              {availableTools.map((tool, index) => (
                 <li
                   key={tool.name}
-                  className="playbook-add-option"
+                  className={`playbook-add-option${focusedOptionIndex === index ? ' playbook-add-option--focused' : ''}`}
                   role="option"
                   aria-selected={selectedTool === tool.name}
-                  tabIndex={0}
-                  onClick={() => {
-                    setSelectedTool(tool.name);
-                    setIsDropdownOpen(false);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      setSelectedTool(tool.name);
-                      setIsDropdownOpen(false);
-                    }
-                  }}
+                  tabIndex={-1}
+                  onClick={() => selectOption(tool.name)}
+                  onKeyDown={(e) => handleOptionKeyDown(e, tool.name, index)}
                 >
                   <span className="playbook-add-option-name">{tool.name}</span>
                   <span className="playbook-add-option-desc">{tool.description}</span>
@@ -208,8 +346,8 @@ export function PlaybookBuilder({
         </button>
       </div>
 
-      {/* ── Actions ─────────────────────────────────────────────────── */}
-      <div className="playbook-actions">
+      {/* -- Actions ------------------------------------------------------- */}
+      <div className="playbook-actions" role="group" aria-label="Playbook actions">
         <button
           type="button"
           className="playbook-save-btn"
@@ -236,4 +374,4 @@ export function PlaybookBuilder({
       </div>
     </div>
   );
-}
+});

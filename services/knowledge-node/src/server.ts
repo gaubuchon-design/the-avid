@@ -13,7 +13,7 @@
 
 import express from 'express';
 import { createServer } from 'http';
-import { WebSocketServer } from 'ws';
+import { WebSocketServer, WebSocket } from 'ws';
 import { SERVICE_NAME, SERVICE_VERSION } from './index.js';
 import type { MeshService } from './mesh/MeshService.js';
 import type { SearchQuery } from './mesh/ScatterGatherSearch.js';
@@ -133,6 +133,16 @@ app.post('/mesh/search', async (req, res) => {
     return;
   }
 
+  if (typeof query.topK !== 'number' || query.topK < 1 || query.topK > 1000) {
+    res.status(400).json({ error: 'topK must be a number between 1 and 1000' });
+    return;
+  }
+
+  if (query.text.length > 10_000) {
+    res.status(400).json({ error: 'Search text exceeds maximum length of 10,000 characters' });
+    return;
+  }
+
   try {
     const results = await meshService.search(query);
     res.json(results);
@@ -172,9 +182,89 @@ wss.on('connection', (ws) => {
 });
 
 // ---------------------------------------------------------------------------
+// WebSocket heartbeat — detect dead connections
+// ---------------------------------------------------------------------------
+
+const WS_PING_INTERVAL_MS = 30_000;
+const wsAlive = new WeakMap<WebSocket, boolean>();
+
+const heartbeatInterval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (wsAlive.get(ws) === false) {
+      console.log(`[${SERVICE_NAME}] Terminating unresponsive WebSocket client`);
+      ws.terminate();
+      return;
+    }
+    wsAlive.set(ws, false);
+    ws.ping();
+  });
+}, WS_PING_INTERVAL_MS);
+
+wss.on('connection', (ws) => {
+  wsAlive.set(ws, true);
+  ws.on('pong', () => {
+    wsAlive.set(ws, true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Graceful shutdown
+// ---------------------------------------------------------------------------
+
+let isShuttingDown = false;
+
+async function gracefulShutdown(signal: string): Promise<void> {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  console.log(`[${SERVICE_NAME}] Received ${signal}, shutting down gracefully...`);
+
+  clearInterval(heartbeatInterval);
+
+  // Stop the mesh service if attached
+  if (meshService) {
+    try {
+      await meshService.stop();
+      console.log(`[${SERVICE_NAME}] Mesh service stopped`);
+    } catch (err) {
+      console.error(`[${SERVICE_NAME}] Error stopping mesh service:`, err);
+    }
+  }
+
+  // Close all WebSocket connections
+  wss.clients.forEach((ws) => {
+    try {
+      ws.close(1001, 'Server shutting down');
+    } catch {
+      // Ignore errors during shutdown
+    }
+  });
+
+  // Close WebSocket server
+  wss.close(() => {
+    console.log(`[${SERVICE_NAME}] WebSocket server closed`);
+  });
+
+  // Close HTTP server (stop accepting new connections)
+  server.close(() => {
+    console.log(`[${SERVICE_NAME}] HTTP server closed`);
+    process.exit(0);
+  });
+
+  // Force exit after 10 seconds if graceful shutdown stalls
+  setTimeout(() => {
+    console.error(`[${SERVICE_NAME}] Forced exit after shutdown timeout`);
+    process.exit(1);
+  }, 10_000).unref();
+}
+
+process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
+
+// ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
-const PORT = Number(process.env.PORT) || 4200;
+const PORT = Number(process.env['PORT']) || 4200;
 
 server.listen(PORT, () => {
   console.log(`[${SERVICE_NAME}] v${SERVICE_VERSION} listening on http://localhost:${PORT}`);

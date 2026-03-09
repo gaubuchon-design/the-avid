@@ -5,6 +5,8 @@
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { db } from '../../db/client';
+import { validate, paginationQuery, paginate } from '../../utils/validation';
+import { assertFound, NotFoundError, ForbiddenError } from '../../utils/errors';
 import { z } from 'zod';
 
 const router = Router();
@@ -14,20 +16,31 @@ router.use(authenticate);
 
 const createBrandKitSchema = z.object({
   orgId: z.string().uuid(),
-  brandName: z.string().min(1),
+  brandName: z.string().min(1).max(200),
+  primaryColors: z.array(z.string().regex(/^#[0-9a-fA-F]{6}$/)).optional(),
+  secondaryColors: z.array(z.string().regex(/^#[0-9a-fA-F]{6}$/)).optional(),
+  fonts: z.record(z.string()).optional(),
+  typography: z.record(z.any()).optional(),
+  voiceTone: z.string().max(1000).optional(),
+  approvedMusicIds: z.array(z.string().uuid()).optional(),
+  prohibitedElements: z.array(z.string().max(200)).optional(),
+});
+
+const updateBrandKitSchema = z.object({
+  brandName: z.string().min(1).max(200).optional(),
   primaryColors: z.array(z.string()).optional(),
   secondaryColors: z.array(z.string()).optional(),
   fonts: z.record(z.string()).optional(),
   typography: z.record(z.any()).optional(),
-  voiceTone: z.string().optional(),
-  approvedMusicIds: z.array(z.string()).optional(),
+  voiceTone: z.string().max(1000).optional(),
+  approvedMusicIds: z.array(z.string().uuid()).optional(),
   prohibitedElements: z.array(z.string()).optional(),
-});
+}).strict();
 
 router.get('/brand-kits', async (req: Request, res: Response) => {
-  const { orgId } = req.query;
+  const { orgId } = req.query as Record<string, string>;
   const kits = await db.brandKit.findMany({
-    where: orgId ? { orgId: orgId as string } : {},
+    where: orgId ? { orgId } : {},
     include: { templates: { take: 5 }, campaigns: { take: 5 } },
     orderBy: { createdAt: 'desc' },
   });
@@ -35,20 +48,20 @@ router.get('/brand-kits', async (req: Request, res: Response) => {
 });
 
 router.get('/brand-kits/:id', async (req: Request, res: Response) => {
-  const kit = await db.brandKit.findUniqueOrThrow({
+  const kit = await db.brandKit.findUnique({
     where: { id: req.params.id },
     include: { templates: true, campaigns: true },
   });
+  assertFound(kit, 'Brand kit');
   res.json({ brandKit: kit });
 });
 
-router.post('/brand-kits', async (req: Request, res: Response) => {
-  const data = createBrandKitSchema.parse(req.body);
-  const kit = await db.brandKit.create({ data });
+router.post('/brand-kits', validate(createBrandKitSchema), async (req: Request, res: Response) => {
+  const kit = await db.brandKit.create({ data: req.body });
   res.status(201).json({ brandKit: kit });
 });
 
-router.patch('/brand-kits/:id', async (req: Request, res: Response) => {
+router.patch('/brand-kits/:id', validate(updateBrandKitSchema), async (req: Request, res: Response) => {
   const kit = await db.brandKit.update({
     where: { id: req.params.id },
     data: req.body,
@@ -58,10 +71,18 @@ router.patch('/brand-kits/:id', async (req: Request, res: Response) => {
 
 router.delete('/brand-kits/:id', async (req: Request, res: Response) => {
   await db.brandKit.delete({ where: { id: req.params.id } });
-  res.json({ success: true });
+  res.status(204).send();
 });
 
 // ─── Brand Templates ─────────────────────────────────────────────────────────
+
+const createTemplateSchema = z.object({
+  name: z.string().min(1).max(200),
+  description: z.string().max(1000).optional(),
+  elements: z.array(z.record(z.unknown())).default([]),
+  lockedElementIds: z.array(z.string()).default([]),
+  category: z.string().max(100).optional(),
+});
 
 router.get('/brand-kits/:kitId/templates', async (req: Request, res: Response) => {
   const templates = await db.brandTemplate.findMany({
@@ -71,16 +92,13 @@ router.get('/brand-kits/:kitId/templates', async (req: Request, res: Response) =
   res.json({ templates });
 });
 
-router.post('/brand-kits/:kitId/templates', async (req: Request, res: Response) => {
+router.post('/brand-kits/:kitId/templates', validate(createTemplateSchema), async (req: Request, res: Response) => {
+  // Verify brand kit exists
+  const kit = await db.brandKit.findUnique({ where: { id: req.params.kitId } });
+  assertFound(kit, 'Brand kit');
+
   const template = await db.brandTemplate.create({
-    data: {
-      brandKitId: req.params.kitId,
-      name: req.body.name,
-      description: req.body.description,
-      elements: req.body.elements || [],
-      lockedElementIds: req.body.lockedElementIds || [],
-      category: req.body.category,
-    },
+    data: { brandKitId: req.params.kitId, ...req.body },
   });
   res.status(201).json({ template });
 });
@@ -98,36 +116,44 @@ router.patch('/brand-kits/:kitId/templates/:id', async (req: Request, res: Respo
 const createCampaignSchema = z.object({
   orgId: z.string().uuid(),
   brandKitId: z.string().uuid().optional(),
-  name: z.string().min(1),
-  brief: z.string().optional(),
-  objective: z.string().optional(),
-  targetAudience: z.string().optional(),
+  name: z.string().min(1).max(200),
+  brief: z.string().max(5000).optional(),
+  objective: z.string().max(500).optional(),
+  targetAudience: z.string().max(500).optional(),
   startDate: z.string().datetime().optional(),
   endDate: z.string().datetime().optional(),
-  tokenBudget: z.number().int().optional(),
+  tokenBudget: z.number().int().min(0).optional(),
 });
 
-router.get('/campaigns', async (req: Request, res: Response) => {
-  const { orgId, status } = req.query;
+router.get('/campaigns', validate(paginationQuery, 'query'), async (req: Request, res: Response) => {
+  const { orgId, status } = req.query as Record<string, string>;
+  const { page, limit } = req.query as any;
+  const skip = (page - 1) * limit;
+
   const where: any = {};
   if (orgId) where.orgId = orgId;
   if (status) where.status = status;
 
-  const campaigns = await db.campaign.findMany({
-    where,
-    include: {
-      brandKit: { select: { id: true, brandName: true } },
-      deliverables: true,
-      markets: true,
-      _count: { select: { variants: true } },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
-  res.json({ campaigns });
+  const [campaigns, total] = await Promise.all([
+    db.campaign.findMany({
+      where,
+      include: {
+        brandKit: { select: { id: true, brandName: true } },
+        deliverables: true,
+        markets: true,
+        _count: { select: { variants: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+    }),
+    db.campaign.count({ where }),
+  ]);
+  res.json({ campaigns, pagination: paginate(total, page, limit) });
 });
 
 router.get('/campaigns/:id', async (req: Request, res: Response) => {
-  const campaign = await db.campaign.findUniqueOrThrow({
+  const campaign = await db.campaign.findUnique({
     where: { id: req.params.id },
     include: {
       brandKit: true,
@@ -136,11 +162,12 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
       variants: { orderBy: { createdAt: 'desc' } },
     },
   });
+  assertFound(campaign, 'Campaign');
   res.json({ campaign });
 });
 
-router.post('/campaigns', async (req: Request, res: Response) => {
-  const data = createCampaignSchema.parse(req.body);
+router.post('/campaigns', validate(createCampaignSchema), async (req: Request, res: Response) => {
+  const data = req.body;
   const campaign = await db.campaign.create({
     data: {
       ...data,
@@ -161,19 +188,24 @@ router.patch('/campaigns/:id', async (req: Request, res: Response) => {
 
 // ─── Campaign Deliverables ───────────────────────────────────────────────────
 
-router.post('/campaigns/:campaignId/deliverables', async (req: Request, res: Response) => {
-  const deliverable = await db.campaignDeliverable.create({
-    data: {
-      campaignId: req.params.campaignId,
-      name: req.body.name,
-      type: req.body.type,
-      targetDuration: req.body.targetDuration,
-      aspectRatio: req.body.aspectRatio,
-      assignedEditorId: req.body.assignedEditorId,
-    },
-  });
-  res.status(201).json({ deliverable });
+const createDeliverableSchema = z.object({
+  name: z.string().min(1).max(200),
+  type: z.string().max(100),
+  targetDuration: z.number().positive().optional(),
+  aspectRatio: z.string().max(20).optional(),
+  assignedEditorId: z.string().uuid().optional(),
 });
+
+router.post(
+  '/campaigns/:campaignId/deliverables',
+  validate(createDeliverableSchema),
+  async (req: Request, res: Response) => {
+    const deliverable = await db.campaignDeliverable.create({
+      data: { campaignId: req.params.campaignId, ...req.body },
+    });
+    res.status(201).json({ deliverable });
+  }
+);
 
 router.patch('/campaigns/:campaignId/deliverables/:id', async (req: Request, res: Response) => {
   const deliverable = await db.campaignDeliverable.update({
@@ -185,6 +217,13 @@ router.patch('/campaigns/:campaignId/deliverables/:id', async (req: Request, res
 
 // ─── Content Variants ────────────────────────────────────────────────────────
 
+const createVariantSchema = z.object({
+  masterProjectId: z.string().uuid().optional(),
+  variantName: z.string().min(1).max(200),
+  languageCode: z.string().max(10).optional(),
+  changes: z.array(z.record(z.unknown())).default([]),
+});
+
 router.get('/campaigns/:campaignId/variants', async (req: Request, res: Response) => {
   const variants = await db.contentVariant.findMany({
     where: { campaignId: req.params.campaignId },
@@ -193,24 +232,25 @@ router.get('/campaigns/:campaignId/variants', async (req: Request, res: Response
   res.json({ variants });
 });
 
-router.post('/campaigns/:campaignId/variants', async (req: Request, res: Response) => {
-  const variant = await db.contentVariant.create({
-    data: {
-      campaignId: req.params.campaignId,
-      masterProjectId: req.body.masterProjectId,
-      variantName: req.body.variantName,
-      languageCode: req.body.languageCode,
-      changes: req.body.changes || [],
-    },
-  });
-  res.status(201).json({ variant });
-});
+router.post(
+  '/campaigns/:campaignId/variants',
+  validate(createVariantSchema),
+  async (req: Request, res: Response) => {
+    const variant = await db.contentVariant.create({
+      data: { campaignId: req.params.campaignId, ...req.body },
+    });
+    res.status(201).json({ variant });
+  }
+);
 
 router.post('/campaigns/:campaignId/variants/generate-all', async (req: Request, res: Response) => {
-  // Generate all pending variants for a campaign
   const variants = await db.contentVariant.findMany({
     where: { campaignId: req.params.campaignId, status: 'PENDING' },
   });
+
+  if (variants.length === 0) {
+    return res.json({ variants: [], message: 'No pending variants to generate' });
+  }
 
   // In production: queue variant generation jobs
   const updated = await Promise.all(
@@ -238,10 +278,9 @@ router.get('/compliance/:projectId', async (req: Request, res: Response) => {
 
 router.post('/compliance/:projectId/check', async (req: Request, res: Response) => {
   const { brandKitId } = req.body;
-  const userId = (req as any).user.id;
+  const userId = req.user!.id;
 
   // In production: run AI compliance check
-  // For now, create a placeholder report
   const report = await db.complianceReport.create({
     data: {
       projectId: req.params.projectId,
@@ -256,25 +295,28 @@ router.post('/compliance/:projectId/check', async (req: Request, res: Response) 
 
 // ─── DAM Connections ─────────────────────────────────────────────────────────
 
+const createDAMSchema = z.object({
+  orgId: z.string().uuid(),
+  provider: z.string().min(1).max(100),
+  name: z.string().min(1).max(200),
+  apiEndpoint: z.string().url(),
+  apiKey: z.string().optional(),
+  accessToken: z.string().optional(),
+});
+
 router.get('/dam-connections', async (req: Request, res: Response) => {
-  const { orgId } = req.query;
+  const { orgId } = req.query as Record<string, string>;
   const connections = await db.dAMConnection.findMany({
-    where: { orgId: orgId as string, isActive: true },
+    where: {
+      ...(orgId ? { orgId } : {}),
+      isActive: true,
+    },
   });
   res.json({ connections });
 });
 
-router.post('/dam-connections', async (req: Request, res: Response) => {
-  const connection = await db.dAMConnection.create({
-    data: {
-      orgId: req.body.orgId,
-      provider: req.body.provider,
-      name: req.body.name,
-      apiEndpoint: req.body.apiEndpoint,
-      apiKey: req.body.apiKey,
-      accessToken: req.body.accessToken,
-    },
-  });
+router.post('/dam-connections', validate(createDAMSchema), async (req: Request, res: Response) => {
+  const connection = await db.dAMConnection.create({ data: req.body });
   res.status(201).json({ connection });
 });
 
@@ -283,38 +325,43 @@ router.delete('/dam-connections/:id', async (req: Request, res: Response) => {
     where: { id: req.params.id },
     data: { isActive: false },
   });
-  res.json({ success: true });
+  res.status(204).send();
 });
 
 // ─── Performance Analytics ───────────────────────────────────────────────────
 
 router.get('/analytics/:projectId', async (req: Request, res: Response) => {
+  const { period } = req.query as Record<string, string>;
   const analytics = await db.videoPerformance.findMany({
-    where: { projectId: req.params.projectId },
+    where: {
+      projectId: req.params.projectId,
+      ...(period ? { periodDays: parseInt(period, 10) } : {}),
+    },
     orderBy: { measuredAt: 'desc' },
+    take: 50,
   });
   res.json({ analytics });
 });
 
-router.post('/analytics', async (req: Request, res: Response) => {
-  const data = await db.videoPerformance.create({
-    data: {
-      projectId: req.body.projectId,
-      publishJobId: req.body.publishJobId,
-      platform: req.body.platform,
-      externalVideoId: req.body.externalVideoId,
-      views: req.body.views || 0,
-      completionRate: req.body.completionRate,
-      clickThroughRate: req.body.clickThroughRate,
-      engagementRate: req.body.engagementRate,
-      avgWatchSeconds: req.body.avgWatchSeconds,
-      likes: req.body.likes || 0,
-      comments: req.body.comments || 0,
-      shares: req.body.shares || 0,
-      impressions: req.body.impressions || 0,
-      periodDays: req.body.periodDays || 7,
-    },
-  });
+const createAnalyticsSchema = z.object({
+  projectId: z.string().uuid(),
+  publishJobId: z.string().uuid().optional(),
+  platform: z.string().max(50),
+  externalVideoId: z.string().max(200).optional(),
+  views: z.number().int().min(0).default(0),
+  completionRate: z.number().min(0).max(1).optional(),
+  clickThroughRate: z.number().min(0).max(1).optional(),
+  engagementRate: z.number().min(0).max(1).optional(),
+  avgWatchSeconds: z.number().min(0).optional(),
+  likes: z.number().int().min(0).default(0),
+  comments: z.number().int().min(0).default(0),
+  shares: z.number().int().min(0).default(0),
+  impressions: z.number().int().min(0).default(0),
+  periodDays: z.number().int().min(1).default(7),
+});
+
+router.post('/analytics', validate(createAnalyticsSchema), async (req: Request, res: Response) => {
+  const data = await db.videoPerformance.create({ data: req.body });
   res.status(201).json({ analytics: data });
 });
 

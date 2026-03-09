@@ -5,11 +5,13 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
+import { v4 as uuidv4 } from 'uuid';
 import { config } from './config';
-import { logger } from './utils/logger';
-import { connectDb, disconnectDb } from './db/client';
+import { logger, requestLogger } from './utils/logger';
+import { connectDb, disconnectDb, checkDbHealth } from './db/client';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { initWebSocket } from './websocket';
+import exportRoutes from './routes/export';
 
 // ─── Route Imports ─────────────────────────────────────────────────────────────
 import authRoutes from './routes/auth';
@@ -30,12 +32,23 @@ import creatorRoutes from './routes/creator';
 const app = express();
 const httpServer = http.createServer(app);
 
+// ─── Request ID injection ──────────────────────────────────────────────────────
+app.use((req, _res, next) => {
+  req.headers['x-request-id'] = req.headers['x-request-id'] || uuidv4();
+  next();
+});
+
+// ─── Request Logging ───────────────────────────────────────────────────────────
+app.use(requestLogger());
+
 // ─── Security & Parsing ────────────────────────────────────────────────────────
 app.set('trust proxy', 1);
+app.disable('x-powered-by');
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
   contentSecurityPolicy: false, // handled by frontend
+  hsts: config.isProd ? { maxAge: 63072000, includeSubDomains: true, preload: true } : false,
 }));
 
 app.use(cors({
@@ -43,12 +56,14 @@ app.use(cors({
     if (!origin || config.cors.origins.includes(origin) || config.isDev) {
       callback(null, true);
     } else {
+      logger.warn(`CORS rejection: origin=${origin}`);
       callback(new Error(`Origin ${origin} not allowed by CORS`));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
+  exposedHeaders: ['X-Request-ID', 'X-RateLimit-Remaining'],
 }));
 
 app.use(compression());
@@ -62,6 +77,7 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: { message: 'Too many requests', code: 'RATE_LIMITED' } },
+  keyGenerator: (req) => req.ip ?? req.headers['x-forwarded-for']?.toString() ?? 'unknown',
 });
 app.use(limiter);
 
@@ -69,7 +85,16 @@ app.use(limiter);
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 min
   max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
   message: { error: { message: 'Too many auth attempts', code: 'RATE_LIMITED' } },
+});
+
+// Upload-specific limiter (more generous for large media uploads)
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 200,
+  message: { error: { message: 'Too many upload requests', code: 'RATE_LIMITED' } },
 });
 
 // ─── Health Check ──────────────────────────────────────────────────────────────
@@ -80,16 +105,28 @@ app.get('/health', (_req, res) => {
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     env: config.env,
+    memoryUsage: {
+      rss: Math.round(process.memoryUsage().rss / 1024 / 1024),
+      heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+    },
   });
 });
 
 app.get('/health/db', async (_req, res) => {
-  try {
-    const { db } = await import('./db/client');
-    await db.$queryRaw`SELECT 1`;
-    res.json({ status: 'ok', db: 'connected' });
-  } catch {
-    res.status(503).json({ status: 'error', db: 'disconnected' });
+  const dbHealth = await checkDbHealth();
+  if (dbHealth.ok) {
+    res.json({ status: 'ok', db: 'connected', latencyMs: dbHealth.latencyMs });
+  } else {
+    res.status(503).json({ status: 'error', db: 'disconnected', latencyMs: dbHealth.latencyMs });
+  }
+});
+
+app.get('/health/ready', async (_req, res) => {
+  const dbHealth = await checkDbHealth();
+  if (dbHealth.ok) {
+    res.json({ status: 'ready', latencyMs: dbHealth.latencyMs });
+  } else {
+    res.status(503).json({ status: 'not_ready', latencyMs: dbHealth.latencyMs });
   }
 });
 
@@ -102,6 +139,7 @@ api.use('/', mediaRoutes);  // /projects/:projectId/bins + /media (with mergePar
 api.use('/ai', aiRoutes);
 api.use('/marketplace', marketplaceRoutes);
 api.use('/social-connections', socialRouter);
+api.use('/', exportRoutes); // /projects/:projectId/export/*, /projects/:projectId/import/*
 
 // Project-scoped nested routes
 api.use('/projects/:projectId/timelines', timelineRouter);
@@ -136,6 +174,8 @@ app.use(errorHandler);
 const ws = initWebSocket(httpServer);
 
 // ─── Start ─────────────────────────────────────────────────────────────────────
+let isShuttingDown = false;
+
 async function start() {
   try {
     await connectDb();
@@ -143,7 +183,7 @@ async function start() {
     httpServer.listen(config.server.port, () => {
       logger.info(`
 ╔═══════════════════════════════════════════════════╗
-║           The Avid — API Server                   ║
+║           The Avid -- API Server                  ║
 ╠═══════════════════════════════════════════════════╣
 ║  Port   : ${String(config.server.port).padEnd(38)}║
 ║  Env    : ${config.env.padEnd(38)}║
@@ -158,19 +198,42 @@ async function start() {
 
 // ─── Graceful Shutdown ─────────────────────────────────────────────────────────
 const shutdown = async (signal: string) => {
-  logger.info(`Received ${signal}, shutting down gracefully…`);
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  logger.info(`Received ${signal}, shutting down gracefully...`);
+
+  // Stop accepting new connections
   httpServer.close(async () => {
-    await disconnectDb();
-    logger.info('Server closed');
-    process.exit(0);
+    try {
+      // Close WebSocket connections
+      ws.io.close();
+      // Disconnect database
+      await disconnectDb();
+      logger.info('Server closed cleanly');
+      process.exit(0);
+    } catch (err) {
+      logger.error('Error during shutdown', err);
+      process.exit(1);
+    }
   });
-  setTimeout(() => { logger.error('Forced shutdown'); process.exit(1); }, 10000);
+
+  // Force shutdown after 15 seconds
+  setTimeout(() => {
+    logger.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 15000).unref();
 };
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT',  () => shutdown('SIGINT'));
-process.on('uncaughtException', (err) => { logger.error('Uncaught exception', err); process.exit(1); });
-process.on('unhandledRejection', (reason) => { logger.error('Unhandled rejection', reason); });
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught exception', { message: err.message, stack: err.stack });
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled rejection', { reason });
+});
 
 start();
 

@@ -10,38 +10,77 @@ interface QueuedPublishJob {
   autoCaption: boolean;
 }
 
+// Platform-specific aspect ratio defaults
+const PLATFORM_DEFAULTS: Record<string, { aspectRatio: string; maxDuration?: number }> = {
+  YOUTUBE: { aspectRatio: '16:9' },
+  INSTAGRAM: { aspectRatio: '1:1', maxDuration: 60 },
+  TIKTOK: { aspectRatio: '9:16', maxDuration: 180 },
+  VIMEO: { aspectRatio: '16:9' },
+  CUSTOM: { aspectRatio: '16:9' },
+};
+
 class PublishService {
   private queue: QueuedPublishJob[] = [];
+  private processing = false;
 
-  async enqueue(job: QueuedPublishJob) {
+  /**
+   * Add a publish job to the processing queue.
+   */
+  async enqueue(job: QueuedPublishJob): Promise<void> {
     this.queue.push(job);
-    this.processNext();
+    logger.info('Publish job enqueued', {
+      jobId: job.id,
+      platform: job.platform,
+      queueLength: this.queue.length,
+    });
+    if (!this.processing) this.processNext();
   }
 
-  private async processNext() {
+  /**
+   * Get current queue depth (useful for health checks).
+   */
+  getQueueDepth(): number {
+    return this.queue.length;
+  }
+
+  private async processNext(): Promise<void> {
     const job = this.queue.shift();
-    if (!job) return;
+    if (!job) {
+      this.processing = false;
+      return;
+    }
+    this.processing = true;
+
+    const startTime = Date.now();
 
     try {
-      await db.publishJob.update({ where: { id: job.id }, data: { status: 'PROCESSING' } });
+      await db.publishJob.update({
+        where: { id: job.id },
+        data: { status: 'PROCESSING' },
+      });
 
       // Step 1: Export from timeline
-      logger.info(`Exporting timeline ${job.timelineId} for ${job.platform}`);
+      logger.info('Exporting timeline', {
+        jobId: job.id,
+        timelineId: job.timelineId,
+        platform: job.platform,
+      });
       await this.simulateExport(job);
 
       // Step 2: AI enhancements (smart reframe, auto-caption)
       if (job.smartReframe) {
-        logger.info(`Applying smart reframe to ${job.aspectRatio}`);
+        const targetAspect = job.aspectRatio ?? PLATFORM_DEFAULTS[job.platform]?.aspectRatio ?? '16:9';
+        logger.info('Applying smart reframe', { jobId: job.id, aspectRatio: targetAspect });
         await new Promise((r) => setTimeout(r, 500));
       }
 
       if (job.autoCaption) {
-        logger.info(`Generating auto-captions`);
+        logger.info('Generating auto-captions', { jobId: job.id });
         await new Promise((r) => setTimeout(r, 500));
       }
 
       // Step 3: Platform delivery
-      logger.info(`Publishing to ${job.platform}`);
+      logger.info('Delivering to platform', { jobId: job.id, platform: job.platform });
       const externalUrl = await this.deliverToPlatform(job);
 
       await db.publishJob.update({
@@ -54,36 +93,67 @@ class PublishService {
         },
       });
 
-      logger.info(`Publish job ${job.id} complete → ${externalUrl}`);
+      const durationMs = Date.now() - startTime;
+      logger.info('Publish job complete', {
+        jobId: job.id,
+        platform: job.platform,
+        externalUrl,
+        durationMs,
+      });
     } catch (err: any) {
-      logger.error(`Publish job ${job.id} failed`, err);
+      const durationMs = Date.now() - startTime;
+      logger.error('Publish job failed', {
+        jobId: job.id,
+        platform: job.platform,
+        error: err.message,
+        durationMs,
+      });
+
       await db.publishJob.update({
         where: { id: job.id },
-        data: { status: 'FAILED', errorMessage: err.message },
-      });
+        data: {
+          status: 'FAILED',
+          errorMessage: err.message?.slice(0, 2000),
+        },
+      }).catch((dbErr) =>
+        logger.error('Failed to update publish job status', { jobId: job.id, error: dbErr.message })
+      );
     }
+
+    // Process next in queue
+    setImmediate(() => this.processNext());
   }
 
   private async simulateExport(job: QueuedPublishJob): Promise<void> {
     // In production: kick off FFmpeg export via job queue
+    // const platform = PLATFORM_DEFAULTS[job.platform];
     // ffmpeg -i [input] -vf scale={resolution} -b:v {bitrate}k -preset fast [output]
+    //
+    // Export pipeline:
+    //   1. Resolve timeline to flat edit list (in/out points, tracks, effects)
+    //   2. Render with FFmpeg using hardware acceleration if available
+    //   3. Apply platform-specific encoding constraints (codec, bitrate, max file size)
+    //   4. Upload rendered file to staging S3 bucket
     await new Promise((r) => setTimeout(r, 1000));
   }
 
   private async deliverToPlatform(job: QueuedPublishJob): Promise<string> {
     switch (job.platform) {
       case 'YOUTUBE':
-        // YouTube Data API v3: videos.insert with multipart upload
+        // YouTube Data API v3: videos.insert with resumable upload
+        // Requires OAuth2 token from SocialConnection
         return `https://youtube.com/watch?v=placeholder_${job.id}`;
       case 'INSTAGRAM':
-        // Instagram Graph API: media upload + publish
+        // Instagram Graph API: create media container -> publish
         return `https://instagram.com/p/placeholder_${job.id}`;
       case 'TIKTOK':
-        // TikTok Content Posting API
+        // TikTok Content Posting API: init upload -> upload video -> publish
         return `https://tiktok.com/@user/video/placeholder_${job.id}`;
       case 'VIMEO':
+        // Vimeo API: tus-based resumable upload
         return `https://vimeo.com/placeholder_${job.id}`;
       default:
+        // Generic CDN export
         return `https://cdn.avid.app/exports/${job.id}.mp4`;
     }
   }

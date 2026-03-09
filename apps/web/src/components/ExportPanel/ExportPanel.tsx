@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import {
@@ -54,7 +54,7 @@ const useExportStore = create<ExportWizardState & ExportWizardActions>()(
     setDestination: (d) => set((st) => { st.destination = d; }),
     setCaptionFormat: (f) => set((st) => { st.captionFormat = f; }),
     toggleCaptions: () => set((st) => { st.includeCaptions = !st.includeCaptions; }),
-    syncJobs: (jobs) => set((st) => { st.jobs = jobs as any; }),
+    syncJobs: (jobs) => set((st) => { st.jobs = jobs; }),
   })),
 );
 
@@ -137,10 +137,10 @@ const CAPTION_FORMATS: CaptionFormat[] = ['srt', 'vtt', 'scc', 'ttml'];
 //  Sub-components
 // =============================================================================
 
-function StepIndicator({ current }: { current: number }) {
+const StepIndicator = memo(function StepIndicator({ current }: { current: number }) {
   const steps = ['Select', 'Format', 'Destination', 'Export'];
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 0, padding: '12px 16px', borderBottom: '1px solid var(--border-default)', flexShrink: 0 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 0, padding: '12px 16px', borderBottom: '1px solid var(--border-default)', flexShrink: 0 }} role="navigation" aria-label="Export wizard steps">
       {steps.map((label, i) => {
         const stepNum = i + 1;
         const isActive = stepNum === current;
@@ -186,7 +186,7 @@ function StepIndicator({ current }: { current: number }) {
       })}
     </div>
   );
-}
+});
 
 function StepSelect() {
   const { selectionMode, setSelectionMode } = useExportStore();
@@ -292,10 +292,14 @@ function StepFormat() {
   );
 }
 
-function PresetCard({ preset, selected, onSelect }: { preset: ExportPreset; selected: boolean; onSelect: () => void }) {
+const PresetCard = memo(function PresetCard({ preset, selected, onSelect }: { preset: ExportPreset; selected: boolean; onSelect: () => void }) {
   return (
     <div
       onClick={onSelect}
+      role="option"
+      aria-selected={selected}
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(); } }}
       style={{
         padding: '10px 12px',
         borderRadius: 'var(--radius-md)',
@@ -332,7 +336,7 @@ function PresetCard({ preset, selected, onSelect }: { preset: ExportPreset; sele
       </div>
     </div>
   );
-}
+});
 
 function StepDestination() {
   const { destination, setDestination, includeCaptions, toggleCaptions, captionFormat, setCaptionFormat } =
@@ -532,7 +536,7 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-function JobCard({ job, onCancel }: { job: ExportJob; onCancel: () => void }) {
+const JobCard = memo(function JobCard({ job, onCancel }: { job: ExportJob; onCancel: () => void }) {
   const preset = exportEngine.getPreset(job.presetId);
   const statusColor =
     job.status === 'completed'
@@ -569,7 +573,7 @@ function JobCard({ job, onCancel }: { job: ExportJob; onCancel: () => void }) {
       {/* Progress bar */}
       {(job.status === 'encoding' || job.status === 'uploading') && (
         <>
-          <div style={{ height: 4, borderRadius: 2, background: 'var(--bg-elevated)', overflow: 'hidden', marginBottom: 4 }}>
+          <div style={{ height: 4, borderRadius: 2, background: 'var(--bg-elevated)', overflow: 'hidden', marginBottom: 4 }} role="progressbar" aria-valuenow={job.progress} aria-valuemin={0} aria-valuemax={100} aria-label="Export progress">
             <div
               style={{
                 height: '100%',
@@ -598,13 +602,13 @@ function JobCard({ job, onCancel }: { job: ExportJob; onCancel: () => void }) {
         </div>
       )}
       {job.status === 'failed' && (
-        <div style={{ fontSize: 10, color: 'var(--error)' }}>
+        <div style={{ fontSize: 10, color: 'var(--error)' }} role="alert">
           {job.error ?? 'Export failed'}
         </div>
       )}
     </div>
   );
-}
+});
 
 // =============================================================================
 //  Main ExportPanel component
@@ -619,7 +623,7 @@ export function ExportPanel() {
     step === 3;
 
   return (
-    <div style={panel}>
+    <div style={panel} role="region" aria-label="Export Panel">
       <div style={header}>Export & Deliver</div>
       <StepIndicator current={step} />
       <div style={body}>
@@ -631,14 +635,14 @@ export function ExportPanel() {
       {step < 4 && (
         <div style={footerBar}>
           <button
-            onClick={() => step > 1 && setStep((step - 1) as any)}
+            onClick={() => step > 1 && setStep((step - 1) as ExportWizardState['step'])}
             disabled={step === 1}
             style={{ ...btn('ghost'), opacity: step === 1 ? 0.3 : 1 }}
           >
             Back
           </button>
           <button
-            onClick={() => canNext && setStep((step + 1) as any)}
+            onClick={() => canNext && setStep((step + 1) as ExportWizardState['step'])}
             disabled={!canNext}
             style={{ ...btn('primary'), opacity: canNext ? 1 : 0.4 }}
           >

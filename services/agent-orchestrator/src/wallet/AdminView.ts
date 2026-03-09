@@ -223,8 +223,9 @@ export class AdminView {
       if (!catMap[job.category]) {
         catMap[job.category] = { totalTokens: 0, jobCount: 0 };
       }
-      catMap[job.category].totalTokens += job.actualTokens;
-      catMap[job.category].jobCount += 1;
+      const cat = catMap[job.category]!;
+      cat.totalTokens += job.actualTokens;
+      cat.jobCount += 1;
     }
 
     const categories: Record<string, CategoryUsage> = {};

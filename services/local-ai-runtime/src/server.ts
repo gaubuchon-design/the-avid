@@ -31,6 +31,18 @@ import type { IModelBackend, ModelCapability, ModelRequest } from './ModelRunner
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 
+// CORS middleware for development
+app.use((_req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (_req.method === 'OPTIONS') {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
+
 /** Pre-seeded model registry. */
 const registry: ModelRegistry = createSeededRegistry();
 
@@ -125,9 +137,10 @@ app.get('/models', (req: Request, res: Response) => {
  * Retrieve a specific model by ID.
  */
 app.get('/models/:id', (req: Request, res: Response) => {
-  const model = registry.getModel(req.params.id);
+  const modelId = req.params['id'] as string;
+  const model = registry.getModel(modelId);
   if (!model) {
-    res.status(404).json({ error: `Model "${req.params.id}" not found.` });
+    res.status(404).json({ error: `Model "${modelId}" not found.` });
     return;
   }
   res.json(model);
@@ -151,6 +164,13 @@ app.post('/infer', async (req: Request, res: Response) => {
       res.status(400).json({
         error: 'Request body must include modelId, capability, and input.',
       });
+      return;
+    }
+
+    // Validate model exists in the registry
+    const model = registry.getModel(request.modelId);
+    if (!model) {
+      res.status(404).json({ error: `Model "${request.modelId}" not found in registry.` });
       return;
     }
 
@@ -178,6 +198,16 @@ app.post('/embed', async (req: Request, res: Response) => {
 
     if (!texts || !Array.isArray(texts) || texts.length === 0) {
       res.status(400).json({ error: '`texts` must be a non-empty string array.' });
+      return;
+    }
+
+    if (texts.length > 1000) {
+      res.status(400).json({ error: '`texts` array exceeds maximum batch size of 1000.' });
+      return;
+    }
+
+    if (texts.some((t: unknown) => typeof t !== 'string')) {
+      res.status(400).json({ error: 'All entries in `texts` must be strings.' });
       return;
     }
 
@@ -243,6 +273,11 @@ app.post('/translate', async (req: Request, res: Response) => {
       return;
     }
 
+    if (text.length > 100_000) {
+      res.status(400).json({ error: '`text` exceeds maximum length of 100,000 characters.' });
+      return;
+    }
+
     const backend = await resolveBackend('translation');
     const result = await translate(text, sourceLanguage, targetLanguage, registry, backend, {
       modelId,
@@ -264,7 +299,7 @@ app.post('/translate', async (req: Request, res: Response) => {
  */
 app.get('/benchmark/:capability', async (req: Request, res: Response) => {
   try {
-    const capability = req.params.capability as ModelCapability;
+    const capability = req.params['capability'] as ModelCapability;
 
     const validCapabilities: readonly ModelCapability[] = [
       'embedding', 'stt', 'translation', 'text-generation',
@@ -299,11 +334,61 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 // Start
 // ---------------------------------------------------------------------------
 
-const PORT = Number(process.env.PORT) || 4300;
+// ---------------------------------------------------------------------------
+// Graceful shutdown
+// ---------------------------------------------------------------------------
+
+let httpServer: ReturnType<typeof app.listen> | null = null;
+let isShuttingDown = false;
+
+async function gracefulShutdown(signal: string): Promise<void> {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  console.log(`[${SERVICE_NAME}] Received ${signal}, shutting down gracefully...`);
+
+  // Shut down all backends (release GPU memory, unload models)
+  for (const backend of allBackends) {
+    try {
+      await backend.shutdown();
+      console.log(`[${SERVICE_NAME}] Backend "${backend.name}" shut down.`);
+    } catch (err) {
+      console.error(
+        `[${SERVICE_NAME}] Error shutting down backend "${backend.name}":`,
+        (err as Error).message,
+      );
+    }
+  }
+
+  // Close the HTTP server
+  if (httpServer) {
+    httpServer.close(() => {
+      console.log(`[${SERVICE_NAME}] HTTP server closed`);
+      process.exit(0);
+    });
+  } else {
+    process.exit(0);
+  }
+
+  // Force exit after 10 seconds if graceful shutdown stalls
+  setTimeout(() => {
+    console.error(`[${SERVICE_NAME}] Forced exit after shutdown timeout`);
+    process.exit(1);
+  }, 10_000).unref();
+}
+
+process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
+
+// ---------------------------------------------------------------------------
+// Start
+// ---------------------------------------------------------------------------
+
+const PORT = Number(process.env['PORT']) || 4300;
 
 initializeBackends()
   .then(() => {
-    app.listen(PORT, () => {
+    httpServer = app.listen(PORT, () => {
       console.log(
         `[${SERVICE_NAME}] v${SERVICE_VERSION} listening on http://localhost:${PORT}`,
       );

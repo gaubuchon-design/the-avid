@@ -1,8 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../../db/client';
-import { authenticate, requireProjectAccess } from '../../middleware/auth';
+import { authenticate } from '../../middleware/auth';
 import { validate, schemas, paginationQuery, paginate } from '../../utils/validation';
-import { NotFoundError, InsufficientTokensError, BadRequestError } from '../../utils/errors';
+import { NotFoundError, InsufficientTokensError, BadRequestError, assertFound } from '../../utils/errors';
 import { aiService } from '../../services/ai.service';
 import { tokenService } from '../../services/token.service';
 
@@ -25,18 +25,31 @@ const TOKEN_COSTS: Record<string, number> = {
   SCRIPT_SYNC: 30,
 };
 
-// ─── POST /ai/jobs — create & queue job ────────────────────────────────────────
+// ─── Helper: check and debit tokens ───────────────────────────────────────────
+async function checkAndDebitTokens(userId: string, jobType: string, referenceId?: string): Promise<number> {
+  const cost = TOKEN_COSTS[jobType] ?? 10;
+  const balance = await tokenService.getBalance(userId);
+  if (balance < cost) throw new InsufficientTokensError(cost, balance);
+  await tokenService.debit(userId, cost, jobType.toLowerCase(), referenceId);
+  return cost;
+}
+
+// ─── POST /ai/jobs -- create & queue job ────────────────────────────────────────
 router.post('/jobs', validate(schemas.createAIJob), async (req: Request, res: Response) => {
   const { type, mediaAssetId, projectId, inputParams, priority } = req.body;
   const userId = req.user!.id;
 
-  // Check token balance
-  const cost = TOKEN_COSTS[type] ?? 10;
-  const balance = await tokenService.getBalance(userId);
-  if (balance < cost) throw new InsufficientTokensError(cost, balance);
+  // Verify referenced entities
+  if (mediaAssetId) {
+    const asset = await db.mediaAsset.findUnique({ where: { id: mediaAssetId } });
+    if (!asset) throw new NotFoundError('Media asset');
+  }
+  if (projectId) {
+    const project = await db.project.findUnique({ where: { id: projectId } });
+    if (!project) throw new NotFoundError('Project');
+  }
 
-  // Reserve tokens
-  await tokenService.debit(userId, cost, type.toLowerCase(), undefined);
+  const cost = await checkAndDebitTokens(userId, type, projectId ?? mediaAssetId);
 
   const job = await db.aIJob.create({
     data: {
@@ -51,22 +64,21 @@ router.post('/jobs', validate(schemas.createAIJob), async (req: Request, res: Re
     },
   });
 
-  // Enqueue in background job queue
   await aiService.enqueue(job);
 
   res.status(202).json({ job, tokensDeducted: cost });
 });
 
-// ─── GET /ai/jobs — list user's jobs ──────────────────────────────────────────
+// ─── GET /ai/jobs -- list user's jobs ──────────────────────────────────────────
 router.get('/jobs', validate(paginationQuery, 'query'), async (req: Request, res: Response) => {
   const { page, limit, sortOrder } = req.query as any;
-  const { type, status, projectId } = req.query as any;
+  const { type, status, projectId } = req.query as Record<string, string>;
   const skip = (page - 1) * limit;
 
   const where: any = {
     userId: req.user!.id,
-    ...(type ? { type } : {}),
-    ...(status ? { status } : {}),
+    ...(type ? { type: type.toUpperCase() } : {}),
+    ...(status ? { status: status.toUpperCase() } : {}),
     ...(projectId ? { projectId } : {}),
   };
 
@@ -80,51 +92,55 @@ router.get('/jobs', validate(paginationQuery, 'query'), async (req: Request, res
 
 // ─── GET /ai/jobs/:id ─────────────────────────────────────────────────────────
 router.get('/jobs/:id', async (req: Request, res: Response) => {
-  const job = await db.aIJob.findUnique({
+  const job = await db.aIJob.findFirst({
     where: { id: req.params.id, userId: req.user!.id },
   });
-  if (!job) throw new NotFoundError('AI Job');
+  assertFound(job, 'AI Job');
   res.json({ job });
 });
 
-// ─── DELETE /ai/jobs/:id — cancel ─────────────────────────────────────────────
+// ─── DELETE /ai/jobs/:id -- cancel ─────────────────────────────────────────────
 router.delete('/jobs/:id', async (req: Request, res: Response) => {
-  const job = await db.aIJob.findUnique({ where: { id: req.params.id, userId: req.user!.id } });
-  if (!job) throw new NotFoundError('AI Job');
+  const job = await db.aIJob.findFirst({
+    where: { id: req.params.id, userId: req.user!.id },
+  });
+  assertFound(job, 'AI Job');
+
   if (!['QUEUED', 'RUNNING'].includes(job.status)) {
-    throw new BadRequestError('Job cannot be cancelled in its current state');
+    throw new BadRequestError(`Job cannot be cancelled in "${job.status}" state`);
   }
 
   await db.aIJob.update({ where: { id: job.id }, data: { status: 'CANCELLED' } });
 
-  // Refund tokens if still queued
+  // Refund tokens if still queued (not yet consumed resources)
+  let refunded = 0;
   if (job.status === 'QUEUED') {
     await tokenService.credit(req.user!.id, job.tokensUsed, 'refund_cancelled_job', job.id);
+    refunded = job.tokensUsed;
   }
 
-  res.json({ message: 'Job cancelled', refunded: job.status === 'QUEUED' ? job.tokensUsed : 0 });
+  res.json({ message: 'Job cancelled', refunded });
 });
 
-// ─── POST /ai/transcribe — quick transcription shortcut ───────────────────────
-router.post('/transcribe', async (req: Request, res: Response) => {
+// ─── POST /ai/transcribe -- quick transcription shortcut ───────────────────────
+router.post('/transcribe', validate(schemas.transcribe), async (req: Request, res: Response) => {
   const { mediaAssetId, language, diarize } = req.body;
-  if (!mediaAssetId) throw new BadRequestError('mediaAssetId required');
 
   const asset = await db.mediaAsset.findUnique({ where: { id: mediaAssetId } });
-  if (!asset) throw new NotFoundError('Media asset');
+  assertFound(asset, 'Media asset');
 
-  const cost = TOKEN_COSTS.TRANSCRIPTION;
-  const balance = await tokenService.getBalance(req.user!.id);
-  if (balance < cost) throw new InsufficientTokensError(cost, balance);
+  if (!['VIDEO', 'AUDIO'].includes(asset.type)) {
+    throw new BadRequestError('Transcription is only supported for audio and video assets');
+  }
 
-  await tokenService.debit(req.user!.id, cost, 'transcription', mediaAssetId);
+  const cost = await checkAndDebitTokens(req.user!.id, 'TRANSCRIPTION', mediaAssetId);
 
   const job = await db.aIJob.create({
     data: {
       type: 'TRANSCRIPTION',
       userId: req.user!.id,
       mediaAssetId,
-      inputParams: { language: language ?? 'en', diarize: diarize ?? false },
+      inputParams: { language, diarize },
       tokensUsed: cost,
       priority: 7,
     },
@@ -134,31 +150,31 @@ router.post('/transcribe', async (req: Request, res: Response) => {
   res.status(202).json({ job });
 });
 
-// ─── POST /ai/phrase-search — semantic search across bins ─────────────────────
-router.post('/phrase-search', async (req: Request, res: Response) => {
-  const { projectId, query, searchType } = req.body; // searchType: 'phonetic' | 'semantic' | 'visual'
-  if (!projectId || !query) throw new BadRequestError('projectId and query required');
+// ─── POST /ai/phrase-search -- semantic search across bins ─────────────────────
+router.post('/phrase-search', validate(schemas.phraseSearch), async (req: Request, res: Response) => {
+  const { projectId, query, searchType } = req.body;
+
+  // Verify project access
+  const member = await db.projectMember.findUnique({
+    where: { projectId_userId: { projectId, userId: req.user!.id } },
+  });
+  if (!member) throw new NotFoundError('Project');
 
   const results = await aiService.phraseSearch({
     projectId,
     query,
-    searchType: searchType ?? 'semantic',
+    searchType,
     userId: req.user!.id,
   });
 
-  res.json({ results });
+  res.json({ results, query, searchType });
 });
 
-// ─── POST /ai/script-sync — sync transcript to footage ────────────────────────
-router.post('/script-sync', async (req: Request, res: Response) => {
+// ─── POST /ai/script-sync -- sync transcript to footage ────────────────────────
+router.post('/script-sync', validate(schemas.scriptSync), async (req: Request, res: Response) => {
   const { projectId, scriptText, mediaAssetIds } = req.body;
-  if (!projectId || !scriptText) throw new BadRequestError('projectId and scriptText required');
 
-  const cost = TOKEN_COSTS.SCRIPT_SYNC;
-  const balance = await tokenService.getBalance(req.user!.id);
-  if (balance < cost) throw new InsufficientTokensError(cost, balance);
-
-  await tokenService.debit(req.user!.id, cost, 'script_sync', projectId);
+  const cost = await checkAndDebitTokens(req.user!.id, 'SCRIPT_SYNC', projectId);
 
   const job = await db.aIJob.create({
     data: {
@@ -175,23 +191,18 @@ router.post('/script-sync', async (req: Request, res: Response) => {
   res.status(202).json({ job });
 });
 
-// ─── POST /ai/assembly — agentic first-pass assembly ──────────────────────────
-router.post('/assembly', async (req: Request, res: Response) => {
+// ─── POST /ai/assembly -- agentic first-pass assembly ──────────────────────────
+router.post('/assembly', validate(schemas.assembly), async (req: Request, res: Response) => {
   const { projectId, timelineId, prompt, role, mediaAssetIds } = req.body;
-  if (!projectId) throw new BadRequestError('projectId required');
 
-  const cost = TOKEN_COSTS.ASSEMBLY;
-  const balance = await tokenService.getBalance(req.user!.id);
-  if (balance < cost) throw new InsufficientTokensError(cost, balance);
-
-  await tokenService.debit(req.user!.id, cost, 'assembly', projectId);
+  const cost = await checkAndDebitTokens(req.user!.id, 'ASSEMBLY', projectId);
 
   const job = await db.aIJob.create({
     data: {
       type: 'ASSEMBLY',
       userId: req.user!.id,
       projectId,
-      inputParams: { timelineId, prompt, role: role ?? 'editor', mediaAssetIds },
+      inputParams: { timelineId, prompt, role, mediaAssetIds },
       tokensUsed: cost,
       priority: 5,
     },
@@ -201,15 +212,15 @@ router.post('/assembly', async (req: Request, res: Response) => {
   res.status(202).json({ job });
 });
 
-// ─── POST /ai/highlights — extract highlights ─────────────────────────────────
-router.post('/highlights', async (req: Request, res: Response) => {
+// ─── POST /ai/highlights -- extract highlights ─────────────────────────────────
+router.post('/highlights', validate(schemas.highlights), async (req: Request, res: Response) => {
   const { mediaAssetId, projectId, criteria, maxDuration } = req.body;
 
-  const cost = TOKEN_COSTS.HIGHLIGHTS;
-  const balance = await tokenService.getBalance(req.user!.id);
-  if (balance < cost) throw new InsufficientTokensError(cost, balance);
+  if (!mediaAssetId && !projectId) {
+    throw new BadRequestError('Either mediaAssetId or projectId is required');
+  }
 
-  await tokenService.debit(req.user!.id, cost, 'highlights', projectId ?? mediaAssetId);
+  const cost = await checkAndDebitTokens(req.user!.id, 'HIGHLIGHTS', projectId ?? mediaAssetId);
 
   const job = await db.aIJob.create({
     data: {
@@ -217,7 +228,7 @@ router.post('/highlights', async (req: Request, res: Response) => {
       userId: req.user!.id,
       projectId,
       mediaAssetId,
-      inputParams: { criteria: criteria ?? 'action,emotion,key-moments', maxDuration: maxDuration ?? 90 },
+      inputParams: { criteria: criteria ?? 'action,emotion,key-moments', maxDuration },
       tokensUsed: cost,
       priority: 5,
     },
@@ -227,15 +238,16 @@ router.post('/highlights', async (req: Request, res: Response) => {
   res.status(202).json({ job });
 });
 
-// ─── GET /ai/tokens — token balance ───────────────────────────────────────────
+// ─── GET /ai/tokens -- token balance ───────────────────────────────────────────
 router.get('/tokens', async (req: Request, res: Response) => {
   const balance = await tokenService.getBalance(req.user!.id);
-  const transactions = await db.tokenTransaction.findMany({
-    where: { balance: { userId: req.user!.id } },
-    orderBy: { createdAt: 'desc' },
-    take: 20,
-  });
+  const transactions = await tokenService.getTransactionHistory(req.user!.id, 20);
   res.json({ balance, transactions });
+});
+
+// ─── GET /ai/costs -- token cost reference ──────────────────────────────────────
+router.get('/costs', async (_req: Request, res: Response) => {
+  res.json({ costs: TOKEN_COSTS });
 });
 
 export default router;

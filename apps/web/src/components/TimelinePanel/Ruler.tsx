@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useEffect } from 'react';
+import React, { useRef, useCallback, useEffect, memo } from 'react';
 
 interface RulerProps {
   zoom: number;
@@ -7,7 +7,7 @@ interface RulerProps {
   onScrub: (time: number) => void;
 }
 
-export function Ruler({ zoom, scrollLeft, duration, onScrub }: RulerProps) {
+export const Ruler = memo(function Ruler({ zoom, scrollLeft, duration, onScrub }: RulerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const draw = useCallback(() => {
@@ -18,9 +18,12 @@ export function Ruler({ zoom, scrollLeft, duration, onScrub }: RulerProps) {
 
     const W = canvas.offsetWidth;
     const H = canvas.offsetHeight;
-    canvas.width = W * devicePixelRatio;
-    canvas.height = H * devicePixelRatio;
-    ctx.scale(devicePixelRatio, devicePixelRatio);
+    if (W <= 0 || H <= 0) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.scale(dpr, dpr);
 
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = '#111822';
@@ -66,12 +69,14 @@ export function Ruler({ zoom, scrollLeft, duration, onScrub }: RulerProps) {
 
   useEffect(() => {
     draw();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
     const obs = new ResizeObserver(draw);
-    if (canvasRef.current) obs.observe(canvasRef.current);
+    obs.observe(canvas);
     return () => obs.disconnect();
   }, [draw]);
 
-  const handleMouseDown = (e: React.MouseEvent) => {
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
     const rect = (e.target as HTMLElement).getBoundingClientRect();
     const scrub = (ev: MouseEvent) => {
       const x = ev.clientX - rect.left;
@@ -84,14 +89,23 @@ export function Ruler({ zoom, scrollLeft, duration, onScrub }: RulerProps) {
     };
     window.addEventListener('mousemove', scrub);
     window.addEventListener('mouseup', up);
-  };
+  }, [onScrub, scrollLeft, zoom]);
 
   return (
-    <div className="timeline-ruler" onMouseDown={handleMouseDown}>
+    <div
+      className="timeline-ruler"
+      onMouseDown={handleMouseDown}
+      role="slider"
+      aria-label="Timeline ruler - click to scrub"
+      aria-valuemin={0}
+      aria-valuemax={Math.round(duration)}
+      tabIndex={0}
+    >
       <canvas
         ref={canvasRef}
         style={{ width: '100%', height: '100%', display: 'block' }}
+        aria-hidden="true"
       />
     </div>
   );
-}
+});

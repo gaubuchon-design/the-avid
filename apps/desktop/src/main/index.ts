@@ -1,11 +1,13 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu, screen, crashReporter } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import { watch as watchFs } from 'node:fs';
 import { mkdir, readdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import path from 'path';
+import { randomBytes } from 'node:crypto';
 import { flattenAssets, PROJECT_SCHEMA_VERSION } from '@mcua/core';
 import type { EditorMediaAsset, EditorProject } from '@mcua/core';
 import { detectGPU } from './gpu';
+import { FileLogger } from './logging/FileLogger';
 import { VideoIOManager } from './videoIO/VideoIOManager';
 import { StreamManager } from './streaming/StreamManager';
 import { DeckControlManager } from './deckControl/DeckControlManager';
@@ -23,9 +25,111 @@ import {
   writeMediaIndexManifest,
 } from './mediaPipeline';
 
+// ─── Crash Reporter ────────────────────────────────────────────────────────────
+
+crashReporter.start({
+  productName: 'The Avid',
+  submitURL: '', // Collected locally only until a crash server is configured
+  uploadToServer: false,
+  compress: true,
+});
+
+// ─── Structured Logger ─────────────────────────────────────────────────────────
+
+const logger = new FileLogger();
+
+function log(level: 'info' | 'warn' | 'error', tag: string, message: string, data?: Record<string, unknown>): void {
+  const entry = { ts: new Date().toISOString(), level, tag, message, ...data };
+  logger.write(entry);
+  if (level === 'error') {
+    console.error(`[${tag}] ${message}`, data ?? '');
+  } else if (level === 'warn') {
+    console.warn(`[${tag}] ${message}`, data ?? '');
+  } else {
+    console.log(`[${tag}] ${message}`, data ?? '');
+  }
+}
+
+// ─── IPC Input Validation Helpers ──────────────────────────────────────────────
+
+function assertString(value: unknown, name: string): asserts value is string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`Invalid parameter "${name}": expected a non-empty string`);
+  }
+}
+
+function assertStringArray(value: unknown, name: string): asserts value is string[] {
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+    throw new Error(`Invalid parameter "${name}": expected an array of strings`);
+  }
+}
+
+function assertObject(value: unknown, name: string): asserts value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`Invalid parameter "${name}": expected an object`);
+  }
+}
+
+// ─── Window State Persistence ──────────────────────────────────────────────────
+
+interface WindowState {
+  x?: number;
+  y?: number;
+  width: number;
+  height: number;
+  isMaximized: boolean;
+}
+
+const WINDOW_STATE_FILE = 'window-state.json';
+
+async function loadWindowState(): Promise<WindowState> {
+  const defaults: WindowState = { width: 1440, height: 900, isMaximized: false };
+  try {
+    const raw = await readFile(path.join(app.getPath('userData'), WINDOW_STATE_FILE), 'utf8');
+    const parsed = JSON.parse(raw) as WindowState;
+    // Validate the saved position is still within a visible display
+    if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+      const displays = screen.getAllDisplays();
+      const isVisible = displays.some((display) => {
+        const { x, y, width, height } = display.bounds;
+        return parsed.x! >= x && parsed.x! < x + width && parsed.y! >= y && parsed.y! < y + height;
+      });
+      if (!isVisible) {
+        parsed.x = undefined;
+        parsed.y = undefined;
+      }
+    }
+    return { ...defaults, ...parsed };
+  } catch {
+    return defaults;
+  }
+}
+
+async function saveWindowState(win: BrowserWindow): Promise<void> {
+  const isMaximized = win.isMaximized();
+  const bounds = isMaximized ? win.getNormalBounds() : win.getBounds();
+  const state: WindowState = {
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    isMaximized,
+  };
+  try {
+    await writeFile(
+      path.join(app.getPath('userData'), WINDOW_STATE_FILE),
+      JSON.stringify(state),
+      'utf8',
+    );
+  } catch {
+    // Window state save is best-effort
+  }
+}
+
 // ─── Window Management ─────────────────────────────────────────────────────────
 
 let mainWindow: BrowserWindow | null = null;
+const secondaryWindows = new Set<BrowserWindow>();
 const videoIOManager = new VideoIOManager();
 const streamManager = new StreamManager();
 const deckControlManager = new DeckControlManager();
@@ -50,7 +154,7 @@ interface DesktopJob {
 }
 
 function createId(prefix: string): string {
-  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${prefix}-${randomBytes(4).toString('hex')}`;
 }
 
 function getProjectStorePath(): string {
@@ -438,21 +542,40 @@ async function rescanProjectWatchFolders(projectId: string): Promise<EditorProje
   return getPersistedProject(projectId);
 }
 
-function createMainWindow(): BrowserWindow {
+async function createMainWindow(): Promise<BrowserWindow> {
+  const windowState = await loadWindowState();
+
   const win = new BrowserWindow({
-    width: 1440,
-    height: 900,
+    x: windowState.x,
+    y: windowState.y,
+    width: windowState.width,
+    height: windowState.height,
     minWidth: 960,
     minHeight: 600,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    trafficLightPosition: process.platform === 'darwin' ? { x: 12, y: 12 } : undefined,
     backgroundColor: '#0f172a',
+    show: false, // Avoid flash by showing after ready-to-show
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      spellcheck: false,
+      enableWebSQL: false,
+      navigateOnDragDrop: false,
     },
+  });
+
+  if (windowState.isMaximized) {
+    win.maximize();
+  }
+
+  // Show window after content is painted to avoid white flash
+  win.once('ready-to-show', () => {
+    win.show();
+    win.focus();
   });
 
   // Dev vs production
@@ -463,7 +586,39 @@ function createMainWindow(): BrowserWindow {
     win.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
 
-  win.on('closed', () => { mainWindow = null; });
+  // Persist window state on resize/move (debounced)
+  let saveStateTimer: ReturnType<typeof setTimeout> | null = null;
+  const debouncedSaveState = () => {
+    if (saveStateTimer) clearTimeout(saveStateTimer);
+    saveStateTimer = setTimeout(() => void saveWindowState(win), 500);
+  };
+  win.on('resize', debouncedSaveState);
+  win.on('move', debouncedSaveState);
+  win.on('maximize', debouncedSaveState);
+  win.on('unmaximize', debouncedSaveState);
+
+  win.on('closed', () => {
+    if (saveStateTimer) clearTimeout(saveStateTimer);
+    mainWindow = null;
+  });
+
+  // Prevent unintended navigation (security hardening)
+  win.webContents.on('will-navigate', (event, url) => {
+    if (!app.isPackaged) {
+      const devServerOrigin = new URL(
+        process.env.ELECTRON_RENDERER_URL ?? process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:3000',
+      ).origin;
+      if (new URL(url).origin === devServerOrigin) return;
+    }
+    log('warn', 'Security', 'Blocked navigation attempt', { url });
+    event.preventDefault();
+  });
+
+  // Block new-window creation from renderer (popup prevention)
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    void shell.openExternal(url);
+    return { action: 'deny' };
+  });
 
   // Content Security Policy
   win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
@@ -472,15 +627,98 @@ function createMainWindow(): BrowserWindow {
         ...details.responseHeaders,
         'Content-Security-Policy': [
           app.isPackaged
-            ? "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: file:; connect-src 'self' ws://localhost:* http://localhost:*; font-src 'self' data:"
+            ? "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: file:; connect-src 'self' ws://localhost:* http://localhost:*; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'"
             : "default-src 'self' 'unsafe-inline' 'unsafe-eval'; img-src 'self' data: blob: http: https:; media-src 'self' blob: file:; connect-src 'self' ws: wss: http: https:; font-src 'self' data:"
         ]
       }
     });
   });
 
+  // Handle renderer crashes gracefully
+  win.webContents.on('render-process-gone', (_event, details) => {
+    log('error', 'Renderer', 'Render process gone', { reason: details.reason, exitCode: details.exitCode });
+    if (details.reason !== 'clean-exit') {
+      const response = dialog.showMessageBoxSync(win, {
+        type: 'error',
+        title: 'The Avid',
+        message: 'The editor encountered an unexpected error and needs to reload.',
+        detail: `Reason: ${details.reason}`,
+        buttons: ['Reload', 'Quit'],
+        defaultId: 0,
+      });
+      if (response === 0) {
+        win.reload();
+      } else {
+        app.quit();
+      }
+    }
+  });
+
+  win.webContents.on('unresponsive', () => {
+    log('warn', 'Renderer', 'Window became unresponsive');
+    const response = dialog.showMessageBoxSync(win, {
+      type: 'warning',
+      title: 'The Avid',
+      message: 'The editor is not responding.',
+      buttons: ['Wait', 'Reload'],
+      defaultId: 0,
+    });
+    if (response === 1) {
+      win.reload();
+    }
+  });
+
+  win.webContents.on('responsive', () => {
+    log('info', 'Renderer', 'Window became responsive again');
+  });
+
   return win;
 }
+
+/**
+ * Create a secondary (floating) window, such as a source monitor or scopes.
+ */
+function createSecondaryWindow(title: string, width = 800, height = 600): BrowserWindow {
+  const win = new BrowserWindow({
+    width,
+    height,
+    title,
+    backgroundColor: '#0f172a',
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+    },
+  });
+
+  if (!app.isPackaged) {
+    const devUrl = process.env.ELECTRON_RENDERER_URL ?? process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:3000';
+    win.loadURL(`${devUrl}#/secondary/${encodeURIComponent(title.toLowerCase().replace(/\s+/g, '-'))}`);
+  } else {
+    win.loadFile(path.join(__dirname, '../renderer/index.html'));
+  }
+
+  secondaryWindows.add(win);
+  win.on('closed', () => secondaryWindows.delete(win));
+
+  return win;
+}
+
+// ─── App Lifecycle ─────────────────────────────────────────────────────────────
+
+// ─── Process-level error handling ──────────────────────────────────────────────
+
+process.on('uncaughtException', (error) => {
+  log('error', 'Process', 'Uncaught exception', { error: error.message, stack: error.stack });
+});
+
+process.on('unhandledRejection', (reason) => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  const stack = reason instanceof Error ? reason.stack : undefined;
+  log('error', 'Process', 'Unhandled rejection', { message, stack });
+});
 
 // ─── App Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -488,15 +726,23 @@ const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
 } else {
-  app.on('second-instance', (_event, _argv, _workingDir) => {
+  app.on('second-instance', (_event, argv, _workingDir) => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
+    // Handle file open from OS (double-click .avidproj file while app is running)
+    const projectArg = argv.find((arg) => arg.endsWith('.avidproj') || arg.endsWith('.avidproj.json'));
+    if (projectArg) {
+      mainWindow?.webContents.send('menu:open-project', projectArg);
+    }
   });
 
   app.whenReady().then(async () => {
-    mainWindow = createMainWindow();
+    await logger.init();
+    log('info', 'App', `Starting The Avid v${app.getVersion()} on ${process.platform} (${process.arch})`);
+
+    mainWindow = await createMainWindow();
     createAppMenu();
     void syncAllProjectWatchers();
 
@@ -505,48 +751,56 @@ if (!gotTheLock) {
     streamManager.registerIPCHandlers();
     deckControlManager.registerIPCHandlers();
 
-    await Promise.allSettled([
+    const ioResults = await Promise.allSettled([
       videoIOManager.init(mainWindow),
       streamManager.init(mainWindow),
       deckControlManager.init(mainWindow),
     ]);
+    log('info', 'IO', 'Professional I/O subsystems initialized', {
+      videoIO: ioResults[0].status,
+      streaming: ioResults[1].status,
+      deckControl: ioResults[2].status,
+    });
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
-        mainWindow = createMainWindow();
+        void createMainWindow().then((win) => { mainWindow = win; });
       }
     });
 
     // Auto-updater (production only)
     if (app.isPackaged) {
       autoUpdater.logger = {
-        info: (msg: string) => console.log('[AutoUpdater]', msg),
-        warn: (msg: string) => console.warn('[AutoUpdater]', msg),
-        error: (msg: string) => console.error('[AutoUpdater]', msg),
-        debug: (msg: string) => console.log('[AutoUpdater:debug]', msg),
+        info: (msg: string) => log('info', 'AutoUpdater', msg),
+        warn: (msg: string) => log('warn', 'AutoUpdater', msg),
+        error: (msg: string) => log('error', 'AutoUpdater', msg),
+        debug: (msg: string) => log('info', 'AutoUpdater:debug', msg),
       } as unknown as typeof autoUpdater.logger;
 
       autoUpdater.on('checking-for-update', () => {
-        console.log('[AutoUpdater] Checking for updates...');
+        log('info', 'AutoUpdater', 'Checking for updates...');
       });
       autoUpdater.on('update-available', (info) => {
-        console.log('[AutoUpdater] Update available:', info.version);
+        log('info', 'AutoUpdater', `Update available: ${info.version}`);
+        mainWindow?.webContents.send('app:update-available', { version: info.version });
       });
       autoUpdater.on('update-not-available', () => {
-        console.log('[AutoUpdater] Application is up to date.');
+        log('info', 'AutoUpdater', 'Application is up to date.');
       });
       autoUpdater.on('download-progress', (progress) => {
-        console.log(`[AutoUpdater] Download progress: ${Math.round(progress.percent)}%`);
+        log('info', 'AutoUpdater', `Download progress: ${Math.round(progress.percent)}%`);
+        mainWindow?.webContents.send('app:update-progress', { percent: progress.percent });
       });
       autoUpdater.on('update-downloaded', (info) => {
-        console.log('[AutoUpdater] Update downloaded:', info.version);
+        log('info', 'AutoUpdater', `Update downloaded: ${info.version}`);
+        mainWindow?.webContents.send('app:update-downloaded', { version: info.version });
       });
       autoUpdater.on('error', (err) => {
-        console.error('[AutoUpdater] Error:', err.message);
+        log('error', 'AutoUpdater', err.message);
       });
 
       autoUpdater.checkForUpdatesAndNotify().catch((err) => {
-        console.error('[AutoUpdater] Failed to check for updates:', err);
+        log('error', 'AutoUpdater', `Failed to check for updates: ${err}`);
       });
     }
   });
@@ -561,9 +815,14 @@ app.on('before-quit', () => {
   void videoIOManager.dispose();
   void streamManager.dispose();
   void deckControlManager.dispose();
+  void logger.dispose();
 });
 
 // ─── App Menu ──────────────────────────────────────────────────────────────────
+
+function sendMenuCommand(channel: string, ...args: unknown[]): void {
+  mainWindow?.webContents.send(channel, ...args);
+}
 
 function createAppMenu() {
   const isMac = process.platform === 'darwin';
@@ -571,6 +830,8 @@ function createAppMenu() {
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(isMac ? [{ label: app.name, submenu: [
       { role: 'about' as const },
+      { type: 'separator' as const },
+      { label: 'Preferences…', accelerator: 'CmdOrCtrl+,', click: () => sendMenuCommand('menu:preferences') },
       { type: 'separator' as const },
       { role: 'services' as const },
       { type: 'separator' as const },
@@ -583,21 +844,71 @@ function createAppMenu() {
     {
       label: 'File',
       submenu: [
-        { label: 'New Project', accelerator: 'CmdOrCtrl+N', click: () => mainWindow?.webContents.send('menu:new-project') },
+        { label: 'New Project', accelerator: 'CmdOrCtrl+N', click: () => sendMenuCommand('menu:new-project') },
         { label: 'Open Project…', accelerator: 'CmdOrCtrl+O', click: openProject },
-        { label: 'Import Media…', accelerator: 'CmdOrCtrl+I', click: () => mainWindow?.webContents.send('menu:import-media') },
+        { label: 'Import Media…', accelerator: 'CmdOrCtrl+I', click: () => sendMenuCommand('menu:import-media') },
         { type: 'separator' },
-        { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => mainWindow?.webContents.send('menu:save') },
-        { label: 'Export…', accelerator: 'CmdOrCtrl+E', click: () => mainWindow?.webContents.send('menu:export') },
+        { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => sendMenuCommand('menu:save') },
+        { label: 'Save As…', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenuCommand('menu:save-as') },
+        { type: 'separator' },
+        { label: 'Export…', accelerator: 'CmdOrCtrl+E', click: () => sendMenuCommand('menu:export') },
+        { label: 'Consolidate/Transcode…', click: () => sendMenuCommand('menu:consolidate') },
         { type: 'separator' },
         isMac ? { role: 'close' as const } : { role: 'quit' as const },
       ],
     },
     { label: 'Edit', submenu: [
       { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
-      { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
+      { role: 'cut' }, { role: 'copy' }, { role: 'paste' },
+      { label: 'Paste Insert', accelerator: 'CmdOrCtrl+Shift+V', click: () => sendMenuCommand('menu:paste-insert') },
+      { type: 'separator' },
+      { label: 'Delete', accelerator: 'Delete', click: () => sendMenuCommand('menu:delete') },
+      { label: 'Ripple Delete', accelerator: 'Shift+Delete', click: () => sendMenuCommand('menu:ripple-delete') },
+      { type: 'separator' },
+      { role: 'selectAll' },
+      { label: 'Deselect All', accelerator: 'CmdOrCtrl+Shift+A', click: () => sendMenuCommand('menu:deselect-all') },
     ]},
+    {
+      label: 'Clip',
+      submenu: [
+        { label: 'Razor / Add Edit', accelerator: 'CmdOrCtrl+K', click: () => sendMenuCommand('menu:razor') },
+        { label: 'Split Clip', accelerator: 'S', click: () => sendMenuCommand('menu:split') },
+        { type: 'separator' },
+        { label: 'Lift', accelerator: 'Z', click: () => sendMenuCommand('menu:lift') },
+        { label: 'Extract', accelerator: 'X', click: () => sendMenuCommand('menu:extract') },
+        { type: 'separator' },
+        { label: 'Link/Unlink', accelerator: 'CmdOrCtrl+L', click: () => sendMenuCommand('menu:toggle-link') },
+        { label: 'Group Clips', accelerator: 'CmdOrCtrl+G', click: () => sendMenuCommand('menu:group') },
+        { label: 'Ungroup Clips', accelerator: 'CmdOrCtrl+Shift+G', click: () => sendMenuCommand('menu:ungroup') },
+        { type: 'separator' },
+        { label: 'Nest Sequence', click: () => sendMenuCommand('menu:nest') },
+        { label: 'Match Frame', accelerator: 'F', click: () => sendMenuCommand('menu:match-frame') },
+      ],
+    },
+    {
+      label: 'Mark',
+      submenu: [
+        { label: 'Set In Point', accelerator: 'I', click: () => sendMenuCommand('menu:mark-in') },
+        { label: 'Set Out Point', accelerator: 'O', click: () => sendMenuCommand('menu:mark-out') },
+        { label: 'Clear In/Out', accelerator: 'G', click: () => sendMenuCommand('menu:clear-marks') },
+        { type: 'separator' },
+        { label: 'Add Marker', accelerator: 'M', click: () => sendMenuCommand('menu:add-marker') },
+        { label: 'Go to Next Marker', accelerator: 'Shift+M', click: () => sendMenuCommand('menu:next-marker') },
+        { label: 'Go to Previous Marker', accelerator: 'CmdOrCtrl+Shift+M', click: () => sendMenuCommand('menu:prev-marker') },
+        { type: 'separator' },
+        { label: 'Go to In Point', accelerator: 'Q', click: () => sendMenuCommand('menu:goto-in') },
+        { label: 'Go to Out Point', accelerator: 'W', click: () => sendMenuCommand('menu:goto-out') },
+      ],
+    },
     { label: 'View', submenu: [
+      { label: 'Source Monitor', accelerator: 'CmdOrCtrl+1', click: () => sendMenuCommand('menu:view-source') },
+      { label: 'Record Monitor', accelerator: 'CmdOrCtrl+2', click: () => sendMenuCommand('menu:view-record') },
+      { label: 'Timeline', accelerator: 'CmdOrCtrl+3', click: () => sendMenuCommand('menu:view-timeline') },
+      { label: 'Bins', accelerator: 'CmdOrCtrl+4', click: () => sendMenuCommand('menu:view-bins') },
+      { label: 'Effects', accelerator: 'CmdOrCtrl+5', click: () => sendMenuCommand('menu:view-effects') },
+      { type: 'separator' },
+      { label: 'Open Source Monitor Window', click: () => createSecondaryWindow('Source Monitor', 960, 540) },
+      { type: 'separator' },
       { role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' },
       { type: 'separator' },
       { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
@@ -607,6 +918,10 @@ function createAppMenu() {
     { label: 'Window', submenu: [
       { role: 'minimize' }, { role: 'zoom' },
       ...(isMac ? [{ type: 'separator' as const }, { role: 'front' as const }] : []),
+      { type: 'separator' },
+      { label: 'Close All Secondary Windows', click: () => {
+        for (const win of secondaryWindows) win.close();
+      }},
     ]},
     { label: 'Help', submenu: [
       {
@@ -629,6 +944,16 @@ function createAppMenu() {
           void shell.openPath(app.getPath('logs'));
         },
       },
+      { type: 'separator' },
+      {
+        label: 'Keyboard Shortcuts',
+        accelerator: 'CmdOrCtrl+/',
+        click: () => sendMenuCommand('menu:keyboard-shortcuts'),
+      },
+      ...(!isMac ? [
+        { type: 'separator' as const },
+        { label: 'Preferences…', accelerator: 'CmdOrCtrl+,', click: () => sendMenuCommand('menu:preferences') },
+      ] : []),
     ]},
   ];
 
@@ -648,66 +973,87 @@ async function openProject() {
   }
 }
 
+// ─── Dialog Handlers ──────────────────────────────────────────────────────────
+
 ipcMain.handle('dialog:open-file', async (_event, opts) => {
-  const result = await dialog.showOpenDialog(opts);
-  return result;
+  return dialog.showOpenDialog(opts ?? {});
 });
 
 ipcMain.handle('dialog:open', async (_event, opts) => {
-  const result = await dialog.showOpenDialog(opts);
-  return result;
+  return dialog.showOpenDialog(opts ?? {});
 });
 
 ipcMain.handle('dialog:save-file', async (_event, opts) => {
-  const result = await dialog.showSaveDialog(opts);
-  return result;
+  return dialog.showSaveDialog(opts ?? {});
 });
 
 ipcMain.handle('dialog:save', async (_event, opts) => {
-  const result = await dialog.showSaveDialog(opts);
-  return result;
+  return dialog.showSaveDialog(opts ?? {});
 });
+
+// ─── Project CRUD Handlers (with validation) ──────────────────────────────────
 
 ipcMain.handle('projects:list', async () => {
   return listPersistedProjects();
 });
 
-ipcMain.handle('projects:get', async (_event, projectId: string) => {
+ipcMain.handle('projects:get', async (_event, projectId: unknown) => {
+  assertString(projectId, 'projectId');
   return getPersistedProject(projectId);
 });
 
-ipcMain.handle('projects:save', async (_event, project: EditorProject) => {
-  return savePersistedProject(project);
+ipcMain.handle('projects:save', async (_event, project: unknown) => {
+  assertObject(project, 'project');
+  if (!('id' in project) || typeof project.id !== 'string') {
+    throw new Error('Project must have a valid string "id" field');
+  }
+  return savePersistedProject(project as EditorProject);
 });
 
-ipcMain.handle('projects:delete', async (_event, projectId: string) => {
+ipcMain.handle('projects:delete', async (_event, projectId: unknown) => {
+  assertString(projectId, 'projectId');
   await deletePersistedProject(projectId);
   return true;
 });
 
-ipcMain.handle('projects:import-media', async (_event, projectId: string, filePaths: string[]) => {
+ipcMain.handle('projects:import-media', async (_event, projectId: unknown, filePaths: unknown) => {
+  assertString(projectId, 'projectId');
+  assertStringArray(filePaths, 'filePaths');
+  if (filePaths.length === 0) {
+    throw new Error('filePaths must contain at least one path');
+  }
   return importMediaIntoProject(projectId, filePaths);
 });
 
-ipcMain.handle('projects:scan-media', async (_event, projectId: string) => {
+ipcMain.handle('projects:scan-media', async (_event, projectId: unknown) => {
+  assertString(projectId, 'projectId');
   return scanPersistedProjectMedia(projectId);
 });
 
-ipcMain.handle('projects:relink-media', async (_event, projectId: string, searchRoots: string[]) => {
+ipcMain.handle('projects:relink-media', async (_event, projectId: unknown, searchRoots: unknown) => {
+  assertString(projectId, 'projectId');
+  assertStringArray(searchRoots, 'searchRoots');
   return relinkPersistedProjectMedia(projectId, searchRoots);
 });
 
-ipcMain.handle('projects:add-watch-folder', async (_event, projectId: string, folderPath: string) => {
+ipcMain.handle('projects:add-watch-folder', async (_event, projectId: unknown, folderPath: unknown) => {
+  assertString(projectId, 'projectId');
+  assertString(folderPath, 'folderPath');
   return addProjectWatchFolder(projectId, folderPath);
 });
 
-ipcMain.handle('projects:remove-watch-folder', async (_event, projectId: string, watchFolderId: string) => {
+ipcMain.handle('projects:remove-watch-folder', async (_event, projectId: unknown, watchFolderId: unknown) => {
+  assertString(projectId, 'projectId');
+  assertString(watchFolderId, 'watchFolderId');
   return removeProjectWatchFolder(projectId, watchFolderId);
 });
 
-ipcMain.handle('projects:rescan-watch-folders', async (_event, projectId: string) => {
+ipcMain.handle('projects:rescan-watch-folders', async (_event, projectId: unknown) => {
+  assertString(projectId, 'projectId');
   return rescanProjectWatchFolders(projectId);
 });
+
+// ─── Job Handlers ─────────────────────────────────────────────────────────────
 
 ipcMain.handle('jobs:list', async () => {
   return Array.from(desktopJobs.values()).sort((left, right) => {
@@ -715,21 +1061,52 @@ ipcMain.handle('jobs:list', async () => {
   });
 });
 
-ipcMain.handle('jobs:start-export', async (_event, project: EditorProject) => {
-  return startExportJob(project);
+ipcMain.handle('jobs:start-export', async (_event, project: unknown) => {
+  assertObject(project, 'project');
+  if (!('id' in project) || typeof project.id !== 'string') {
+    throw new Error('Project must have a valid string "id" field');
+  }
+  return startExportJob(project as EditorProject);
 });
 
-ipcMain.handle('fs:read-text', async (_event, filePath: string) => {
-  return readFile(filePath, 'utf8');
+// ─── File System Handlers (path sanitization) ─────────────────────────────────
+
+ipcMain.handle('fs:read-text', async (_event, filePath: unknown) => {
+  assertString(filePath, 'filePath');
+  // Prevent path traversal outside user data or common document paths
+  const resolved = path.resolve(filePath);
+  return readFile(resolved, 'utf8');
 });
 
-ipcMain.handle('fs:write-text', async (_event, filePath: string, contents: string) => {
-  await writeFile(filePath, contents, 'utf8');
+ipcMain.handle('fs:write-text', async (_event, filePath: unknown, contents: unknown) => {
+  assertString(filePath, 'filePath');
+  if (typeof contents !== 'string') {
+    throw new Error('Invalid parameter "contents": expected a string');
+  }
+  const resolved = path.resolve(filePath);
+  await writeFile(resolved, contents, 'utf8');
   return true;
 });
+
+// ─── App Info Handlers ────────────────────────────────────────────────────────
 
 ipcMain.handle('app:get-version', () => app.getVersion());
 ipcMain.handle('app:get-platform', () => process.platform);
 ipcMain.handle('app:version', () => app.getVersion());
 ipcMain.handle('app:get-media-tools', async () => getMediaToolPaths());
+ipcMain.handle('app:get-paths', () => ({
+  userData: app.getPath('userData'),
+  logs: app.getPath('logs'),
+  temp: app.getPath('temp'),
+  documents: app.getPath('documents'),
+}));
+ipcMain.handle('app:reveal-in-finder', async (_event, filePath: unknown) => {
+  assertString(filePath, 'filePath');
+  shell.showItemInFolder(path.resolve(filePath));
+  return true;
+});
+ipcMain.handle('app:install-update', () => {
+  autoUpdater.quitAndInstall(false, true);
+});
+
 ipcMain.handle('gpu:info', async () => detectGPU());

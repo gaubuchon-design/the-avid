@@ -181,9 +181,9 @@ export async function runBenchmark(
     backend: backend.name,
     iterations: MEASURED_ITERATIONS,
     avgLatencyMs: round(sum / latencies.length),
-    minLatencyMs: round(latencies[0]),
-    maxLatencyMs: round(latencies[latencies.length - 1]),
-    p95LatencyMs: round(latencies[p95Index]),
+    minLatencyMs: round(latencies[0] ?? 0),
+    maxLatencyMs: round(latencies[latencies.length - 1] ?? 0),
+    p95LatencyMs: round(latencies[p95Index] ?? 0),
   };
 }
 
