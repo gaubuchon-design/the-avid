@@ -1,7 +1,7 @@
 export type TrackType = 'VIDEO' | 'AUDIO' | 'EFFECT' | 'SUBTITLE' | 'GRAPHIC';
-export type PanelType = 'edit' | 'color' | 'audio' | 'effects' | 'publish' | 'review' | 'ingest' | 'script';
+export type PanelType = 'edit' | 'color' | 'audio' | 'effects' | 'publish' | 'review' | 'ingest' | 'script' | 'news';
 export type WorkspaceTab = 'video' | 'audio' | 'color' | 'ai';
-export type ProjectTemplate = 'film' | 'commercial' | 'documentary' | 'sports' | 'podcast' | 'social';
+export type ProjectTemplate = 'film' | 'commercial' | 'documentary' | 'sports' | 'podcast' | 'social' | 'news';
 export const PROJECT_SCHEMA_VERSION = 2;
 export type MediaIndexStatus = 'UNSCANNED' | 'INDEXING' | 'READY' | 'MISSING' | 'ERROR';
 export type MediaStorageMode = 'COPY' | 'LINK';
@@ -336,6 +336,13 @@ const TEMPLATE_META: Record<ProjectTemplate, {
     description: 'Vertical short-form editorial workflow tuned for speed.',
     tags: ['social', 'vertical'],
     resolution: { width: 1080, height: 1920, frameRate: 30 },
+  },
+  news: {
+    icon: 'newspaper',
+    color: '#ef4444',
+    description: 'Broadcast news workflow with NRCS integration, rundown, and playout.',
+    tags: ['news', 'broadcast'],
+    resolution: { width: 1920, height: 1080, frameRate: 29.97 },
   },
 };
 
@@ -693,6 +700,13 @@ function createTranscriptCues(bins: EditorBin[], template: ProjectTemplate): Edi
       'Trim the pause between beats for mobile pace.',
       'End on the hook that can loop back to the top.',
     ],
+    news: [
+      'Lead with the SOT from the press conference.',
+      'Cut to the b-roll of the scene before the standup.',
+      'Keep the lower third over the interview bite.',
+      'Trim the package to hit the target duration exactly.',
+      'End on the anchor tag and toss to weather.',
+    ],
   };
 
   return assets.map((asset, index) => {
@@ -737,6 +751,10 @@ function createReviewComments(template: ProjectTemplate): EditorReviewComment[] 
     social: [
       'Hook needs the strongest frame inside the first second.',
       'Caption styling should be larger for mobile.',
+    ],
+    news: [
+      'Package is three seconds over target duration.',
+      'Lower third needs updated title for the source.',
     ],
   };
 
@@ -798,6 +816,10 @@ function createPublishJobs(template: ProjectTemplate): EditorPublishJob[] {
     social: [
       ['Creator Master', 'Vertical Social Pack', 'TikTok and Reels', 'PROCESSING', 78],
       ['Review Link', 'H.264 Review', 'Mobile review room', 'COMPLETED', 100],
+    ],
+    news: [
+      ['Playout MXF', 'Broadcast DNxHD MXF', 'AirSpeed Primary', 'QUEUED', 0],
+      ['Archive Copy', 'XDCAM MXF', 'News archive server', 'DRAFT', 0],
     ],
   };
 

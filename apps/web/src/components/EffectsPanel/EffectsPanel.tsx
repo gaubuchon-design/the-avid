@@ -697,7 +697,7 @@ function ParameterControls() {
   const def = effectsEngine.getDefinition(effect.definitionId);
   if (!def) return null;
 
-  const handleToggleKeyframe = (paramName: string, currentValue: any) => {
+  const handleToggleKeyframe = (paramName: string, currentValue: number | string | boolean) => {
     if (!selectedClipId || !selectedEffectId) return;
     const hasKf = effect.keyframes.some(
       (kf) => kf.frame === currentFrame && kf.paramName === paramName
@@ -723,7 +723,7 @@ function ParameterControls() {
           (kf) => kf.frame === currentFrame && kf.paramName === paramDef.name
         );
 
-        const onUpdate = (v: any) => {
+        const onUpdate = (v: number | string | boolean) => {
           if (selectedClipId && selectedEffectId) {
             updateParam(selectedClipId, selectedEffectId, paramDef.name, v);
           }
@@ -737,7 +737,7 @@ function ParameterControls() {
               <NumberParam
                 key={paramDef.name}
                 paramDef={paramDef}
-                value={value}
+                value={value as number}
                 onChange={onUpdate}
                 hasKeyframe={hasKf}
                 onToggleKeyframe={onToggleKf}
@@ -748,7 +748,7 @@ function ParameterControls() {
               <ColorParam
                 key={paramDef.name}
                 paramDef={paramDef}
-                value={value}
+                value={value as string}
                 onChange={onUpdate}
                 hasKeyframe={hasKf}
                 onToggleKeyframe={onToggleKf}
@@ -759,7 +759,7 @@ function ParameterControls() {
               <BooleanParam
                 key={paramDef.name}
                 paramDef={paramDef}
-                value={value}
+                value={value as boolean}
                 onChange={onUpdate}
                 hasKeyframe={hasKf}
                 onToggleKeyframe={onToggleKf}
@@ -770,7 +770,7 @@ function ParameterControls() {
               <SelectParam
                 key={paramDef.name}
                 paramDef={paramDef}
-                value={value}
+                value={value as string}
                 onChange={onUpdate}
                 hasKeyframe={hasKf}
                 onToggleKeyframe={onToggleKf}

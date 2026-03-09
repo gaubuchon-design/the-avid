@@ -19,6 +19,12 @@ import timelineRouter from './routes/timeline';
 import aiRoutes from './routes/ai';
 import { collabRouter, publishRouter, socialRouter } from './routes/collaboration';
 import marketplaceRoutes from './routes/marketplace';
+import newsRoutes from './routes/news';
+import sportsRoutes from './routes/sports';
+import brandRoutes from './routes/brand';
+import protoolsRoutes from './routes/protools';
+import nexisRoutes from './routes/nexis';
+import creatorRoutes from './routes/creator';
 
 // ─── App Setup ─────────────────────────────────────────────────────────────────
 const app = express();
@@ -101,6 +107,14 @@ api.use('/social-connections', socialRouter);
 api.use('/projects/:projectId/timelines', timelineRouter);
 api.use('/projects/:projectId', collabRouter);    // comments, approvals, locks
 api.use('/projects/:projectId/publish', publishRouter);
+
+// Vertical workflow routes
+api.use('/news', newsRoutes);
+api.use('/sports', sportsRoutes);
+api.use('/brand', brandRoutes);
+api.use('/protools', protoolsRoutes);
+api.use('/nexis', nexisRoutes);
+api.use('/creator', creatorRoutes);
 
 app.use('/api/v1', api);
 

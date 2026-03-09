@@ -271,6 +271,7 @@ class ExportEngine {
   private jobs: Map<string, ExportJob> = new Map();
   private timers: Map<string, ReturnType<typeof setInterval>> = new Map();
   private listeners = new Set<() => void>();
+  private activeRecorders: Map<string, MediaRecorder> = new Map();
 
   /** Initialise with built-in export presets. */
   constructor() {
@@ -305,33 +306,106 @@ class ExportEngine {
   // -- Jobs -------------------------------------------------------------------
 
   /**
-   * Start a new export job with simulated encoding progress.
+   * Start a new export job. When a canvas element is provided the engine
+   * records the canvas stream with `MediaRecorder` and produces a real
+   * WebM blob. Without a canvas it falls back to the simulated 5-second
+   * progress timer (useful for presets like ProRes that need desktop FFmpeg).
+   *
    * @param presetId    The preset ID to encode with.
    * @param destination The delivery destination.
-   * @param options     Optional in/out frame range and caption format.
+   * @param options     Optional in/out frame range, caption format, canvas element, and duration.
    * @returns The newly created ExportJob.
    * @example
+   * // Simulated export (no canvas)
    * const job = exportEngine.startExport('stream-h264-1080p', 'local');
+   * // Real canvas-based export
+   * const job = exportEngine.startExport('custom-webm-vp9', 'local', { canvas: myCanvas, duration: 10 });
    */
   startExport(
     presetId: string,
     destination: ExportDestination,
-    options?: { inFrame?: number; outFrame?: number; captionFormat?: CaptionFormat },
+    options?: {
+      inFrame?: number;
+      outFrame?: number;
+      captionFormat?: CaptionFormat;
+      canvas?: HTMLCanvasElement;
+      duration?: number;
+    },
   ): ExportJob {
     const preset = this.getPreset(presetId);
     const jobId = `export_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const fps = preset?.fps ?? 30;
     const job: ExportJob = {
       id: jobId,
       presetId,
       status: 'encoding',
       progress: 0,
       startedAt: Date.now(),
-      estimatedTimeRemaining: 5,
+      estimatedTimeRemaining: options?.duration ?? 5,
     };
     this.jobs.set(jobId, job);
     this.notify();
 
-    // Simulate encoding progress over ~5 seconds
+    // ── Real MediaRecorder-based export (canvas provided) ──────────────
+    if (options?.canvas) {
+      const canvas = options.canvas;
+      const duration = options.duration ?? 5;
+
+      this.startRealExport(canvas, duration, fps, (progress) => {
+        const currentJob = this.jobs.get(jobId);
+        if (!currentJob || currentJob.status === 'failed') return;
+
+        currentJob.progress = Math.round(progress * 100);
+        const elapsed = (Date.now() - currentJob.startedAt) / 1000;
+        const rate = progress > 0 ? elapsed / progress : 0;
+        currentJob.estimatedTimeRemaining =
+          Math.round(Math.max(0, rate * (1 - progress)) * 10) / 10;
+
+        if (progress >= 0.8 && currentJob.status === 'encoding') {
+          currentJob.status = destination === 'local' ? 'encoding' : 'uploading';
+        }
+        this.notify();
+      })
+        .then((blob) => {
+          const currentJob = this.jobs.get(jobId);
+          if (!currentJob || currentJob.status === 'failed') return;
+
+          currentJob.status = 'completed';
+          currentJob.progress = 100;
+          currentJob.completedAt = Date.now();
+          currentJob.estimatedTimeRemaining = 0;
+
+          // Generate a download URL and trigger browser download
+          const url = URL.createObjectURL(blob);
+          const fileName = preset
+            ? `${preset.name.replace(/\s+/g, '_').toLowerCase()}_${jobId}.webm`
+            : `output_${jobId}.webm`;
+          currentJob.outputPath = fileName;
+
+          const anchor = document.createElement('a');
+          anchor.href = url;
+          anchor.download = fileName;
+          document.body.appendChild(anchor);
+          anchor.click();
+          document.body.removeChild(anchor);
+
+          // Revoke the object URL after a short delay to ensure download starts
+          setTimeout(() => URL.revokeObjectURL(url), 5000);
+          this.notify();
+        })
+        .catch((err) => {
+          const currentJob = this.jobs.get(jobId);
+          if (currentJob) {
+            currentJob.status = 'failed';
+            currentJob.error = err instanceof Error ? err.message : String(err);
+          }
+          this.notify();
+        });
+
+      return { ...job };
+    }
+
+    // ── Simulated fallback (no canvas – for ProRes / desktop FFmpeg) ───
     const totalSteps = 50;
     let step = 0;
     const interval = setInterval(() => {
@@ -368,6 +442,98 @@ class ExportEngine {
     return { ...job };
   }
 
+  // -- Real MediaRecorder Export ----------------------------------------------
+
+  /**
+   * Record a canvas stream using MediaRecorder and return the resulting Blob.
+   *
+   * The method captures the canvas at the given FPS, records for `duration`
+   * seconds, and resolves with a WebM Blob containing the encoded video.
+   *
+   * @param canvas     The HTMLCanvasElement to record.
+   * @param duration   Recording length in seconds.
+   * @param fps        Frames per second for `captureStream`.
+   * @param onProgress Optional callback receiving normalised progress (0-1).
+   * @returns A Promise that resolves to the recorded video Blob.
+   * @example
+   * const blob = await exportEngine.startRealExport(canvas, 10, 30, (p) => console.log(p));
+   */
+  async startRealExport(
+    canvas: HTMLCanvasElement,
+    duration: number,
+    fps: number = 30,
+    onProgress?: (progress: number) => void,
+  ): Promise<Blob> {
+    const stream = canvas.captureStream(fps);
+
+    // Choose the best supported MIME type
+    const preferredMime = 'video/webm;codecs=vp9';
+    const fallbackMime = 'video/webm';
+    const mimeType =
+      typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(preferredMime)
+        ? preferredMime
+        : fallbackMime;
+
+    const recorder = new MediaRecorder(stream, { mimeType });
+    const chunks: Blob[] = [];
+
+    // Track the recorder for potential cancellation
+    const recorderId = `rec_${Date.now()}`;
+    this.activeRecorders.set(recorderId, recorder);
+
+    return new Promise<Blob>((resolve, reject) => {
+      recorder.ondataavailable = (event: BlobEvent) => {
+        if (event.data.size > 0) {
+          chunks.push(event.data);
+        }
+      };
+
+      recorder.onerror = (event: Event) => {
+        this.activeRecorders.delete(recorderId);
+        reject(new Error(`MediaRecorder error: ${(event as ErrorEvent).message ?? 'unknown'}`));
+      };
+
+      recorder.onstop = () => {
+        this.activeRecorders.delete(recorderId);
+        const blob = new Blob(chunks, { type: mimeType });
+        resolve(blob);
+      };
+
+      // Start recording – request data every 100ms for responsive progress
+      recorder.start(100);
+
+      // Track progress based on elapsed time vs target duration
+      const startTime = Date.now();
+      const progressInterval = setInterval(() => {
+        const elapsed = (Date.now() - startTime) / 1000;
+        const progress = Math.min(1, elapsed / duration);
+
+        if (onProgress) {
+          onProgress(progress);
+        }
+
+        if (elapsed >= duration) {
+          clearInterval(progressInterval);
+          if (recorder.state === 'recording') {
+            recorder.stop();
+          }
+          // Stop all tracks on the captured stream
+          stream.getTracks().forEach((track) => track.stop());
+        }
+      }, 100);
+
+      // Safety: also stop when recorder is externally stopped (e.g. cancellation)
+      recorder.addEventListener(
+        'stop',
+        () => {
+          clearInterval(progressInterval);
+          stream.getTracks().forEach((track) => track.stop());
+        },
+        { once: true },
+      );
+    });
+  }
+
   /**
    * Cancel a running export job.
    * @param jobId The job ID to cancel.
@@ -383,6 +549,13 @@ class ExportEngine {
     if (timer) {
       clearInterval(timer);
       this.timers.delete(jobId);
+    }
+    // Stop any active MediaRecorder associated with this job
+    for (const [recId, recorder] of this.activeRecorders) {
+      if (recorder.state === 'recording') {
+        recorder.stop();
+      }
+      this.activeRecorders.delete(recId);
     }
     this.notify();
   }

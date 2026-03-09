@@ -8,9 +8,9 @@ function formatDuration(sec?: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-function formatDate(): string {
-  const d = new Date();
-  return `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)} ${d.toLocaleTimeString()}`;
+function formatDate(d?: Date | string): string {
+  const date = d ? new Date(d) : new Date();
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function BinItem({ bin, depth = 0 }: { bin: Bin; depth?: number }) {
@@ -66,7 +66,7 @@ function AssetCard({ asset }: { asset: MediaAsset }) {
         <div className={`asset-type-badge ${asset.type.toLowerCase()}`}>{asset.type}</div>
         {asset.isFavorite && <div className="asset-fav">★</div>}
       </div>
-      <div className="asset-name truncate">{asset.name}</div>
+      <div className="asset-name truncate" title={asset.name}>{asset.name}</div>
     </div>
   );
 }
@@ -98,7 +98,7 @@ function AssetListView({ assets }: { assets: MediaAsset[] }) {
                 asset.type === 'AUDIO' ? 'var(--track-audio)' : 'var(--track-effect)',
             }} />
           </span>
-          <span className="bin-col-name truncate">{asset.name}</span>
+          <span className="bin-col-name truncate" title={asset.name}>{asset.name}</span>
           <span className="bin-col-date">{formatDate()}</span>
           <span className="bin-col-duration">{formatDuration(asset.duration)}</span>
         </div>
@@ -232,7 +232,7 @@ function SmartBinItem({ smartBin }: { smartBin: SmartBin }) {
 /* ─── Main BinPanel ───────────────────────────────────────────────────── */
 
 export function BinPanel() {
-  const { bins, activeBinAssets, toolbarTab, addBin, selectedBinId, smartBins } = useEditorStore();
+  const { bins, activeBinAssets, toolbarTab, addBin, selectedBinId, smartBins, importMediaFiles } = useEditorStore();
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [tab, setTab] = useState<'bins' | 'smart' | 'search'>('bins');
@@ -262,15 +262,18 @@ export function BinPanel() {
                   input.multiple = true;
                   input.accept = 'video/*,audio/*,image/*';
                   input.onchange = () => {
-                    // In production: upload to S3, create MediaAsset records
                     if (input.files?.length) {
-                      alert(`${input.files.length} file(s) selected for import. (Media ingest pipeline not connected in demo)`);
+                      importMediaFiles(input.files, selectedBinId ?? undefined);
                     }
                   };
                   input.click();
                 }}>+</button>
               <button className="tl-btn" title="New Bin"
-                onClick={() => setShowNewBinInput(true)}>📁</button>
+                onClick={() => setShowNewBinInput(true)}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                </svg>
+              </button>
             </>
           )}
         </div>
@@ -308,11 +311,14 @@ export function BinPanel() {
       {/* Tabs — only show for Media mode */}
       {!isEffectsMode && (
         <div className="panel-tabs">
-          {(['bins', 'smart', 'search'] as const).map(t => (
-            <button key={t} className={`panel-tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
-              {t === 'smart' ? '✦ Smart' : t}
-            </button>
-          ))}
+          {(['bins', 'smart', 'search'] as const).map(t => {
+            const label = t === 'bins' ? 'Bins' : t === 'smart' ? 'Smart' : 'Search';
+            return (
+              <button key={t} className={`panel-tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
+                {t === 'smart' ? `✦ ${label}` : label}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -325,9 +331,18 @@ export function BinPanel() {
         {!isEffectsMode && (
           <div className="bin-view-toggle" style={{ display: 'flex', gap: 2, padding: 0 }}>
             <button className={`view-btn${viewMode === 'grid' ? ' active' : ''}`}
-              onClick={() => setViewMode('grid')} title="Grid view">▦</button>
+              onClick={() => setViewMode('grid')} title="Grid view">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
+              </svg>
+            </button>
             <button className={`view-btn${viewMode === 'list' ? ' active' : ''}`}
-              onClick={() => setViewMode('list')} title="List view">☰</button>
+              onClick={() => setViewMode('list')} title="List view">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
           </div>
         )}
       </div>

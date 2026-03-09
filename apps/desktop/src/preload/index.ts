@@ -66,6 +66,48 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeTextFile: (filePath: string, contents: string) =>
     ipcRenderer.invoke('fs:write-text', filePath, contents),
 
+  // ─── Video I/O (DeckLink, AJA) ────────────────────────────────────────
+  videoIO: {
+    available:      () => ipcRenderer.invoke('video-io:available'),
+    enumerate:      () => ipcRenderer.invoke('video-io:enumerate'),
+    startCapture:   (config: unknown) => ipcRenderer.invoke('video-io:start-capture', config),
+    stopCapture:    (deviceId: string) => ipcRenderer.invoke('video-io:stop-capture', deviceId),
+    startPlayback:  (config: unknown) => ipcRenderer.invoke('video-io:start-playback', config),
+    stopPlayback:   (deviceId: string) => ipcRenderer.invoke('video-io:stop-playback', deviceId),
+    sendFrame:      (deviceId: string, data: ArrayBuffer) => ipcRenderer.invoke('video-io:send-frame', deviceId, data),
+    deviceStatus:   (deviceId: string) => ipcRenderer.invoke('video-io:device-status', deviceId),
+    getTransportBuffer: (deviceId: string) => ipcRenderer.invoke('video-io:get-transport-buffer', deviceId),
+    onFrameAvailable: (cb: (info: unknown) => void) => subscribe('video-io:frame-available', cb),
+  },
+
+  // ─── Streaming (NDI, SRT) ───────────────────────────────────────────
+  streaming: {
+    available:  () => ipcRenderer.invoke('streaming:available'),
+    startNDI:   (config: unknown) => ipcRenderer.invoke('streaming:start-ndi', config),
+    startSRT:   (config: unknown) => ipcRenderer.invoke('streaming:start-srt', config),
+    stop:       (targetId: string) => ipcRenderer.invoke('streaming:stop', targetId),
+    stopAll:    () => ipcRenderer.invoke('streaming:stop-all'),
+    stats:      () => ipcRenderer.invoke('streaming:stats'),
+    targets:    () => ipcRenderer.invoke('streaming:targets'),
+    onStatsUpdate: (cb: (stats: unknown) => void) => subscribe('streaming:stats-update', cb),
+  },
+
+  // ─── Deck Control (Sony 9-pin RS-422) ───────────────────────────────
+  deckControl: {
+    available:     () => ipcRenderer.invoke('deck:available'),
+    listPorts:     () => ipcRenderer.invoke('deck:list-ports'),
+    connect:       (portPath: string) => ipcRenderer.invoke('deck:connect', portPath),
+    disconnect:    (deckId: string) => ipcRenderer.invoke('deck:disconnect', deckId),
+    command:       (deckId: string, cmd: string) => ipcRenderer.invoke('deck:command', deckId, cmd),
+    jog:           (deckId: string, speed: number) => ipcRenderer.invoke('deck:jog', deckId, speed),
+    shuttle:       (deckId: string, speed: number) => ipcRenderer.invoke('deck:shuttle', deckId, speed),
+    timecode:      (deckId: string) => ipcRenderer.invoke('deck:timecode', deckId),
+    goToTimecode:  (deckId: string, tc: unknown) => ipcRenderer.invoke('deck:go-to-tc', deckId, tc),
+    connectedDecks: () => ipcRenderer.invoke('deck:connected-decks'),
+    onTimecodeUpdate: (cb: (info: unknown) => void) => subscribe('deck:timecode-update', cb),
+    onStatusUpdate:   (cb: (info: unknown) => void) => subscribe('deck:status-update', cb),
+  },
+
   // Menu event listeners
   onNewProject:  (cb: () => void) => subscribe('menu:new-project', cb),
   onOpenProject: (cb: (path: string) => void) => subscribe('menu:open-project', cb),

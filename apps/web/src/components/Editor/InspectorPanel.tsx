@@ -1,11 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useEditorStore } from '../../store/editor.store';
-
-function formatTC(sec: number) {
-  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60),
-        s = Math.floor(sec % 60), f = Math.floor((sec % 1) * 24);
-  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}:${String(f).padStart(2,'0')}`;
-}
+import { Timecode } from '../../lib/timecode';
+import { audioEngine } from '../../engine/AudioEngine';
+import { effectsEngine } from '../../engine/EffectsEngine';
 
 /* ─── Shared widgets ─────────────────────────────────────────────────────── */
 
@@ -16,7 +13,7 @@ function Slider({ label, value, unit = '', min = 0, max = 100, onChange }: {
     <div className="property-row">
       <div className="property-label">{label}</div>
       <div className="property-value">
-        <input type="number" className="property-input" value={value} style={{ width: 48 }}
+        <input type="number" className="property-input" value={value} style={{ width: 56 }}
           onChange={e => onChange(+e.target.value || 0)} />
         {unit && <span className="property-unit">{unit}</span>}
         <input type="range" className="range-slider" min={min} max={max} value={value}
@@ -42,7 +39,14 @@ function NumberInput({ label, value, onChange }: {
 
 function ToggleSwitch({ enabled, onToggle }: { enabled: boolean; onToggle: () => void }) {
   return (
-    <div className={`effect-toggle${enabled ? ' on' : ''}`} onClick={onToggle} />
+    <div
+      className={`effect-toggle${enabled ? ' on' : ''}`}
+      onClick={onToggle}
+      role="switch"
+      aria-checked={enabled}
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}
+    />
   );
 }
 
@@ -74,7 +78,7 @@ function CollapsibleSection({ title, children, defaultOpen = false }: {
     <div className="inspector-section">
       <div className="inspector-section-title" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
         onClick={() => setOpen(!open)}>
-        <span style={{ fontSize: 8 }}>{open ? '▾' : '▸'}</span>
+        <span style={{ fontSize: 10 }}>{open ? '▾' : '▸'}</span>
         {title}
       </div>
       {open && children}
@@ -112,6 +116,15 @@ function VideoTab() {
 /* ─── Tab: Audio (Figma: 304C + SP 76 + DynS) ───────────────────────────── */
 
 function AudioTab() {
+  const { selectedClipIds, tracks } = useEditorStore();
+  const selectedClip = selectedClipIds.length > 0
+    ? tracks.flatMap(t => t.clips).find(c => c.id === selectedClipIds[0])
+    : null;
+  // Derive the track ID that owns this clip
+  const trackId = selectedClip
+    ? tracks.find(t => t.clips.some(c => c.id === selectedClip.id))?.id ?? 'master'
+    : 'master';
+
   const [gain, setGain] = useState(0);
   const [pan, setPan] = useState(0);
   const [slope, setSlope] = useState(50);
@@ -127,23 +140,81 @@ function AudioTab() {
   // DynS
   const [dynEnabled, setDynEnabled] = useState(false);
   const [dynDepth, setDynDepth] = useState(0);
+  // VU Meter
+  const [meterLevel, setMeterLevel] = useState({ peak: 0, rms: 0 });
+
+  // Ensure the audio engine is initialised
+  useEffect(() => {
+    audioEngine.init();
+  }, []);
+
+  // Poll meter levels from the real audio engine
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const level = audioEngine.getMeterLevel(trackId);
+      setMeterLevel(level);
+    }, 50);
+    return () => clearInterval(interval);
+  }, [trackId]);
+
+  // Wire gain changes to the audio engine
+  const handleGainChange = useCallback((dB: number) => {
+    setGain(dB);
+    // Convert dB to linear gain: 0 dB = 1.0, range approx -60..+6
+    const linear = dB <= -60 ? 0 : Math.pow(10, dB / 20);
+    audioEngine.setTrackGain(trackId, Math.min(2, linear));
+  }, [trackId]);
+
+  // Wire pan changes to the audio engine
+  const handlePanChange = useCallback((panVal: number) => {
+    setPan(panVal);
+    // panVal is -50..+50, normalise to -1..+1
+    audioEngine.setTrackPan(trackId, panVal / 50);
+  }, [trackId]);
+
+  // Wire compressor params to the audio engine (304C + DynS combined)
+  const handleCompressorUpdate = useCallback((params: {
+    attack?: number; release?: number; inputGain?: number;
+    compression?: number; outputGain?: number; slope?: number;
+  }) => {
+    // Map UI values to Web Audio compressor params
+    audioEngine.setCompressor(trackId, {
+      threshold: -(params.compression ?? compression),
+      ratio: 1 + ((params.slope ?? slope) / 100) * 19, // slope 0..100 -> ratio 1..20
+      attack: (params.attack ?? attack) / 1000,          // ms -> seconds
+      release: (params.release ?? release) / 1000,        // ms -> seconds
+      knee: 10,
+    });
+  }, [trackId, attack, release, compression, slope]);
 
   return (
     <div className="tab-content">
       {/* 304C Section */}
       <div className="inspector-section">
         <div className="inspector-section-title">304C</div>
-        <div className="vu-meter-container" style={{
-          height: 32, background: 'var(--bg-void)', borderRadius: 'var(--radius-sm)',
-          border: '1px solid var(--border-default)', marginBottom: 8,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-muted)',
-        }}>VU Meter</div>
-        <Slider label="Slope" value={slope} onChange={setSlope} />
-        <Slider label="Attack" value={attack} onChange={setAttack} />
-        <Slider label="Release" value={release} onChange={setRelease} />
-        <Slider label="Input Gain" value={inputGain + 60} unit="dB" min={0} max={120} onChange={v => setInputGain(v - 60)} />
-        <Slider label="Compression" value={compression} onChange={setCompression} />
+        <div className="vu-meter-container" title={`Peak: ${(meterLevel.peak * 100).toFixed(1)}%  RMS: ${(meterLevel.rms * 100).toFixed(1)}%`}>
+          <div style={{
+            height: 8, borderRadius: 2, background: 'var(--bg-tertiary)',
+            overflow: 'hidden', position: 'relative',
+          }}>
+            <div style={{
+              position: 'absolute', left: 0, top: 0, bottom: 0,
+              width: `${Math.min(100, meterLevel.rms * 100)}%`,
+              background: meterLevel.peak > 0.9 ? '#ef4444' : '#22c896',
+              transition: 'width 50ms',
+            }} />
+            <div style={{
+              position: 'absolute', top: 0, bottom: 0,
+              left: `${Math.min(100, meterLevel.peak * 100)}%`,
+              width: 2, background: '#fff',
+            }} />
+          </div>
+        </div>
+        <Slider label="Slope" value={slope} onChange={v => { setSlope(v); handleCompressorUpdate({ slope: v }); }} />
+        <Slider label="Attack" value={attack} onChange={v => { setAttack(v); handleCompressorUpdate({ attack: v }); }} />
+        <Slider label="Release" value={release} onChange={v => { setRelease(v); handleCompressorUpdate({ release: v }); }} />
+        <Slider label="Input Gain" value={inputGain + 60} unit="dB" min={0} max={120} onChange={v => { const dB = v - 60; setInputGain(dB); handleCompressorUpdate({ inputGain: dB }); }} />
+        <Slider label="Compression" value={compression} onChange={v => { setCompression(v); handleCompressorUpdate({ compression: v }); }} />
         <Slider label="Output Gain" value={outputGain + 60} unit="dB" min={0} max={120} onChange={v => setOutputGain(v - 60)} />
       </div>
 
@@ -169,8 +240,8 @@ function AudioTab() {
       {/* Audio basic controls */}
       <div className="inspector-section">
         <div className="inspector-section-title">Audio</div>
-        <Slider label="Gain" value={gain + 60} unit="dB" min={0} max={120} onChange={v => setGain(v - 60)} />
-        <Slider label="Pan" value={pan + 50} unit="" min={0} max={100} onChange={v => setPan(v - 50)} />
+        <Slider label="Gain" value={gain + 60} unit="dB" min={0} max={120} onChange={v => handleGainChange(v - 60)} />
+        <Slider label="Pan" value={pan + 50} unit="" min={0} max={100} onChange={v => handlePanChange(v - 50)} />
       </div>
     </div>
   );
@@ -179,10 +250,11 @@ function AudioTab() {
 /* ─── Tab: Info ──────────────────────────────────────────────────────────── */
 
 function InfoTab() {
-  const { tracks, selectedClipIds } = useEditorStore();
+  const { tracks, selectedClipIds, projectSettings } = useEditorStore();
   const clip = selectedClipIds.length > 0
     ? tracks.flatMap(t => t.clips).find(c => c.id === selectedClipIds[0])
     : null;
+  const infoTc = new Timecode({ fps: projectSettings?.frameRate || 24 });
 
   return (
     <div className="tab-content">
@@ -206,9 +278,9 @@ function InfoTab() {
           <div className="inspector-section-title">Clip Info</div>
           {[
             ['Name', clip.name],
-            ['Start', `${clip.startTime.toFixed(2)}s`],
-            ['End', `${clip.endTime.toFixed(2)}s`],
-            ['Duration', `${(clip.endTime - clip.startTime).toFixed(2)}s`],
+            ['Start', infoTc.secondsToTC(clip.startTime)],
+            ['End', infoTc.secondsToTC(clip.endTime)],
+            ['Duration', infoTc.secondsToTC(clip.endTime - clip.startTime)],
           ].map(([label, value]) => (
             <div key={label} className="property-row">
               <div className="property-label">{label}</div>
@@ -414,10 +486,11 @@ function EffectsPropertiesTab() {
 /* ─── Clip Info block ────────────────────────────────────────────────────── */
 
 function ClipInfo() {
-  const { tracks, selectedClipIds } = useEditorStore();
+  const { tracks, selectedClipIds, projectSettings } = useEditorStore();
   const clip = selectedClipIds.length > 0
     ? tracks.flatMap(t => t.clips).find(c => c.id === selectedClipIds[0])
     : null;
+  const clipTc = new Timecode({ fps: projectSettings?.frameRate || 24 });
 
   if (!clip) return (
     <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
@@ -430,9 +503,9 @@ function ClipInfo() {
       <div className="inspector-section-title">Clip Info</div>
       {[
         ['Name', clip.name],
-        ['Start', `${clip.startTime.toFixed(2)}s`],
-        ['End', `${clip.endTime.toFixed(2)}s`],
-        ['Duration', `${(clip.endTime - clip.startTime).toFixed(2)}s`],
+        ['Start', clipTc.secondsToTC(clip.startTime)],
+        ['End', clipTc.secondsToTC(clip.endTime)],
+        ['Duration', clipTc.secondsToTC(clip.endTime - clip.startTime)],
       ].map(([label, value]) => (
         <div key={label} className="property-row">
           <div className="property-label">{label}</div>
@@ -446,21 +519,23 @@ function ClipInfo() {
 /* ─── Main Inspector Panel ───────────────────────────────────────────────── */
 
 export function InspectorPanel() {
-  const { activeInspectorTab, setInspectorTab, selectedClipIds, tracks } = useEditorStore();
+  const { activeInspectorTab, setInspectorTab, selectedClipIds, tracks, projectSettings } = useEditorStore();
   const clip = selectedClipIds.length > 0
     ? tracks.flatMap(t => t.clips).find(c => c.id === selectedClipIds[0])
     : null;
 
-  // Figma tabs: Video | Audio | Info | ! (effects properties)
+  const tc = new Timecode({ fps: projectSettings?.frameRate || 24 });
+
+  // Figma tabs: Video | Audio | Info | FX (effects properties)
   const tabs: Array<{ id: string; label: string }> = [
     { id: 'video', label: 'Video' },
     { id: 'audio', label: 'Audio' },
     { id: 'info', label: 'Info' },
-    { id: 'effects', label: '!' },
+    { id: 'effects', label: 'FX' },
   ];
 
   const clipName = clip?.name || 'No Clip';
-  const clipDuration = clip ? formatTC(clip.endTime - clip.startTime) : '00:00:00:00';
+  const clipDuration = clip ? tc.secondsToTC(clip.endTime - clip.startTime) : '00:00:00:00';
 
   return (
     <div className="inspector-panel">
@@ -474,7 +549,7 @@ export function InspectorPanel() {
         <span className="inspector-clip-tc">{clipDuration}</span>
       </div>
 
-      {/* Tabs: Video | Audio | Info | ! */}
+      {/* Tabs: Video | Audio | Info | FX */}
       <div className="panel-tabs">
         {tabs.map(t => (
           <button key={t.id}

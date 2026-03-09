@@ -21,6 +21,10 @@ export interface Capabilities {
   storageQuotaMB: number;
   renderMode: 'webgpu' | 'canvas2d' | 'software';
   breakpoint: 'mobile' | 'tablet' | 'desktop-compact' | 'desktop-full';
+  /** Features that are not available on this platform. */
+  degradedFeatures: string[];
+  /** Overall performance classification based on hardware. */
+  performanceTier: 'high' | 'medium' | 'low';
 }
 
 /**
@@ -118,6 +122,20 @@ class PlatformCapabilities {
       breakpoint = 'desktop-full';
     }
 
+    // Degraded features — list features that are NOT available
+    const degradedFeatures: string[] = [];
+    if (!hasWebGPU) degradedFeatures.push('webgpu');
+    if (!hasOffscreenCanvas) degradedFeatures.push('offscreenCanvas');
+    if (!hasWebCodecs) degradedFeatures.push('webCodecs');
+    if (typeof SharedArrayBuffer === 'undefined') degradedFeatures.push('sharedArrayBuffer');
+
+    // Performance tier
+    const performanceTier = this.computePerformanceTier(
+      hasWebGPU,
+      deviceMemoryGB,
+      hardwareConcurrency,
+    );
+
     this.caps = {
       hasWebGPU,
       hasOffscreenCanvas,
@@ -136,6 +154,8 @@ class PlatformCapabilities {
       storageQuotaMB,
       renderMode,
       breakpoint,
+      degradedFeatures,
+      performanceTier,
     };
 
     this.notify();
@@ -150,10 +170,23 @@ class PlatformCapabilities {
    */
   get(): Capabilities {
     if (!this.caps) {
+      const hasOffscreenCanvas = typeof OffscreenCanvas !== 'undefined';
+      const hasWebCodecs = typeof (globalThis as any).VideoDecoder !== 'undefined';
+      const deviceMemoryGB = (navigator as any)?.deviceMemory ?? 4;
+      const hardwareConcurrency = navigator?.hardwareConcurrency ?? 4;
+
+      // Compute degraded features for the synchronous default
+      const degradedFeatures: string[] = [];
+      // WebGPU defaults to false until async detect runs
+      degradedFeatures.push('webgpu');
+      if (!hasOffscreenCanvas) degradedFeatures.push('offscreenCanvas');
+      if (!hasWebCodecs) degradedFeatures.push('webCodecs');
+      if (typeof SharedArrayBuffer === 'undefined') degradedFeatures.push('sharedArrayBuffer');
+
       this.caps = {
         hasWebGPU: false,
-        hasOffscreenCanvas: typeof OffscreenCanvas !== 'undefined',
-        hasWebCodecs: typeof (globalThis as any).VideoDecoder !== 'undefined',
+        hasOffscreenCanvas,
+        hasWebCodecs,
         isElectron: /Electron/i.test(navigator?.userAgent ?? ''),
         isMobile: /Android|iPhone|iPod/i.test(navigator?.userAgent ?? ''),
         isTablet: /iPad/i.test(navigator?.userAgent ?? ''),
@@ -162,14 +195,16 @@ class PlatformCapabilities {
           ('ontouchstart' in window || navigator.maxTouchPoints > 0),
         hasPWA: false,
         maxTextureSize: 4096,
-        deviceMemoryGB: (navigator as any)?.deviceMemory ?? 4,
-        hardwareConcurrency: navigator?.hardwareConcurrency ?? 4,
+        deviceMemoryGB,
+        hardwareConcurrency,
         screenWidth: typeof screen !== 'undefined' ? screen.width : 1920,
         screenHeight: typeof screen !== 'undefined' ? screen.height : 1080,
         pixelRatio: typeof window !== 'undefined' ? window.devicePixelRatio ?? 1 : 1,
         storageQuotaMB: 0,
         renderMode: 'canvas2d',
         breakpoint: this.computeBreakpoint(),
+        degradedFeatures,
+        performanceTier: this.computePerformanceTier(false, deviceMemoryGB, hardwareConcurrency),
       };
       // Fire-and-forget async detect
       this.detect().catch(() => {});
@@ -216,6 +251,19 @@ class PlatformCapabilities {
       default:
         return false;
     }
+  }
+
+  /**
+   * Get the overall performance tier based on detected hardware.
+   * @returns `'high'`, `'medium'`, or `'low'`.
+   */
+  getPerformanceTier(): 'high' | 'medium' | 'low' {
+    const caps = this.get();
+    return this.computePerformanceTier(
+      caps.hasWebGPU,
+      caps.deviceMemoryGB,
+      caps.hardwareConcurrency,
+    );
   }
 
   // -- Storage ----------------------------------------------------------------
@@ -336,6 +384,19 @@ class PlatformCapabilities {
     if (w < 1024) return 'tablet';
     if (w < 1440) return 'desktop-compact';
     return 'desktop-full';
+  }
+
+  /**
+   * Classify the device into a performance tier.
+   */
+  private computePerformanceTier(
+    hasWebGPU: boolean,
+    deviceMemoryGB: number,
+    hardwareConcurrency: number,
+  ): 'high' | 'medium' | 'low' {
+    if (hasWebGPU && deviceMemoryGB >= 8 && hardwareConcurrency >= 8) return 'high';
+    if (deviceMemoryGB >= 4 && hardwareConcurrency >= 4) return 'medium';
+    return 'low';
   }
 }
 

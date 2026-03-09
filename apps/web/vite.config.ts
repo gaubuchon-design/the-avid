@@ -12,8 +12,8 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      '/api': { target: 'http://localhost:4000', changeOrigin: true },
-      '/socket.io': { target: 'http://localhost:4000', ws: true },
+      '/api': { target: process.env.VITE_API_URL || 'http://localhost:4000', changeOrigin: true },
+      '/socket.io': { target: process.env.VITE_API_URL || 'http://localhost:4000', ws: true },
     },
   },
   build: {

@@ -2,6 +2,9 @@
 //  THE AVID -- Plugin Registry & Marketplace
 // =============================================================================
 
+/** Supported plugin setting value type. */
+export type PluginSettingValue = string | number | boolean | string[] | number[];
+
 /** Supported plugin types. */
 export type PluginType = 'videoEffect' | 'audioEffect' | 'exportFormat' | 'aiTool' | 'panelExtension';
 
@@ -23,7 +26,7 @@ export interface PluginManifest {
 export interface InstalledPlugin extends PluginManifest {
   installedAt: number;
   enabled: boolean;
-  settings: Record<string, any>;
+  settings: Record<string, PluginSettingValue>;
 }
 
 /** A marketplace listing with community metadata. */
@@ -334,7 +337,7 @@ class PluginRegistry {
    * @param id       Plugin identifier.
    * @param settings Settings object to merge.
    */
-  updatePluginSettings(id: string, settings: Record<string, any>): void {
+  updatePluginSettings(id: string, settings: Record<string, PluginSettingValue>): void {
     const plugin = this.installed.get(id);
     if (plugin) {
       plugin.settings = { ...plugin.settings, ...settings };
@@ -352,14 +355,14 @@ class PluginRegistry {
    * @returns An object with `postMessage` and `destroy` methods.
    * @throws If the plugin is not installed.
    */
-  createSandbox(pluginId: string): { postMessage: (msg: any) => void; destroy: () => void } {
+  createSandbox(pluginId: string): { postMessage: (msg: unknown) => void; destroy: () => void } {
     const plugin = this.installed.get(pluginId);
     if (!plugin) throw new Error(`Plugin "${pluginId}" is not installed`);
 
     let destroyed = false;
 
     return {
-      postMessage: (msg: any) => {
+      postMessage: (msg: unknown) => {
         if (destroyed) return;
         console.log(`[PluginSandbox:${pluginId}] message:`, msg);
       },

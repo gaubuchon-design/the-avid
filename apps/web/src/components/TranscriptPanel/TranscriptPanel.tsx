@@ -221,8 +221,13 @@ export function TranscriptPanel() {
   // Simulated transcription
   const handleTranscribe = useCallback(async () => {
     setIsTranscribing(true);
-    await new Promise(r => setTimeout(r, 2000));
-    setIsTranscribing(false);
+    try {
+      await new Promise(r => setTimeout(r, 2000));
+    } catch (err) {
+      console.error('Transcription failed:', err);
+    } finally {
+      setIsTranscribing(false);
+    }
   }, []);
 
   const formatTC = (sec: number) => {
@@ -243,25 +248,27 @@ export function TranscriptPanel() {
       {/* Header */}
       <div className="transcript-header">
         <span className="transcript-title">Transcript</span>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+        <div className="transcript-header-actions">
           <button
-            className="tl-btn"
+            className={`tl-btn${showSpeakers ? '' : ' is-inactive'}`}
             title="Toggle Speakers"
+            aria-label="Toggle speaker labels"
+            aria-pressed={showSpeakers}
             onClick={() => setShowSpeakers(!showSpeakers)}
-            style={{ fontSize: 10, opacity: showSpeakers ? 1 : 0.4 }}
           >👤</button>
           <button
-            className="tl-btn"
+            className={`tl-btn${showTimecodes ? '' : ' is-inactive'}`}
             title="Toggle Timecodes"
+            aria-label="Toggle timecodes"
+            aria-pressed={showTimecodes}
             onClick={() => setShowTimecodes(!showTimecodes)}
-            style={{ fontSize: 10, opacity: showTimecodes ? 1 : 0.4 }}
           >⏱</button>
           <button
             className="tl-btn"
             title="Transcribe All Media"
+            aria-label="Transcribe all media"
             onClick={handleTranscribe}
             disabled={isTranscribing}
-            style={{ fontSize: 10 }}
           >{isTranscribing ? '⟳' : '✦'}</button>
         </div>
       </div>
@@ -271,6 +278,7 @@ export function TranscriptPanel() {
         <input
           type="text"
           placeholder="Search transcript…"
+          aria-label="Search transcript"
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
@@ -289,7 +297,7 @@ export function TranscriptPanel() {
       )}
 
       {/* Transcript body */}
-      <div className="transcript-body" ref={containerRef}>
+      <div className="transcript-body" ref={containerRef} role="region" aria-label="Transcript content">
         {isTranscribing ? (
           <div className="transcript-loading">
             <div className="transcript-loading-icon">✦</div>
@@ -300,7 +308,7 @@ export function TranscriptPanel() {
           </div>
         ) : filteredSegments.length === 0 ? (
           <div className="transcript-empty">
-            {search ? 'No matches found' : 'No transcript available. Click ✦ to transcribe.'}
+            {search ? 'No matches found' : 'No transcript available. Click the Transcribe button to generate.'}
           </div>
         ) : (
           filteredSegments.map(segment => (

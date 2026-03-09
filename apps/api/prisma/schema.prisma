@@ -876,3 +876,631 @@ model MarketplacePurchase {
   @@index([userId])
   @@index([itemId])
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEWS WORKFLOW
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum StoryStatus {
+  UNASSIGNED
+  IN_EDIT
+  READY
+  AIRED
+  KILLED
+}
+
+enum NRCSType {
+  INEWS
+  ENPS
+  OCTOPUS
+  OPENMEDIA
+}
+
+enum PlayoutServerType {
+  AIRSPEED
+  VIZ_ARK
+  ROSS_STRATUS
+  GRASS_VALLEY_K2
+  GENERIC_MXF_FTP
+}
+
+model NRCSConnection {
+  id          String   @id @default(uuid())
+  orgId       String
+  type        NRCSType
+  host        String
+  port        Int
+  username    String?
+  password    String?   // encrypted
+  isActive    Boolean   @default(true)
+  lastSyncAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  rundowns    Rundown[]
+
+  @@index([orgId])
+}
+
+model Rundown {
+  id              String   @id @default(uuid())
+  nrcsConnectionId String
+  nrcsConnection  NRCSConnection @relation(fields: [nrcsConnectionId], references: [id], onDelete: Cascade)
+  externalId      String   // NRCS-side rundown ID
+  name            String   // e.g., "6PM News 2026-03-08"
+  airDate         DateTime
+  showDuration    Float?   // total show duration seconds
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  stories         NewsStory[]
+
+  @@unique([nrcsConnectionId, externalId])
+  @@index([airDate])
+}
+
+model NewsStory {
+  id              String       @id @default(uuid())
+  rundownId       String
+  rundown         Rundown      @relation(fields: [rundownId], references: [id], onDelete: Cascade)
+  projectId       String?
+  externalId      String       // NRCS-side story ID
+  slugline        String       // e.g., "RUSSIA-SUMMIT"
+  scriptText      String?      // producer-written script
+  status          StoryStatus  @default(UNASSIGNED)
+  targetDuration  Float?       // seconds
+  actualDuration  Float?       // computed from timeline
+  sortOrder       Int          @default(0)
+  priority        Int          @default(0) // 0=normal, 1=urgent, 2=breaking
+  assignedEditorId String?
+  locaterTags     Json?        // [{text, timecode}]
+  supersData      Json?        // [{personName, title, location, graphicId}]
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([rundownId])
+  @@index([status])
+  @@index([assignedEditorId])
+}
+
+model PlayoutDestination {
+  id              String           @id @default(uuid())
+  orgId           String
+  name            String
+  type            PlayoutServerType
+  host            String
+  port            Int?
+  basePath        String?
+  filenamePattern String?          // e.g., "{slug}_{date}_{version}"
+  outputFormat    String           @default("MXF_DNXHD")
+  isActive        Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([orgId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SPORTS PRODUCTION
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum SportsEventType {
+  GOAL
+  TACKLE
+  DUNK
+  ASSIST
+  PENALTY
+  FOUL
+  HOME_RUN
+  TOUCHDOWN
+  REPLAY
+  TIMEOUT
+  SUBSTITUTION
+  YELLOW_CARD
+  RED_CARD
+  OTHER
+}
+
+enum SportType {
+  SOCCER
+  BASKETBALL
+  FOOTBALL
+  BASEBALL
+  HOCKEY
+  TENNIS
+  CRICKET
+  RUGBY
+  OTHER
+}
+
+model SportsProduction {
+  id              String     @id @default(uuid())
+  projectId       String     @unique
+  sport           SportType
+  competitionName String?
+  venue           String?
+  homeTeam        String?
+  awayTeam        String?
+  gameDate        DateTime?
+  broadcastNetwork String?
+  evsServerHost   String?
+  statsProvider   String?    // "SPORTRADAR" | "ESPN_STATS" | "OPTA"
+  statsApiKey     String?    // encrypted
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  highlights      SportsHighlight[]
+  growingFiles    GrowingFile[]
+  statsSnapshots  StatsSnapshot[]
+  packages        SportsPackage[]
+
+  @@index([projectId])
+}
+
+model SportsHighlight {
+  id              String           @id @default(uuid())
+  productionId    String
+  production      SportsProduction @relation(fields: [productionId], references: [id], onDelete: Cascade)
+  eventType       SportsEventType
+  gameClock       String?          // "78:23"
+  period          String?          // "2nd Half", "Q4"
+  description     String?
+  confidence      Float            @default(0.8)
+  timestamp       Float            // seconds into recording
+  mediaAssetId    String?
+  players         String[]
+  homeScore       Int?
+  awayScore       Int?
+  isUsed          Boolean          @default(false) // placed in package
+  createdAt       DateTime         @default(now())
+
+  @@index([productionId])
+  @@index([eventType])
+}
+
+model GrowingFile {
+  id              String           @id @default(uuid())
+  productionId    String
+  production      SportsProduction @relation(fields: [productionId], references: [id], onDelete: Cascade)
+  filePath        String
+  currentDuration Float            @default(0) // seconds
+  isGrowing       Boolean          @default(true)
+  format          String           @default("MXF") // GXF | MXF | MP4
+  cameraAngle     String?
+  lastFrameAt     DateTime?
+  mediaAssetId    String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([productionId])
+  @@index([isGrowing])
+}
+
+model StatsSnapshot {
+  id              String           @id @default(uuid())
+  productionId    String
+  production      SportsProduction @relation(fields: [productionId], references: [id], onDelete: Cascade)
+  gameClockMs     Int              // milliseconds
+  period          String?
+  homeScore       Int              @default(0)
+  awayScore       Int              @default(0)
+  events          Json             @default("[]") // [{type, player, time}]
+  rawData         Json             @default("{}") // full provider data
+  capturedAt      DateTime         @default(now())
+
+  @@index([productionId])
+  @@index([capturedAt])
+}
+
+enum SportsPackageType {
+  PRE_GAME
+  HALFTIME
+  POST_GAME
+  SOCIAL_CLIP
+  HIGHLIGHTS_REEL
+  PLAYER_FEATURE
+}
+
+model SportsPackage {
+  id              String              @id @default(uuid())
+  productionId    String
+  production      SportsProduction    @relation(fields: [productionId], references: [id], onDelete: Cascade)
+  type            SportsPackageType
+  name            String
+  targetDuration  Float?              // seconds
+  timelineId      String?
+  status          String              @default("BUILDING") // BUILDING | READY | EXPORTED | AIRED
+  highlightIds    String[]            // referenced SportsHighlight IDs
+  deliveredAt     DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([productionId])
+  @@index([type])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BRAND & MARKETING
+// ─────────────────────────────────────────────────────────────────────────────
+
+model BrandKit {
+  id                String   @id @default(uuid())
+  orgId             String
+  brandName         String
+  logoFiles         Json     @default("[]") // [{variant, format, s3Key}]
+  primaryColors     String[]
+  secondaryColors   String[]
+  fonts             Json     @default("{}") // {primary, secondary, display}
+  typography        Json     @default("{}") // {h1Size, bodySize, captionSize}
+  safeArea          Json     @default("{}") // {logoMinSize, logoPadding}
+  voiceTone         String?
+  approvedMusicIds  String[]
+  prohibitedElements String[]
+  isDefault         Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  campaigns         Campaign[]
+  templates         BrandTemplate[]
+  complianceReports ComplianceReport[]
+
+  @@index([orgId])
+}
+
+model BrandTemplate {
+  id              String   @id @default(uuid())
+  brandKitId      String
+  brandKit        BrandKit @relation(fields: [brandKitId], references: [id], onDelete: Cascade)
+  name            String
+  description     String?
+  thumbnailUrl    String?
+  elements        Json     @default("[]") // TemplateElement[]
+  lockedElementIds String[]
+  category        String?  // "intro", "endcard", "lower-third", "full"
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([brandKitId])
+}
+
+model Campaign {
+  id              String   @id @default(uuid())
+  orgId           String
+  brandKitId      String?
+  brandKit        BrandKit? @relation(fields: [brandKitId], references: [id])
+  name            String
+  brief           String?
+  objective       String?
+  targetAudience  String?
+  startDate       DateTime?
+  endDate         DateTime?
+  tokenBudget     Int      @default(0)
+  tokensUsed      Int      @default(0)
+  status          String   @default("DRAFT") // DRAFT | ACTIVE | COMPLETED | ARCHIVED
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  deliverables    CampaignDeliverable[]
+  markets         CampaignMarket[]
+  variants        ContentVariant[]
+
+  @@index([orgId])
+  @@index([status])
+}
+
+model CampaignDeliverable {
+  id              String   @id @default(uuid())
+  campaignId      String
+  campaign        Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  name            String   // "30s TV Spot", "15s Pre-Roll", etc.
+  type            String   // "TV_SPOT" | "PRE_ROLL" | "SOCIAL_STORY" | "BANNER_VIDEO"
+  targetDuration  Float?
+  aspectRatio     String?
+  sequenceId      String?
+  projectId       String?
+  assignedEditorId String?
+  status          String   @default("BRIEF") // BRIEF | IN_PRODUCTION | REVIEW | APPROVED | DELIVERED
+  approvalChain   Json     @default("[]") // [{userId, status, notes, date}]
+  deliveredAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([campaignId])
+  @@index([status])
+}
+
+model CampaignMarket {
+  id              String   @id @default(uuid())
+  campaignId      String
+  campaign        Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  name            String   // "US", "France", "Germany"
+  languageCode    String   // "en-US", "fr-FR"
+  localAssets     Json     @default("{}") // {endcard, music, voiceover}
+  createdAt       DateTime @default(now())
+
+  @@index([campaignId])
+}
+
+model ContentVariant {
+  id              String   @id @default(uuid())
+  campaignId      String?
+  campaign        Campaign? @relation(fields: [campaignId], references: [id])
+  masterProjectId String
+  variantName     String
+  languageCode    String?
+  changes         Json     @default("[]") // VariantChange[]
+  sequenceId      String?
+  status          String   @default("PENDING") // PENDING | GENERATING | READY | FAILED
+  generatedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([campaignId])
+  @@index([masterProjectId])
+}
+
+model ComplianceReport {
+  id              String   @id @default(uuid())
+  projectId       String
+  brandKitId      String?
+  brandKit        BrandKit? @relation(fields: [brandKitId], references: [id])
+  overallStatus   String   @default("UNCHECKED") // PASS | FAIL | WARNING | UNCHECKED
+  findings        Json     @default("[]") // ComplianceFinding[]
+  checkedAt       DateTime @default(now())
+  checkedById     String?
+
+  @@index([projectId])
+  @@index([brandKitId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DAM (Digital Asset Management) CONNECTIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum DAMProvider {
+  BYNDER
+  BRANDFOLDER
+  CANTO
+  AEM
+  CLOUDINARY
+}
+
+model DAMConnection {
+  id              String      @id @default(uuid())
+  orgId           String
+  provider        DAMProvider
+  name            String
+  apiEndpoint     String
+  apiKey          String?     // encrypted
+  accessToken     String?     // encrypted
+  refreshToken    String?
+  isActive        Boolean     @default(true)
+  lastSyncAt      DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([orgId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRO TOOLS INTEGRATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ProToolsSessionStatus {
+  DISCONNECTED
+  CONNECTING
+  CONNECTED
+  SYNCING
+  ERROR
+}
+
+model ProToolsSession {
+  id              String                @id @default(uuid())
+  projectId       String
+  mediaCentralId  String?               // MediaCentral project ID for co-presence
+  proToolsHost    String?
+  status          ProToolsSessionStatus @default(DISCONNECTED)
+  lastSyncAt      DateTime?
+  syncMode        String                @default("AAF") // AAF | LIVE | MEDIACENTRAL
+  connectedUserId String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  markerSyncs     MarkerSync[]
+
+  @@index([projectId])
+}
+
+model MarkerSync {
+  id              String          @id @default(uuid())
+  sessionId       String
+  session         ProToolsSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  avidMarkerId    String?
+  proToolsLocId   String?
+  timecode        Float
+  label           String?
+  color           String?
+  syncDirection   String          // "AVID_TO_PT" | "PT_TO_AVID" | "BIDIRECTIONAL"
+  syncedAt        DateTime        @default(now())
+
+  @@index([sessionId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEXIS STORAGE
+// ─────────────────────────────────────────────────────────────────────────────
+
+model NEXISWorkspace {
+  id              String   @id @default(uuid())
+  orgId           String
+  name            String
+  host            String
+  port            Int      @default(443)
+  workspaceId     String   // NEXIS-side workspace identifier
+  storageGroupId  String?
+  totalCapacityGB Float?
+  usedCapacityGB  Float?
+  isConnected     Boolean  @default(false)
+  lastHealthCheck DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  mediaPaths      NEXISMediaPath[]
+
+  @@unique([orgId, workspaceId])
+  @@index([orgId])
+}
+
+model NEXISMediaPath {
+  id              String         @id @default(uuid())
+  workspaceId     String
+  workspace       NEXISWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  mediaAssetId    String
+  nexisPath       String         // full NEXIS path
+  ownerId         String?        // editor who owns this media
+  isLocked        Boolean        @default(false)
+  cacheStatus     String         @default("UNCACHED") // UNCACHED | PARTIAL | CACHED
+  cacheSizeMB     Float?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@unique([workspaceId, mediaAssetId])
+  @@index([workspaceId])
+  @@index([mediaAssetId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CREATOR / SERIES MANAGEMENT
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Series {
+  id              String   @id @default(uuid())
+  orgId           String?
+  userId          String
+  name            String
+  description     String?
+  thumbnailUrl    String?
+  brandColors     String[]
+  brandFonts      Json     @default("{}") // {primary, secondary}
+  introClipId     String?
+  outroClipId     String?
+  logoS3Key       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  episodes        Episode[]
+
+  @@index([userId])
+}
+
+model Episode {
+  id              String   @id @default(uuid())
+  seriesId        String
+  series          Series   @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  projectId       String?
+  episodeNumber   Int
+  title           String
+  description     String?
+  status          String   @default("DRAFT") // DRAFT | IN_PROGRESS | PUBLISHED | SCHEDULED
+  publishedAt     DateTime?
+  scheduledAt     DateTime?
+  views           Int      @default(0)
+  watchTimeMinutes Float   @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([seriesId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PERFORMANCE ANALYTICS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model VideoPerformance {
+  id              String   @id @default(uuid())
+  projectId       String
+  publishJobId    String?
+  platform        PublishPlatform
+  externalVideoId String?
+  views           Int      @default(0)
+  completionRate  Float?   // 0-1
+  clickThroughRate Float?  // 0-1
+  engagementRate  Float?   // 0-1
+  avgWatchSeconds Float?
+  likes           Int      @default(0)
+  comments        Int      @default(0)
+  shares          Int      @default(0)
+  impressions     Int      @default(0)
+  measuredAt      DateTime @default(now())
+  periodDays      Int      @default(7) // 7, 14, 28 day snapshot
+
+  @@index([projectId])
+  @@index([platform])
+  @@index([measuredAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AGENT MEMORY & PLAYBOOKS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AgentMemory {
+  id              String   @id @default(uuid())
+  userId          String
+  key             String   // preference key
+  value           Json     // preference value
+  source          String   @default("AUTO") // AUTO | USER
+  confidence      Float    @default(0.8)
+  lastUsedAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId, key])
+  @@index([userId])
+}
+
+enum PlaybookVertical {
+  GENERAL
+  NEWS
+  SPORTS
+  CREATOR
+  MARKETING
+}
+
+model AgentPlaybook {
+  id              String            @id @default(uuid())
+  authorId        String
+  name            String
+  description     String?
+  vertical        PlaybookVertical  @default(GENERAL)
+  steps           Json              @default("[]") // AgentStep[]
+  variables       Json              @default("[]") // PlaybookVariable[]
+  priceTokens     Int               @default(0)
+  rating          Float             @default(0)
+  usageCount      Int               @default(0)
+  isPublished     Boolean           @default(false)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([vertical])
+  @@index([isPublished])
+  @@index([authorId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ACCESSIBILITY
+// ─────────────────────────────────────────────────────────────────────────────
+
+model CaptionValidation {
+  id              String   @id @default(uuid())
+  projectId       String
+  timelineId      String
+  standard        String   // "FCC" | "NETFLIX" | "BBC_EBU" | "WCAG"
+  status          String   @default("UNCHECKED") // PASS | FAIL | WARNING
+  violations      Json     @default("[]") // [{cueIndex, rule, message, severity}]
+  autoFixApplied  Boolean  @default(false)
+  validatedAt     DateTime @default(now())
+
+  @@index([projectId])
+  @@index([timelineId])
+}

@@ -152,3 +152,70 @@ export function getHWAccelFlags(gpu: GPUInfo): string[] {
       return [];
   }
 }
+
+/**
+ * Return FFmpeg CLI args for hardware-accelerated encoding of a given codec.
+ * Falls back to software encoders when no supported GPU is detected.
+ */
+export function getHWAccelFFmpegArgs(
+  gpu: GPUInfo,
+  codec: 'h264' | 'hevc' | 'prores',
+): string[] {
+  const encoderMap: Record<
+    GPUInfo['vendor'],
+    Partial<Record<'h264' | 'hevc' | 'prores', string[]>>
+  > = {
+    nvidia: {
+      h264: ['-hwaccel', 'cuda', '-c:v', 'h264_nvenc'],
+      hevc: ['-hwaccel', 'cuda', '-c:v', 'hevc_nvenc'],
+      // NVIDIA does not support ProRes encoding; fall through to software.
+    },
+    apple: {
+      h264: ['-hwaccel', 'videotoolbox', '-c:v', 'h264_videotoolbox'],
+      hevc: ['-hwaccel', 'videotoolbox', '-c:v', 'hevc_videotoolbox'],
+      prores: ['-hwaccel', 'videotoolbox', '-c:v', 'prores_videotoolbox'],
+    },
+    intel: {
+      h264: ['-hwaccel', 'qsv', '-c:v', 'h264_qsv'],
+      hevc: ['-hwaccel', 'qsv', '-c:v', 'hevc_qsv'],
+    },
+    amd: {
+      h264: ['-c:v', 'h264_amf'],
+      hevc: ['-c:v', 'hevc_amf'],
+    },
+    unknown: {},
+  };
+
+  const softwareFallback: Record<'h264' | 'hevc' | 'prores', string[]> = {
+    h264: ['-c:v', 'libx264'],
+    hevc: ['-c:v', 'libx265'],
+    prores: ['-c:v', 'prores_ks'],
+  };
+
+  if (!gpu.hasHardwareEncode) {
+    return softwareFallback[codec];
+  }
+
+  return encoderMap[gpu.vendor]?.[codec] ?? softwareFallback[codec];
+}
+
+/**
+ * Return FFmpeg CLI args for hardware-accelerated decoding.
+ * Falls back to an empty array (software decode) when no supported GPU is detected.
+ */
+export function getHWAccelDecodeArgs(gpu: GPUInfo): string[] {
+  if (!gpu.hasHardwareDecode) {
+    return [];
+  }
+
+  switch (gpu.vendor) {
+    case 'nvidia':
+      return ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'];
+    case 'apple':
+      return ['-hwaccel', 'videotoolbox'];
+    case 'intel':
+      return ['-hwaccel', 'qsv'];
+    default:
+      return [];
+  }
+}

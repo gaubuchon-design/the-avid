@@ -2,12 +2,7 @@ import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useEditorStore } from '../../store/editor.store';
 import { editEngine } from '../../engine/EditEngine';
-
-function formatTC(sec: number): string {
-  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60),
-        s = Math.floor(sec % 60), f = Math.floor((sec % 1) * 24);
-  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}:${String(f).padStart(2,'0')}`;
-}
+import { Timecode } from '../../lib/timecode';
 
 export function Toolbar() {
   const navigate = useNavigate();
@@ -16,8 +11,10 @@ export function Toolbar() {
     toggleExportPanel, toolbarTab, setToolbarTab, projectName,
     selectedClipIds, splitClip, showAIPanel, toggleAIPanel, tokenBalance,
     showTranscriptPanel, toggleTranscriptPanel,
-    tracks,
+    tracks, projectSettings,
   } = useEditorStore();
+
+  const tc = new Timecode({ fps: projectSettings?.frameRate || 24 });
 
   // Get selected clip info for sub-bar
   const selectedClip = selectedClipIds.length > 0
@@ -27,19 +24,17 @@ export function Toolbar() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (['INPUT','TEXTAREA'].includes((e.target as Element)?.tagName)) return;
-      switch (e.key) {
-        case ' ': e.preventDefault(); togglePlay(); break;
-        case 'z': case 'Z':
-          if (e.metaKey || e.ctrlKey) { e.preventDefault(); e.shiftKey ? editEngine.redo() : editEngine.undo(); }
-          break;
+      if ((e.key === 'z' || e.key === 'Z') && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        e.shiftKey ? editEngine.redo() : editEngine.undo();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [togglePlay]);
+  }, []);
 
   return (
-    <>
+    <div className="toolbar-wrapper">
       {/* Main toolbar row */}
       <div className="toolbar">
         {/* Mac-style window dots */}
@@ -50,12 +45,12 @@ export function Toolbar() {
         </div>
 
         {/* Home + Folder icons */}
-        <button className="toolbar-icon-btn" onClick={() => navigate('/')} title="Home">
+        <button className="toolbar-icon-btn" onClick={() => navigate('/')} title="Home" aria-label="Home">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9 22 9 12 15 12 15 22" />
           </svg>
         </button>
-        <button className="toolbar-icon-btn" title="Open Project">
+        <button className="toolbar-icon-btn" title="Open Project" aria-label="Open Project">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
           </svg>
@@ -97,6 +92,7 @@ export function Toolbar() {
           className={`toolbar-icon-btn toolbar-ai-btn${showAIPanel ? ' active' : ''}`}
           onClick={toggleAIPanel}
           title="AI Assistant"
+          aria-label="AI Assistant"
         >
           <span>✦</span>
           <span className="toolbar-ai-label">AI</span>
@@ -108,6 +104,7 @@ export function Toolbar() {
           className={`toolbar-icon-btn${showTranscriptPanel ? ' active' : ''}`}
           onClick={toggleTranscriptPanel}
           title={showTranscriptPanel ? 'Hide Transcript' : 'Show Transcript'}
+          aria-label={showTranscriptPanel ? 'Hide Transcript' : 'Show Transcript'}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
@@ -116,11 +113,26 @@ export function Toolbar() {
           </svg>
         </button>
 
+        {/* Export */}
+        <button
+          className="toolbar-icon-btn"
+          onClick={toggleExportPanel}
+          title="Export"
+          aria-label="Export"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+        </button>
+
         {/* Inspector toggle — purple when active */}
         <button
           className={`toolbar-inspector-toggle${showInspector ? ' active' : ''}`}
           onClick={toggleInspector}
           title={showInspector ? 'Hide Inspector' : 'Show Inspector'}
+          aria-label={showInspector ? 'Hide Inspector' : 'Show Inspector'}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <rect x="2" y="3" width="20" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
@@ -129,7 +141,7 @@ export function Toolbar() {
         </button>
 
         {/* Cursor/pointer icon */}
-        <button className="toolbar-icon-btn" title="Select">
+        <button className="toolbar-icon-btn" title="Select" aria-label="Select">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M4 4l7.07 17 2.51-7.39L21 11.07z" />
           </svg>
@@ -138,19 +150,19 @@ export function Toolbar() {
 
       {/* Sub-bar: Timecode | Sequence Name ✦ | Clip name + TC */}
       <div className="toolbar-sub-bar">
-        <div className="toolbar-sub-timecode">{formatTC(playheadTime)}</div>
+        <div className="toolbar-sub-timecode">{tc.secondsToTC(playheadTime)}</div>
         <div className="toolbar-sub-spacer" />
-        <div className="toolbar-sub-sequence">Sequence Name</div>
+        <div className="toolbar-sub-sequence">{projectName ? `${projectName} – edit` : 'Untitled Sequence'}</div>
         <span className="toolbar-sub-diamond">✦</span>
         {selectedClip ? (
           <>
             <span className="toolbar-sub-clip-name">{selectedClip.name}</span>
-            <span className="toolbar-sub-clip-tc">{formatTC(selectedClip.endTime - selectedClip.startTime)}</span>
+            <span className="toolbar-sub-clip-tc">{tc.secondsToTC(selectedClip.endTime - selectedClip.startTime)}</span>
           </>
         ) : (
           <span className="toolbar-sub-clip-name" style={{ opacity: 0.4 }}>No clip selected</span>
         )}
       </div>
-    </>
+    </div>
   );
 }

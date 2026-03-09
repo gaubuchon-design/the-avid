@@ -6,12 +6,18 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "build:mac": "electron-builder --mac",
-    "build:win": "electron-builder --win",
-    "build:all": "electron-builder --mac --win",
+    "preview": "electron-vite preview",
+    "pack": "electron-vite build && electron-builder --dir",
+    "dist": "electron-vite build && electron-builder",
+    "dist:mac": "electron-vite build && electron-builder --mac",
+    "dist:win": "electron-vite build && electron-builder --win",
+    "dist:linux": "electron-vite build && electron-builder --linux",
+    "postinstall": "electron-builder install-app-deps",
     "lint": "eslint src --ext .ts,.tsx",
     "type-check": "tsc --noEmit",
-    "clean": "rm -rf dist out"
+    "clean": "rm -rf dist out",
+    "download-ffmpeg": "node scripts/download-ffmpeg.js",
+    "generate-icons": "node scripts/generate-icons.js"
   },
   "dependencies": {
     "@mcua/core": "*",
@@ -21,12 +27,17 @@
     "react-router-dom": "^6.23.0",
     "zustand": "^4.5.0",
     "immer": "^10.1.0",
-    "electron-updater": "^6.2.0"
+    "electron-updater": "^6.2.0",
+    "macadam": "^2.0.18",
+    "grandiose": "^0.0.4",
+    "@eyevinn/srt": "^0.8.3",
+    "serialport": "^12.0.0"
   },
   "devDependencies": {
     "electron": "^31.0.0",
     "electron-builder": "^24.13.0",
     "electron-vite": "^2.3.0",
+    "@electron/notarize": "^2.3.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
@@ -35,33 +46,119 @@
   "build": {
     "appId": "com.theavid.app",
     "productName": "The Avid",
-    "copyright": "Copyright © 2026 The Avid",
+    "copyright": "Copyright © 2026 The Avid, Inc.",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "directories": {
-      "output": "out"
+      "output": "out",
+      "buildResources": "resources"
     },
-    "files": ["dist/**/*", "resources/**/*"],
+    "files": [
+      "dist/**",
+      "resources/**",
+      "!resources/bin/README.md"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/bin/${os}",
+        "to": "bin",
+        "filter": ["**/*"]
+      }
+    ],
+    "asarUnpack": [
+      "resources/bin/**",
+      "node_modules/macadam/**",
+      "node_modules/grandiose/**",
+      "node_modules/@eyevinn/srt/**",
+      "node_modules/serialport/**",
+      "node_modules/@serialport/**"
+    ],
     "mac": {
       "category": "public.app-category.video",
       "icon": "resources/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "resources/entitlements.mac.plist",
+      "entitlementsInherit": "resources/entitlements.mac.inherit.plist",
       "target": [
         { "target": "dmg", "arch": ["x64", "arm64"] },
         { "target": "zip", "arch": ["x64", "arm64"] }
       ],
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "resources/entitlements.mac.plist",
-      "entitlementsInherit": "resources/entitlements.mac.plist"
+      "darkModeSupport": true,
+      "minimumSystemVersion": "12.0"
+    },
+    "dmg": {
+      "background": "resources/dmg-background.png",
+      "icon": "resources/icon.icns",
+      "iconSize": 128,
+      "contents": [
+        { "x": 380, "y": 170, "type": "link", "path": "/Applications" },
+        { "x": 130, "y": 170, "type": "file" }
+      ],
+      "window": {
+        "width": 540,
+        "height": 380
+      }
     },
     "win": {
       "icon": "resources/icon.ico",
       "target": [
         { "target": "nsis", "arch": ["x64"] },
         { "target": "portable", "arch": ["x64"] }
-      ]
+      ],
+      "publisherName": "The Avid, Inc."
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    }
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "resources/icon.ico",
+      "uninstallerIcon": "resources/icon.ico",
+      "installerHeaderIcon": "resources/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "The Avid",
+      "include": "resources/nsis/installer.nsh",
+      "deleteAppDataOnUninstall": false,
+      "license": "resources/license.txt"
+    },
+    "linux": {
+      "icon": "resources/icons",
+      "category": "AudioVideo",
+      "target": [
+        { "target": "AppImage", "arch": ["x64"] },
+        { "target": "deb", "arch": ["x64"] }
+      ],
+      "mimeTypes": ["video/mp4", "video/quicktime", "video/x-msvideo", "audio/mpeg", "audio/wav"]
+    },
+    "fileAssociations": [
+      {
+        "ext": "avidproj",
+        "name": "Avid Project",
+        "description": "The Avid Project File",
+        "mimeType": "application/x-avidproj",
+        "role": "Editor"
+      },
+      {
+        "ext": "aaf",
+        "name": "Advanced Authoring Format",
+        "description": "AAF Media File",
+        "mimeType": "application/x-aaf"
+      },
+      {
+        "ext": "edl",
+        "name": "Edit Decision List",
+        "description": "EDL File",
+        "mimeType": "text/x-edl"
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "the-avid",
+        "repo": "the-avid",
+        "releaseType": "release"
+      }
+    ],
+    "afterSign": "scripts/notarize.js"
   }
 }

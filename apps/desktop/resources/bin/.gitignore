@@ -1,0 +1,7 @@
+# Ignore downloaded binaries (large files)
+mac/ffmpeg
+mac/ffprobe
+win/ffmpeg.exe
+win/ffprobe.exe
+linux/ffmpeg
+linux/ffprobe
