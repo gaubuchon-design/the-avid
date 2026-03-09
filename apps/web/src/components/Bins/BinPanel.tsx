@@ -71,9 +71,26 @@ function AssetCard({ asset }: { asset: MediaAsset }) {
   );
 }
 
-/** Figma-style column list view with Color | Name | Date | Duration */
+function formatResolution(w?: number, h?: number): string {
+  if (!w || !h) return '--';
+  if (w === 3840 && h === 2160) return '4K UHD';
+  if (w === 1920 && h === 1080) return 'HD 1080';
+  if (w === 1280 && h === 720) return 'HD 720';
+  if (w === 4096 && h === 2160) return '4K DCI';
+  return `${w}x${h}`;
+}
+
+function formatFileSize(bytes?: number): string {
+  if (!bytes) return '--';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+}
+
+/** Resolve-style column list view with metadata columns */
 function AssetListView({ assets }: { assets: MediaAsset[] }) {
-  const { setSourceAsset, sourceAsset } = useEditorStore();
+  const { setSourceAsset, sourceAsset, ingestProgress } = useEditorStore();
 
   return (
     <div className="bin-list-view">
@@ -81,28 +98,53 @@ function AssetListView({ assets }: { assets: MediaAsset[] }) {
       <div className="bin-list-header">
         <span className="bin-col-color"></span>
         <span className="bin-col-name">Name</span>
-        <span className="bin-col-date">Creation Date</span>
         <span className="bin-col-duration">Duration</span>
+        <span className="bin-col-fps">FPS</span>
+        <span className="bin-col-res">Resolution</span>
+        <span className="bin-col-codec">Codec</span>
+        <span className="bin-col-cs">Color</span>
+        <span className="bin-col-size">Size</span>
       </div>
       {/* Rows */}
-      {assets.map(asset => (
-        <div
-          key={asset.id}
-          className={`bin-list-row${sourceAsset?.id === asset.id ? ' selected' : ''}`}
-          onClick={() => setSourceAsset(asset)}
-          onDoubleClick={() => setSourceAsset(asset)}
-        >
-          <span className="bin-col-color">
-            <span className="bin-list-color-dot" style={{
-              background: asset.type === 'VIDEO' ? 'var(--track-video)' :
-                asset.type === 'AUDIO' ? 'var(--track-audio)' : 'var(--track-effect)',
-            }} />
-          </span>
-          <span className="bin-col-name truncate" title={asset.name}>{asset.name}</span>
-          <span className="bin-col-date">{formatDate()}</span>
-          <span className="bin-col-duration">{formatDuration(asset.duration)}</span>
-        </div>
-      ))}
+      {assets.map(asset => {
+        const progress = ingestProgress[asset.id];
+        const isIngesting = progress !== undefined;
+        return (
+          <div
+            key={asset.id}
+            className={`bin-list-row${sourceAsset?.id === asset.id ? ' selected' : ''}${isIngesting ? ' ingesting' : ''}`}
+            onClick={() => setSourceAsset(asset)}
+            onDoubleClick={() => setSourceAsset(asset)}
+            style={{ position: 'relative' }}
+          >
+            {isIngesting && (
+              <div style={{
+                position: 'absolute', left: 0, bottom: 0, height: 2,
+                width: `${(progress * 100).toFixed(0)}%`,
+                background: 'var(--brand)', borderRadius: 1, transition: 'width 0.2s',
+              }} />
+            )}
+            <span className="bin-col-color">
+              <span className="bin-list-color-dot" style={{
+                background: asset.type === 'VIDEO' ? 'var(--track-video)' :
+                  asset.type === 'AUDIO' ? 'var(--track-audio)' :
+                  asset.type === 'IMAGE' ? 'var(--track-effect)' :
+                  asset.type === 'GRAPHIC' ? 'var(--track-gfx)' : 'var(--text-muted)',
+              }} />
+            </span>
+            <span className="bin-col-name truncate" title={asset.name}>
+              {asset.hasAlpha && <span title="Has alpha channel" style={{ color: 'var(--warning)', marginRight: 3 }}>A</span>}
+              {asset.name}
+            </span>
+            <span className="bin-col-duration">{formatDuration(asset.duration)}</span>
+            <span className="bin-col-fps">{asset.fps ? asset.fps.toFixed(asset.fps % 1 ? 3 : 0) : '--'}</span>
+            <span className="bin-col-res">{formatResolution(asset.width, asset.height)}</span>
+            <span className="bin-col-codec" title={asset.codec}>{asset.codec ?? '--'}</span>
+            <span className="bin-col-cs" title={asset.colorSpace}>{asset.colorSpace ?? '--'}</span>
+            <span className="bin-col-size">{formatFileSize(asset.fileSize)}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -232,22 +274,66 @@ function SmartBinItem({ smartBin }: { smartBin: SmartBin }) {
 /* ─── Main BinPanel ───────────────────────────────────────────────────── */
 
 export function BinPanel() {
-  const { bins, activeBinAssets, toolbarTab, addBin, selectedBinId, smartBins, importMediaFiles } = useEditorStore();
+  const { bins, activeBinAssets, toolbarTab, addBin, selectedBinId, smartBins, importMediaFiles, ingestProgress } = useEditorStore();
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [tab, setTab] = useState<'bins' | 'smart' | 'search'>('bins');
   const [showNewBinInput, setShowNewBinInput] = useState(false);
   const [newBinName, setNewBinName] = useState('');
+  const [isDragOver, setIsDragOver] = useState(false);
 
   const isEffectsMode = toolbarTab === 'effects';
+  const ingestCount = Object.keys(ingestProgress).length;
 
   const filtered = activeBinAssets.filter(a =>
     !search || a.name.toLowerCase().includes(search.toLowerCase()) ||
     a.tags.some(t => t.includes(search.toLowerCase()))
   );
 
+  // Drag-drop handlers for native file import
+  const handleDragOver = (e: React.DragEvent) => {
+    if (isEffectsMode) return;
+    if (e.dataTransfer.types.includes('Files')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      setIsDragOver(true);
+    }
+  };
+  const handleDragLeave = (e: React.DragEvent) => {
+    // Only if leaving the panel entirely
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsDragOver(false);
+    }
+  };
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    if (e.dataTransfer.files?.length) {
+      importMediaFiles(e.dataTransfer.files, selectedBinId ?? undefined);
+    }
+  };
+
   return (
-    <div className="bin-panel">
+    <div
+      className="bin-panel"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* Drop zone overlay */}
+      {isDragOver && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 100,
+          background: 'rgba(109,76,250,0.15)', border: '2px dashed var(--brand)',
+          borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          pointerEvents: 'none',
+        }}>
+          <div style={{ color: 'var(--brand-bright)', fontSize: 13, fontWeight: 600, textAlign: 'center' }}>
+            Drop media files to import<br />
+            <span style={{ fontSize: 11, opacity: 0.7 }}>Video, Audio, Images, Graphics</span>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="panel-header">
         <span className="panel-title">{isEffectsMode ? 'Effects' : 'Media'}</span>
@@ -260,7 +346,7 @@ export function BinPanel() {
                   const input = document.createElement('input');
                   input.type = 'file';
                   input.multiple = true;
-                  input.accept = 'video/*,audio/*,image/*';
+                  input.accept = 'video/*,audio/*,image/*,.svg,.exr,.dpx,.tga,.psd,.mxf,.avi,.mkv';
                   input.onchange = () => {
                     if (input.files?.length) {
                       importMediaFiles(input.files, selectedBinId ?? undefined);
@@ -394,7 +480,13 @@ export function BinPanel() {
         ) : (
           <>
             <span>{filtered.length} items</span>
-            <span style={{ marginLeft: 'auto' }}>{activeBinAssets.filter(a => a.status === 'PROCESSING').length > 0 ? '⟳ Processing…' : '✓ Ready'}</span>
+            <span style={{ marginLeft: 'auto' }}>
+              {ingestCount > 0
+                ? `⟳ Ingesting ${ingestCount} file${ingestCount > 1 ? 's' : ''}…`
+                : activeBinAssets.filter(a => a.status === 'PROCESSING').length > 0
+                  ? '⟳ Processing…'
+                  : '✓ Ready'}
+            </span>
           </>
         )}
       </div>

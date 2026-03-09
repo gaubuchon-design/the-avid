@@ -26,7 +26,11 @@ function TrackLane({
       className="track-lane"
       style={{ height: 'var(--track-h)', width: totalWidth }}
       data-track-id={track.id}
-      onClick={() => clearSelection()}
+      onClick={(e) => {
+        // Only clear selection when clicking the lane itself, not a child clip
+        if ((e.target as HTMLElement).closest('.clip')) return;
+        clearSelection();
+      }}
     >
       {track.clips.map((clip) => (
         <ClipView

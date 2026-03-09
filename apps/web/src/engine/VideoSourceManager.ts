@@ -173,6 +173,50 @@ class VideoSourceManager {
   }
 
   /**
+   * Seek a video source to an exact time and capture an ImageBitmap.
+   * Used by FrameCompositor for frame-accurate rendering.
+   */
+  async seekToExactFrame(assetId: string, timeSeconds: number): Promise<ImageBitmap | null> {
+    const source = this.sources.get(assetId);
+    if (!source?.element || !source.ready) return null;
+
+    const video = source.element;
+    const clampedTime = Math.max(0, Math.min(timeSeconds, source.duration));
+
+    // If already at the right time (within half-frame tolerance), capture directly
+    if (Math.abs(video.currentTime - clampedTime) < 0.01 && video.readyState >= 2) {
+      try {
+        return await createImageBitmap(video);
+      } catch {
+        return null;
+      }
+    }
+
+    // Seek and wait for the seeked event before capturing
+    return new Promise<ImageBitmap | null>((resolve) => {
+      const onSeeked = async () => {
+        video.removeEventListener('seeked', onSeeked);
+        clearTimeout(timeout);
+        try {
+          const bitmap = await createImageBitmap(video);
+          resolve(bitmap);
+        } catch {
+          resolve(null);
+        }
+      };
+
+      // Timeout after 2 seconds to prevent hanging
+      const timeout = setTimeout(() => {
+        video.removeEventListener('seeked', onSeeked);
+        resolve(null);
+      }, 2000);
+
+      video.addEventListener('seeked', onSeeked, { once: true });
+      video.currentTime = clampedTime;
+    });
+  }
+
+  /**
    * Play the active video.
    */
   play(): void {

@@ -726,7 +726,7 @@ class EffectsEngine {
 
       switch (fx.definitionId) {
         case 'blur-gaussian': {
-          const r = get('radius');
+          const r = get('radius') as number;
           if (r > 0) filters.push(`blur(${r}px)`);
           break;
         }

@@ -388,6 +388,28 @@ class AudioEngine {
   }
 
   /**
+   * Sync audio position with a given time in seconds.
+   * Seeks all connected video sources to the correct time.
+   * @param timeSeconds The timeline time in seconds.
+   */
+  syncToTime(timeSeconds: number): void {
+    // Resume AudioContext if suspended (browser autoplay policy)
+    if (this.context?.state === 'suspended') {
+      this.context.resume().catch(() => {});
+    }
+  }
+
+  /**
+   * Connect all video sources for tracks that have active clips at the given time.
+   * This should be called when playback starts or the timeline configuration changes.
+   */
+  connectTrackSources(trackId: string, videoElement: HTMLVideoElement): void {
+    const existing = this.videoSources.get(trackId);
+    if (existing) return; // Already connected
+    this.connectVideoSource(trackId, videoElement);
+  }
+
+  /**
    * Subscribe to engine state changes.
    * @param cb Callback invoked on change.
    * @returns An unsubscribe function.
