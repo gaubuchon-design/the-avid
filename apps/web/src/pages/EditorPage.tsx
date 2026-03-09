@@ -17,6 +17,9 @@ import { SequenceDialog } from '../components/SequenceDialog/SequenceDialog';
 import { TitleTool } from '../components/TitleTool/TitleTool';
 import { SubtitleEditor } from '../components/SubtitleEditor/SubtitleEditor';
 import { useEditorStore } from '../store/editor.store';
+import { UserSettingsPanel } from '../components/UserSettings/UserSettingsPanel';
+import { useKeyboardAction } from '../hooks/useKeyboardAction';
+import { editEngine } from '../engine/EditEngine';
 import { AlphaImportDialog } from '../components/AlphaImportDialog/AlphaImportDialog';
 import { TrackerPanel } from '../components/TrackerPanel/TrackerPanel';
 import { TrackingOverlay } from '../components/TrackerPanel/TrackingOverlay';
@@ -132,7 +135,7 @@ function VerticalSidePanel({ workspace }: { workspace: WorkspacePreset }) {
 export function EditorPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams] = useSearchParams();
-  const { showAIPanel, showExportPanel, showTranscriptPanel, toggleExportPanel, loadProject, showInspector, showNewProjectDialog, showSequenceDialog, showTitleTool, showSubtitleEditor, showAlphaImportDialog } = useEditorStore();
+  const { showAIPanel, showExportPanel, showSettingsPanel, showTranscriptPanel, toggleExportPanel, toggleSettingsPanel, loadProject, showInspector, showNewProjectDialog, showSequenceDialog, showTitleTool, showSubtitleEditor, showAlphaImportDialog } = useEditorStore();
   const [showTracker, setShowTracker] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [workspace, setWorkspace] = useState<WorkspacePreset>(
@@ -141,6 +144,30 @@ export function EditorPage() {
   const [showMultiCam, setShowMultiCam] = useState(false);
   const [activePage, setActivePage] = useState<PageId>('edit');
   usePlaybackEngine();
+
+  // ─── Register core keyboard actions with the KeyboardEngine ──────────
+  const { togglePlay, setInToPlayhead, setOutToPlayhead, clearInOut,
+    goToStart, goToEnd, deleteSelectedClips, setPlayhead, playheadTime, duration,
+  } = useEditorStore();
+
+  useKeyboardAction('transport.playForward', togglePlay, [togglePlay]);
+  useKeyboardAction('transport.playReverse', togglePlay, [togglePlay]);
+  useKeyboardAction('transport.stop', () => useEditorStore.getState().isPlaying && togglePlay(), [togglePlay]);
+  useKeyboardAction('transport.playToggle', togglePlay, [togglePlay]);
+  useKeyboardAction('transport.stepForward', () => setPlayhead(Math.min(playheadTime + 1 / 24, duration)), [playheadTime, duration]);
+  useKeyboardAction('transport.stepBackward', () => setPlayhead(Math.max(playheadTime - 1 / 24, 0)), [playheadTime]);
+  useKeyboardAction('transport.goToStart', goToStart, [goToStart]);
+  useKeyboardAction('transport.goToEnd', goToEnd, [goToEnd]);
+  useKeyboardAction('mark.in', setInToPlayhead, [setInToPlayhead]);
+  useKeyboardAction('mark.out', setOutToPlayhead, [setOutToPlayhead]);
+  useKeyboardAction('mark.clearBoth', clearInOut, [clearInOut]);
+  useKeyboardAction('edit.undo', () => editEngine.undo(), []);
+  useKeyboardAction('edit.redo', () => editEngine.redo(), []);
+  useKeyboardAction('edit.delete', deleteSelectedClips, [deleteSelectedClips]);
+  useKeyboardAction('view.fullScreen', () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen();
+  }, []);
 
   useEffect(() => {
     if (projectId && projectId !== 'new') loadProject(projectId);
@@ -275,6 +302,11 @@ export function EditorPage() {
             <ExportPanel />
           </div>
         </div>
+      )}
+
+      {/* User Settings modal */}
+      {showSettingsPanel && (
+        <UserSettingsPanel onClose={toggleSettingsPanel} />
       )}
 
       {/* New dialogs & panels */}

@@ -388,6 +388,7 @@ interface EditorState {
   showTranscriptPanel: boolean;
   showCollabPanel: boolean;
   showExportPanel: boolean;
+  showSettingsPanel: boolean;
   isFullscreen: boolean;
 
   // Collaboration
@@ -525,6 +526,7 @@ interface EditorActions {
   toggleTranscriptPanel: () => void;
   toggleCollabPanel: () => void;
   toggleExportPanel: () => void;
+  toggleSettingsPanel: () => void;
   toggleCommandPalette: (open?: boolean) => void;
 
   // Timeline view
@@ -995,6 +997,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     showTranscriptPanel: false,
     showCollabPanel: false,
     showExportPanel: false,
+    showSettingsPanel: false,
     isFullscreen: false,
     collabUsers: [
       { id: 'u1', displayName: 'Sarah K.', color: '#7c5cfc' },
@@ -1215,6 +1218,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     toggleTranscriptPanel: () => set((s) => { s.showTranscriptPanel = !s.showTranscriptPanel; }),
     toggleCollabPanel: () => set((s) => { s.showCollabPanel = !s.showCollabPanel; }),
     toggleExportPanel: () => set((s) => { s.showExportPanel = !s.showExportPanel; }),
+    toggleSettingsPanel: () => set((s) => { s.showSettingsPanel = !s.showSettingsPanel; }),
     toggleCommandPalette: (open) => set((s) => {
       s.isCommandPaletteOpen = typeof open === 'boolean' ? open : !s.isCommandPaletteOpen;
     }),

@@ -6,7 +6,8 @@ type AuthMode = 'login' | 'register';
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { login, register, loginAsDemo, isLoading, error, clearError } = useAuthStore();
+  const { login, register, quickLogin, loginAsDemo, isLoading, error, clearError } = useAuthStore();
+  const [quickEmail, setQuickEmail] = useState('');
 
   const [mode, setMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
@@ -180,20 +181,37 @@ export function LoginPage() {
         {/* Divider */}
         <div style={styles.divider}>
           <span style={styles.dividerLine} />
-          <span style={styles.dividerText}>or</span>
+          <span style={styles.dividerText}>or quick login</span>
           <span style={styles.dividerLine} />
         </div>
 
-        {/* Demo Mode */}
-        <button
-          type="button"
-          onClick={() => { loginAsDemo(); navigate('/'); }}
-          style={styles.demoBtn}
-        >
-          <span style={styles.demoBtnIcon}>▶</span>
-          Try Demo Mode
-        </button>
-        <p style={styles.demoHint}>No account needed — explore the full editor</p>
+        {/* Quick Login — email only */}
+        <div style={styles.form}>
+          <div style={styles.fieldGroup}>
+            <label style={styles.label}>Email</label>
+            <input
+              type="email"
+              value={quickEmail}
+              onChange={(e) => setQuickEmail(e.target.value)}
+              placeholder="you@example.com"
+              style={styles.input}
+            />
+          </div>
+          <button
+            type="button"
+            disabled={!quickEmail.includes('@')}
+            onClick={() => { quickLogin(quickEmail); navigate('/'); }}
+            style={{
+              ...styles.demoBtn,
+              opacity: quickEmail.includes('@') ? 1 : 0.5,
+              cursor: quickEmail.includes('@') ? 'pointer' : 'not-allowed',
+            }}
+          >
+            <span style={styles.demoBtnIcon}>▶</span>
+            Quick Login
+          </button>
+        </div>
+        <p style={styles.demoHint}>Enter any email to start — no account required</p>
 
         {/* Footer */}
         <div style={styles.footer}>
