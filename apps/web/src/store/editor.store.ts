@@ -18,6 +18,12 @@ export type WorkspaceTab = 'video' | 'audio' | 'color' | 'info' | 'effects';
 export type TimelineViewMode = 'timeline' | 'list' | 'waveform';
 export type EditTool = 'select' | 'trim' | 'razor' | 'slip' | 'slide';
 export type SearchFilterType = 'semantic' | 'phonetic' | 'visual';
+export type AlphaMode = 'straight' | 'premultiplied' | 'ignore' | 'auto';
+export type CompositeMode =
+  | 'source-over' | 'multiply' | 'screen' | 'overlay'
+  | 'darken' | 'lighten' | 'color-dodge' | 'color-burn'
+  | 'hard-light' | 'soft-light' | 'difference' | 'exclusion'
+  | 'hue' | 'saturation' | 'color' | 'luminosity';
 
 /** Intrinsic video properties (always present on every video clip). */
 export interface IntrinsicVideoProps {
@@ -87,6 +93,7 @@ export interface Clip {
   intrinsicVideo: IntrinsicVideoProps;
   intrinsicAudio: IntrinsicAudioProps;
   timeRemap: TimeRemapState;
+  blendMode?: CompositeMode;
 }
 
 export interface Track {
@@ -100,6 +107,7 @@ export interface Track {
   volume: number;
   clips: Clip[];
   color: string;
+  blendMode?: CompositeMode;
 }
 
 export interface Marker {
@@ -127,6 +135,7 @@ export interface MediaAsset {
   codec?: string;
   colorSpace?: string;
   hasAlpha?: boolean;
+  alphaMode?: AlphaMode;
   audioChannels?: number;
   sampleRate?: number;
   fileSize?: number;
@@ -371,6 +380,9 @@ interface EditorState {
   showSequenceDialog: boolean;
   showTitleTool: boolean;
   showSubtitleEditor: boolean;
+  showAlphaImportDialog: boolean;
+  alphaDialogAssetId: string | null;
+  alphaDialogResolve: ((mode: AlphaMode) => void) | null;
 
   // UI State
   activePanel: PanelType;
@@ -381,6 +393,7 @@ interface EditorState {
   showTranscriptPanel: boolean;
   showCollabPanel: boolean;
   showExportPanel: boolean;
+  showSettingsPanel: boolean;
   isFullscreen: boolean;
 
   // Collaboration
@@ -519,6 +532,7 @@ interface EditorActions {
   toggleTranscriptPanel: () => void;
   toggleCollabPanel: () => void;
   toggleExportPanel: () => void;
+  toggleSettingsPanel: () => void;
   toggleCommandPalette: (open?: boolean) => void;
 
   // Timeline view
@@ -578,6 +592,9 @@ interface EditorActions {
   toggleSequenceDialog: () => void;
   toggleTitleTool: () => void;
   toggleSubtitleEditor: () => void;
+  openAlphaImportDialog: (assetId: string) => Promise<AlphaMode>;
+  resolveAlphaImportDialog: (mode: AlphaMode) => void;
+  cancelAlphaImportDialog: () => void;
 
   // Subtitles
   addSubtitleTrack: (track: SubtitleTrack) => void;
@@ -828,6 +845,9 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     showSequenceDialog: false,
     showTitleTool: false,
     showSubtitleEditor: false,
+    showAlphaImportDialog: false,
+    alphaDialogAssetId: null,
+    alphaDialogResolve: null,
     activePanel: 'edit',
     activeInspectorTab: 'video',
     toolbarTab: 'media',
@@ -836,6 +856,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     showTranscriptPanel: false,
     showCollabPanel: false,
     showExportPanel: false,
+    showSettingsPanel: false,
     isFullscreen: false,
     collabUsers: [
       { id: 'u1', displayName: 'Sarah K.', color: '#7c5cfc' },
@@ -1103,6 +1124,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     toggleTranscriptPanel: () => set((s) => { s.showTranscriptPanel = !s.showTranscriptPanel; }),
     toggleCollabPanel: () => set((s) => { s.showCollabPanel = !s.showCollabPanel; }),
     toggleExportPanel: () => set((s) => { s.showExportPanel = !s.showExportPanel; }),
+    toggleSettingsPanel: () => set((s) => { s.showSettingsPanel = !s.showSettingsPanel; }),
     toggleCommandPalette: (open) => set((s) => {
       s.isCommandPaletteOpen = typeof open === 'boolean' ? open : !s.isCommandPaletteOpen;
     }),
@@ -1896,6 +1918,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
               asset.codec = metadata.codec;
               asset.colorSpace = metadata.colorSpace;
               asset.hasAlpha = metadata.hasAlpha;
+              // Alpha mode will be set after dialog resolves (see below)
               asset.audioChannels = metadata.audioChannels;
               asset.sampleRate = metadata.sampleRate;
               asset.fileSize = metadata.fileSize;
@@ -1925,6 +1948,30 @@ export const useEditorStore = create<EditorState & EditorActions>()(
               s.activeBinAssets = [...selectedBin.assets];
             }
           });
+
+          // If the imported media has alpha, prompt user for alpha interpretation
+          if (metadata.hasAlpha) {
+            try {
+              const alphaMode = await get().openAlphaImportDialog(assetId);
+              set((s) => {
+                function findAssetAlpha(bins: Bin[]): MediaAsset | null {
+                  for (const b of bins) {
+                    const a = b.assets.find((a) => a.id === assetId);
+                    if (a) return a;
+                    const child = findAssetAlpha(b.children);
+                    if (child) return child;
+                  }
+                  return null;
+                }
+                const asset = findAssetAlpha(s.bins);
+                if (asset) {
+                  asset.alphaMode = alphaMode;
+                }
+              });
+            } catch {
+              // Dialog was cancelled — default to 'auto'
+            }
+          }
         } catch (err) {
           console.error('Media ingest failed for', file.name, err);
           set((s) => {
@@ -1950,6 +1997,38 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     toggleSequenceDialog: () => set((s) => { s.showSequenceDialog = !s.showSequenceDialog; }),
     toggleTitleTool: () => set((s) => { s.showTitleTool = !s.showTitleTool; }),
     toggleSubtitleEditor: () => set((s) => { s.showSubtitleEditor = !s.showSubtitleEditor; }),
+    openAlphaImportDialog: (assetId: string) => {
+      return new Promise<AlphaMode>((resolve) => {
+        set((s) => {
+          s.showAlphaImportDialog = true;
+          s.alphaDialogAssetId = assetId;
+          s.alphaDialogResolve = resolve as any;
+        });
+      });
+    },
+    resolveAlphaImportDialog: (mode: AlphaMode) => set((s) => {
+      if (s.alphaDialogResolve) {
+        (s.alphaDialogResolve as (m: AlphaMode) => void)(mode);
+      }
+      // Store the chosen alphaMode on the asset
+      if (s.alphaDialogAssetId) {
+        for (const bin of s.bins) {
+          const asset = bin.assets.find((a) => a.id === s.alphaDialogAssetId);
+          if (asset) { asset.alphaMode = mode; break; }
+        }
+      }
+      s.showAlphaImportDialog = false;
+      s.alphaDialogAssetId = null;
+      s.alphaDialogResolve = null;
+    }),
+    cancelAlphaImportDialog: () => set((s) => {
+      if (s.alphaDialogResolve) {
+        (s.alphaDialogResolve as (m: AlphaMode) => void)('auto');
+      }
+      s.showAlphaImportDialog = false;
+      s.alphaDialogAssetId = null;
+      s.alphaDialogResolve = null;
+    }),
 
     // Subtitles
     addSubtitleTrack: (track) => set((s) => { s.subtitleTracks.push(track); }),

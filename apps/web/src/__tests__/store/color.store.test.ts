@@ -5,7 +5,7 @@ describe('useColorStore', () => {
   beforeEach(() => {
     useColorStore.setState({
       selectedNodeId: null,
-      activeView: 'wheels',
+      activeView: 'primary',
       abWipeEnabled: false,
       abWipePosition: 50,
     });

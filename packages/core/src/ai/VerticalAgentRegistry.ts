@@ -228,6 +228,47 @@ and optimizing for listening platforms. You understand conversational pacing and
   };
 }
 
+function createVFXCompositorAgent(): VerticalAgentDefinition {
+  return {
+    id: 'agent-vfx',
+    vertical: 'film' as AgentVertical,
+    name: 'VFX Compositor Agent',
+    description: 'Specialized for visual effects and compositing: object removal, rotoscoping, sky replacement, beauty, color matching, stabilization, and AI-driven compositing workflows.',
+    systemPrompt: `You are an expert VFX compositor AI assistant. You specialize in:
+- Object removal (wires, rigs, boom mics) using AI inpainting
+- AI rotoscoping with SAM-based per-frame mask generation
+- Sky replacement with edge refinement and color matching
+- Beauty/skin retouching with frequency separation
+- Cross-clip color matching using perceptual analysis
+- Content-aware stabilization with optical flow
+- Planar tracking for insert compositing (corner pin)
+- Keying (chroma, luma, difference, IBK) with spill suppression
+- Blend modes and alpha-aware compositing pipelines
+
+When given a VFX task, decompose it into a pipeline: segmentation → mask → process → composite.
+Always consider edge quality, temporal coherence, and render performance.
+Suggest the simplest approach first and escalate to AI methods only when needed.`,
+    baseToolCount: BASE_TOOLS.length,
+    domainTools: [
+      { name: 'ai_object_removal', description: 'Remove object from video using AI inpainting', category: 'effects', parameters: [{ name: 'clipId', type: 'string', description: 'Clip ID', required: true }, { name: 'description', type: 'string', description: 'Object description', required: true }, { name: 'method', type: 'string', description: 'Removal method', required: false, enumValues: ['inpaint', 'patch', 'clone'] }], requiresConfirmation: true, tokenCost: 25 },
+      { name: 'ai_rotoscope', description: 'Generate AI per-frame masks for an object', category: 'effects', parameters: [{ name: 'clipId', type: 'string', description: 'Clip ID', required: true }, { name: 'description', type: 'string', description: 'Object to mask', required: true }, { name: 'propagate', type: 'boolean', description: 'Propagate across frames', required: false }], requiresConfirmation: false, tokenCost: 20 },
+      { name: 'ai_sky_replacement', description: 'Replace sky using AI segmentation', category: 'effects', parameters: [{ name: 'clipId', type: 'string', description: 'Clip ID', required: true }, { name: 'replacementAssetId', type: 'string', description: 'Replacement sky asset', required: false }], requiresConfirmation: true, tokenCost: 22 },
+      { name: 'ai_face_beauty', description: 'AI skin smoothing and beauty enhancement', category: 'effects', parameters: [{ name: 'clipId', type: 'string', description: 'Clip ID', required: true }, { name: 'smoothing', type: 'number', description: 'Smoothing 0-100', required: false }], requiresConfirmation: false, tokenCost: 15 },
+      { name: 'ai_color_match', description: 'AI perceptual color matching between clips', category: 'color', parameters: [{ name: 'referenceClipId', type: 'string', description: 'Reference clip', required: true }, { name: 'targetClipIds', type: 'array', description: 'Target clips to match', required: true }], requiresConfirmation: false, tokenCost: 12 },
+      { name: 'ai_stabilize', description: 'Content-aware video stabilization', category: 'effects', parameters: [{ name: 'clipId', type: 'string', description: 'Clip ID', required: true }, { name: 'smoothing', type: 'number', description: 'Smoothing amount 0-1', required: false }], requiresConfirmation: true, tokenCost: 18 },
+      { name: 'apply_effect', description: 'Apply a VFX effect to a clip', category: 'effects', parameters: [{ name: 'clipId', type: 'string', description: 'Clip ID', required: true }, { name: 'effectId', type: 'string', description: 'Effect definition ID', required: true }], requiresConfirmation: false, tokenCost: 3 },
+      { name: 'track_region', description: 'Run planar tracking on a region', category: 'effects', parameters: [{ name: 'clipId', type: 'string', description: 'Clip ID', required: true }, { name: 'region', type: 'object', description: 'Tracking region points', required: true }], requiresConfirmation: false, tokenCost: 15 },
+      { name: 'apply_corner_pin', description: 'Apply tracked corner pin to an insert layer', category: 'effects', parameters: [{ name: 'insertClipId', type: 'string', description: 'Insert clip', required: true }, { name: 'trackingDataId', type: 'string', description: 'Tracking data to use', required: true }], requiresConfirmation: true, tokenCost: 8 },
+    ],
+    templateMapping: ['film', 'commercial'],
+    icon: 'wand',
+    color: '#f59e0b',
+    capabilities: ['object-removal', 'rotoscoping', 'sky-replacement', 'beauty-retouching', 'color-matching', 'stabilization', 'planar-tracking', 'keying', 'compositing'],
+    contextWindowTokens: 128000,
+    maxOutputTokens: 8192,
+  };
+}
+
 // ─── Registry ──────────────────────────────────────────────────────────────
 
 export class VerticalAgentRegistry {
@@ -245,6 +286,7 @@ export class VerticalAgentRegistry {
       createDocumentaryAgent(),
       createSportsAgent(),
       createPodcastAgent(),
+      createVFXCompositorAgent(),
     ];
 
     for (const agent of defaults) {

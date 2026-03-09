@@ -225,6 +225,156 @@ function packUniforms(
       return buf;
     }
 
+    case 'luma-key': {
+      // struct: f32 threshold, f32 softness, u32 invert, u32 _pad
+      const buf = new ArrayBuffer(16);
+      const f = new Float32Array(buf);
+      const u = new Uint32Array(buf);
+      f[0] = getNum('threshold');
+      f[1] = getNum('softness');
+      u[2] = getBool('invert') ? 1 : 0;
+      u[3] = 0;
+      return buf;
+    }
+
+    case 'curves': {
+      // struct: u32 channel, f32 shadows, f32 midtones, f32 highlights
+      const buf = new ArrayBuffer(16);
+      const f = new Float32Array(buf);
+      const u = new Uint32Array(buf);
+      const channelMap: Record<string, number> = { rgb: 0, r: 1, g: 2, b: 3 };
+      u[0] = channelMap[getStr('channel')] ?? 0;
+      f[1] = getNum('shadows');
+      f[2] = getNum('midtones');
+      f[3] = getNum('highlights');
+      return buf;
+    }
+
+    case 'color-lookup': {
+      // struct: u32 lutIndex, f32 intensity, 2x u32 pad
+      const buf = new ArrayBuffer(16);
+      const f = new Float32Array(buf);
+      const u = new Uint32Array(buf);
+      u[0] = Math.round(getNum('lutIndex'));
+      f[1] = getNum('intensity');
+      u[2] = 0;
+      u[3] = 0;
+      return buf;
+    }
+
+    case 'directional-blur': {
+      // struct: f32 angle, i32 length, 2x u32 pad
+      const buf = new ArrayBuffer(16);
+      const f = new Float32Array(buf);
+      const i = new Int32Array(buf);
+      const u = new Uint32Array(buf);
+      f[0] = getNum('angle');
+      i[1] = Math.round(getNum('length'));
+      u[2] = 0;
+      u[3] = 0;
+      return buf;
+    }
+
+    case 'radial-blur': {
+      // struct: f32 amount, u32 blurType, f32 centerX, f32 centerY
+      const buf = new ArrayBuffer(16);
+      const f = new Float32Array(buf);
+      const u = new Uint32Array(buf);
+      f[0] = getNum('amount');
+      u[1] = getStr('blurType') === 'zoom' ? 1 : 0;
+      f[2] = getNum('centerX');
+      f[3] = getNum('centerY');
+      return buf;
+    }
+
+    case 'lens-distortion': {
+      // struct: f32 curvature, f32 vDecenter, f32 hDecenter, f32 fillR, f32 fillG, f32 fillB, 2x u32 pad = 32 bytes
+      const buf = new ArrayBuffer(32);
+      const f = new Float32Array(buf);
+      const u = new Uint32Array(buf);
+      f[0] = getNum('curvature');
+      f[1] = getNum('vDecenter');
+      f[2] = getNum('hDecenter');
+      const [fr, fg, fb] = hexToRgbFloat(getStr('fillColor'));
+      f[3] = fr;
+      f[4] = fg;
+      f[5] = fb;
+      u[6] = 0;
+      u[7] = 0;
+      return buf;
+    }
+
+    case 'turbulent-displace': {
+      // struct: f32 amount, f32 size, f32 complexity, f32 evolution, u32 displaceType, 3x u32 pad = 32 bytes
+      const buf = new ArrayBuffer(32);
+      const f = new Float32Array(buf);
+      const u = new Uint32Array(buf);
+      f[0] = getNum('amount');
+      f[1] = getNum('size');
+      f[2] = getNum('complexity');
+      f[3] = getNum('evolution');
+      const displaceMap: Record<string, number> = { turbulent: 0, bulge: 1, twist: 2 };
+      u[4] = displaceMap[getStr('displaceType')] ?? 0;
+      u[5] = 0;
+      u[6] = 0;
+      u[7] = 0;
+      return buf;
+    }
+
+    case 'noise': {
+      // struct: f32 amount, u32 noiseType, u32 colored, u32 seed
+      const buf = new ArrayBuffer(16);
+      const f = new Float32Array(buf);
+      const u = new Uint32Array(buf);
+      f[0] = getNum('amount');
+      u[1] = getStr('noiseType') === 'uniform' ? 1 : 0;
+      u[2] = getBool('colored') ? 1 : 0;
+      u[3] = getBool('animated') ? _frame : Math.round(getNum('seed'));
+      return buf;
+    }
+
+    case 'mirror': {
+      // struct: u32 axis, f32 center, 2x u32 pad
+      const buf = new ArrayBuffer(16);
+      const f = new Float32Array(buf);
+      const u = new Uint32Array(buf);
+      const axisMap: Record<string, number> = { horizontal: 0, vertical: 1, both: 2 };
+      u[0] = axisMap[getStr('axis')] ?? 0;
+      f[1] = getNum('center');
+      u[2] = 0;
+      u[3] = 0;
+      return buf;
+    }
+
+    case 'glitch': {
+      // struct: f32 amount, f32 blockSize, f32 rgbSplit, u32 scanlines, u32 seed, 3x u32 pad = 32 bytes
+      const buf = new ArrayBuffer(32);
+      const f = new Float32Array(buf);
+      const u = new Uint32Array(buf);
+      f[0] = getNum('amount');
+      f[1] = getNum('blockSize');
+      f[2] = getNum('rgbSplit');
+      u[3] = getBool('scanlines') ? 1 : 0;
+      u[4] = getBool('animated') ? _frame : Math.round(getNum('seed'));
+      u[5] = 0;
+      u[6] = 0;
+      u[7] = 0;
+      return buf;
+    }
+
+    case 'halftone': {
+      // struct: f32 dotSize, f32 angle, u32 shape, u32 pad
+      const buf = new ArrayBuffer(16);
+      const f = new Float32Array(buf);
+      const u = new Uint32Array(buf);
+      f[0] = getNum('dotSize');
+      f[1] = getNum('angle');
+      const shapeMap: Record<string, number> = { circle: 0, square: 1, diamond: 2 };
+      u[2] = shapeMap[getStr('shape')] ?? 0;
+      u[3] = 0;
+      return buf;
+    }
+
     default:
       return null;
   }
