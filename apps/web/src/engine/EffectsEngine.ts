@@ -444,6 +444,290 @@ const BUILT_IN_EFFECTS: EffectDefinition[] = [
       { name: 'reduction', type: 'number', default: 6, min: 0, max: 20, step: 0.5, unit: 'dB' },
     ],
   },
+
+  // ── Boris FX: Keyer ──
+  {
+    id: 'difference-key',
+    name: 'Difference Key',
+    category: 'Keyer',
+    params: [
+      { name: 'threshold', type: 'number', default: 30, min: 0, max: 100, step: 1 },
+      { name: 'softness', type: 'number', default: 20, min: 0, max: 100, step: 1 },
+    ],
+  },
+  {
+    id: 'color-range-key',
+    name: 'Color Range Key',
+    category: 'Keyer',
+    params: [
+      { name: 'minHue', type: 'number', default: 90, min: 0, max: 360, step: 1 },
+      { name: 'maxHue', type: 'number', default: 150, min: 0, max: 360, step: 1 },
+      { name: 'minSat', type: 'number', default: 20, min: 0, max: 100, step: 1 },
+      { name: 'maxSat', type: 'number', default: 100, min: 0, max: 100, step: 1 },
+      { name: 'minLum', type: 'number', default: 10, min: 0, max: 100, step: 1 },
+      { name: 'maxLum', type: 'number', default: 90, min: 0, max: 100, step: 1 },
+      { name: 'softness', type: 'number', default: 20, min: 0, max: 100, step: 1 },
+    ],
+  },
+  {
+    id: 'linear-color-key',
+    name: 'Linear Color Key',
+    category: 'Keyer',
+    params: [
+      { name: 'keyColor', type: 'color', default: '#00ff00' },
+      { name: 'matchRange', type: 'number', default: 40, min: 0, max: 100, step: 1 },
+      { name: 'keyBalanceLow', type: 'number', default: 50, min: 0, max: 100, step: 1 },
+      { name: 'keyBalanceHigh', type: 'number', default: 50, min: 0, max: 100, step: 1 },
+    ],
+  },
+  {
+    id: 'ibk-keyer',
+    name: 'IBK Keyer',
+    category: 'Keyer',
+    params: [
+      { name: 'screenType', type: 'select', default: 'green', options: ['green', 'blue'] },
+      { name: 'despill', type: 'number', default: 50, min: 0, max: 100, step: 1 },
+      { name: 'edgeWeight', type: 'number', default: 50, min: 0, max: 100, step: 1 },
+    ],
+  },
+
+  // ── Boris FX: Light ──
+  {
+    id: 'light-wrap',
+    name: 'Light Wrap',
+    category: 'Light',
+    params: [
+      { name: 'wrapWidth', type: 'number', default: 30, min: 0, max: 100, step: 1 },
+      { name: 'intensity', type: 'number', default: 50, min: 0, max: 100, step: 1 },
+      { name: 'blurRadius', type: 'number', default: 40, min: 0, max: 100, step: 1 },
+      { name: 'lumaSoftness', type: 'number', default: 50, min: 0, max: 100, step: 1 },
+    ],
+  },
+  {
+    id: 'lens-flare',
+    name: 'Lens Flare',
+    category: 'Light',
+    params: [
+      { name: 'posX', type: 'number', default: 50, min: 0, max: 100, step: 1, unit: '%' },
+      { name: 'posY', type: 'number', default: 30, min: 0, max: 100, step: 1, unit: '%' },
+      { name: 'brightness', type: 'number', default: 100, min: 0, max: 200, step: 1, unit: '%' },
+      { name: 'scale', type: 'number', default: 100, min: 0, max: 200, step: 1, unit: '%' },
+      { name: 'anamorphic', type: 'number', default: 0, min: 0, max: 100, step: 1, unit: '%' },
+    ],
+  },
+  {
+    id: 'bokeh-blur',
+    name: 'Bokeh Blur',
+    category: 'Light',
+    params: [
+      { name: 'radius', type: 'number', default: 10, min: 0, max: 100, step: 1, unit: 'px' },
+      { name: 'shape', type: 'select', default: 'hexagon', options: ['hexagon', 'octagon', 'circle'] },
+      { name: 'rotation', type: 'number', default: 0, min: 0, max: 360, step: 1, unit: 'deg' },
+      { name: 'highlightBoost', type: 'number', default: 50, min: 0, max: 100, step: 1, unit: '%' },
+    ],
+  },
+  {
+    id: 'light-rays',
+    name: 'Light Rays',
+    category: 'Light',
+    params: [
+      { name: 'posX', type: 'number', default: 50, min: 0, max: 100, step: 1, unit: '%' },
+      { name: 'posY', type: 'number', default: 20, min: 0, max: 100, step: 1, unit: '%' },
+      { name: 'length', type: 'number', default: 50, min: 0, max: 100, step: 1, unit: '%' },
+      { name: 'brightness', type: 'number', default: 100, min: 0, max: 200, step: 1, unit: '%' },
+      { name: 'threshold', type: 'number', default: 60, min: 0, max: 100, step: 1, unit: '%' },
+    ],
+  },
+  {
+    id: 'prism',
+    name: 'Prism',
+    category: 'Light',
+    params: [
+      { name: 'amount', type: 'number', default: 30, min: 0, max: 100, step: 1 },
+      { name: 'angle', type: 'number', default: 0, min: 0, max: 360, step: 1, unit: 'deg' },
+      { name: 'blurType', type: 'select', default: 'linear', options: ['linear', 'radial'] },
+    ],
+  },
+
+  // ── Boris FX: Particle ──
+  {
+    id: 'particle-illusion',
+    name: 'Particle Illusion',
+    category: 'Particle',
+    params: [
+      { name: 'emitterType', type: 'select', default: 'spark', options: ['spark', 'fire', 'smoke', 'snow', 'rain', 'dust', 'explosion'] },
+      { name: 'birthRate', type: 'number', default: 50, min: 1, max: 1000, step: 1 },
+      { name: 'lifetime', type: 'number', default: 2, min: 0.1, max: 10, step: 0.1, unit: 's' },
+      { name: 'velocity', type: 'number', default: 100, min: 0, max: 500, step: 1 },
+      { name: 'gravity', type: 'number', default: 50, min: -100, max: 100, step: 1 },
+      { name: 'particleSize', type: 'number', default: 5, min: 1, max: 100, step: 1, unit: 'px' },
+      { name: 'color', type: 'color', default: '#ffffff' },
+    ],
+  },
+
+  // ── Boris FX: Beauty ──
+  {
+    id: 'beauty-studio',
+    name: 'Beauty Studio',
+    category: 'Beauty',
+    params: [
+      { name: 'smoothing', type: 'number', default: 50, min: 0, max: 100, step: 1, unit: '%' },
+      { name: 'blemishRemoval', type: 'number', default: 30, min: 0, max: 100, step: 1, unit: '%' },
+      { name: 'skinMask', type: 'number', default: 70, min: 0, max: 100, step: 1, unit: '%' },
+      { name: 'toneUnify', type: 'number', default: 20, min: 0, max: 100, step: 1, unit: '%' },
+    ],
+  },
+
+  // ── Boris FX: Film ──
+  {
+    id: 'film-damage',
+    name: 'Film Damage',
+    category: 'Film',
+    params: [
+      { name: 'scratches', type: 'number', default: 30, min: 0, max: 100, step: 1, unit: '%' },
+      { name: 'dust', type: 'number', default: 20, min: 0, max: 100, step: 1, unit: '%' },
+      { name: 'flicker', type: 'number', default: 15, min: 0, max: 100, step: 1, unit: '%' },
+      { name: 'colorShift', type: 'number', default: 10, min: 0, max: 100, step: 1, unit: '%' },
+      { name: 'gate', type: 'number', default: 10, min: 0, max: 100, step: 1, unit: '%' },
+    ],
+  },
+  {
+    id: 'day-for-night',
+    name: 'Day for Night',
+    category: 'Film',
+    params: [
+      { name: 'blueTint', type: 'number', default: 60, min: 0, max: 100, step: 1 },
+      { name: 'contrast', type: 'number', default: 20, min: -100, max: 100, step: 1 },
+      { name: 'saturation', type: 'number', default: -30, min: -100, max: 100, step: 1 },
+      { name: 'brightness', type: 'number', default: -20, min: -100, max: 100, step: 1 },
+    ],
+  },
+  {
+    id: 's-curves',
+    name: 'S-Curves',
+    category: 'Film',
+    params: [
+      { name: 'amount', type: 'number', default: 50, min: 0, max: 100, step: 1, unit: '%' },
+      { name: 'channel', type: 'select', default: 'rgb', options: ['rgb', 'red', 'green', 'blue'] },
+    ],
+  },
+
+  // ── Boris FX: Edge ──
+  {
+    id: 'edge-cleaner',
+    name: 'Edge Cleaner',
+    category: 'Edge',
+    params: [
+      { name: 'erode', type: 'number', default: 20, min: 0, max: 100, step: 1 },
+      { name: 'blur', type: 'number', default: 30, min: 0, max: 100, step: 1 },
+      { name: 'contract', type: 'number', default: 10, min: 0, max: 100, step: 1 },
+      { name: 'softness', type: 'number', default: 40, min: 0, max: 100, step: 1 },
+    ],
+  },
+  {
+    id: 'matte-choker',
+    name: 'Matte Choker',
+    category: 'Edge',
+    params: [
+      { name: 'chokeAmount', type: 'number', default: 0, min: -100, max: 100, step: 1 },
+      { name: 'softness', type: 'number', default: 30, min: 0, max: 100, step: 1 },
+      { name: 'graySmooth', type: 'number', default: 20, min: 0, max: 100, step: 1 },
+    ],
+  },
+
+  // ── Boris FX: Time ──
+  {
+    id: 'optical-flow-slowmo',
+    name: 'Optical Flow Slow-Mo',
+    category: 'Time',
+    params: [
+      { name: 'speed', type: 'number', default: 50, min: 10, max: 100, step: 1, unit: '%' },
+      { name: 'quality', type: 'select', default: 'normal', options: ['draft', 'normal', 'high'] },
+      { name: 'motionEstimation', type: 'select', default: 'optical-flow', options: ['block', 'optical-flow'] },
+    ],
+  },
+  {
+    id: 'frame-interpolation',
+    name: 'Frame Interpolation',
+    category: 'Time',
+    params: [
+      { name: 'targetFps', type: 'select', default: '60', options: ['24', '30', '48', '60', '120'] },
+      { name: 'quality', type: 'select', default: 'normal', options: ['draft', 'normal', 'high'] },
+    ],
+  },
+
+  // ── Boris FX: Warp ──
+  {
+    id: 'corner-pin',
+    name: 'Corner Pin',
+    category: 'Warp',
+    params: [
+      { name: 'topLeftX', type: 'number', default: 0, min: 0, max: 100, step: 0.1 },
+      { name: 'topLeftY', type: 'number', default: 0, min: 0, max: 100, step: 0.1 },
+      { name: 'topRightX', type: 'number', default: 100, min: 0, max: 100, step: 0.1 },
+      { name: 'topRightY', type: 'number', default: 0, min: 0, max: 100, step: 0.1 },
+      { name: 'bottomLeftX', type: 'number', default: 0, min: 0, max: 100, step: 0.1 },
+      { name: 'bottomLeftY', type: 'number', default: 100, min: 0, max: 100, step: 0.1 },
+      { name: 'bottomRightX', type: 'number', default: 100, min: 0, max: 100, step: 0.1 },
+      { name: 'bottomRightY', type: 'number', default: 100, min: 0, max: 100, step: 0.1 },
+    ],
+  },
+  {
+    id: 'mesh-warp',
+    name: 'Mesh Warp',
+    category: 'Warp',
+    params: [
+      { name: 'gridRows', type: 'number', default: 4, min: 2, max: 20, step: 1 },
+      { name: 'gridCols', type: 'number', default: 4, min: 2, max: 20, step: 1 },
+      { name: 'quality', type: 'select', default: 'normal', options: ['draft', 'normal', 'high'] },
+    ],
+  },
+  {
+    id: 'ripple',
+    name: 'Ripple',
+    category: 'Warp',
+    params: [
+      { name: 'amplitude', type: 'number', default: 20, min: 0, max: 200, step: 1, unit: 'px' },
+      { name: 'wavelength', type: 'number', default: 60, min: 1, max: 500, step: 1, unit: 'px' },
+      { name: 'phase', type: 'number', default: 0, min: 0, max: 360, step: 1, unit: 'deg' },
+      { name: 'damping', type: 'number', default: 50, min: 0, max: 100, step: 1, unit: '%' },
+      { name: 'centerX', type: 'number', default: 50, min: 0, max: 100, step: 1, unit: '%' },
+      { name: 'centerY', type: 'number', default: 50, min: 0, max: 100, step: 1, unit: '%' },
+    ],
+  },
+  {
+    id: 'wave',
+    name: 'Wave',
+    category: 'Warp',
+    params: [
+      { name: 'amplitude', type: 'number', default: 20, min: 0, max: 200, step: 1, unit: 'px' },
+      { name: 'wavelength', type: 'number', default: 80, min: 1, max: 500, step: 1, unit: 'px' },
+      { name: 'direction', type: 'number', default: 0, min: 0, max: 360, step: 1, unit: 'deg' },
+      { name: 'waveType', type: 'select', default: 'sine', options: ['sine', 'triangle', 'square'] },
+    ],
+  },
+  {
+    id: 'twirl',
+    name: 'Twirl',
+    category: 'Warp',
+    params: [
+      { name: 'angle', type: 'number', default: 90, min: -720, max: 720, step: 1, unit: 'deg' },
+      { name: 'radius', type: 'number', default: 50, min: 0, max: 100, step: 1, unit: '%' },
+      { name: 'centerX', type: 'number', default: 50, min: 0, max: 100, step: 1, unit: '%' },
+      { name: 'centerY', type: 'number', default: 50, min: 0, max: 100, step: 1, unit: '%' },
+    ],
+  },
+  {
+    id: 'sphere',
+    name: 'Sphere',
+    category: 'Warp',
+    params: [
+      { name: 'radius', type: 'number', default: 50, min: 0, max: 100, step: 1, unit: '%' },
+      { name: 'refraction', type: 'number', default: 50, min: -100, max: 100, step: 1 },
+      { name: 'centerX', type: 'number', default: 50, min: 0, max: 100, step: 1, unit: '%' },
+      { name: 'centerY', type: 'number', default: 50, min: 0, max: 100, step: 1, unit: '%' },
+    ],
+  },
 ];
 
 // ─── Effect Processors ────────────────────────────────────────────────────
@@ -455,6 +739,30 @@ import { applySharpen } from './effects/sharpen';
 import { applyChromaKey } from './effects/chroma-key';
 import { applyVignette, applyFilmGrain, applyGlow, applyDropShadow } from './effects/stylize';
 import { applyLetterbox } from './effects/transform';
+import { applyLumaKey } from './effects/luma-key';
+import { applyDirectionalBlur } from './effects/directional-blur';
+import { applyRadialBlur } from './effects/radial-blur';
+import { applyCurves } from './effects/curves';
+import { applyColorLookup } from './effects/color-lookup';
+import { applyGlitch } from './effects/glitch';
+import { applyHalftone } from './effects/halftone';
+import { applyLensDistortion } from './effects/lens-distortion';
+import { applyTurbulentDisplace } from './effects/turbulent-displace';
+import { applyNoise } from './effects/noise';
+import { applyMirror } from './effects/mirror';
+import { applySolidColor } from './effects/solid-color';
+import { applyGradient } from './effects/gradient';
+import { applyBlendMode } from './effects/blend-mode';
+
+// ─── Boris FX Effect Processors ──────────────────────────────────────────
+import { applyDifferenceKey, applyColorRangeKey, applyLinearColorKey, applyIBKKeyer } from './effects/keyers';
+import { applyLightWrap, applyLensFlare, applyBokehBlur, applyLightRays, applyPrism } from './effects/light';
+import { ParticleIllusion } from './effects/particle';
+import { applyBeautyStudio } from './effects/beauty';
+import { applyFilmDamage, applyDayForNight, applySCurves } from './effects/film-look';
+import { applyEdgeCleaner, applyMatteChoker } from './effects/edge-matte';
+import { applyOpticalFlowSlowmo, applyFrameInterpolation } from './effects/time-effects';
+import { applyCornerPin, applyMeshWarp, applyRipple, applyWave, applyTwirl, applySphere } from './effects/warp';
 
 // ─── WebGPU Pipeline ──────────────────────────────────────────────────────
 import { WebGPUPipeline } from './gpu/WebGPUPipeline';
@@ -467,6 +775,7 @@ class EffectsEngine {
   private clipEffectsMap: Map<string, string[]> = new Map();
   private nextInstanceId = 1;
   private gpuPipeline: WebGPUPipeline | null = null;
+  private particleIllusion: ParticleIllusion = new ParticleIllusion();
 
   constructor() {
     for (const def of BUILT_IN_EFFECTS) {
@@ -959,8 +1268,415 @@ class EffectsEngine {
             break;
           }
 
+          case 'luma-key':
+            applyLumaKey(
+              imageData.data,
+              getNum('threshold'),
+              getNum('softness'),
+              getBool('invertKey'),
+            );
+            break;
+
+          case 'directional-blur':
+            applyDirectionalBlur(imageData, getNum('angle'), getNum('length'));
+            break;
+
+          case 'radial-blur':
+            applyRadialBlur(
+              imageData,
+              getNum('amount'),
+              getStr('type'),
+              getNum('centerX'),
+              getNum('centerY'),
+            );
+            break;
+
+          case 'curves':
+            applyCurves(
+              imageData.data,
+              getStr('channel'),
+              getNum('shadows'),
+              getNum('midtones'),
+              getNum('highlights'),
+            );
+            break;
+
+          case 'color-lookup':
+            applyColorLookup(imageData.data, getStr('lut'), getNum('intensity'));
+            break;
+
+          case 'glitch':
+            applyGlitch(
+              imageData,
+              getNum('amount'),
+              getNum('blockSize'),
+              getNum('rgbSplit'),
+              getBool('scanlines'),
+              frame,
+            );
+            break;
+
+          case 'halftone':
+            applyHalftone(
+              imageData,
+              getNum('dotSize'),
+              getNum('angle'),
+              getStr('shape'),
+            );
+            break;
+
+          case 'lens-distortion':
+            applyLensDistortion(
+              imageData,
+              getNum('curvature'),
+              getNum('verticalDecentering'),
+              getNum('horizontalDecentering'),
+              getStr('fillColor'),
+            );
+            break;
+
+          case 'turbulent-displace':
+            applyTurbulentDisplace(
+              imageData,
+              getNum('amount'),
+              getNum('size'),
+              getNum('complexity'),
+              getNum('evolution'),
+              getStr('type'),
+            );
+            break;
+
+          case 'noise':
+            applyNoise(
+              imageData,
+              getNum('amount'),
+              getStr('type'),
+              getBool('colored'),
+              getBool('animated') ? frame : 0,
+            );
+            break;
+
+          case 'mirror':
+            applyMirror(imageData, getStr('axis'), getNum('center'));
+            break;
+
+          case 'solid-color':
+            applySolidColor(imageData, getStr('color'), getNum('opacity'));
+            break;
+
+          case 'gradient':
+            applyGradient(
+              imageData,
+              getStr('startColor'),
+              getStr('endColor'),
+              getStr('type'),
+              getNum('angle'),
+              getNum('blend'),
+            );
+            break;
+
           case 'speed-ramp':
-            // Speed ramp is a metadata effect — handled by PlaybackEngine, not pixel data
+          case 'fluid-morph':
+          case 'morph-cut':
+          case 'warp-stabilizer':
+            // Multi-frame / metadata effects — handled by PlaybackEngine, not pixel data
+            break;
+
+          // ── Boris FX: Keyer ──────────────────────────────────────────
+
+          case 'difference-key':
+            // Difference Key requires a reference frame. Without one, use a
+            // black frame as the reference (keys out dark pixels).
+            applyDifferenceKey(
+              imageData.data,
+              new Uint8ClampedArray(imageData.data.length), // black reference
+              getNum('threshold'),
+              getNum('softness'),
+            );
+            break;
+
+          case 'color-range-key':
+            applyColorRangeKey(
+              imageData.data,
+              getNum('minHue'),
+              getNum('maxHue'),
+              getNum('minSat'),
+              getNum('maxSat'),
+              getNum('minLum'),
+              getNum('maxLum'),
+              getNum('softness'),
+            );
+            break;
+
+          case 'linear-color-key':
+            applyLinearColorKey(
+              imageData.data,
+              getStr('keyColor'),
+              getNum('matchRange'),
+              getNum('keyBalanceLow'),
+              getNum('keyBalanceHigh'),
+            );
+            break;
+
+          case 'ibk-keyer':
+            applyIBKKeyer(
+              imageData.data,
+              getStr('screenType'),
+              getNum('despill'),
+              getNum('edgeWeight'),
+            );
+            break;
+
+          // ── Boris FX: Light ──────────────────────────────────────────
+
+          case 'light-wrap':
+            applyLightWrap(
+              imageData,
+              getNum('wrapWidth'),
+              getNum('intensity'),
+              getNum('blurRadius'),
+              getNum('lumaSoftness'),
+            );
+            break;
+
+          case 'lens-flare':
+            applyLensFlare(
+              imageData,
+              getNum('posX'),
+              getNum('posY'),
+              getNum('brightness'),
+              getNum('scale'),
+              getNum('anamorphic'),
+            );
+            break;
+
+          case 'bokeh-blur':
+            applyBokehBlur(
+              imageData,
+              getNum('radius'),
+              getStr('shape'),
+              getNum('rotation'),
+              getNum('highlightBoost'),
+            );
+            break;
+
+          case 'light-rays':
+            applyLightRays(
+              imageData,
+              getNum('posX'),
+              getNum('posY'),
+              getNum('length'),
+              getNum('brightness'),
+              getNum('threshold'),
+            );
+            break;
+
+          case 'prism':
+            applyPrism(
+              imageData,
+              getNum('amount'),
+              getNum('angle'),
+              getStr('blurType'),
+            );
+            break;
+
+          // ── Boris FX: Particle ───────────────────────────────────────
+
+          case 'particle-illusion':
+            this.particleIllusion.configure({
+              emitterType: getStr('emitterType'),
+              birthRate: getNum('birthRate'),
+              lifetime: getNum('lifetime'),
+              velocity: getNum('velocity'),
+              gravity: getNum('gravity'),
+              particleSize: getNum('particleSize'),
+              color: getStr('color'),
+            });
+            this.particleIllusion.render(imageData, frame);
+            break;
+
+          // ── Boris FX: Beauty ─────────────────────────────────────────
+
+          case 'beauty-studio':
+            applyBeautyStudio(
+              imageData,
+              getNum('smoothing'),
+              getNum('blemishRemoval'),
+              getNum('skinMask'),
+              getNum('toneUnify'),
+            );
+            break;
+
+          // ── Boris FX: Film ───────────────────────────────────────────
+
+          case 'film-damage':
+            applyFilmDamage(
+              imageData,
+              getNum('scratches'),
+              getNum('dust'),
+              getNum('flicker'),
+              getNum('colorShift'),
+              getNum('gate'),
+              frame,
+            );
+            break;
+
+          case 'day-for-night':
+            applyDayForNight(
+              imageData.data,
+              getNum('blueTint'),
+              getNum('contrast'),
+              getNum('saturation'),
+              getNum('brightness'),
+            );
+            break;
+
+          case 's-curves':
+            applySCurves(
+              imageData.data,
+              getNum('amount'),
+              getStr('channel'),
+            );
+            break;
+
+          // ── Boris FX: Edge ───────────────────────────────────────────
+
+          case 'edge-cleaner':
+            applyEdgeCleaner(
+              imageData.data,
+              imageData.width,
+              imageData.height,
+              getNum('erode'),
+              getNum('blur'),
+              getNum('contract'),
+              getNum('softness'),
+            );
+            break;
+
+          case 'matte-choker':
+            applyMatteChoker(
+              imageData.data,
+              imageData.width,
+              imageData.height,
+              getNum('chokeAmount'),
+              getNum('softness'),
+              getNum('graySmooth'),
+            );
+            break;
+
+          // ── Boris FX: Time ───────────────────────────────────────────
+
+          case 'optical-flow-slowmo':
+            applyOpticalFlowSlowmo(
+              imageData,
+              getNum('speed'),
+              getStr('quality'),
+              getStr('motionEstimation'),
+            );
+            break;
+
+          case 'frame-interpolation':
+            applyFrameInterpolation(
+              imageData,
+              getStr('targetFps'),
+              getStr('quality'),
+            );
+            break;
+
+          // ── Boris FX: Warp ───────────────────────────────────────────
+
+          case 'corner-pin':
+            applyCornerPin(
+              imageData,
+              getNum('topLeftX'),
+              getNum('topLeftY'),
+              getNum('topRightX'),
+              getNum('topRightY'),
+              getNum('bottomLeftX'),
+              getNum('bottomLeftY'),
+              getNum('bottomRightX'),
+              getNum('bottomRightY'),
+            );
+            break;
+
+          case 'mesh-warp':
+            applyMeshWarp(
+              imageData,
+              getNum('gridRows'),
+              getNum('gridCols'),
+            );
+            break;
+
+          case 'ripple':
+            applyRipple(
+              imageData,
+              getNum('amplitude'),
+              getNum('wavelength'),
+              getNum('phase'),
+              getNum('damping'),
+              getNum('centerX'),
+              getNum('centerY'),
+            );
+            break;
+
+          case 'wave':
+            applyWave(
+              imageData,
+              getNum('amplitude'),
+              getNum('wavelength'),
+              getNum('direction'),
+              getStr('waveType'),
+            );
+            break;
+
+          case 'twirl':
+            applyTwirl(
+              imageData,
+              getNum('angle'),
+              getNum('radius'),
+              getNum('centerX'),
+              getNum('centerY'),
+            );
+            break;
+
+          case 'sphere':
+            applySphere(
+              imageData,
+              getNum('radius'),
+              getNum('refraction'),
+              getNum('centerX'),
+              getNum('centerY'),
+            );
+            break;
+
+          // ── Blend Mode ─────────────────────────────────────────────
+          case 'blend-mode': {
+            // Clone current image as base, apply overlay blend in place
+            const baseImg = new ImageData(
+              new Uint8ClampedArray(imageData.data),
+              imageData.width,
+              imageData.height,
+            );
+            applyBlendMode(
+              baseImg,
+              imageData,
+              getStr('mode') || 'multiply',
+              getNum('opacity'),
+            );
+            // Copy blended result back
+            imageData.data.set(baseImg.data);
+            break;
+          }
+
+          // ── Audio Effects (handled by Web Audio API, not pixel data) ──
+          case 'audio-eq':
+          case 'audio-compressor':
+          case 'audio-reverb':
+          case 'audio-delay':
+          case 'audio-deesser':
+            // Audio effects are processed by the AudioEngine via Web Audio API nodes.
+            // They have no pixel-level processing. The EffectsEngine stores their
+            // instances and keyframes, but rendering is delegated to AudioEngine.
             break;
 
           default:
