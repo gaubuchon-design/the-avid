@@ -1,12 +1,14 @@
 // =============================================================================
 //  THE AVID — Frame Compositor Engine
 //  Central rendering pipeline: decodes video frames from sources, composites
-//  multiple timeline tracks, applies intrinsic transforms, and outputs
-//  ImageBitmap for display in Source/Record monitors.
+//  multiple timeline tracks, applies intrinsic transforms, blend modes,
+//  per-clip effects, and alpha-aware compositing. Outputs ImageBitmap for
+//  display in Source/Record monitors.
 // =============================================================================
 
 import { videoSourceManager } from './VideoSourceManager';
-import type { Track, Clip, IntrinsicVideoProps, SequenceSettings } from '../store/editor.store';
+import { effectsEngine } from './EffectsEngine';
+import type { Track, Clip, IntrinsicVideoProps, SequenceSettings, AlphaMode, CompositeMode } from '../store/editor.store';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -20,6 +22,50 @@ interface FrameCache {
   assetId: string;
   time: number;
   bitmap: ImageBitmap;
+}
+
+/** Lookup for per-asset alpha modes (populated by caller from store). */
+export type AssetAlphaMap = Map<string, AlphaMode>;
+
+// ─── Alpha Helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Premultiply alpha: multiply RGB by alpha so Canvas 2D compositing is correct.
+ * Canvas 2D expects premultiplied alpha for proper blending.
+ */
+function premultiplyAlpha(imageData: ImageData): void {
+  const d = imageData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const a = d[i + 3] / 255;
+    d[i] = Math.round(d[i] * a);
+    d[i + 1] = Math.round(d[i + 1] * a);
+    d[i + 2] = Math.round(d[i + 2] * a);
+  }
+}
+
+/**
+ * Unpremultiply alpha: divide RGB by alpha to recover straight alpha.
+ */
+function unpremultiplyAlpha(imageData: ImageData): void {
+  const d = imageData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const a = d[i + 3];
+    if (a === 0) continue;
+    const invA = 255 / a;
+    d[i] = Math.min(255, Math.round(d[i] * invA));
+    d[i + 1] = Math.min(255, Math.round(d[i + 1] * invA));
+    d[i + 2] = Math.min(255, Math.round(d[i + 2] * invA));
+  }
+}
+
+/**
+ * Set all alpha values to 255 (fully opaque), ignoring source alpha.
+ */
+function ignoreAlpha(imageData: ImageData): void {
+  const d = imageData.data;
+  for (let i = 3; i < d.length; i += 4) {
+    d[i] = 255;
+  }
 }
 
 // ─── Engine ───────────────────────────────────────────────────────────────────
@@ -77,8 +123,8 @@ class FrameCompositorClass {
   private applyTransforms(
     ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D,
     props: IntrinsicVideoProps,
-    frameW: number,
-    frameH: number,
+    _frameW: number,
+    _frameH: number,
     canvasW: number,
     canvasH: number,
   ): void {
@@ -157,6 +203,45 @@ class FrameCompositorClass {
   }
 
   /**
+   * Process clip effects and apply alpha interpretation to a bitmap.
+   * Returns a new ImageBitmap with effects applied, or the original if no processing needed.
+   */
+  private async processClipBitmap(
+    bitmap: ImageBitmap,
+    clip: Clip,
+    currentFrame: number,
+    alphaMode?: AlphaMode,
+  ): Promise<ImageBitmap> {
+    const clipEffects = effectsEngine.getClipEffects(clip.id);
+    const needsEffects = clipEffects.length > 0 && clipEffects.some((e) => e.enabled);
+    const needsAlpha = alphaMode && alphaMode !== 'auto' && alphaMode !== 'premultiplied';
+
+    if (!needsEffects && !needsAlpha) return bitmap;
+
+    // Render bitmap to temporary canvas to extract ImageData
+    const tempCanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const tempCtx = tempCanvas.getContext('2d')!;
+    tempCtx.drawImage(bitmap, 0, 0);
+    let imageData = tempCtx.getImageData(0, 0, bitmap.width, bitmap.height);
+
+    // Apply alpha interpretation
+    if (alphaMode === 'straight') {
+      premultiplyAlpha(imageData);
+    } else if (alphaMode === 'ignore') {
+      ignoreAlpha(imageData);
+    }
+
+    // Process effects through the effects engine
+    if (needsEffects) {
+      imageData = await effectsEngine.processFrameAsync(imageData, clipEffects, currentFrame);
+    }
+
+    // Put processed data back and create new bitmap
+    tempCtx.putImageData(imageData, 0, 0);
+    return createImageBitmap(tempCanvas);
+  }
+
+  /**
    * Render a single source clip frame for the Source Monitor.
    */
   async renderSourceFrame(
@@ -196,7 +281,15 @@ class FrameCompositorClass {
 
   /**
    * Render a composited timeline frame for the Record Monitor.
-   * Composites all visible video tracks at the given playhead time.
+   * Composites all visible video tracks at the given playhead time with
+   * blend modes, per-clip effects, and alpha-aware compositing.
+   *
+   * @param tracks        All timeline tracks
+   * @param currentTime   Current playhead time in seconds
+   * @param settings      Sequence settings (fps, resolution, etc.)
+   * @param outputWidth   Output canvas width
+   * @param outputHeight  Output canvas height
+   * @param assetAlphaModes  Optional map of assetId → AlphaMode for alpha interpretation
    */
   async renderTimelineFrame(
     tracks: Track[],
@@ -204,6 +297,7 @@ class FrameCompositorClass {
     settings: SequenceSettings,
     outputWidth: number,
     outputHeight: number,
+    assetAlphaModes?: AssetAlphaMap,
   ): Promise<ImageBitmap | null> {
     const ctx = this.ensureCanvas(outputWidth, outputHeight);
     ctx.clearRect(0, 0, outputWidth, outputHeight);
@@ -211,6 +305,9 @@ class FrameCompositorClass {
     // Fill with black background
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, outputWidth, outputHeight);
+
+    // Calculate current frame number for keyframe evaluation
+    const currentFrame = Math.round(currentTime * settings.fps);
 
     // Sort video tracks by sortOrder (bottom to top = lowest sortOrder first)
     const videoTracks = tracks
@@ -222,13 +319,21 @@ class FrameCompositorClass {
       if (!clip || !clip.assetId) continue;
 
       const sourceTime = this.getSourceTime(clip, currentTime, settings.fps);
-      const bitmap = await this.getFrame(clip.assetId, sourceTime);
+      let bitmap = await this.getFrame(clip.assetId, sourceTime);
       if (!bitmap) continue;
+
+      // ── Per-clip effect processing & alpha interpretation ──
+      const alphaMode = assetAlphaModes?.get(clip.assetId);
+      bitmap = await this.processClipBitmap(bitmap, clip, currentFrame, alphaMode);
 
       // Save context for transforms
       ctx.save();
 
-      // Apply intrinsic video transforms
+      // ── Apply blend mode (clip-level overrides track-level) ──
+      const blendMode: CompositeMode = clip.blendMode || track.blendMode || 'source-over';
+      ctx.globalCompositeOperation = blendMode as GlobalCompositeOperation;
+
+      // Apply intrinsic video transforms (opacity, scale, position, rotation)
       this.applyTransforms(ctx, clip.intrinsicVideo, bitmap.width, bitmap.height, outputWidth, outputHeight);
 
       // Draw with letterboxing

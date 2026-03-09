@@ -1,6 +1,8 @@
 // ─── Color Grading Engine ─────────────────────────────────────────────────────
 // Node-graph based color pipeline with primary corrections, curves, and stills.
 
+import { colorGradingPipeline } from './color/ColorGradingPipeline';
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 /** Supported color node types in the processing graph. */
@@ -378,23 +380,46 @@ export class ColorEngine {
     return chain;
   }
 
-  // ── Processing (Stub) ─────────────────────────────────────────────────
+  // ── Processing ─────────────────────────────────────────────────────────
 
   /**
-   * Process a frame through the node chain.
-   * Stub -- returns input unchanged in the demo build.
-   * @param imageData The source ImageData to process.
-   * @returns The processed ImageData.
+   * Process a frame through the node chain using the GPU pipeline (async).
+   * Falls back to CPU if WebGPU is unavailable.
+   */
+  async processFrameAsync(imageData: ImageData): Promise<ImageData> {
+    try {
+      const nodes = this.getAllNodes().filter((n) => n.enabled);
+      const connections = this.getConnections();
+      return await colorGradingPipeline.processFrame(imageData, nodes, connections);
+    } catch (err) {
+      console.error('[ColorEngine] processFrameAsync error:', err);
+      return imageData;
+    }
+  }
+
+  /**
+   * Synchronous CPU-only processing for immediate results.
+   * Uses the GPU pipeline's CPU fallback path.
    */
   processFrame(imageData: ImageData): ImageData {
     try {
-      const chain = this.getNodeChain().filter((n) => n.enabled);
-      void chain;
-      return imageData;
+      const nodes = this.getAllNodes().filter((n) => n.enabled);
+      const connections = this.getConnections();
+      // CPU path is synchronous within the pipeline
+      return (colorGradingPipeline as any).processFrameCPU(
+        imageData,
+        (colorGradingPipeline as any).topologicalSort(nodes, connections)
+          .filter((n: ColorNode) => n.enabled && n.type !== 'source' && n.type !== 'output'),
+      );
     } catch (err) {
       console.error('[ColorEngine] processFrame error:', err);
       return imageData;
     }
+  }
+
+  /** Initialize the GPU pipeline (call once at startup). */
+  async initGPU(): Promise<void> {
+    await colorGradingPipeline.init();
   }
 
   // ── Looks ──────────────────────────────────────────────────────────────

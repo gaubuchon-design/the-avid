@@ -13,6 +13,17 @@ export { shaderSource as filmGrainShader } from './film-grain';
 export { shaderSource as glowShader } from './glow';
 export { shaderSource as dropShadowShader } from './drop-shadow';
 export { shaderSource as letterboxShader } from './letterbox';
+export { shaderSource as lumaKeyShader } from './luma-key';
+export { shaderSource as curvesShader } from './curves';
+export { shaderSource as colorLookupShader } from './color-lookup';
+export { shaderSource as directionalBlurShader } from './directional-blur';
+export { shaderSource as radialBlurShader } from './radial-blur';
+export { shaderSource as lensDistortionShader } from './lens-distortion';
+export { shaderSource as turbulentDisplaceShader } from './turbulent-displace';
+export { shaderSource as noiseShader } from './noise-gen';
+export { shaderSource as mirrorShader } from './mirror';
+export { shaderSource as glitchShader } from './glitch';
+export { shaderSource as halftoneShader } from './halftone';
 
 // Blur is special — it has separate horizontal and vertical passes
 export { horizontalBlurSource, verticalBlurSource, shaderSource as blurShader } from './blur';
@@ -27,6 +38,17 @@ import { shaderSource as filmGrainShader } from './film-grain';
 import { shaderSource as glowShader } from './glow';
 import { shaderSource as dropShadowShader } from './drop-shadow';
 import { shaderSource as letterboxShader } from './letterbox';
+import { shaderSource as lumaKeyShader } from './luma-key';
+import { shaderSource as curvesShader } from './curves';
+import { shaderSource as colorLookupShader } from './color-lookup';
+import { shaderSource as directionalBlurShader } from './directional-blur';
+import { shaderSource as radialBlurShader } from './radial-blur';
+import { shaderSource as lensDistortionShader } from './lens-distortion';
+import { shaderSource as turbulentDisplaceShader } from './turbulent-displace';
+import { shaderSource as noiseShader } from './noise-gen';
+import { shaderSource as mirrorShader } from './mirror';
+import { shaderSource as glitchShader } from './glitch';
+import { shaderSource as halftoneShader } from './halftone';
 import { horizontalBlurSource, verticalBlurSource } from './blur';
 
 /**
@@ -46,4 +68,15 @@ export const SHADER_SOURCES: Record<string, string> = {
   'glow': glowShader,
   'drop-shadow': dropShadowShader,
   'letterbox': letterboxShader,
+  'luma-key': lumaKeyShader,
+  'curves': curvesShader,
+  'color-lookup': colorLookupShader,
+  'directional-blur': directionalBlurShader,
+  'radial-blur': radialBlurShader,
+  'lens-distortion': lensDistortionShader,
+  'turbulent-displace': turbulentDisplaceShader,
+  'noise': noiseShader,
+  'mirror': mirrorShader,
+  'glitch': glitchShader,
+  'halftone': halftoneShader,
 };
