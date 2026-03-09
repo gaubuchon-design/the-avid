@@ -22,6 +22,10 @@ export function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Prevent duplicate submissions
+    if (isLoading) return;
+
     setLocalError(null);
     clearError();
 
@@ -32,13 +36,24 @@ export function LoginPage() {
       return;
     }
 
+    if (email.trim() && !email.includes('@')) {
+      setLocalError('Please enter a valid email address');
+      emailRef.current?.focus();
+      return;
+    }
+
     if (!password) {
       setLocalError('Password is required');
       return;
     }
 
+    if (password.length < 6) {
+      setLocalError('Password must be at least 6 characters');
+      return;
+    }
+
     try {
-      await login(email, password);
+      await login(email.trim(), password);
       navigate('/');
     } catch {
       // Error is already set in the store

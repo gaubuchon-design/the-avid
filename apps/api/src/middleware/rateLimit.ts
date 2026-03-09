@@ -1,4 +1,5 @@
 import rateLimit from 'express-rate-limit';
+import { logger } from '../utils/logger';
 import { config } from '../config';
 
 // ─── Rate Limiter Factory ────────────────────────────────────────────────────
@@ -8,6 +9,8 @@ function createLimiter(opts: {
   max: number;
   message: string;
   code?: string;
+  /** If true, 5xx responses won't count towards the rate limit */
+  skipFailedRequests?: boolean;
   keyGenerator?: (req: any) => string;
 }) {
   return rateLimit({
@@ -15,11 +18,23 @@ function createLimiter(opts: {
     max: opts.max,
     standardHeaders: true,
     legacyHeaders: false,
+    skipFailedRequests: opts.skipFailedRequests ?? false,
     message: {
       error: {
         message: opts.message,
         code: opts.code ?? 'RATE_LIMITED',
       },
+    },
+    handler: (_req, res, _next, options) => {
+      const retryAfterSeconds = Math.ceil(opts.windowMs / 1000);
+      res.setHeader('Retry-After', String(retryAfterSeconds));
+      res.status(429).json(options.message);
+      logger.warn('Rate limit exceeded', {
+        code: opts.code ?? 'RATE_LIMITED',
+        ip: _req.ip,
+        path: _req.path,
+        userId: (_req as any).user?.id,
+      });
     },
     keyGenerator:
       opts.keyGenerator ??
@@ -47,6 +62,7 @@ export const authLimiter = createLimiter({
   max: 20,
   message: 'Too many authentication attempts, please try again later',
   code: 'AUTH_RATE_LIMITED',
+  skipFailedRequests: true,
   keyGenerator: (req) =>
     req.ip ?? req.headers['x-forwarded-for']?.toString() ?? 'unknown',
 });

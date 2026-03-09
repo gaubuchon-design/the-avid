@@ -81,3 +81,11 @@ export function requestLogger() {
     next();
   };
 }
+
+/**
+ * Create a child logger with additional context fields.
+ * Useful for per-request or per-service logging.
+ */
+export function createChildLogger(meta: Record<string, unknown>) {
+  return logger.child(meta);
+}

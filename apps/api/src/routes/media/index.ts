@@ -57,9 +57,9 @@ router.post(
   validateAll({ params: projectIdParam, body: schemas.createBin }),
   async (req: Request, res: Response) => {
     // If parentId is provided, verify it belongs to this project
-    if (req.body.parentId) {
+    if (req.body['parentId']) {
       const parent = await db.bin.findFirst({
-        where: { id: req.body.parentId, projectId: req.params['projectId']! },
+        where: { id: req.body['parentId'], projectId: req.params['projectId']! },
       });
       if (!parent) throw new NotFoundError('Parent bin');
     }

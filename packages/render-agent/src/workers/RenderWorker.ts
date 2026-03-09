@@ -16,8 +16,10 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { WorkerJob } from '../index.js';
+import { getAvailableDiskSpace } from '../capabilities.js';
 
 /** FFmpeg progress data parsed from stderr output. */
 export interface RenderProgress {
@@ -55,6 +57,14 @@ export interface RenderWorkerConfig {
   readonly retryMaxDelayMs: number;
   /** Timeout in ms for the entire render process. 0 = no limit. Default: 0 */
   readonly timeoutMs: number;
+  /** Minimum free memory in MB required to start a render. Default: 256 */
+  readonly minFreeMemoryMB: number;
+  /** Minimum free disk space in bytes required to start a render. Default: 500MB */
+  readonly minFreeDiskBytes: number;
+  /** Interval in ms for checking memory during render. Default: 5000 */
+  readonly memoryCheckIntervalMs: number;
+  /** Maximum memory usage percentage before aborting render. Default: 95 */
+  readonly maxMemoryPercent: number;
 }
 
 const DEFAULT_RENDER_CONFIG: RenderWorkerConfig = {
@@ -62,6 +72,10 @@ const DEFAULT_RENDER_CONFIG: RenderWorkerConfig = {
   retryBaseDelayMs: 1000,
   retryMaxDelayMs: 10_000,
   timeoutMs: 0,
+  minFreeMemoryMB: 256,
+  minFreeDiskBytes: 500 * 1024 * 1024, // 500 MB
+  memoryCheckIntervalMs: 5000,
+  maxMemoryPercent: 95,
 };
 
 /** Map of codec names to their FFmpeg configuration. */
@@ -160,9 +174,122 @@ export class RenderWorker {
   private startTime = 0;
   private currentOutputPath: string | null = null;
   private config: RenderWorkerConfig;
+  private memoryCheckTimer: ReturnType<typeof setInterval> | null = null;
+  /** Tracks all temp files created during rendering so they can be cleaned up on any exit path. */
+  private tempFiles: Set<string> = new Set();
 
   constructor(config: Partial<RenderWorkerConfig> = {}) {
     this.config = { ...DEFAULT_RENDER_CONFIG, ...config };
+  }
+
+  // ── Resource Checks ──────────────────────────────────────────────
+
+  /**
+   * Check that system has sufficient resources before starting a render.
+   * @throws {Error} if memory or disk space is below configured thresholds.
+   */
+  private async checkResourcesBeforeRender(outputDir: string): Promise<void> {
+    // Memory check
+    const freeMemMB = Math.round(os.freemem() / (1024 * 1024));
+    if (freeMemMB < this.config.minFreeMemoryMB) {
+      throw new Error(
+        `Insufficient memory to start render: ${freeMemMB}MB free, ` +
+        `minimum ${this.config.minFreeMemoryMB}MB required`,
+      );
+    }
+
+    // Disk space check
+    try {
+      const freeDiskBytes = await getAvailableDiskSpace(outputDir);
+      if (freeDiskBytes > 0 && freeDiskBytes < this.config.minFreeDiskBytes) {
+        const freeMB = Math.round(freeDiskBytes / (1024 * 1024));
+        const requiredMB = Math.round(this.config.minFreeDiskBytes / (1024 * 1024));
+        throw new Error(
+          `Insufficient disk space to start render: ${freeMB}MB free ` +
+          `at ${outputDir}, minimum ${requiredMB}MB required`,
+        );
+      }
+    } catch (err) {
+      // If disk space check itself fails (not an insufficient space error), log and continue
+      if (err instanceof Error && err.message.includes('Insufficient disk space')) {
+        throw err;
+      }
+      console.warn(`[RenderWorker] Disk space check failed, continuing: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * Start monitoring memory usage during render.
+   * Cancels the render if memory exceeds the configured threshold.
+   */
+  private startMemoryMonitor(): void {
+    if (this.config.memoryCheckIntervalMs <= 0) return;
+
+    this.memoryCheckTimer = setInterval(() => {
+      const totalMem = os.totalmem();
+      const freeMem = os.freemem();
+      const usedPercent = Math.round(((totalMem - freeMem) / totalMem) * 100);
+
+      if (usedPercent >= this.config.maxMemoryPercent) {
+        console.error(
+          `[RenderWorker] Memory usage critical: ${usedPercent}% used ` +
+          `(threshold: ${this.config.maxMemoryPercent}%). Cancelling render.`,
+        );
+        this.cancel();
+      }
+    }, this.config.memoryCheckIntervalMs);
+
+    // Don't keep the process alive for memory checks
+    if (typeof this.memoryCheckTimer === 'object' && 'unref' in this.memoryCheckTimer) {
+      this.memoryCheckTimer.unref();
+    }
+  }
+
+  /** Stop the memory monitoring timer. */
+  private stopMemoryMonitor(): void {
+    if (this.memoryCheckTimer) {
+      clearInterval(this.memoryCheckTimer);
+      this.memoryCheckTimer = null;
+    }
+  }
+
+  /** Track a temp file for cleanup. */
+  private trackTempFile(filePath: string): void {
+    this.tempFiles.add(filePath);
+  }
+
+  /** Remove a tracked temp file. */
+  private untrackTempFile(filePath: string): void {
+    this.tempFiles.delete(filePath);
+  }
+
+  /** Clean up all tracked temp files. Called on error paths and process exit. */
+  private cleanupAllTempFiles(): void {
+    for (const filePath of this.tempFiles) {
+      this.cleanupTempFile(filePath);
+    }
+    this.tempFiles.clear();
+  }
+
+  /**
+   * Validate the output file after render completes.
+   * Checks that the file exists and has a non-zero size (is not corrupt/truncated).
+   * @throws {Error} if the output file is missing or has zero size.
+   */
+  private validateOutputFile(outputPath: string): void {
+    try {
+      const stats = fs.statSync(outputPath);
+      if (stats.size === 0) {
+        throw new Error(`Render produced empty output file: ${outputPath}`);
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('empty output file')) {
+        // Clean up the corrupt/empty file
+        this.cleanupTempFile(outputPath);
+        throw err;
+      }
+      throw new Error(`Render output file not found or inaccessible: ${outputPath}`);
+    }
   }
 
   /**
@@ -227,6 +354,11 @@ export class RenderWorker {
       );
 
     this.currentOutputPath = outputPath;
+    this.trackTempFile(outputPath);
+
+    // ── Pre-flight resource checks ──────────────────────────────
+    const outputDir = path.dirname(outputPath);
+    await this.checkResourcesBeforeRender(outputDir);
 
     // Calculate total frames for progress
     const totalFrames = (job.endFrame != null && job.startFrame != null)
@@ -241,65 +373,120 @@ export class RenderWorker {
     // ── Retry loop with exponential backoff ───────────────────────
     let lastError: Error | null = null;
 
-    for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
-      if (this.cancelled) {
-        this.cleanupTempFile(outputPath);
-        throw new Error('Render job cancelled');
-      }
+    // Start memory monitoring during render
+    this.startMemoryMonitor();
 
-      if (attempt > 0) {
-        // Exponential backoff
-        const delay = Math.min(
-          this.config.retryBaseDelayMs * Math.pow(2, attempt - 1),
-          this.config.retryMaxDelayMs,
-        );
-        const jitter = delay * 0.2 * Math.random();
-        await this.sleep(Math.round(delay + jitter));
-        console.log(`[RenderWorker] Retry ${attempt}/${this.config.maxRetries} for job ${job.id}`);
-      }
-
-      try {
-        const result = await this.executeFFmpeg(args, totalFrames, onProgress);
-        this.currentOutputPath = null;
-        return result ?? outputPath;
-      } catch (err) {
-        lastError = err instanceof Error ? err : new Error(String(err));
-
-        // Don't retry on cancellation or abort
-        if (this.cancelled || lastError.message.includes('cancelled')) {
+    try {
+      for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
+        if (this.cancelled) {
           this.cleanupTempFile(outputPath);
-          throw lastError;
+          this.untrackTempFile(outputPath);
+          throw new Error('Render job cancelled');
         }
 
-        // Don't retry on validation errors
-        if (lastError.message.includes('Failed to spawn')) {
-          this.cleanupTempFile(outputPath);
-          throw lastError;
+        if (attempt > 0) {
+          // Exponential backoff
+          const delay = Math.min(
+            this.config.retryBaseDelayMs * Math.pow(2, attempt - 1),
+            this.config.retryMaxDelayMs,
+          );
+          const jitter = delay * 0.2 * Math.random();
+          await this.sleep(Math.round(delay + jitter));
+          console.log(`[RenderWorker] Retry ${attempt}/${this.config.maxRetries} for job ${job.id}`);
+
+          // Check resources again before retry
+          try {
+            await this.checkResourcesBeforeRender(outputDir);
+          } catch (resourceErr) {
+            lastError = resourceErr instanceof Error ? resourceErr : new Error(String(resourceErr));
+            console.error(`[RenderWorker] Resource check failed on retry: ${lastError.message}`);
+            // Don't retry if resources are exhausted
+            break;
+          }
         }
 
-        console.error(`[RenderWorker] Attempt ${attempt + 1} failed: ${lastError.message}`);
+        try {
+          const result = await this.executeFFmpeg(args, totalFrames, onProgress);
+          const finalPath = result ?? outputPath;
+
+          // Validate the output file is not corrupt/truncated
+          this.validateOutputFile(finalPath);
+
+          this.currentOutputPath = null;
+          this.untrackTempFile(outputPath);
+          return finalPath;
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error(String(err));
+
+          // Don't retry on cancellation or abort
+          if (this.cancelled || lastError.message.includes('cancelled')) {
+            this.cleanupTempFile(outputPath);
+            this.untrackTempFile(outputPath);
+            throw lastError;
+          }
+
+          // Don't retry on validation errors
+          if (lastError.message.includes('Failed to spawn')) {
+            this.cleanupTempFile(outputPath);
+            this.untrackTempFile(outputPath);
+            throw lastError;
+          }
+
+          // Detect OOM kills (exit code 137 on Linux)
+          if (lastError.message.includes('code 137') || lastError.message.includes('SIGKILL')) {
+            console.error(`[RenderWorker] Process was OOM-killed for job ${job.id}`);
+            this.cleanupTempFile(outputPath);
+            this.untrackTempFile(outputPath);
+            throw new Error(`Render process killed (likely OOM): ${lastError.message}`);
+          }
+
+          // Detect disk full errors
+          if (
+            lastError.message.includes('No space left on device') ||
+            lastError.message.includes('ENOSPC')
+          ) {
+            console.error(`[RenderWorker] Disk full during render for job ${job.id}`);
+            this.cleanupTempFile(outputPath);
+            this.untrackTempFile(outputPath);
+            throw new Error(`Disk full during render: ${lastError.message}`);
+          }
+
+          console.error(`[RenderWorker] Attempt ${attempt + 1} failed: ${lastError.message}`);
+        }
       }
+
+      // All retries exhausted
+      this.cleanupTempFile(outputPath);
+      this.untrackTempFile(outputPath);
+      throw lastError ?? new Error('Render failed after all retries');
+    } finally {
+      this.stopMemoryMonitor();
     }
-
-    // All retries exhausted
-    this.cleanupTempFile(outputPath);
-    throw lastError ?? new Error('Render failed after all retries');
   }
 
-  /** Cancel the currently running render process. */
+  /** Cancel the currently running render process and clean up resources. */
   cancel(): void {
     this.cancelled = true;
+    this.stopMemoryMonitor();
+
     if (this.childProcess) {
       this.childProcess.kill('SIGTERM');
       const pid = this.childProcess.pid;
+      const cp = this.childProcess;
       setTimeout(() => {
         try {
           if (pid) process.kill(pid, 0);
-          this.childProcess?.kill('SIGKILL');
+          cp.kill('SIGKILL');
         } catch {
           // Already dead
         }
       }, 5000);
+    }
+
+    // Clean up any partial output
+    if (this.currentOutputPath) {
+      this.cleanupTempFile(this.currentOutputPath);
+      this.untrackTempFile(this.currentOutputPath);
     }
   }
 

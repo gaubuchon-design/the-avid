@@ -9,7 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { config } from './config';
 import { logger, requestLogger } from './utils/logger';
 import { connectDb, disconnectDb, checkDbHealth } from './db/client';
-import { errorHandler, notFoundHandler } from './middleware/errorHandler';
+import { errorHandler, notFoundHandler, requireJsonContentType, requestDuration } from './middleware/errorHandler';
 import { initWebSocket } from './websocket';
 import exportRoutes from './routes/export';
 
@@ -68,6 +68,8 @@ app.use(cors({
 }));
 
 app.use(compression());
+app.use(requestDuration);
+app.use(requireJsonContentType);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -99,6 +101,8 @@ const uploadLimiter = rateLimit({
 });
 
 // ─── Health Check ──────────────────────────────────────────────────────────────
+
+/** Liveness probe -- always responds if the process is running */
 app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
@@ -113,21 +117,45 @@ app.get('/health', (_req, res) => {
   });
 });
 
+/** Database-specific health check */
 app.get('/health/db', async (_req, res) => {
-  const dbHealth = await checkDbHealth();
-  if (dbHealth.ok) {
-    res.json({ status: 'ok', db: 'connected', latencyMs: dbHealth.latencyMs });
-  } else {
-    res.status(503).json({ status: 'error', db: 'disconnected', latencyMs: dbHealth.latencyMs });
+  try {
+    const dbHealth = await checkDbHealth();
+    if (dbHealth.ok) {
+      res.json({ status: 'ok', db: 'connected', latencyMs: dbHealth.latencyMs });
+    } else {
+      res.status(503).json({ status: 'error', db: 'disconnected', latencyMs: dbHealth.latencyMs });
+    }
+  } catch (err) {
+    logger.error('Health check /health/db failed', { error: err instanceof Error ? err.message : String(err) });
+    res.status(503).json({ status: 'error', db: 'error', latencyMs: -1 });
   }
 });
 
+/** Readiness probe -- checks all critical dependencies */
 app.get('/health/ready', async (_req, res) => {
-  const dbHealth = await checkDbHealth();
-  if (dbHealth.ok) {
-    res.json({ status: 'ready', latencyMs: dbHealth.latencyMs });
+  const checks: Record<string, { ok: boolean; latencyMs?: number; error?: string }> = {};
+
+  // Database check
+  try {
+    const dbHealth = await checkDbHealth();
+    checks['database'] = { ok: dbHealth.ok, latencyMs: dbHealth.latencyMs };
+  } catch (err) {
+    checks['database'] = { ok: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+
+  const allOk = Object.values(checks).every((c) => c.ok);
+
+  const payload = {
+    status: allOk ? 'ready' : 'not_ready',
+    timestamp: new Date().toISOString(),
+    checks,
+  };
+
+  if (allOk) {
+    res.json(payload);
   } else {
-    res.status(503).json({ status: 'not_ready', latencyMs: dbHealth.latencyMs });
+    res.status(503).json(payload);
   }
 });
 
@@ -230,11 +258,17 @@ const shutdown = async (signal: string) => {
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT',  () => shutdown('SIGINT'));
 process.on('uncaughtException', (err) => {
-  logger.error('Uncaught exception', { message: err.message, stack: err.stack });
-  process.exit(1);
+  logger.error('Uncaught exception', { message: err.message, stack: err.stack, name: err.name });
+  // Only exit for non-operational errors; operational errors should be handled by middleware
+  if (!(err as any).isOperational) {
+    process.exit(1);
+  }
 });
 process.on('unhandledRejection', (reason) => {
-  logger.error('Unhandled rejection', { reason });
+  const msg = reason instanceof Error
+    ? { message: reason.message, stack: reason.stack, name: reason.name }
+    : { reason: String(reason) };
+  logger.error('Unhandled rejection', msg);
 });
 
 start();

@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { logger } from '../utils/logger';
 import { config } from '../config';
+import { DatabaseConnectionError } from '../utils/errors';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -54,15 +55,32 @@ db.$on('error' as any, (e: any) => {
 });
 
 /**
- * Connect to the database. Should be called during server startup.
+ * Connect to the database with retry logic. Should be called during server startup.
  */
-export async function connectDb(): Promise<void> {
-  try {
-    await db.$connect();
-    logger.info('Database connected');
-  } catch (err: any) {
-    logger.error('Database connection failed', { error: err.message });
-    throw err;
+export async function connectDb(maxRetries = 3, delayMs = 2000): Promise<void> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await db.$connect();
+      logger.info('Database connected', { attempt });
+      return;
+    } catch (err: any) {
+      logger.error(`Database connection failed (attempt ${attempt}/${maxRetries})`, {
+        error: err.message,
+        attempt,
+        maxRetries,
+      });
+
+      if (attempt === maxRetries) {
+        throw new DatabaseConnectionError(
+          `Failed to connect to database after ${maxRetries} attempts: ${err.message}`
+        );
+      }
+
+      // Wait before retrying with exponential backoff
+      const waitMs = delayMs * Math.pow(2, attempt - 1);
+      logger.info(`Retrying database connection in ${waitMs}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
   }
 }
 

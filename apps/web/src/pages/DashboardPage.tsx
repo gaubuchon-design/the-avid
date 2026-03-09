@@ -30,7 +30,9 @@ function iconForProject(icon: string): string {
 }
 
 function formatDuration(seconds: number): string {
-  const wholeSeconds = Math.max(0, Math.floor(seconds));
+  // Defensive: handle NaN, Infinity, negative values
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+  const wholeSeconds = Math.floor(seconds);
   const hours = Math.floor(wholeSeconds / 3600);
   const minutes = Math.floor((wholeSeconds % 3600) / 60);
   const secs = wholeSeconds % 60;
@@ -41,7 +43,12 @@ function formatDuration(seconds: number): string {
 }
 
 function formatRelativeDate(isoDate: string): string {
-  const diffMs = Date.now() - new Date(isoDate).getTime();
+  // Defensive: handle invalid/missing dates
+  if (!isoDate) return 'Unknown';
+  const parsedTime = new Date(isoDate).getTime();
+  if (!Number.isFinite(parsedTime)) return 'Unknown';
+
+  const diffMs = Date.now() - parsedTime;
   const diffMinutes = Math.max(0, Math.floor(diffMs / 60000));
   if (diffMinutes < 60) {
     return `${Math.max(diffMinutes, 1)}m ago`;
@@ -113,9 +120,10 @@ export function DashboardPage() {
   }, [refreshProjects]);
 
   const filteredProjects = projects.filter((project) => {
+    const projectTags = project.tags ?? [];
     const matchesSearch = !search
-      || project.name.toLowerCase().includes(search.toLowerCase())
-      || project.tags.some((tag) => tag.toLowerCase().includes(search.toLowerCase()));
+      || (project.name ?? '').toLowerCase().includes(search.toLowerCase())
+      || projectTags.some((tag) => tag.toLowerCase().includes(search.toLowerCase()));
 
     if (!matchesSearch) {
       return false;
@@ -144,11 +152,24 @@ export function DashboardPage() {
     time: formatRelativeDate(project.updatedAt),
   }));
 
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+
   const createAndOpenProject = async (template: ProjectTemplate, workspace?: string) => {
-    const project = await createProjectInRepository({ template });
-    await refreshProjects();
-    const ws = workspace ? `?workspace=${workspace}` : '';
-    navigate(`/editor/${project.id}${ws}`);
+    // Prevent duplicate creation when rapidly clicking
+    if (isCreating) return;
+    setIsCreating(true);
+    setCreateError(null);
+    try {
+      const project = await createProjectInRepository({ template });
+      await refreshProjects();
+      const ws = workspace ? `?workspace=${workspace}` : '';
+      navigate(`/editor/${project.id}${ws}`);
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Failed to create project');
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   return (
@@ -373,7 +394,7 @@ export function DashboardPage() {
                       {formatDuration(project.durationSeconds)}
                     </div>
                     <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 3, background: 'rgba(0,0,0,0.4)' }}>
-                      <div style={{ height: '100%', width: `${project.progress}%`, background: project.color, opacity: 0.8 }} />
+                      <div style={{ height: '100%', width: `${Math.max(0, Math.min(100, project.progress ?? 0))}%`, background: project.color ?? 'var(--brand)', opacity: 0.8 }} />
                     </div>
                   </div>
                   <div className="project-card-body">
@@ -392,7 +413,7 @@ export function DashboardPage() {
                       </span>
                     </div>
                     <div className="project-card-tags">
-                      {project.tags.map((tag) => <span key={tag} className="project-tag">{tag}</span>)}
+                      {(project.tags ?? []).map((tag) => <span key={tag} className="project-tag">{tag}</span>)}
                     </div>
                   </div>
                 </div>
@@ -449,6 +470,31 @@ export function DashboardPage() {
           </div>
         </div>
       </div>
+      {/* Project creation error toast */}
+      {createError && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          style={{
+            position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+            zIndex: 5000, padding: '10px 20px', borderRadius: 'var(--radius-md)',
+            background: 'rgba(239, 68, 68, 0.95)', color: '#fff',
+            fontSize: 12, fontWeight: 500, boxShadow: 'var(--shadow-lg)',
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}
+        >
+          <span>{createError}</span>
+          <button
+            onClick={() => setCreateError(null)}
+            aria-label="Dismiss error"
+            style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      )}
       {showNewProjectDialog && <NewProjectDialog />}
     </div>
   );

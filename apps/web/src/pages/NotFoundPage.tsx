@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 export function NotFoundPage() {
@@ -13,6 +13,19 @@ export function NotFoundPage() {
     };
   }, []);
 
+  const handleGoHome = useCallback(() => {
+    navigate('/');
+  }, [navigate]);
+
+  const handleGoBack = useCallback(() => {
+    // Safely handle browser back -- if there's no history, go home
+    if (window.history.length > 1) {
+      navigate(-1);
+    } else {
+      navigate('/');
+    }
+  }, [navigate]);
+
   return (
     <div className="not-found-page" role="main" aria-label="Page not found">
       <div className="not-found-content">
@@ -24,14 +37,14 @@ export function NotFoundPage() {
         <div className="not-found-actions">
           <button
             className="btn btn-primary btn-lg"
-            onClick={() => navigate('/')}
+            onClick={handleGoHome}
             aria-label="Navigate to dashboard"
           >
             Go to Dashboard
           </button>
           <button
             className="btn btn-ghost btn-lg"
-            onClick={() => navigate(-1)}
+            onClick={handleGoBack}
             aria-label="Go back to previous page"
           >
             Go Back

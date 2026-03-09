@@ -5,6 +5,15 @@ import { db } from '../db/client';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { NotFoundError, MediaProcessingError } from '../utils/errors';
+import { CircuitBreaker } from '../utils/circuitBreaker';
+
+/** Circuit breaker for S3 operations */
+const s3Breaker = new CircuitBreaker({
+  name: 's3',
+  failureThreshold: 5,
+  resetTimeout: 30_000,
+  callTimeout: 15_000,
+});
 
 interface MediaAssetRecord {
   id: string;
@@ -135,14 +144,14 @@ class MediaService {
 
     if (config.aws.accessKeyId) {
       try {
-        await s3
-          .upload({
+        await s3Breaker.execute(() =>
+          s3.upload({
             Bucket: config.aws.buckets.media,
             Key: s3Key,
             Body: file.buffer,
             ContentType: file.mimetype,
-          })
-          .promise();
+          }).promise()
+        );
       } catch (err: any) {
         logger.error('S3 upload failed', { s3Key, error: err.message });
         throw new MediaProcessingError('Failed to upload file to storage');
@@ -252,13 +261,15 @@ class MediaService {
 
     if (asset.waveformS3Key) {
       try {
-        const obj = await s3.getObject({
-          Bucket: config.aws.buckets.media,
-          Key: asset.waveformS3Key,
-        }).promise();
+        const obj = await s3Breaker.execute(() =>
+          s3.getObject({
+            Bucket: config.aws.buckets.media,
+            Key: asset.waveformS3Key!,
+          }).promise()
+        );
         return JSON.parse(obj.Body?.toString() ?? '[]');
       } catch (e: any) {
-        logger.warn('Waveform fetch failed, returning placeholder', { assetId, error: e.message });
+        logger.warn('Waveform fetch failed, returning fallback data', { assetId, error: e.message });
       }
     }
 
@@ -280,13 +291,15 @@ class MediaService {
 
     if (config.aws.accessKeyId && keys.length) {
       try {
-        await s3.deleteObjects({
-          Bucket: config.aws.buckets.media,
-          Delete: { Objects: keys.map((k) => ({ Key: k })) },
-        }).promise();
+        await s3Breaker.execute(() =>
+          s3.deleteObjects({
+            Bucket: config.aws.buckets.media,
+            Delete: { Objects: keys.map((k) => ({ Key: k })) },
+          }).promise()
+        );
         logger.info('S3 objects deleted', { assetId, keyCount: keys.length });
       } catch (err: any) {
-        // Log but don't fail the DB delete — S3 cleanup can be retried
+        // Log but don't fail the DB delete -- S3 cleanup can be retried
         logger.error('Failed to delete S3 objects', { assetId, error: err.message });
       }
     }

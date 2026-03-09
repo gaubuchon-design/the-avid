@@ -22,6 +22,10 @@ export function RegisterPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Prevent duplicate submissions
+    if (isLoading) return;
+
     setLocalError(null);
     clearError();
 
@@ -30,17 +34,34 @@ export function RegisterPage() {
       nameRef.current?.focus();
       return;
     }
+
+    if (!email.trim()) {
+      setLocalError('Email is required');
+      return;
+    }
+
+    if (!email.includes('@') || !email.includes('.')) {
+      setLocalError('Please enter a valid email address');
+      return;
+    }
+
+    if (!password) {
+      setLocalError('Password is required');
+      return;
+    }
+
     if (password.length < 6) {
       setLocalError('Password must be at least 6 characters');
       return;
     }
+
     if (password !== confirmPassword) {
       setLocalError('Passwords do not match');
       return;
     }
 
     try {
-      await register(email, name.trim(), password);
+      await register(email.trim(), name.trim(), password);
       navigate('/');
     } catch {
       // Error is already set in the store

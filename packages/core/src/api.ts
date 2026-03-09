@@ -78,9 +78,19 @@ export class ApiClient {
 
   // ─── Auth ──────────────────────────────────────────────────────────────────
 
+  /**
+   * Authenticate a user with email and password.
+   *
+   * @param email - User email address. Must be a non-empty string.
+   * @param password - User password. Must be a non-empty string.
+   * @throws {Error} if email or password is empty or not a string.
+   */
   async login(email: string, password: string): Promise<{ user: User; token: string }> {
-    if (!email || !password) {
-      throw new Error('login() requires non-empty email and password');
+    if (!email || typeof email !== 'string') {
+      throw new Error('login() requires a non-empty string email');
+    }
+    if (!password || typeof password !== 'string') {
+      throw new Error('login() requires a non-empty string password');
     }
     return this.request('/auth/login', {
       method: 'POST',
@@ -108,7 +118,16 @@ export class ApiClient {
     return this.request(`/projects/${encodeURIComponent(id)}`);
   }
 
+  /**
+   * Create a new project.
+   *
+   * @param data - Partial project data for the new project.
+   * @throws {Error} if data is null or not an object.
+   */
   async createProject(data: Partial<Project>): Promise<Project> {
+    if (!data || typeof data !== 'object') {
+      throw new Error('createProject() requires a non-null project data object');
+    }
     return this.request('/projects', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -135,8 +154,20 @@ export class ApiClient {
     return this.request(`/projects/${encodeURIComponent(projectId)}/assets`);
   }
 
+  /**
+   * Upload a media asset to a project.
+   *
+   * @param projectId - Project ID. Must be a non-empty string.
+   * @param file - File object to upload.
+   * @throws {Error} if projectId is empty or file is null.
+   */
   async uploadAsset(projectId: string, file: File): Promise<MediaAsset> {
-    if (!projectId) throw new Error('uploadAsset() requires a non-empty projectId');
+    if (!projectId || typeof projectId !== 'string') {
+      throw new Error('uploadAsset() requires a non-empty string projectId');
+    }
+    if (!file) {
+      throw new Error('uploadAsset() requires a non-null file');
+    }
     const formData = new FormData();
     formData.append('file', file);
     return this.request(`/projects/${encodeURIComponent(projectId)}/assets`, {

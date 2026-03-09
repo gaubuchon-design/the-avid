@@ -322,6 +322,9 @@ export class RenderAgent extends EventEmitter {
   private disposed = false;
   private lastResourceUsage: ResourceUsage | null = null;
 
+  /** Signal handler references for cleanup. */
+  private signalHandlers: Map<string, () => void> = new Map();
+
   constructor(
     nodeInfo: Partial<RenderNodeInfo> = {},
     enabledWorkerTypes?: WorkerJobType[],
@@ -358,6 +361,47 @@ export class RenderAgent extends EventEmitter {
     this.jobQueue.setTimeoutHandler((jobId) => {
       this.router.cancelJob(jobId);
     });
+
+    // Register process signal handlers for graceful shutdown
+    this.registerSignalHandlers();
+  }
+
+  // ── Signal Handling ──────────────────────────────────────────────
+
+  /**
+   * Register process signal handlers (SIGTERM, SIGINT) for graceful shutdown.
+   * When a signal is received, the agent will drain its queue and disconnect.
+   */
+  private registerSignalHandlers(): void {
+    const handleShutdown = (signal: string) => {
+      console.log(`[RenderAgent] Received ${signal}, initiating graceful shutdown...`);
+      this.emit('shutdown', signal);
+
+      void this.disconnect().then(() => {
+        console.log('[RenderAgent] Graceful shutdown complete.');
+        this.removeSignalHandlers();
+      }).catch((err) => {
+        console.error('[RenderAgent] Error during shutdown:', (err as Error).message);
+        this.removeSignalHandlers();
+      });
+    };
+
+    const sigterm = () => handleShutdown('SIGTERM');
+    const sigint = () => handleShutdown('SIGINT');
+
+    this.signalHandlers.set('SIGTERM', sigterm);
+    this.signalHandlers.set('SIGINT', sigint);
+
+    process.on('SIGTERM', sigterm);
+    process.on('SIGINT', sigint);
+  }
+
+  /** Remove signal handlers to prevent leaks. */
+  private removeSignalHandlers(): void {
+    for (const [signal, handler] of this.signalHandlers) {
+      process.removeListener(signal, handler);
+    }
+    this.signalHandlers.clear();
   }
 
   // ── Public properties ─────────────────────────────────────────────
@@ -463,17 +507,28 @@ export class RenderAgent extends EventEmitter {
    * Gracefully disconnect from the coordinator.
    * Drains the job queue and waits for in-flight jobs to finish.
    */
+  /**
+   * Gracefully disconnect from the coordinator.
+   * Drains the job queue, cancels in-flight work, and cleans up resources.
+   * Also removes process signal handlers to prevent leaks.
+   */
   async disconnect(): Promise<void> {
     this.disposed = true;
     this.clearReconnectTimer();
     this.stopHealthChecker();
+    this.removeSignalHandlers();
 
     // Drain the queue (cancels pending, waits for running)
-    await this.jobQueue.drain(this.config.shutdownTimeoutMs);
+    try {
+      await this.jobQueue.drain(this.config.shutdownTimeoutMs);
+    } catch (err) {
+      console.error('[RenderAgent] Error draining job queue:', (err as Error).message);
+    }
     this.jobQueue.dispose();
 
     // Cancel any stragglers
     if (this.activeJobs.size > 0) {
+      console.log(`[RenderAgent] Force-cancelling ${this.activeJobs.size} active job(s)`);
       this.router.cancelAll();
     }
 
@@ -810,6 +865,28 @@ export class RenderAgent extends EventEmitter {
   }
 
   private async startJob(job: WorkerJob): Promise<void> {
+    // Pre-flight health check: ensure we have enough resources to run this job
+    try {
+      const health = await this.healthCheck();
+      if (!health.healthy) {
+        const reasons = health.warnings.join('; ');
+        console.warn(`[RenderAgent] Pre-flight health check failed for job ${job.id}: ${reasons}`);
+
+        // Re-queue the job for later instead of failing it
+        this.jobQueue.markFailed(job.id, `Pre-flight health check failed: ${reasons}`);
+        this.send({
+          type: 'job:retrying',
+          jobId: job.id,
+          error: `Pre-flight health check failed: ${reasons}`,
+        });
+        this.emit('job:retrying', job, `Health check failed: ${reasons}`);
+        return;
+      }
+    } catch (err) {
+      // If the health check itself throws, log and proceed cautiously
+      console.warn(`[RenderAgent] Pre-flight health check error: ${(err as Error).message}`);
+    }
+
     this.activeJobs.set(job.id, job);
     this.nodeInfo.status = 'busy';
     this.nodeInfo.currentJobId = job.id;
@@ -859,9 +936,19 @@ export class RenderAgent extends EventEmitter {
         });
         this.emit('job:cancelled', job);
       } else {
-        console.error(`[RenderAgent] Job ${job.id} failed:`, message);
+        // Categorize the error for better reporting
+        const isOOM = message.includes('OOM') || message.includes('code 137') || message.includes('SIGKILL');
+        const isDiskFull = message.includes('No space left') || message.includes('ENOSPC') || message.includes('Disk full');
 
-        // markFailed handles retry logic internally
+        if (isOOM) {
+          console.error(`[RenderAgent] Job ${job.id} OOM-killed:`, message);
+        } else if (isDiskFull) {
+          console.error(`[RenderAgent] Job ${job.id} failed - disk full:`, message);
+        } else {
+          console.error(`[RenderAgent] Job ${job.id} failed:`, message);
+        }
+
+        // markFailed handles retry logic internally (OOM and disk full are non-retryable)
         const retried = this.jobQueue.markFailed(job.id, message);
 
         if (retried) {
@@ -877,6 +964,7 @@ export class RenderAgent extends EventEmitter {
             type: 'job:failed',
             jobId: job.id,
             error: message,
+            errorCategory: isOOM ? 'oom' : isDiskFull ? 'disk_full' : 'unknown',
           });
           this.emit('job:failed', job, message);
         }

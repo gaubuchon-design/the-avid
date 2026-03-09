@@ -3,8 +3,17 @@ import { db } from '../db/client';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { AIServiceError } from '../utils/errors';
+import { CircuitBreaker } from '../utils/circuitBreaker';
 
 const openai = config.openai.apiKey ? new OpenAI({ apiKey: config.openai.apiKey }) : null;
+
+/** Circuit breaker for OpenAI API calls */
+const openaiBreaker = new CircuitBreaker({
+  name: 'openai',
+  failureThreshold: 3,
+  resetTimeout: 60_000, // 1 minute
+  callTimeout: 30_000,  // 30 seconds per call
+});
 
 interface QueuedAIJob {
   id: string;
@@ -46,6 +55,13 @@ class AIService {
    */
   isConfigured(): boolean {
     return openai !== null;
+  }
+
+  /**
+   * Get the circuit breaker state for the OpenAI service (useful for health checks).
+   */
+  getCircuitState() {
+    return openaiBreaker.getState();
   }
 
   private async processNext(): Promise<void> {
@@ -196,15 +212,17 @@ ${assets.map((a: { name: string; duration: number | null; transcript: string | n
 ${params['prompt'] ? `Additional direction: ${params['prompt']}` : ''}`;
 
     try {
-      const completion = await openai.chat.completions.create({
-        model: config.openai.assemblyModel,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        response_format: { type: 'json_object' },
-        max_tokens: 2000,
-      });
+      const completion = await openaiBreaker.execute(() =>
+        openai.chat.completions.create({
+          model: config.openai.assemblyModel,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          response_format: { type: 'json_object' },
+          max_tokens: 2000,
+        })
+      );
 
       const content = completion.choices[0]?.message?.content;
       if (!content) {

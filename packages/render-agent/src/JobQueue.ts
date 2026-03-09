@@ -203,14 +203,25 @@ export class JobQueue {
   /**
    * Add a job to the queue.
    *
-   * @param job - The worker job to enqueue.
+   * @param job - The worker job to enqueue. Must have a non-empty id.
    * @param options - Override per-job retry/timeout settings.
-   * @throws If the queue is full or draining.
+   * @throws {Error} If the queue is full, draining, or the job is invalid.
    */
   enqueue(
     job: WorkerJob,
     options?: { maxRetries?: number; maxDurationMs?: number },
   ): QueuedJob {
+    // Input validation
+    if (!job || typeof job !== 'object') {
+      throw new Error('enqueue() requires a valid job object');
+    }
+    if (!job.id || typeof job.id !== 'string') {
+      throw new Error('enqueue() requires a job with a non-empty string id');
+    }
+    if (!job.type) {
+      throw new Error(`enqueue() requires a job with a valid type, got: ${String(job.type)}`);
+    }
+
     if (this.draining) {
       throw new Error(
         `Job queue is draining. Cannot enqueue job ${job.id}.`,
@@ -220,6 +231,14 @@ export class JobQueue {
     if (this.pendingCount >= this.config.maxSize) {
       throw new Error(
         `Job queue is full (max ${this.config.maxSize}). Cannot enqueue job ${job.id}.`,
+      );
+    }
+
+    // Check for duplicate job IDs
+    const existingJob = this.queue.find((q) => q.job.id === job.id);
+    if (existingJob) {
+      throw new Error(
+        `Job ${job.id} is already in the queue (status: ${existingJob.status})`,
       );
     }
 
@@ -330,7 +349,10 @@ export class JobQueue {
 
   /**
    * Mark a job as failed and move it to history.
+   * Detects OOM kills, disk full errors, and other non-retryable failures.
    *
+   * @param jobId - The job ID that failed.
+   * @param error - Error message describing the failure.
    * @returns `true` if the job can be retried (was re-queued), `false` if moved to history.
    */
   markFailed(jobId: string, error: string): boolean {
@@ -339,8 +361,20 @@ export class JobQueue {
 
     this.clearJobTimeout(entry);
 
-    // Check if retries are available
-    if (entry.retryCount < entry.maxRetries) {
+    // Detect non-retryable failures
+    const isOOM = error.includes('OOM') || error.includes('code 137') || error.includes('SIGKILL');
+    const isDiskFull = error.includes('No space left on device') || error.includes('ENOSPC') || error.includes('Disk full');
+    const isNonRetryable = isOOM || isDiskFull;
+
+    if (isOOM) {
+      console.error(`[JobQueue] Job ${jobId} failed due to OOM kill -- not retrying`);
+    }
+    if (isDiskFull) {
+      console.error(`[JobQueue] Job ${jobId} failed due to disk full -- not retrying`);
+    }
+
+    // Check if retries are available and error is retryable
+    if (!isNonRetryable && entry.retryCount < entry.maxRetries) {
       entry.retryCount++;
       entry.status = 'queued';
       entry.startedAt = undefined;
@@ -348,10 +382,14 @@ export class JobQueue {
       return true;
     }
 
-    // Exhausted retries
+    // Exhausted retries or non-retryable failure
     entry.status = 'failed';
     entry.completedAt = isoNow();
-    entry.error = `Exhausted ${entry.maxRetries} retries. Last error: ${error}`;
+    if (isNonRetryable) {
+      entry.error = `Non-retryable failure: ${error}`;
+    } else {
+      entry.error = `Exhausted ${entry.maxRetries} retries. Last error: ${error}`;
+    }
     this.retriesExhaustedCount++;
     this.moveToHistory(jobId);
     this.checkDrainComplete();

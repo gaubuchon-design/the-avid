@@ -1,14 +1,18 @@
 // ─── Base Error ────────────────────────────────────────────────────────────────
 
 export class AppError extends Error {
+  public readonly isOperational: boolean;
+
   constructor(
     public override message: string,
     public statusCode: number = 500,
     public code?: string,
-    public details?: unknown
+    public details?: unknown,
+    isOperational = true,
   ) {
     super(message);
     this.name = this.constructor.name;
+    this.isOperational = isOperational;
     Error.captureStackTrace(this, this.constructor);
   }
 
@@ -68,8 +72,11 @@ export class UnprocessableError extends AppError {
 }
 
 export class TooManyRequestsError extends AppError {
+  public readonly retryAfterSeconds?: number;
+
   constructor(message = 'Rate limit exceeded', retryAfterSeconds?: number) {
     super(message, 429, 'RATE_LIMITED', retryAfterSeconds ? { retryAfter: retryAfterSeconds } : undefined);
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -84,9 +91,38 @@ export class InsufficientTokensError extends AppError {
   }
 }
 
+export class PayloadTooLargeError extends AppError {
+  constructor(message = 'Request payload too large', maxSizeBytes?: number) {
+    super(message, 413, 'PAYLOAD_TOO_LARGE', maxSizeBytes ? { maxSizeBytes } : undefined);
+  }
+}
+
+export class UnsupportedMediaTypeError extends AppError {
+  constructor(message = 'Unsupported media type') {
+    super(message, 415, 'UNSUPPORTED_MEDIA_TYPE');
+  }
+}
+
+export class InternalServerError extends AppError {
+  constructor(message = 'Internal server error', details?: unknown) {
+    super(message, 500, 'INTERNAL_ERROR', details, false);
+  }
+}
+
 export class MediaProcessingError extends AppError {
   constructor(message: string, details?: unknown) {
     super(message, 500, 'MEDIA_PROCESSING_ERROR', details);
+  }
+}
+
+export class ExternalServiceError extends AppError {
+  constructor(service: string, message?: string) {
+    super(
+      message ?? `External service "${service}" is unavailable`,
+      502,
+      'EXTERNAL_SERVICE_ERROR',
+      { service }
+    );
   }
 }
 
@@ -102,14 +138,9 @@ export class ServiceUnavailableError extends AppError {
   }
 }
 
-export class ExternalServiceError extends AppError {
-  constructor(service: string, message?: string) {
-    super(
-      message ?? `External service "${service}" is unavailable`,
-      502,
-      'EXTERNAL_SERVICE_ERROR',
-      { service }
-    );
+export class DatabaseConnectionError extends AppError {
+  constructor(message = 'Database connection failed') {
+    super(message, 503, 'DATABASE_CONNECTION_ERROR');
   }
 }
 
@@ -130,5 +161,26 @@ export function assertFound<T>(value: T | null | undefined, resource = 'Resource
 export function assertValid(condition: boolean, message: string, details?: unknown): asserts condition {
   if (!condition) {
     throw new BadRequestError(message, details);
+  }
+}
+
+// ─── Prisma error helpers ──────────────────────────────────────────────────────
+
+/**
+ * Map a Prisma error code to an appropriate AppError.
+ * Returns null if the error code is not recognized.
+ */
+export function mapPrismaError(code: string, meta?: { target?: unknown; cause?: string }): AppError | null {
+  switch (code) {
+    case 'P2002':
+      return new ConflictError('Resource already exists', { fields: meta?.target });
+    case 'P2003':
+      return new BadRequestError('Related resource not found', { fields: meta?.target });
+    case 'P2014':
+      return new BadRequestError('Invalid relation: the change would violate a required relation', { cause: meta?.cause });
+    case 'P2025':
+      return new NotFoundError('Resource');
+    default:
+      return null;
   }
 }

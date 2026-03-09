@@ -9,7 +9,8 @@ import { usePlayerStore } from '../store/player.store';
 import { useDebounce } from '../hooks/useDebounce';
 
 function formatDuration(sec: number): string {
-  if (!sec || sec <= 0) return '--:--:--:--';
+  // Defensive: handle NaN, Infinity, negative, or zero
+  if (!Number.isFinite(sec) || sec <= 0) return '--:--:--:--';
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = Math.floor(sec % 60);
@@ -18,7 +19,7 @@ function formatDuration(sec: number): string {
 }
 
 function formatFileSize(bytes?: number): string {
-  if (!bytes) return '--';
+  if (bytes === undefined || bytes === null || !Number.isFinite(bytes) || bytes <= 0) return '--';
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;

@@ -103,6 +103,8 @@ export function DeliverPage() {
 
   const handleStartRender = useCallback(() => {
     if (isRendering) return;
+    // Guard against empty queue
+    if (!renderQueue.some((j) => j.status === 'queued')) return;
     setIsRendering(true);
 
     renderIntervalRef.current = setInterval(() => {
@@ -113,15 +115,20 @@ export function DeliverPage() {
 
         if (activeJob) {
           const idx = updated.indexOf(activeJob);
-          const newProgress = Math.min(100, activeJob.progress + Math.random() * 8 + 2);
-          updated[idx] = {
-            ...activeJob,
-            progress: newProgress,
-            status: newProgress >= 100 ? 'complete' : 'rendering',
-          };
+          if (idx >= 0) {
+            const increment = Math.random() * 8 + 2;
+            const newProgress = Math.min(100, (activeJob.progress ?? 0) + (Number.isFinite(increment) ? increment : 5));
+            updated[idx] = {
+              ...activeJob,
+              progress: newProgress,
+              status: newProgress >= 100 ? 'complete' : 'rendering',
+            };
+          }
         } else if (nextQueued) {
           const idx = updated.indexOf(nextQueued);
-          updated[idx] = { ...nextQueued, status: 'rendering', progress: 0 };
+          if (idx >= 0) {
+            updated[idx] = { ...nextQueued, status: 'rendering', progress: 0 };
+          }
         } else {
           // All done
           if (renderIntervalRef.current !== null) {
@@ -134,7 +141,7 @@ export function DeliverPage() {
         return updated;
       });
     }, 250);
-  }, [isRendering]);
+  }, [isRendering, renderQueue]);
 
   if (!isReady) {
     return <DeliverSkeleton />;
@@ -218,7 +225,7 @@ export function DeliverPage() {
               <SettingField label="Codec" value={selectedPreset.codec} />
               <SettingField label="Resolution" value={selectedPreset.resolution} />
               <SettingField label="Bitrate" value={selectedPreset.bitrate} />
-              <SettingField label="Duration" value={`${Math.floor(duration)}s`} />
+              <SettingField label="Duration" value={Number.isFinite(duration) ? `${Math.floor(duration)}s` : '--'} />
               <SettingField label="Output" value="~/Desktop/export" />
             </div>
             <button

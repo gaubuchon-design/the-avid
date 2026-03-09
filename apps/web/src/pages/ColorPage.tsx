@@ -45,8 +45,9 @@ export function ColorPage() {
   }, []);
 
   const handleSaveLook = useCallback(() => {
-    saveLook(`Look ${looks.length + 1}`);
-  }, [looks.length, saveLook]);
+    const lookCount = Array.isArray(looks) ? looks.length : 0;
+    saveLook(`Look ${lookCount + 1}`);
+  }, [looks, saveLook]);
 
   if (!isReady) {
     return <ColorPageSkeleton />;

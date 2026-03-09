@@ -205,6 +205,18 @@ export interface ToolCallResult {
 // Orchestrator Configuration
 // ---------------------------------------------------------------------------
 
+/** A plan that could not be executed and was sent to the dead-letter queue. */
+export interface DeadLetterEntry {
+  /** The failed plan. */
+  readonly plan: AgentPlan;
+  /** Why the plan was dead-lettered. */
+  readonly reason: string;
+  /** ISO-8601 timestamp when the entry was created. */
+  readonly deadLetteredAt: string;
+  /** Number of retry attempts that were made. */
+  readonly attempts: number;
+}
+
 /** Top-level configuration for the orchestrator service. */
 export interface OrchestratorConfig {
   /** Gemini API key (optional -- falls back to template matching). */
@@ -219,4 +231,10 @@ export interface OrchestratorConfig {
   readonly stepRetryCount?: number;
   /** Whether to enforce token budgets per plan (default: true). */
   readonly tokenBudgetEnabled?: boolean;
+  /** Maximum time in milliseconds for an entire plan to execute (default: 300000 = 5 minutes). */
+  readonly planTimeoutMs?: number;
+  /** Step-level retry backoff delays in milliseconds (default: [1000, 2000, 4000]). */
+  readonly stepBackoffDelaysMs?: readonly number[];
+  /** Maximum entries in the dead-letter queue before oldest are pruned (default: 100). */
+  readonly deadLetterMaxSize?: number;
 }

@@ -23,6 +23,7 @@ import type {
   AgentPlan,
   AgentStep,
   ApprovalPolicy,
+  DeadLetterEntry,
   ExecutionMode,
   OrchestratorConfig,
   ToolCallResult,
@@ -112,6 +113,15 @@ const DEFAULT_STEP_RETRY_COUNT = 2;
 /** Token budget overshoot tolerance (10% headroom). */
 const TOKEN_BUDGET_HEADROOM = 0.1;
 
+/** Default plan-level execution timeout: 5 minutes. */
+const DEFAULT_PLAN_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** Default step-level backoff delays: 1s, 2s, 4s. */
+const DEFAULT_STEP_BACKOFF_DELAYS_MS: readonly number[] = [1_000, 2_000, 4_000];
+
+/** Default max dead-letter queue size. */
+const DEFAULT_DEAD_LETTER_MAX_SIZE = 100;
+
 // ---------------------------------------------------------------------------
 // OrchestratorService
 // ---------------------------------------------------------------------------
@@ -144,6 +154,9 @@ export class OrchestratorService {
   private readonly parallelConcurrency: number;
   private readonly stepRetryCount: number;
   private readonly tokenBudgetEnabled: boolean;
+  private readonly planTimeoutMs: number;
+  private readonly stepBackoffDelaysMs: readonly number[];
+  private readonly deadLetterMaxSize: number;
 
   /** All plans keyed by plan ID. */
   private plans: Map<string, AgentPlan> = new Map();
@@ -155,6 +168,10 @@ export class OrchestratorService {
   private executingPlanCount = 0;
   /** Set of plan IDs that have been requested for cancellation. */
   private cancelledPlanIds: Set<string> = new Set();
+  /** Dead-letter queue for plans that failed after exhausting retries. */
+  private deadLetterQueue: DeadLetterEntry[] = [];
+  /** Tracks per-plan execution start times for timeout enforcement. */
+  private planStartTimes: Map<string, number> = new Map();
 
   /**
    * @param config - Orchestrator configuration.
@@ -176,6 +193,9 @@ export class OrchestratorService {
     this.parallelConcurrency = DEFAULT_PARALLEL_CONCURRENCY;
     this.stepRetryCount = config.stepRetryCount ?? DEFAULT_STEP_RETRY_COUNT;
     this.tokenBudgetEnabled = config.tokenBudgetEnabled ?? true;
+    this.planTimeoutMs = config.planTimeoutMs ?? DEFAULT_PLAN_TIMEOUT_MS;
+    this.stepBackoffDelaysMs = config.stepBackoffDelaysMs ?? DEFAULT_STEP_BACKOFF_DELAYS_MS;
+    this.deadLetterMaxSize = config.deadLetterMaxSize ?? DEFAULT_DEAD_LETTER_MAX_SIZE;
   }
 
   // -----------------------------------------------------------------------
@@ -564,34 +584,152 @@ export class OrchestratorService {
   }
 
   // -----------------------------------------------------------------------
+  // Dead-letter queue
+  // -----------------------------------------------------------------------
+
+  /**
+   * Get all entries in the dead-letter queue.
+   */
+  getDeadLetterQueue(): DeadLetterEntry[] {
+    return this.deadLetterQueue.map((entry) => ({
+      ...entry,
+      plan: {
+        ...entry.plan,
+        steps: entry.plan.steps.map((s) => ({ ...s })),
+      },
+    }));
+  }
+
+  /**
+   * Get the count of entries in the dead-letter queue.
+   */
+  getDeadLetterCount(): number {
+    return this.deadLetterQueue.length;
+  }
+
+  /**
+   * Clear the dead-letter queue.
+   */
+  clearDeadLetterQueue(): void {
+    this.deadLetterQueue.length = 0;
+  }
+
+  /**
+   * Remove a specific entry from the dead-letter queue by plan ID.
+   *
+   * @param planId - The plan ID to remove.
+   * @returns `true` if an entry was found and removed.
+   */
+  removeFromDeadLetterQueue(planId: string): boolean {
+    const index = this.deadLetterQueue.findIndex((e) => e.plan.id === planId);
+    if (index >= 0) {
+      this.deadLetterQueue.splice(index, 1);
+      return true;
+    }
+    return false;
+  }
+
+  // -----------------------------------------------------------------------
   // Private: execution
   // -----------------------------------------------------------------------
 
   /**
    * Execute all approved steps in a plan using the configured execution mode.
+   * Enforces a plan-level timeout. On failure, auto-compensates completed
+   * destructive steps and dead-letters the plan if all retries are exhausted.
    */
   private async executeSteps(plan: AgentPlan): Promise<void> {
-    let allSucceeded: boolean;
+    this.planStartTimes.set(plan.id, Date.now());
 
-    switch (this.executionMode) {
-      case 'parallel':
-        allSucceeded = await this.executeStepsParallel(plan);
-        break;
-      case 'conditional':
-        allSucceeded = await this.executeStepsConditional(plan);
-        break;
-      case 'sequential':
-      default:
-        allSucceeded = await this.executeStepsSequential(plan);
-        break;
+    let allSucceeded: boolean;
+    let timedOut = false;
+
+    try {
+      const executionPromise = (async (): Promise<boolean> => {
+        switch (this.executionMode) {
+          case 'parallel':
+            return this.executeStepsParallel(plan);
+          case 'conditional':
+            return this.executeStepsConditional(plan);
+          case 'sequential':
+          default:
+            return this.executeStepsSequential(plan);
+        }
+      })();
+
+      // Race execution against the plan-level timeout
+      const timeoutPromise = new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => {
+          timedOut = true;
+          // Signal cancellation so in-flight steps stop
+          this.cancelledPlanIds.add(plan.id);
+          resolve(false);
+        }, this.planTimeoutMs);
+        // Don't let the timer keep the process alive
+        if (typeof timer === 'object' && 'unref' in timer) {
+          timer.unref();
+        }
+        // Store for cleanup
+        (plan as { _timeoutTimer?: ReturnType<typeof setTimeout> })._timeoutTimer = timer;
+      });
+
+      allSucceeded = await Promise.race([executionPromise, timeoutPromise]);
+
+      // Clean up timeout timer
+      const timer = (plan as { _timeoutTimer?: ReturnType<typeof setTimeout> })._timeoutTimer;
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        delete (plan as { _timeoutTimer?: ReturnType<typeof setTimeout> })._timeoutTimer;
+      }
+    } finally {
+      this.planStartTimes.delete(plan.id);
+      // Clean up cancellation signal if it was set by timeout
+      if (timedOut) {
+        this.cancelledPlanIds.delete(plan.id);
+      }
     }
 
-    plan.status = allSucceeded ? 'completed' : 'failed';
+    if (timedOut) {
+      // Mark remaining steps as cancelled due to timeout
+      for (const step of plan.steps) {
+        if (step.status === 'approved' || step.status === 'executing') {
+          (step as { status: string }).status = 'cancelled';
+          (step as { error?: string }).error = `Plan timed out after ${this.planTimeoutMs}ms`;
+        }
+      }
+    }
+
+    const planFailed = !allSucceeded;
+    plan.status = planFailed ? 'failed' : 'completed';
     plan.updatedAt = new Date().toISOString();
 
+    // On failure, auto-compensate completed destructive steps
+    if (planFailed) {
+      const hasCompletedSteps = plan.steps.some((s) => s.status === 'completed');
+      if (hasCompletedSteps) {
+        await this.compensationManager.compensatePlan(plan.id, plan.steps);
+        for (const step of plan.steps) {
+          if (step.status === 'completed') {
+            const compensation = this.compensationManager
+              .getCompensations(plan.id)
+              .find((c) => c.stepId === step.id);
+            if (compensation?.success) {
+              (step as { status: string }).status = 'compensated';
+            }
+          }
+        }
+      }
+
+      // Add to dead-letter queue
+      this.addToDeadLetterQueue(plan, timedOut
+        ? `Plan timed out after ${this.planTimeoutMs}ms`
+        : 'Plan execution failed');
+    }
+
     this.toolLogger.logPlanEvent({
-      type: allSucceeded ? 'plan-completed' : 'plan-failed',
+      type: planFailed ? 'plan-failed' : 'plan-completed',
       planId: plan.id,
+      metadata: timedOut ? { reason: 'timeout' } : undefined,
     });
 
     this.archivePlan(plan);
@@ -697,10 +835,17 @@ export class OrchestratorService {
   }
 
   /**
-   * Check whether the plan has been flagged for cancellation.
+   * Check whether the plan has been flagged for cancellation or has
+   * exceeded its timeout.
    */
   private isPlanCancelled(planId: string): boolean {
-    return this.cancelledPlanIds.has(planId);
+    if (this.cancelledPlanIds.has(planId)) return true;
+    // Check plan-level timeout
+    const startTime = this.planStartTimes.get(planId);
+    if (startTime !== undefined && Date.now() - startTime > this.planTimeoutMs) {
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -768,9 +913,10 @@ export class OrchestratorService {
         return false;
       }
 
-      // Brief backoff between retries (skip first attempt).
+      // Step-level backoff between retries using configurable delays (default: 1s, 2s, 4s).
       if (attempt > 0) {
-        const backoffMs = Math.min(300 * Math.pow(2, attempt - 1), 3_000);
+        const delayIndex = Math.min(attempt - 1, this.stepBackoffDelaysMs.length - 1);
+        const backoffMs = this.stepBackoffDelaysMs[delayIndex] ?? 1_000;
         await new Promise<void>((resolve) => setTimeout(resolve, backoffMs));
       }
 
@@ -857,6 +1003,27 @@ export class OrchestratorService {
   // -----------------------------------------------------------------------
   // Private: helpers
   // -----------------------------------------------------------------------
+
+  /**
+   * Add a failed plan to the dead-letter queue for later inspection.
+   */
+  private addToDeadLetterQueue(plan: AgentPlan, reason: string): void {
+    const failedSteps = plan.steps.filter((s) => s.status === 'failed');
+    this.deadLetterQueue.push({
+      plan: {
+        ...plan,
+        steps: plan.steps.map((s) => ({ ...s })),
+      },
+      reason,
+      deadLetteredAt: new Date().toISOString(),
+      attempts: failedSteps.length,
+    });
+
+    // Prune oldest entries if over the limit
+    while (this.deadLetterQueue.length > this.deadLetterMaxSize) {
+      this.deadLetterQueue.shift();
+    }
+  }
 
   /**
    * Move a plan from the active map to the history array.

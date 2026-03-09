@@ -7,7 +7,8 @@ import { RegisterPage } from './pages/RegisterPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { AuthGuard } from './components/AuthGuard';
-import { ErrorBoundary } from './components/ErrorBoundary';
+import { ErrorBoundary, PageErrorBoundary, PanelErrorBoundary } from './components/ErrorBoundary';
+import { OfflineBanner } from './components/OfflineBanner';
 import { useSettingsEffects } from './hooks/useSettingsEffects';
 import { KeyboardProvider } from './components/KeyboardProvider';
 import { LoadingSpinner } from './components/LoadingSpinner';
@@ -40,15 +41,16 @@ const BrandPanel = lazy(() => import('./components/BrandPanel/BrandPanel').then(
 const MultiCamPanel = lazy(() => import('./components/MultiCamPanel/MultiCamPanel').then(m => ({ default: m.MultiCamPanel })));
 const AccessibilityPanel = lazy(() => import('./components/AccessibilityPanel/AccessibilityPanel').then(m => ({ default: m.AccessibilityPanel })));
 
-// Suspense + ErrorBoundary wrapper for lazy panels
+// Suspense + PanelErrorBoundary wrapper for lazy panels
+// Each panel is isolated -- one failure does not cascade to the rest of the app.
 function LazyPanel(Component: React.LazyExoticComponent<React.ComponentType>) {
   return function WrappedPanel() {
     return (
-      <ErrorBoundary>
+      <PanelErrorBoundary panelName="LazyPanel">
         <Suspense fallback={<LoadingSpinner />}>
           <Component />
         </Suspense>
-      </ErrorBoundary>
+      </PanelErrorBoundary>
     );
   };
 }
@@ -121,26 +123,31 @@ export default function App() {
 
   return (
     <KeyboardProvider>
+      {/* Global offline banner -- renders at top when user goes offline */}
+      <OfflineBanner />
+
       <Routes>
         {/* ── Auth Routes (no auth required) ────────────────────────── */}
-        <Route element={<ErrorBoundary><AuthLayout /></ErrorBoundary>}>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
+        <Route element={<ErrorBoundary level="page"><AuthLayout /></ErrorBoundary>}>
+          <Route path="/login" element={<PageErrorBoundary pageName="Login"><LoginPage /></PageErrorBoundary>} />
+          <Route path="/register" element={<PageErrorBoundary pageName="Register"><RegisterPage /></PageErrorBoundary>} />
         </Route>
 
         {/* ── Authenticated Dashboard Routes ────────────────────────── */}
-        <Route element={<ErrorBoundary><AuthGuard><MainLayout /></AuthGuard></ErrorBoundary>}>
-          <Route path="/" element={<DashboardPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
+        <Route element={<ErrorBoundary level="page"><AuthGuard><MainLayout /></AuthGuard></ErrorBoundary>}>
+          <Route path="/" element={<PageErrorBoundary pageName="Dashboard"><DashboardPage /></PageErrorBoundary>} />
+          <Route path="/settings" element={<PageErrorBoundary pageName="Settings"><SettingsPage /></PageErrorBoundary>} />
         </Route>
 
         {/* ── Editor (full-bleed, own layout) ───────────────────────── */}
         <Route
           path="/editor/:projectId"
           element={
-            <ErrorBoundary>
+            <ErrorBoundary level="page">
               <AuthGuard>
-                <EditorPage />
+                <PageErrorBoundary pageName="Editor">
+                  <EditorPage />
+                </PageErrorBoundary>
               </AuthGuard>
             </ErrorBoundary>
           }
@@ -149,9 +156,11 @@ export default function App() {
         <Route
           path="/project/:projectId"
           element={
-            <ErrorBoundary>
+            <ErrorBoundary level="page">
               <AuthGuard>
-                <EditorPage />
+                <PageErrorBoundary pageName="Editor">
+                  <EditorPage />
+                </PageErrorBoundary>
               </AuthGuard>
             </ErrorBoundary>
           }

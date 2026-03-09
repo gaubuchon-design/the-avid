@@ -47,6 +47,27 @@ export function validateAll(schemaMap: Partial<Record<ValidateTarget, ZodSchema>
   };
 }
 
+// ─── String sanitization ────────────────────────────────────────────────────
+
+/**
+ * Sanitize a string by trimming whitespace and removing dangerous HTML entities.
+ * This is a basic XSS prevention measure for stored user content.
+ */
+export function sanitizeString(value: string): string {
+  return value
+    .trim()
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
+}
+
+/**
+ * Zod transform that trims and sanitizes a string value.
+ * Use for user-facing text fields that will be stored.
+ */
+export const sanitizedString = z.string().transform(sanitizeString);
+
 // ─── Common param schemas ───────────────────────────────────────────────────
 
 export const uuidParam = z.object({ id: z.string().uuid() });
