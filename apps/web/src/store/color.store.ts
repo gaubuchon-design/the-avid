@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import {
   ColorNode,
@@ -108,6 +109,7 @@ interface ColorActions {
   updatePowerWindow: (id: string, updates: Partial<PowerWindow>) => void;
   selectPowerWindow: (id: string | null) => void;
   setGPUReady: (ready: boolean, mode: 'gpu' | 'cpu') => void;
+  resetStore: () => void;
 }
 
 // ─── Store ─────────────────────────────────────────────────────────────────────
@@ -115,161 +117,184 @@ interface ColorActions {
 let windowIdCounter = 0;
 
 export const useColorStore = create<ColorState & ColorActions>()(
-  immer((set) => ({
-    // Initial state — synced from engine
-    nodes: colorEngine.getAllNodes(),
-    connections: colorEngine.getConnections(),
-    selectedNodeId: null,
-    activeView: 'primary',
-    wheelMode: 'primary',
-    curveType: 'custom',
-    scopeType: 'waveform',
-    scopePosition: 'post',
-    qualifierShowMatte: false,
-    qualifierMatteMode: 'highlight' as const,
-    powerWindows: [],
-    selectedWindowId: null,
-    looks: [],
-    stills: [],
-    abWipeEnabled: false,
-    abWipePosition: 50,
-    gpuReady: false,
-    processingMode: 'cpu' as const,
+  devtools(
+    immer((set) => ({
+      // Initial state — synced from engine
+      nodes: colorEngine.getAllNodes(),
+      connections: colorEngine.getConnections(),
+      selectedNodeId: null,
+      activeView: 'primary' as const,
+      wheelMode: 'primary' as const,
+      curveType: 'custom' as const,
+      scopeType: 'waveform' as const,
+      scopePosition: 'post' as const,
+      qualifierShowMatte: false,
+      qualifierMatteMode: 'highlight' as const,
+      powerWindows: [] as PowerWindow[],
+      selectedWindowId: null as string | null,
+      looks: [] as { id: string; name: string; thumbnail?: string }[],
+      stills: [] as { id: string; name: string; frame: number }[],
+      abWipeEnabled: false,
+      abWipePosition: 50,
+      gpuReady: false,
+      processingMode: 'cpu' as const,
 
-    // Actions
-    selectNode: (id) =>
-      set((s) => {
-        s.selectedNodeId = id;
-      }),
+      // Actions
+      selectNode: (id) =>
+        set((s) => {
+          s.selectedNodeId = id;
+        }, false, 'color/selectNode'),
 
-    setActiveView: (view) =>
-      set((s) => {
-        s.activeView = view;
-      }),
+      setActiveView: (view) =>
+        set((s) => {
+          s.activeView = view;
+        }, false, 'color/setActiveView'),
 
-    setWheelMode: (mode) =>
-      set((s) => {
-        s.wheelMode = mode;
-      }),
+      setWheelMode: (mode) =>
+        set((s) => {
+          s.wheelMode = mode;
+        }, false, 'color/setWheelMode'),
 
-    setCurveType: (type) =>
-      set((s) => {
-        s.curveType = type;
-      }),
+      setCurveType: (type) =>
+        set((s) => {
+          s.curveType = type;
+        }, false, 'color/setCurveType'),
 
-    setScopeType: (type) =>
-      set((s) => {
-        s.scopeType = type;
-      }),
+      setScopeType: (type) =>
+        set((s) => {
+          s.scopeType = type;
+        }, false, 'color/setScopeType'),
 
-    setScopePosition: (pos) =>
-      set((s) => {
-        s.scopePosition = pos;
-      }),
+      setScopePosition: (pos) =>
+        set((s) => {
+          s.scopePosition = pos;
+        }, false, 'color/setScopePosition'),
 
-    toggleABWipe: () =>
-      set((s) => {
-        s.abWipeEnabled = !s.abWipeEnabled;
-      }),
+      toggleABWipe: () =>
+        set((s) => {
+          s.abWipeEnabled = !s.abWipeEnabled;
+        }, false, 'color/toggleABWipe'),
 
-    setABWipePosition: (position) =>
-      set((s) => {
-        s.abWipePosition = Math.max(0, Math.min(100, position));
-      }),
+      setABWipePosition: (position) =>
+        set((s) => {
+          s.abWipePosition = Math.max(0, Math.min(100, position));
+        }, false, 'color/setABWipePosition'),
 
-    setQualifierShowMatte: (show) =>
-      set((s) => {
-        s.qualifierShowMatte = show;
-      }),
+      setQualifierShowMatte: (show) =>
+        set((s) => {
+          s.qualifierShowMatte = show;
+        }, false, 'color/setQualifierShowMatte'),
 
-    setQualifierMatteMode: (mode) =>
-      set((s) => {
-        s.qualifierMatteMode = mode;
-      }),
+      setQualifierMatteMode: (mode) =>
+        set((s) => {
+          s.qualifierMatteMode = mode;
+        }, false, 'color/setQualifierMatteMode'),
 
-    syncFromEngine: () =>
-      set((s) => {
-        s.nodes = colorEngine.getAllNodes();
-        s.connections = colorEngine.getConnections();
-        s.looks = colorEngine.getLooks().map((l) => ({
-          id: l.id,
-          name: l.name,
-          thumbnail: l.thumbnail,
-        }));
-        s.stills = colorEngine.getStills().map((st) => ({
-          id: st.id,
-          name: st.name,
-          frame: st.frame,
-        }));
-      }),
+      syncFromEngine: () =>
+        set((s) => {
+          s.nodes = colorEngine.getAllNodes();
+          s.connections = colorEngine.getConnections();
+          s.looks = colorEngine.getLooks().map((l) => ({
+            id: l.id,
+            name: l.name,
+            thumbnail: l.thumbnail,
+          }));
+          s.stills = colorEngine.getStills().map((st) => ({
+            id: st.id,
+            name: st.name,
+            frame: st.frame,
+          }));
+        }, false, 'color/syncFromEngine'),
 
-    addNode: (type) => {
-      colorEngine.addNode(type);
-    },
+      addNode: (type) => {
+        colorEngine.addNode(type);
+      },
 
-    removeNode: (id) => {
-      colorEngine.removeNode(id);
-    },
+      removeNode: (id) => {
+        colorEngine.removeNode(id);
+      },
 
-    updateNodeParams: (id, params) => {
-      colorEngine.updateNodeParams(id, params);
-    },
+      updateNodeParams: (id, params) => {
+        colorEngine.updateNodeParams(id, params);
+      },
 
-    saveLook: (name) => {
-      colorEngine.saveLook(name);
-    },
+      saveLook: (name) => {
+        colorEngine.saveLook(name);
+      },
 
-    loadLook: (id) => {
-      colorEngine.loadLook(id);
-    },
+      loadLook: (id) => {
+        colorEngine.loadLook(id);
+      },
 
-    saveStill: (name) => {
-      colorEngine.saveStill(name, '');
-    },
+      saveStill: (name) => {
+        colorEngine.saveStill(name, '');
+      },
 
-    addPowerWindow: (type) =>
-      set((s) => {
-        const id = `pw_${++windowIdCounter}_${Date.now().toString(36)}`;
-        s.powerWindows.push({
-          id,
-          type,
-          centerX: 0.5,
-          centerY: 0.5,
-          radiusX: 0.25,
-          radiusY: 0.25,
-          width: 0.5,
-          height: 0.5,
-          rotation: 0,
-          softness: 0.1,
-          invert: false,
-          enabled: true,
-        });
-        s.selectedWindowId = id;
-      }),
+      addPowerWindow: (type) =>
+        set((s) => {
+          const id = `pw_${++windowIdCounter}_${Date.now().toString(36)}`;
+          s.powerWindows.push({
+            id,
+            type,
+            centerX: 0.5,
+            centerY: 0.5,
+            radiusX: 0.25,
+            radiusY: 0.25,
+            width: 0.5,
+            height: 0.5,
+            rotation: 0,
+            softness: 0.1,
+            invert: false,
+            enabled: true,
+          });
+          s.selectedWindowId = id;
+        }, false, 'color/addPowerWindow'),
 
-    removePowerWindow: (id) =>
-      set((s) => {
-        s.powerWindows = s.powerWindows.filter((w) => w.id !== id);
-        if (s.selectedWindowId === id) s.selectedWindowId = null;
-      }),
+      removePowerWindow: (id) =>
+        set((s) => {
+          s.powerWindows = s.powerWindows.filter((w) => w.id !== id);
+          if (s.selectedWindowId === id) s.selectedWindowId = null;
+        }, false, 'color/removePowerWindow'),
 
-    updatePowerWindow: (id, updates) =>
-      set((s) => {
-        const win = s.powerWindows.find((w) => w.id === id);
-        if (win) Object.assign(win, updates);
-      }),
+      updatePowerWindow: (id, updates) =>
+        set((s) => {
+          const win = s.powerWindows.find((w) => w.id === id);
+          if (win) Object.assign(win, updates);
+        }, false, 'color/updatePowerWindow'),
 
-    selectPowerWindow: (id) =>
-      set((s) => {
-        s.selectedWindowId = id;
-      }),
+      selectPowerWindow: (id) =>
+        set((s) => {
+          s.selectedWindowId = id;
+        }, false, 'color/selectPowerWindow'),
 
-    setGPUReady: (ready, mode) =>
-      set((s) => {
-        s.gpuReady = ready;
-        s.processingMode = mode;
-      }),
-  }))
+      setGPUReady: (ready, mode) =>
+        set((s) => {
+          s.gpuReady = ready;
+          s.processingMode = mode;
+        }, false, 'color/setGPUReady'),
+
+      resetStore: () =>
+        set((s) => {
+          s.nodes = colorEngine.getAllNodes();
+          s.connections = colorEngine.getConnections();
+          s.selectedNodeId = null;
+          s.activeView = 'primary';
+          s.wheelMode = 'primary';
+          s.curveType = 'custom';
+          s.scopeType = 'waveform';
+          s.scopePosition = 'post';
+          s.qualifierShowMatte = false;
+          s.qualifierMatteMode = 'highlight';
+          s.powerWindows = [];
+          s.selectedWindowId = null;
+          s.looks = [];
+          s.stills = [];
+          s.abWipeEnabled = false;
+          s.abWipePosition = 50;
+        }, false, 'color/resetStore'),
+    })),
+    { name: 'ColorStore', enabled: process.env["NODE_ENV"] === 'development' },
+  )
 );
 
 // Wire up engine -> store sync
@@ -285,3 +310,32 @@ colorEngine.initGPU().then(async () => {
     colorGradingPipeline.processingMode,
   );
 });
+
+// ─── Named Selectors ────────────────────────────────────────────────────────
+
+type ColorStoreState = ColorState & ColorActions;
+
+export const selectColorNodes = (state: ColorStoreState) => state.nodes;
+export const selectColorConnections = (state: ColorStoreState) => state.connections;
+export const selectSelectedNodeId = (state: ColorStoreState) => state.selectedNodeId;
+export const selectColorActiveView = (state: ColorStoreState) => state.activeView;
+export const selectWheelMode = (state: ColorStoreState) => state.wheelMode;
+export const selectCurveType = (state: ColorStoreState) => state.curveType;
+export const selectColorScopeType = (state: ColorStoreState) => state.scopeType;
+export const selectColorScopePosition = (state: ColorStoreState) => state.scopePosition;
+export const selectQualifierShowMatte = (state: ColorStoreState) => state.qualifierShowMatte;
+export const selectQualifierMatteMode = (state: ColorStoreState) => state.qualifierMatteMode;
+export const selectPowerWindows = (state: ColorStoreState) => state.powerWindows;
+export const selectSelectedWindowId = (state: ColorStoreState) => state.selectedWindowId;
+export const selectColorLooks = (state: ColorStoreState) => state.looks;
+export const selectColorStills = (state: ColorStoreState) => state.stills;
+export const selectABWipeEnabled = (state: ColorStoreState) => state.abWipeEnabled;
+export const selectABWipePosition = (state: ColorStoreState) => state.abWipePosition;
+export const selectGpuReady = (state: ColorStoreState) => state.gpuReady;
+export const selectProcessingMode = (state: ColorStoreState) => state.processingMode;
+export const selectSelectedColorNode = (state: ColorStoreState) =>
+  state.nodes.find((n) => n.id === state.selectedNodeId) ?? null;
+export const selectSelectedPowerWindow = (state: ColorStoreState) =>
+  state.powerWindows.find((w) => w.id === state.selectedWindowId) ?? null;
+export const selectEnabledPowerWindows = (state: ColorStoreState) =>
+  state.powerWindows.filter((w) => w.enabled);

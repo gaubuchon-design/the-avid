@@ -35,7 +35,8 @@
  * - `INVALID_ARGUMENT` -- caller provided an invalid parameter
  * - `TIMEOUT`          -- operation exceeded the allowed time
  * - `UNAVAILABLE`      -- backend service is unreachable
- * - `AUTH_FAILED`      -- authentication or authorisation failure
+ * - `AUTH_FAILED`      -- authentication failure (401 equivalent)
+ * - `FORBIDDEN`        -- authorisation failure (403 equivalent)
  * - `INTERNAL`         -- unexpected internal error
  * - `NOT_IMPLEMENTED`  -- the adapter does not support this operation
  * - `CANCELLED`        -- operation was cancelled by the caller
@@ -47,6 +48,7 @@ export type AdapterErrorCode =
   | 'TIMEOUT'
   | 'UNAVAILABLE'
   | 'AUTH_FAILED'
+  | 'FORBIDDEN'
   | 'INTERNAL'
   | 'NOT_IMPLEMENTED'
   | 'CANCELLED';
@@ -174,7 +176,9 @@ export class InvalidArgumentError extends AdapterError {
 
 /**
  * Thrown when an operation conflicts with current state
- * (e.g. trying to delete an already-deleted clip).
+ * (e.g. trying to delete an already-deleted clip, concurrent modification).
+ *
+ * Corresponds to HTTP 409.
  */
 export class ConflictError extends AdapterError {
   constructor(adapterName: string, message: string) {
@@ -186,5 +190,41 @@ export class ConflictError extends AdapterError {
     });
     this.name = 'ConflictError';
     Object.setPrototypeOf(this, ConflictError.prototype);
+  }
+}
+
+/**
+ * Thrown when authentication credentials are missing, invalid, or expired.
+ *
+ * Corresponds to HTTP 401. Always non-recoverable without new credentials.
+ */
+export class AuthenticationError extends AdapterError {
+  constructor(adapterName: string, message: string) {
+    super({
+      adapterName,
+      code: 'AUTH_FAILED',
+      message,
+      recoverable: false,
+    });
+    this.name = 'AuthenticationError';
+    Object.setPrototypeOf(this, AuthenticationError.prototype);
+  }
+}
+
+/**
+ * Thrown when the authenticated user lacks permission for the requested operation.
+ *
+ * Corresponds to HTTP 403. Always non-recoverable with current credentials.
+ */
+export class AuthorizationError extends AdapterError {
+  constructor(adapterName: string, message: string) {
+    super({
+      adapterName,
+      code: 'FORBIDDEN',
+      message,
+      recoverable: false,
+    });
+    this.name = 'AuthorizationError';
+    Object.setPrototypeOf(this, AuthorizationError.prototype);
   }
 }

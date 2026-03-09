@@ -3,7 +3,7 @@
 //  Scopes, viewer, gallery, color controls, node graph strip, timeline.
 // =============================================================================
 
-import React from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { RecordMonitor } from '../components/RecordMonitor/RecordMonitor';
 import { ColorPanel } from '../components/ColorPanel/ColorPanel';
 import { ScopesPanel } from '../components/ColorPanel/ScopesPanel';
@@ -11,14 +11,53 @@ import { NodeGraph } from '../components/ColorPanel/NodeGraph';
 import { TimelinePanel } from '../components/TimelinePanel/TimelinePanel';
 import { useColorStore } from '../store/color.store';
 
+function ColorPageSkeleton() {
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }} aria-hidden="true" role="status" aria-label="Loading color page">
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
+        <div style={{ width: 280, flexShrink: 0, borderRight: '1px solid var(--border-default)', background: 'var(--bg-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 40, height: 40, borderRadius: '50%', border: '2px solid var(--border-subtle)', borderTopColor: 'var(--brand)', animation: 'spin 0.8s linear infinite' }} />
+        </div>
+        <div style={{ flex: 1, background: 'var(--bg-void)' }} />
+        <div style={{ width: 180, flexShrink: 0, borderLeft: '1px solid var(--border-default)', background: 'var(--bg-surface)', padding: 8 }}>
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} style={{ height: 24, background: 'var(--bg-elevated)', borderRadius: 3, marginBottom: 6, width: '90%' }} />
+          ))}
+        </div>
+      </div>
+      <div style={{ height: 220, flexShrink: 0, borderTop: '1px solid var(--border-default)', background: 'var(--bg-surface)' }} />
+      <div style={{ height: 64, flexShrink: 0, borderTop: '1px solid var(--border-default)', background: 'var(--bg-surface)' }} />
+      <div style={{ height: 72, flexShrink: 0, borderTop: '1px solid var(--border-default)' }} />
+    </div>
+  );
+}
+
 export function ColorPage() {
   const looks = useColorStore((s) => s.looks);
   const stills = useColorStore((s) => s.stills);
   const saveLook = useColorStore((s) => s.saveLook);
   const loadLook = useColorStore((s) => s.loadLook);
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setIsReady(true), 200);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const handleSaveLook = useCallback(() => {
+    saveLook(`Look ${looks.length + 1}`);
+  }, [looks.length, saveLook]);
+
+  if (!isReady) {
+    return <ColorPageSkeleton />;
+  }
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div
+      style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+      role="region"
+      aria-label="Color Grading Page"
+    >
       {/* Top section: Scopes + Monitor + Gallery */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
         {/* Scopes panel (left) */}
@@ -29,12 +68,16 @@ export function ColorPage() {
           background: 'var(--bg-surface)',
           display: 'flex',
           flexDirection: 'column',
-        }}>
+        }} role="region" aria-label="Video scopes">
           <ScopesPanel />
         </div>
 
         {/* Record Monitor (center) */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <div
+          style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}
+          role="region"
+          aria-label="Color grading monitor"
+        >
           <RecordMonitor />
         </div>
 
@@ -46,7 +89,7 @@ export function ColorPage() {
           background: 'var(--bg-surface)',
           display: 'flex',
           flexDirection: 'column',
-        }}>
+        }} role="region" aria-label="Gallery and saved looks">
           {/* Gallery header */}
           <div style={{
             padding: '4px 8px',
@@ -62,7 +105,8 @@ export function ColorPage() {
           }}>
             <span>Gallery</span>
             <button
-              onClick={() => saveLook(`Look ${looks.length + 1}`)}
+              onClick={handleSaveLook}
+              aria-label="Save current look to gallery"
               style={{
                 padding: '1px 6px',
                 fontSize: 8,
@@ -85,21 +129,23 @@ export function ColorPage() {
                 Stills
               </div>
               {stills.length === 0 ? (
-                <div style={{ padding: 8, textAlign: 'center', color: 'var(--text-muted)', fontSize: 9 }}>
+                <div style={{ padding: 8, textAlign: 'center', color: 'var(--text-muted)', fontSize: 9 }} role="status">
                   Right-click viewer to grab
                 </div>
               ) : (
-                stills.map((s) => (
-                  <div key={s.id} style={{
-                    padding: '3px 6px',
-                    fontSize: 9,
-                    color: 'var(--text-secondary)',
-                    cursor: 'pointer',
-                    borderRadius: 2,
-                  }}>
-                    {s.name}
-                  </div>
-                ))
+                <div role="listbox" aria-label="Saved stills">
+                  {stills.map((s) => (
+                    <div key={s.id} role="option" tabIndex={0} style={{
+                      padding: '3px 6px',
+                      fontSize: 9,
+                      color: 'var(--text-secondary)',
+                      cursor: 'pointer',
+                      borderRadius: 2,
+                    }}>
+                      {s.name}
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
 
@@ -109,25 +155,31 @@ export function ColorPage() {
                 Looks
               </div>
               {looks.length === 0 ? (
-                <div style={{ padding: 8, textAlign: 'center', color: 'var(--text-muted)', fontSize: 9 }}>
+                <div style={{ padding: 8, textAlign: 'center', color: 'var(--text-muted)', fontSize: 9 }} role="status">
                   No saved looks
                 </div>
               ) : (
-                looks.map((l) => (
-                  <div
-                    key={l.id}
-                    onClick={() => loadLook(l.id)}
-                    style={{
-                      padding: '3px 6px',
-                      fontSize: 9,
-                      color: 'var(--text-secondary)',
-                      cursor: 'pointer',
-                      borderRadius: 2,
-                    }}
-                  >
-                    {l.name}
-                  </div>
-                ))
+                <div role="listbox" aria-label="Saved looks">
+                  {looks.map((l) => (
+                    <div
+                      key={l.id}
+                      role="option"
+                      tabIndex={0}
+                      onClick={() => loadLook(l.id)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); loadLook(l.id); } }}
+                      aria-label={`Apply look: ${l.name}`}
+                      style={{
+                        padding: '3px 6px',
+                        fontSize: 9,
+                        color: 'var(--text-secondary)',
+                        cursor: 'pointer',
+                        borderRadius: 2,
+                      }}
+                    >
+                      {l.name}
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           </div>
@@ -141,7 +193,7 @@ export function ColorPage() {
         borderTop: '1px solid var(--border-default)',
         display: 'flex',
         flexDirection: 'column',
-      }}>
+      }} role="region" aria-label="Color grading controls">
         <ColorPanel />
       </div>
 
@@ -151,7 +203,7 @@ export function ColorPage() {
         flexShrink: 0,
         borderTop: '1px solid var(--border-default)',
         background: 'var(--bg-surface)',
-      }}>
+      }} role="region" aria-label="Color node graph">
         <NodeGraph />
       </div>
 
@@ -160,7 +212,7 @@ export function ColorPage() {
         height: 72,
         flexShrink: 0,
         borderTop: '1px solid var(--border-default)',
-      }}>
+      }} role="region" aria-label="Color page timeline">
         <TimelinePanel />
       </div>
     </div>

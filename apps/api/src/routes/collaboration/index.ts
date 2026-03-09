@@ -7,6 +7,7 @@ import {
   uuidParam,
 } from '../../utils/validation';
 import { NotFoundError, BadRequestError, ConflictError } from '../../utils/errors';
+import { collaborationService } from '../../services/collaboration.service';
 import { z } from 'zod';
 
 // ─── COLLABORATION ROUTER ──────────────────────────────────────────────────────
@@ -15,18 +16,7 @@ collabRouter.use(authenticate);
 
 // GET /projects/:projectId/comments
 collabRouter.get('/comments', requireProjectAccess('VIEWER'), async (req: Request, res: Response) => {
-  const comments = await db.comment.findMany({
-    where: { projectId: req.params['projectId'], deletedAt: null, parentId: null },
-    include: {
-      user: { select: { id: true, displayName: true, avatarUrl: true } },
-      replies: {
-        where: { deletedAt: null },
-        include: { user: { select: { id: true, displayName: true, avatarUrl: true } } },
-        orderBy: { createdAt: 'asc' },
-      },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
+  const comments = await collaborationService.listComments(req.params['projectId']!);
   res.json({ comments });
 });
 
@@ -36,10 +26,11 @@ collabRouter.post(
   requireProjectAccess('REVIEWER'),
   validateAll({ params: projectIdParam, body: schemas.createComment }),
   async (req: Request, res: Response) => {
-    const comment = await db.comment.create({
-      data: { ...req.body, projectId: req.params['projectId'], userId: req.user!.id },
-      include: { user: { select: { id: true, displayName: true, avatarUrl: true } } },
-    });
+    const comment = await collaborationService.createComment(
+      req.params['projectId']!,
+      req.user!.id,
+      req.body,
+    );
     res.status(201).json({ comment });
   }
 );
@@ -50,12 +41,11 @@ collabRouter.patch(
   requireProjectAccess('REVIEWER'),
   validateAll({ params: projectIdAndCommentIdParams, body: schemas.updateComment }),
   async (req: Request, res: Response) => {
-    const comment = await db.comment.findUnique({ where: { id: req.params['commentId'] } });
-    if (!comment || comment.userId !== req.user!.id) throw new NotFoundError('Comment');
-    const updated = await db.comment.update({
-      where: { id: req.params['commentId'] },
-      data: req.body,
-    });
+    const updated = await collaborationService.updateComment(
+      req.params['commentId']!,
+      req.user!.id,
+      req.body,
+    );
     res.json({ comment: updated });
   }
 );
@@ -66,20 +56,14 @@ collabRouter.delete(
   requireProjectAccess('REVIEWER'),
   validate(projectIdAndCommentIdParams, 'params'),
   async (req: Request, res: Response) => {
-    const comment = await db.comment.findUnique({ where: { id: req.params['commentId'] } });
-    if (!comment || comment.userId !== req.user!.id) throw new NotFoundError('Comment');
-    await db.comment.update({ where: { id: req.params['commentId'] }, data: { deletedAt: new Date() } });
+    await collaborationService.deleteComment(req.params['commentId']!, req.user!.id);
     res.status(204).send();
   }
 );
 
 // GET /projects/:projectId/approvals
 collabRouter.get('/approvals', requireProjectAccess('REVIEWER'), async (req: Request, res: Response) => {
-  const approvals = await db.approval.findMany({
-    where: { projectId: req.params['projectId'] },
-    include: { user: { select: { id: true, displayName: true, avatarUrl: true } } },
-    orderBy: { createdAt: 'desc' },
-  });
+  const approvals = await collaborationService.listApprovals(req.params['projectId']!);
   res.json({ approvals });
 });
 
@@ -90,26 +74,11 @@ collabRouter.post(
   validateAll({ params: projectIdParam, body: schemas.createApproval }),
   async (req: Request, res: Response) => {
     const { status, version, notes } = req.body;
-
-    // Check for existing approval by this user for this version
-    const existing = await db.approval.findFirst({
-      where: { projectId: req.params['projectId'], userId: req.user!.id, version },
-      select: { id: true },
-    });
-
-    let approval;
-    if (existing) {
-      approval = await db.approval.update({
-        where: { id: existing.id },
-        data: { status, notes },
-        include: { user: { select: { id: true, displayName: true, avatarUrl: true } } },
-      });
-    } else {
-      approval = await db.approval.create({
-        data: { projectId: req.params['projectId'], userId: req.user!.id, status, version, notes },
-        include: { user: { select: { id: true, displayName: true, avatarUrl: true } } },
-      });
-    }
+    const approval = await collaborationService.upsertApproval(
+      req.params['projectId']!,
+      req.user!.id,
+      { status, version, notes },
+    );
     res.status(201).json({ approval });
   }
 );
@@ -121,28 +90,12 @@ collabRouter.post(
   validateAll({ params: projectIdParam, body: schemas.createLock }),
   async (req: Request, res: Response) => {
     const { resourceType, resourceId, sessionId } = req.body;
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 min
-
-    // Check for existing unexpired lock held by another user
-    const existingLock = await db.resourceLock.findUnique({
-      where: { resourceType_resourceId: { resourceType, resourceId } },
-    });
-
-    if (existingLock && existingLock.lockedById !== req.user!.id && existingLock.expiresAt > new Date()) {
-      throw new ConflictError(`Resource is locked by another user until ${existingLock.expiresAt.toISOString()}`);
-    }
-
-    const lock = await db.resourceLock.upsert({
-      where: { resourceType_resourceId: { resourceType, resourceId } },
-      update: { lockedById: req.user!.id, sessionId, expiresAt },
-      create: {
-        projectId: req.params['projectId'],
-        resourceType,
-        resourceId,
-        lockedById: req.user!.id,
-        sessionId,
-        expiresAt,
-      },
+    const lock = await collaborationService.acquireLock({
+      projectId: req.params['projectId']!,
+      resourceType,
+      resourceId,
+      userId: req.user!.id,
+      sessionId,
     });
     res.status(201).json({ lock });
   }
@@ -154,13 +107,11 @@ collabRouter.delete(
   requireProjectAccess('EDITOR'),
   validate(resourceLockParams, 'params'),
   async (req: Request, res: Response) => {
-    await db.resourceLock.deleteMany({
-      where: {
-        resourceType: req.params['resourceType'],
-        resourceId: req.params['resourceId'],
-        lockedById: req.user!.id,
-      },
-    });
+    await collaborationService.releaseLock(
+      req.params['resourceType']!,
+      req.params['resourceId']!,
+      req.user!.id,
+    );
     res.status(204).send();
   }
 );
@@ -174,7 +125,7 @@ publishRouter.use(authenticate);
 // GET /projects/:projectId/publish
 publishRouter.get('/', requireProjectAccess('VIEWER'), async (req: Request, res: Response) => {
   const jobs = await db.publishJob.findMany({
-    where: { projectId: req.params['projectId'] },
+    where: { projectId: req.params['projectId']! },
     orderBy: { createdAt: 'desc' },
   });
   res.json({ jobs });
@@ -189,7 +140,7 @@ publishRouter.post(
     const job = await db.publishJob.create({
       data: {
         ...req.body,
-        projectId: req.params['projectId'],
+        projectId: req.params['projectId']!,
         userId: req.user!.id,
         status: 'DRAFT',
       },
@@ -205,7 +156,7 @@ publishRouter.patch(
   validateAll({ params: projectIdAndJobIdParams, body: schemas.updatePublishJob }),
   async (req: Request, res: Response) => {
     const job = await db.publishJob.update({
-      where: { id: req.params['jobId'], projectId: req.params['projectId'] },
+      where: { id: req.params['jobId']!, projectId: req.params['projectId']! },
       data: req.body,
     });
     res.json({ job });
@@ -221,13 +172,13 @@ publishRouter.post(
     const { publishService } = await import('../../services/publish.service');
 
     const job = await db.publishJob.update({
-      where: { id: req.params['jobId'] },
+      where: { id: req.params['jobId']! },
       data: { status: 'PENDING' },
     });
 
     publishService.enqueue(job);
 
-    res.json({ job, message: 'Publish job queued' });
+    res.status(202).json({ job, message: 'Publish job queued' });
   }
 );
 
@@ -246,7 +197,7 @@ socialRouter.get('/', async (req: Request, res: Response) => {
 const connectionIdParam = z.object({ connectionId: z.string().uuid() });
 socialRouter.delete('/:connectionId', validate(connectionIdParam, 'params'), async (req: Request, res: Response) => {
   await db.socialConnection.updateMany({
-    where: { id: req.params['connectionId'], userId: req.user!.id },
+    where: { id: req.params['connectionId']!, userId: req.user!.id },
     data: { isActive: false },
   });
   res.status(204).send();

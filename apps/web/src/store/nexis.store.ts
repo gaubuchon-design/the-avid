@@ -6,6 +6,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { create } from 'zustand';
+import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import type {
   NEXISConnectionStatus,
@@ -112,6 +113,10 @@ interface NEXISActions {
   toggleCachePanel: () => void;
   toggleMediaServicesPanel: () => void;
   setActiveNexisTab: (tab: NEXISState['activeNexisTab']) => void;
+
+  // Reset
+  clearError: () => void;
+  resetStore: () => void;
 }
 
 // ─── Default Cache Stats ───────────────────────────────────────────────────
@@ -130,41 +135,39 @@ const DEFAULT_CACHE_STATS: CacheStats = {
   bandwidthUsageMbps: 0,
 };
 
+// ─── Initial State ────────────────────────────────────────────────────────
+
+const INITIAL_NEXIS_STATE: NEXISState = {
+  connectionStatus: 'disconnected',
+  isConnected: false,
+  hostname: null,
+  lastError: null,
+  workspaces: [],
+  activeWorkspaceId: null,
+  storageGroups: [],
+  mediaPaths: [],
+  selectedMediaId: null,
+  binLocks: [],
+  writeTargets: [],
+  coPresenceUsers: [],
+  mediaServicesJobs: [],
+  cacheEntries: [],
+  cacheStats: DEFAULT_CACHE_STATS,
+  storageUsed: 0,
+  storageTotal: 0,
+  showWorkspaceBrowser: true,
+  showCachePanel: false,
+  showMediaServicesPanel: false,
+  activeNexisTab: 'workspaces',
+};
+
 // ─── Store ─────────────────────────────────────────────────────────────────
 
 export const useNexisStore = create<NEXISState & NEXISActions>()(
-  immer((set) => ({
-    // ── Initial State ───────────────────────────────────────────────────
-    connectionStatus: 'disconnected',
-    isConnected: false,
-    hostname: null,
-    lastError: null,
-
-    workspaces: [],
-    activeWorkspaceId: null,
-    storageGroups: [],
-
-    mediaPaths: [],
-    selectedMediaId: null,
-
-    binLocks: [],
-
-    writeTargets: [],
-
-    coPresenceUsers: [],
-
-    mediaServicesJobs: [],
-
-    cacheEntries: [],
-    cacheStats: DEFAULT_CACHE_STATS,
-
-    storageUsed: 0,
-    storageTotal: 0,
-
-    showWorkspaceBrowser: true,
-    showCachePanel: false,
-    showMediaServicesPanel: false,
-    activeNexisTab: 'workspaces',
+  devtools(
+    immer((set) => ({
+      // ── Initial State ───────────────────────────────────────────────────
+      ...INITIAL_NEXIS_STATE,
 
     // ── Connection Actions ──────────────────────────────────────────────
 
@@ -314,5 +317,45 @@ export const useNexisStore = create<NEXISState & NEXISActions>()(
     }),
 
     setActiveNexisTab: (tab) => set((s) => { s.activeNexisTab = tab; }),
+
+    // ── Error & Reset ────────────────────────────────────────────────────
+
+    clearError: () => set((s) => { s.lastError = null; }, false, 'nexis/clearError'),
+
+    resetStore: () => set(() => ({
+      ...INITIAL_NEXIS_STATE,
+      cacheStats: { ...DEFAULT_CACHE_STATS },
+    }), true, 'nexis/resetStore'),
   })),
+  { name: 'NexisStore', enabled: process.env["NODE_ENV"] === 'development' },
+  )
 );
+
+// ─── Named Selectors ────────────────────────────────────────────────────────
+
+type NexisStoreState = NEXISState & NEXISActions;
+
+export const selectNexisConnectionStatus = (state: NexisStoreState) => state.connectionStatus;
+export const selectNexisIsConnected = (state: NexisStoreState) => state.isConnected;
+export const selectNexisHostname = (state: NexisStoreState) => state.hostname;
+export const selectNexisLastError = (state: NexisStoreState) => state.lastError;
+export const selectNexisWorkspaces = (state: NexisStoreState) => state.workspaces;
+export const selectActiveWorkspaceId = (state: NexisStoreState) => state.activeWorkspaceId;
+export const selectNexisStorageGroups = (state: NexisStoreState) => state.storageGroups;
+export const selectNexisMediaPaths = (state: NexisStoreState) => state.mediaPaths;
+export const selectNexisBinLocks = (state: NexisStoreState) => state.binLocks;
+export const selectNexisWriteTargets = (state: NexisStoreState) => state.writeTargets;
+export const selectCoPresenceUsers = (state: NexisStoreState) => state.coPresenceUsers;
+export const selectMediaServicesJobs = (state: NexisStoreState) => state.mediaServicesJobs;
+export const selectCacheEntries = (state: NexisStoreState) => state.cacheEntries;
+export const selectCacheStats = (state: NexisStoreState) => state.cacheStats;
+export const selectStorageUsed = (state: NexisStoreState) => state.storageUsed;
+export const selectStorageTotal = (state: NexisStoreState) => state.storageTotal;
+export const selectActiveNexisTab = (state: NexisStoreState) => state.activeNexisTab;
+export const selectActiveWorkspace = (state: NexisStoreState) =>
+  state.workspaces.find((w) => w.id === state.activeWorkspaceId) ?? null;
+export const selectStorageUtilization = (state: NexisStoreState) =>
+  state.storageTotal > 0 ? (state.storageUsed / state.storageTotal) * 100 : 0;
+export const selectRunningJobs = (state: NexisStoreState) =>
+  state.mediaServicesJobs.filter((j) => j.status === 'running' || j.status === 'queued');
+export const selectCacheHitRate = (state: NexisStoreState) => state.cacheStats.hitRate;

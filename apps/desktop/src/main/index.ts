@@ -6,6 +6,7 @@ import {
   shell,
   Menu,
   Tray,
+  TouchBar,
   Notification,
   nativeTheme,
   screen,
@@ -18,6 +19,7 @@ import {
 import { autoUpdater } from 'electron-updater';
 import { watch as watchFs } from 'node:fs';
 import { mkdir, readdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import os from 'os';
 import path from 'path';
 import { randomBytes } from 'node:crypto';
 import { flattenAssets, PROJECT_SCHEMA_VERSION } from '@mcua/core';
@@ -41,6 +43,15 @@ import {
   writeMediaIndexManifest,
 } from './mediaPipeline';
 
+// ─── GPU Acceleration Command-Line Flags ──────────────────────────────────────
+
+// Enable hardware acceleration flags before app is ready.
+// These must be set synchronously at module load time.
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+app.commandLine.appendSwitch('enable-features', 'VaapiVideoDecoder,VaapiVideoEncoder,CanvasOopRasterization');
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+
 // ─── Supported File Extensions ────────────────────────────────────────────────
 
 const NLE_FILE_EXTENSIONS = ['.avid', '.aaf', '.omf', '.mxf', '.avidproj', '.avidproj.json'] as const;
@@ -58,6 +69,98 @@ crashReporter.start({
   uploadToServer: false,
   compress: true,
 });
+
+// ─── IPC Rate Limiter ─────────────────────────────────────────────────────────
+
+/**
+ * Simple per-channel sliding window rate limiter.
+ * Prevents runaway renderer processes from flooding the main process
+ * with IPC calls.
+ */
+class IPCRateLimiter {
+  private windows = new Map<string, number[]>();
+  private readonly maxCalls: number;
+  private readonly windowMs: number;
+
+  constructor(maxCalls = 100, windowMs = 1000) {
+    this.maxCalls = maxCalls;
+    this.windowMs = windowMs;
+  }
+
+  /**
+   * Returns true if the call is allowed, false if rate-limited.
+   */
+  check(channel: string): boolean {
+    const now = Date.now();
+    let timestamps = this.windows.get(channel);
+    if (!timestamps) {
+      timestamps = [];
+      this.windows.set(channel, timestamps);
+    }
+
+    // Evict timestamps outside the sliding window
+    const cutoff = now - this.windowMs;
+    while (timestamps.length > 0 && timestamps[0]! < cutoff) {
+      timestamps.shift();
+    }
+
+    if (timestamps.length >= this.maxCalls) {
+      return false;
+    }
+
+    timestamps.push(now);
+    return true;
+  }
+}
+
+const ipcRateLimiter = new IPCRateLimiter(120, 1000);
+
+// ─── Auto-Save Infrastructure ─────────────────────────────────────────────────
+
+const AUTO_SAVE_INTERVAL_MS = 60_000; // 1 minute
+let autoSaveTimer: ReturnType<typeof setInterval> | null = null;
+let dirtyProjectIds = new Set<string>();
+
+function markProjectDirty(projectId: string): void {
+  dirtyProjectIds.add(projectId);
+}
+
+async function autoSaveAllDirtyProjects(): Promise<void> {
+  if (dirtyProjectIds.size === 0) return;
+
+  const ids = [...dirtyProjectIds];
+  dirtyProjectIds = new Set<string>();
+
+  for (const projectId of ids) {
+    try {
+      const project = await getPersistedProject(projectId);
+      if (project) {
+        await savePersistedProject(project);
+        log('info', 'AutoSave', `Auto-saved project "${project.name}"`, { projectId });
+      }
+    } catch (error) {
+      log('error', 'AutoSave', `Failed to auto-save project ${projectId}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Re-mark as dirty so next tick retries
+      dirtyProjectIds.add(projectId);
+    }
+  }
+}
+
+function startAutoSaveTimer(): void {
+  if (autoSaveTimer) return;
+  autoSaveTimer = setInterval(() => {
+    void autoSaveAllDirtyProjects();
+  }, AUTO_SAVE_INTERVAL_MS);
+}
+
+function stopAutoSaveTimer(): void {
+  if (autoSaveTimer) {
+    clearInterval(autoSaveTimer);
+    autoSaveTimer = null;
+  }
+}
 
 // ─── Protocol Handler Registration ────────────────────────────────────────────
 
@@ -116,6 +219,91 @@ function assertObject(value: unknown, name: string): asserts value is Record<str
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error(`Invalid parameter "${name}": expected an object`);
   }
+}
+
+function assertNumber(value: unknown, name: string): asserts value is number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`Invalid parameter "${name}": expected a finite number`);
+  }
+}
+
+// ─── File Path Sanitization ──────────────────────────────────────────────────
+
+/**
+ * Allowed root directories for file system operations initiated from the renderer.
+ * Prevents path traversal attacks that could read/write arbitrary system files.
+ */
+function getAllowedFSRoots(): string[] {
+  return [
+    app.getPath('userData'),
+    app.getPath('documents'),
+    app.getPath('downloads'),
+    app.getPath('desktop'),
+    app.getPath('temp'),
+    app.getPath('home'),
+  ];
+}
+
+/**
+ * Validate that a file path from the renderer is within an allowed root.
+ * Resolves the path to prevent directory traversal (e.g., ../../etc/passwd).
+ */
+function sanitizeFilePath(filePath: string, name: string): string {
+  assertString(filePath, name);
+
+  const resolved = path.resolve(filePath);
+
+  // Block null bytes (path traversal via null byte injection)
+  if (resolved.includes('\0')) {
+    throw new Error(`Invalid parameter "${name}": path contains null bytes`);
+  }
+
+  const allowedRoots = getAllowedFSRoots();
+  const isAllowed = allowedRoots.some((root) => resolved.startsWith(root));
+  if (!isAllowed) {
+    throw new Error(
+      `Invalid parameter "${name}": path "${resolved}" is outside allowed directories`,
+    );
+  }
+
+  return resolved;
+}
+
+// ─── IPC Error Serialization ─────────────────────────────────────────────────
+
+/**
+ * Serialize an error for safe transport across the IPC boundary.
+ * Electron strips non-standard Error properties, so we normalize them.
+ */
+function serializeIPCError(error: unknown): { message: string; code?: string; stack?: string } {
+  if (error instanceof Error) {
+    return {
+      message: error.message,
+      code: (error as NodeJS.ErrnoException).code,
+      stack: app.isPackaged ? undefined : error.stack,
+    };
+  }
+  return { message: String(error) };
+}
+
+/**
+ * Wrap an IPC handler with rate limiting and error serialization.
+ */
+function registerSafeHandler(
+  channel: string,
+  handler: (event: Electron.IpcMainInvokeEvent, ...args: unknown[]) => unknown,
+): void {
+  ipcMain.handle(channel, async (event, ...args: unknown[]) => {
+    if (!ipcRateLimiter.check(channel)) {
+      throw new Error(`Rate limit exceeded for channel "${channel}"`);
+    }
+    try {
+      return await handler(event, ...args);
+    } catch (error) {
+      const serialized = serializeIPCError(error);
+      throw new Error(serialized.message);
+    }
+  });
 }
 
 // ─── Window State Persistence ──────────────────────────────────────────────────
@@ -392,6 +580,74 @@ interface DesktopJob {
   error?: string;
 }
 
+// ─── Taskbar Progress ─────────────────────────────────────────────────────────
+
+/**
+ * Update the OS taskbar/dock progress indicator based on active jobs.
+ * On macOS this shows progress in the dock badge, on Windows it shows
+ * in the taskbar button.
+ */
+function updateTaskbarProgress(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  const activeJobs = Array.from(desktopJobs.values()).filter(
+    (j) => j.status === 'RUNNING' || j.status === 'QUEUED',
+  );
+
+  if (activeJobs.length === 0) {
+    mainWindow.setProgressBar(-1); // Remove progress indicator
+    return;
+  }
+
+  // Average progress across all active jobs
+  const totalProgress = activeJobs.reduce((sum, j) => sum + j.progress, 0);
+  const averageProgress = totalProgress / (activeJobs.length * 100);
+  mainWindow.setProgressBar(Math.min(1, Math.max(0, averageProgress)));
+}
+
+// ─── Touch Bar (macOS) ───────────────────────────────────────────────────────
+
+function createTouchBar(): TouchBar {
+  const { TouchBarButton, TouchBarSpacer } = TouchBar;
+
+  const playButton = new TouchBarButton({
+    label: '\u25B6',
+    click: () => sendMenuCommand('menu:mark-in'),
+  });
+
+  const stopButton = new TouchBarButton({
+    label: '\u25A0',
+    click: () => sendMenuCommand('menu:mark-out'),
+  });
+
+  const razorButton = new TouchBarButton({
+    label: '\u2702 Razor',
+    click: () => sendMenuCommand('menu:razor'),
+  });
+
+  const markerButton = new TouchBarButton({
+    label: '\u2691 Marker',
+    click: () => sendMenuCommand('menu:add-marker'),
+  });
+
+  const saveButton = new TouchBarButton({
+    label: '\u2B07 Save',
+    click: () => sendMenuCommand('menu:save'),
+  });
+
+  return new TouchBar({
+    items: [
+      playButton,
+      stopButton,
+      new TouchBarSpacer({ size: 'small' }),
+      razorButton,
+      markerButton,
+      new TouchBarSpacer({ size: 'flexible' }),
+      saveButton,
+    ],
+  });
+}
+
 function createId(prefix: string): string {
   return `${prefix}-${randomBytes(4).toString('hex')}`;
 }
@@ -503,6 +759,10 @@ function upsertDesktopJob(job: DesktopJob): DesktopJob {
   };
   desktopJobs.set(nextJob.id, nextJob);
   mainWindow?.webContents.send('desktop-job:updated', nextJob);
+
+  // Update OS taskbar/dock progress indicator
+  updateTaskbarProgress();
+
   return nextJob;
 }
 
@@ -900,6 +1160,11 @@ async function createMainWindow(): Promise<BrowserWindow> {
     });
   });
 
+  // Touch Bar (macOS)
+  if (process.platform === 'darwin') {
+    win.setTouchBar(createTouchBar());
+  }
+
   // Handle renderer crashes gracefully
   win.webContents.on('render-process-gone', (_event, details) => {
     log('error', 'Renderer', 'Render process gone', { reason: details.reason, exitCode: details.exitCode });
@@ -1100,6 +1365,9 @@ if (!gotTheLock) {
     // Create system tray
     createSystemTray();
 
+    // Start auto-save timer for dirty projects
+    startAutoSaveTimer();
+
     // Initialize professional I/O subsystems (non-blocking — missing modules are OK)
     videoIOManager.registerIPCHandlers();
     streamManager.registerIPCHandlers();
@@ -1196,6 +1464,11 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   isQuitting = true;
+
+  // Stop auto-save timer and flush any dirty projects one final time
+  stopAutoSaveTimer();
+  void autoSaveAllDirtyProjects();
+
   projectWatchers.forEach((_watchers, projectId) => disposeProjectWatchers(projectId));
   void videoIOManager.dispose();
   void streamManager.dispose();
@@ -1473,19 +1746,16 @@ ipcMain.handle('jobs:start-export', async (_event, project: unknown) => {
 
 // ─── File System Handlers (path sanitization) ─────────────────────────────────
 
-ipcMain.handle('fs:read-text', async (_event, filePath: unknown) => {
-  assertString(filePath, 'filePath');
-  // Prevent path traversal outside user data or common document paths
-  const resolved = path.resolve(filePath);
+registerSafeHandler('fs:read-text', async (_event, filePath: unknown) => {
+  const resolved = sanitizeFilePath(filePath as string, 'filePath');
   return readFile(resolved, 'utf8');
 });
 
-ipcMain.handle('fs:write-text', async (_event, filePath: unknown, contents: unknown) => {
-  assertString(filePath, 'filePath');
+registerSafeHandler('fs:write-text', async (_event, filePath: unknown, contents: unknown) => {
+  const resolved = sanitizeFilePath(filePath as string, 'filePath');
   if (typeof contents !== 'string') {
     throw new Error('Invalid parameter "contents": expected a string');
   }
-  const resolved = path.resolve(filePath);
   await writeFile(resolved, contents, 'utf8');
   return true;
 });
@@ -1672,4 +1942,98 @@ ipcMain.handle('app:system-info', () => ({
   nodeVersion: process.versions['node'],
   appVersion: app.getVersion(),
   isPackaged: app.isPackaged,
+  cpus: os.cpus().length,
+  totalMemory: os.totalmem(),
+  freeMemory: os.freemem(),
+  hostname: os.hostname(),
 }));
+
+// ─── Dirty Project Tracking IPC ──────────────────────────────────────────────
+
+registerSafeHandler('projects:mark-dirty', (_event, projectId: unknown) => {
+  assertString(projectId, 'projectId');
+  markProjectDirty(projectId);
+  return true;
+});
+
+registerSafeHandler('projects:auto-save-status', () => {
+  return {
+    dirtyCount: dirtyProjectIds.size,
+    dirtyIds: [...dirtyProjectIds],
+    intervalMs: AUTO_SAVE_INTERVAL_MS,
+  };
+});
+
+// ─── Render Dispatch IPC ─────────────────────────────────────────────────────
+
+registerSafeHandler('render:get-gpu-accel-args', async (_event, codec: unknown) => {
+  if (typeof codec !== 'string' || !['h264', 'hevc', 'prores'].includes(codec)) {
+    throw new Error('Invalid codec — expected "h264", "hevc", or "prores"');
+  }
+  const gpu = await detectGPU();
+  const { getHWAccelFFmpegArgs } = await import('./gpu');
+  return {
+    gpu,
+    ffmpegArgs: getHWAccelFFmpegArgs(gpu, codec as 'h264' | 'hevc' | 'prores'),
+  };
+});
+
+registerSafeHandler('render:get-decode-args', async () => {
+  const gpu = await detectGPU();
+  const { getHWAccelDecodeArgs } = await import('./gpu');
+  return {
+    gpu,
+    ffmpegArgs: getHWAccelDecodeArgs(gpu),
+  };
+});
+
+// ─── Hardware Info IPC ────────────────────────────────────────────────────────
+
+registerSafeHandler('hw:get-system-resources', () => {
+  const cpus = os.cpus();
+  const firstCpu = cpus[0];
+  return {
+    cpuModel: firstCpu?.model ?? 'Unknown',
+    cpuCount: cpus.length,
+    totalMemoryMB: Math.round(os.totalmem() / (1024 * 1024)),
+    freeMemoryMB: Math.round(os.freemem() / (1024 * 1024)),
+    platform: os.platform(),
+    release: os.release(),
+    arch: os.arch(),
+    uptime: os.uptime(),
+  };
+});
+
+registerSafeHandler('hw:get-displays', () => {
+  const displays = screen.getAllDisplays();
+  return displays.map((d) => ({
+    id: d.id,
+    label: d.label,
+    bounds: d.bounds,
+    workArea: d.workArea,
+    scaleFactor: d.scaleFactor,
+    rotation: d.rotation,
+    internal: d.internal,
+    colorSpace: d.colorSpace,
+    size: d.size,
+  }));
+});
+
+// ─── Window Drag & Drop File Filter ──────────────────────────────────────────
+
+registerSafeHandler('app:filter-droppable-files', (_event, filePaths: unknown) => {
+  assertStringArray(filePaths, 'filePaths');
+
+  const MEDIA_EXTENSIONS = new Set([
+    '.mp4', '.mov', '.mxf', '.avi', '.mkv', '.webm',
+    '.mp3', '.wav', '.aiff', '.aif', '.flac', '.ogg', '.m4a', '.aac',
+    '.jpg', '.jpeg', '.png', '.tiff', '.tif', '.bmp', '.gif', '.webp', '.exr', '.dpx',
+    '.avid', '.aaf', '.omf', '.edl', '.xml', '.fcpxml', '.avidproj',
+    '.srt', '.vtt', '.ass', '.ssa',
+  ]);
+
+  return filePaths.filter((fp) => {
+    const ext = path.extname(fp).toLowerCase();
+    return MEDIA_EXTENSIONS.has(ext);
+  });
+});

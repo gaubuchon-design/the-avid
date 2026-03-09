@@ -138,6 +138,51 @@ export function paginate(total: number, page: number, limit: number) {
   };
 }
 
+// ─── Cursor-based pagination ────────────────────────────────────────────────
+
+export const cursorPaginationQuery = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().min(1).max(100).default(20),
+  sort: z.string().optional(),
+  order: z.enum(['asc', 'desc']).default('desc'),
+});
+export type CursorPaginationQuery = z.infer<typeof cursorPaginationQuery>;
+
+export interface CursorPaginationMeta {
+  nextCursor: string | null;
+  prevCursor: string | null;
+  limit: number;
+  total: number;
+  hasMore: boolean;
+}
+
+/**
+ * Build cursor pagination metadata from a result set.
+ * Expects `items` to already be fetched with `take: limit + 1` to detect hasMore.
+ */
+export function cursorPaginate<T extends { id: string }>(
+  items: T[],
+  limit: number,
+  total: number,
+  cursorField: keyof T = 'id' as keyof T,
+): { data: T[]; pagination: CursorPaginationMeta } {
+  const hasMore = items.length > limit;
+  const data = hasMore ? items.slice(0, limit) : items;
+  const lastItem = data[data.length - 1];
+  const firstItem = data[0];
+
+  return {
+    data,
+    pagination: {
+      nextCursor: hasMore && lastItem ? String(lastItem[cursorField]) : null,
+      prevCursor: firstItem ? String(firstItem[cursorField]) : null,
+      limit,
+      total,
+      hasMore,
+    },
+  };
+}
+
 // ─── Reusable schema fragments ─────────────────────────────────────────────
 
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Must be a valid hex color');

@@ -17,6 +17,8 @@
 // ---------------------------------------------------------------------------
 export {
   AdapterError,
+  AuthenticationError,
+  AuthorizationError,
   ConflictError,
   InvalidArgumentError,
   NotFoundError,

@@ -19,6 +19,7 @@ function subscribe<Args extends unknown[]>(
 // ─── Allowed IPC channels (security whitelist) ──────────────────────────────────
 
 const ALLOWED_INVOKE_CHANNELS = new Set([
+  // App info
   'app:get-version',
   'app:get-platform',
   'app:version',
@@ -34,13 +35,26 @@ const ALLOWED_INVOKE_CHANNELS = new Set([
   'app:confirm-discard',
   'app:get-dropped-file-info',
   'app:system-info',
+  'app:filter-droppable-files',
+
+  // Dialogs
   'dialog:open-file',
   'dialog:open',
   'dialog:save-file',
   'dialog:save',
+
+  // GPU / Hardware acceleration
   'gpu:info',
   'hw-accel:get-settings',
   'hw-accel:save-settings',
+  'hw:get-system-resources',
+  'hw:get-displays',
+
+  // Render dispatch
+  'render:get-gpu-accel-args',
+  'render:get-decode-args',
+
+  // Projects
   'projects:list',
   'projects:get',
   'projects:save',
@@ -54,10 +68,18 @@ const ALLOWED_INVOKE_CHANNELS = new Set([
   'projects:recent',
   'projects:add-recent',
   'projects:clear-recent',
+  'projects:mark-dirty',
+  'projects:auto-save-status',
+
+  // Jobs
   'jobs:list',
   'jobs:start-export',
+
+  // File system
   'fs:read-text',
   'fs:write-text',
+
+  // Video I/O
   'video-io:available',
   'video-io:enumerate',
   'video-io:start-capture',
@@ -67,6 +89,8 @@ const ALLOWED_INVOKE_CHANNELS = new Set([
   'video-io:send-frame',
   'video-io:device-status',
   'video-io:get-transport-buffer',
+
+  // Streaming
   'streaming:available',
   'streaming:start-ndi',
   'streaming:start-srt',
@@ -74,6 +98,8 @@ const ALLOWED_INVOKE_CHANNELS = new Set([
   'streaming:stop-all',
   'streaming:stats',
   'streaming:targets',
+
+  // Deck control
   'deck:available',
   'deck:list-ports',
   'deck:connect',
@@ -84,6 +110,8 @@ const ALLOWED_INVOKE_CHANNELS = new Set([
   'deck:timecode',
   'deck:go-to-tc',
   'deck:connected-decks',
+
+  // Window control
   'window:minimize',
   'window:maximize',
   'window:close',
@@ -93,6 +121,7 @@ const ALLOWED_INVOKE_CHANNELS = new Set([
 ]);
 
 const ALLOWED_SUBSCRIBE_CHANNELS = new Set([
+  // Menu events
   'menu:new-project',
   'menu:open-project',
   'menu:import-media',
@@ -102,10 +131,14 @@ const ALLOWED_SUBSCRIBE_CHANNELS = new Set([
   'menu:consolidate',
   'menu:preferences',
   'menu:keyboard-shortcuts',
+
+  // Edit menu
   'menu:paste-insert',
   'menu:delete',
   'menu:ripple-delete',
   'menu:deselect-all',
+
+  // Clip/NLE menu
   'menu:razor',
   'menu:split',
   'menu:lift',
@@ -115,6 +148,8 @@ const ALLOWED_SUBSCRIBE_CHANNELS = new Set([
   'menu:ungroup',
   'menu:nest',
   'menu:match-frame',
+
+  // Mark menu
   'menu:mark-in',
   'menu:mark-out',
   'menu:clear-marks',
@@ -123,24 +158,35 @@ const ALLOWED_SUBSCRIBE_CHANNELS = new Set([
   'menu:prev-marker',
   'menu:goto-in',
   'menu:goto-out',
+
+  // View menu
   'menu:view-source',
   'menu:view-record',
   'menu:view-timeline',
   'menu:view-bins',
   'menu:view-effects',
+
+  // Job & I/O events
   'desktop-job:updated',
   'video-io:frame-available',
   'streaming:stats-update',
   'deck:timecode-update',
   'deck:status-update',
+
+  // Auto-update events
   'app:update-available',
   'app:update-progress',
   'app:update-downloaded',
+
+  // Deep link events
   'app:deep-link',
+
+  // Theme events
+  'app:theme-changed',
 ]);
 
 /**
- * Validated invoke — only dispatches to whitelisted channels.
+ * Validated invoke -- only dispatches to whitelisted channels.
  */
 function safeInvoke(channel: string, ...args: unknown[]): Promise<unknown> {
   if (!ALLOWED_INVOKE_CHANNELS.has(channel)) {
@@ -150,7 +196,7 @@ function safeInvoke(channel: string, ...args: unknown[]): Promise<unknown> {
 }
 
 /**
- * Validated subscribe — only listens on whitelisted channels.
+ * Validated subscribe -- only listens on whitelisted channels.
  */
 function safeSubscribe<Args extends unknown[]>(
   channel: string,
@@ -222,6 +268,34 @@ contextBridge.exposeInMainWorld('electronAPI', {
     safeInvoke('fs:read-text', filePath) as Promise<string>,
   writeTextFile: (filePath: string, contents: string) =>
     safeInvoke('fs:write-text', filePath, contents) as Promise<boolean>,
+
+  // ─── Auto-save / dirty tracking ──────────────────────────────────────
+  markProjectDirty: (projectId: string) =>
+    safeInvoke('projects:mark-dirty', projectId) as Promise<boolean>,
+  getAutoSaveStatus: () =>
+    safeInvoke('projects:auto-save-status') as Promise<{
+      dirtyCount: number;
+      dirtyIds: string[];
+      intervalMs: number;
+    }>,
+
+  // ─── Render dispatch ─────────────────────────────────────────────────
+  render: {
+    getGPUAccelArgs: (codec: string) => safeInvoke('render:get-gpu-accel-args', codec),
+    getDecodeArgs: () => safeInvoke('render:get-decode-args'),
+  },
+
+  // ─── Hardware info ──────────────────────────────────────────────────
+  hardware: {
+    getSystemResources: () => safeInvoke('hw:get-system-resources'),
+    getDisplays: () => safeInvoke('hw:get-displays'),
+    getHWAccelSettings: () => safeInvoke('hw-accel:get-settings'),
+    saveHWAccelSettings: (settings: unknown) => safeInvoke('hw-accel:save-settings', settings),
+  },
+
+  // ─── File drag & drop helpers ────────────────────────────────────────
+  filterDroppableFiles: (filePaths: string[]) =>
+    safeInvoke('app:filter-droppable-files', filePaths) as Promise<string[]>,
 
   // ─── Video I/O (DeckLink, AJA) ────────────────────────────────────────
   videoIO: {
@@ -318,6 +392,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Deep link events
   onDeepLink: (cb: (url: string) => void) => safeSubscribe('app:deep-link', cb),
+
+  // Theme change events
+  onThemeChanged: (cb: (info: { shouldUseDarkColors: boolean; themeSource: string }) => void) =>
+    safeSubscribe('app:theme-changed', cb),
 
   // Cleanup
   removeAllListeners: (channel: string) => {

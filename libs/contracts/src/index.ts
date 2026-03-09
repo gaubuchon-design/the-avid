@@ -188,6 +188,74 @@ export {
   parseVersion,
 } from './api-version';
 
+// ─── Type Guards & Assertion Functions ────────────────────────────────────────
+export {
+  // Type guards
+  isMediaType,
+  isApprovalStatus,
+  isTranscriptFormat,
+  isEmbeddingBackend,
+  isTraceStatus,
+  isPublishPlatform,
+  isPublishStatus,
+  isTokenCategory,
+  isPlanStatus,
+  isStepStatus,
+  isExecutionMode,
+  isModality,
+  isHydrationLevel,
+  isMeshEventType,
+  isRenderJobType,
+  isRenderJobStatus,
+  isEventType,
+  isPrivacyLevel,
+  isPlatformEventKind,
+  // Assertion functions
+  assertMediaType,
+  assertApprovalStatus,
+  assertTranscriptFormat,
+  assertEmbeddingBackend,
+  assertTraceStatus,
+  assertPublishPlatform,
+  assertPublishStatus,
+  assertTokenCategory,
+  assertPlanStatus,
+  assertStepStatus,
+  assertExecutionMode,
+  assertModality,
+  assertHydrationLevel,
+  assertMeshEventType,
+  assertRenderJobType,
+  assertRenderJobStatus,
+  assertEventType,
+  assertPrivacyLevel,
+  assertPlatformEventKind,
+  // Branded ID factory functions
+  createClipId,
+  createTrackId,
+  createEffectId,
+  createBinId,
+  createWalletId,
+  createNodeId,
+  createCorrelationId,
+  createProjectId,
+  createSequenceId,
+  createAssetId,
+  createShardId,
+  createPlanId,
+  createJobId,
+} from './type-guards';
+
+export type {
+  ClipId,
+  TrackId,
+  EffectId,
+  BinId,
+  WalletId,
+  NodeId,
+  CorrelationId,
+} from './type-guards';
+
 // ─── Zod Runtime Schemas ──────────────────────────────────────────────────────
 // Re-exported from a separate entry point so that consumers who do not
 // need runtime validation can tree-shake Zod out of their bundle:

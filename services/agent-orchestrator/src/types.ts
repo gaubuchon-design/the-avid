@@ -215,4 +215,8 @@ export interface OrchestratorConfig {
   readonly defaultPolicy?: ApprovalPolicy;
   /** Execution mode for running plan steps. */
   readonly executionMode?: ExecutionMode;
+  /** Number of retry attempts for transient step failures (default: 2). */
+  readonly stepRetryCount?: number;
+  /** Whether to enforce token budgets per plan (default: true). */
+  readonly tokenBudgetEnabled?: boolean;
 }

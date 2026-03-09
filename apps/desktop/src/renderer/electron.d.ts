@@ -108,6 +108,64 @@ interface ConnectedDeck {
   connected: boolean;
 }
 
+// ─── GPU / Hardware Types ─────────────────────────────────────────────────────
+
+interface GPUInfo {
+  vendor: 'nvidia' | 'amd' | 'intel' | 'apple' | 'unknown';
+  renderer: string;
+  driverVersion: string;
+  hasHardwareEncode: boolean;
+  hasHardwareDecode: boolean;
+  hasCUDA: boolean;
+  hasOpenCL: boolean;
+  vram: number;
+  supportedCodecs: {
+    encode: string[];
+    decode: string[];
+  };
+}
+
+interface HWAccelSettings {
+  enabled: boolean;
+  preferHardwareDecode: boolean;
+  preferHardwareEncode: boolean;
+  forceGPU: 'auto' | 'nvidia' | 'amd' | 'intel' | 'apple' | 'software';
+}
+
+interface SystemResources {
+  cpuModel: string;
+  cpuCount: number;
+  totalMemoryMB: number;
+  freeMemoryMB: number;
+  platform: string;
+  release: string;
+  arch: string;
+  uptime: number;
+}
+
+interface DisplayInfo {
+  id: number;
+  label: string;
+  bounds: { x: number; y: number; width: number; height: number };
+  workArea: { x: number; y: number; width: number; height: number };
+  scaleFactor: number;
+  rotation: number;
+  internal: boolean;
+  colorSpace: string;
+  size: { width: number; height: number };
+}
+
+interface AutoSaveStatus {
+  dirtyCount: number;
+  dirtyIds: string[];
+  intervalMs: number;
+}
+
+interface RenderAccelResult {
+  gpu: GPUInfo;
+  ffmpegArgs: string[];
+}
+
 // ─── Desktop Bridge Interface ─────────────────────────────────────────────────
 
 interface DesktopBridge {
@@ -125,7 +183,7 @@ interface DesktopBridge {
     installUpdate: () => Promise<void>;
   };
   gpu: {
-    getInfo: () => Promise<unknown>;
+    getInfo: () => Promise<GPUInfo>;
   };
 
   // Dialogs
@@ -155,6 +213,27 @@ interface DesktopBridge {
   // File system
   readTextFile: (filePath: string) => Promise<string>;
   writeTextFile: (filePath: string, contents: string) => Promise<boolean>;
+
+  // Auto-save / dirty tracking
+  markProjectDirty: (projectId: string) => Promise<boolean>;
+  getAutoSaveStatus: () => Promise<AutoSaveStatus>;
+
+  // Render dispatch
+  render: {
+    getGPUAccelArgs: (codec: string) => Promise<RenderAccelResult>;
+    getDecodeArgs: () => Promise<RenderAccelResult>;
+  };
+
+  // Hardware info
+  hardware: {
+    getSystemResources: () => Promise<SystemResources>;
+    getDisplays: () => Promise<DisplayInfo[]>;
+    getHWAccelSettings: () => Promise<HWAccelSettings>;
+    saveHWAccelSettings: (settings: HWAccelSettings) => Promise<HWAccelSettings>;
+  };
+
+  // File drag & drop helpers
+  filterDroppableFiles: (filePaths: string[]) => Promise<string[]>;
 
   // Video I/O (DeckLink, AJA)
   videoIO: {
@@ -251,6 +330,9 @@ interface DesktopBridge {
 
   // Deep link events
   onDeepLink: (callback: (url: string) => void) => () => void;
+
+  // Theme change events
+  onThemeChanged: (callback: (info: { shouldUseDarkColors: boolean; themeSource: string }) => void) => () => void;
 
   // Cleanup
   removeAllListeners: (channel: string) => void;

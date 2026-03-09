@@ -26,10 +26,20 @@ export function errorHandler(
   res: Response,
   _next: NextFunction
 ) {
+  // Build request context for structured logging
+  const requestContext = {
+    requestId: req.headers['x-request-id'] as string | undefined,
+    userId: req.user?.id,
+    method: req.method,
+    path: req.path,
+  };
+
   // AppError — known, intentional
   if (err instanceof AppError) {
     if (err.statusCode >= 500) {
-      logger.error(`AppError: ${err.message}`, { code: err.code, stack: err.stack });
+      logger.error(`AppError: ${err.message}`, { ...requestContext, code: err.code, stack: err.stack });
+    } else if (err.statusCode >= 400) {
+      logger.warn(`AppError: ${err.message}`, { ...requestContext, code: err.code });
     }
     return res.status(err.statusCode).json(err.toJSON());
   }
@@ -80,6 +90,7 @@ export function errorHandler(
   if (isPrismaKnownRequestError(err)) {
     switch (err.code) {
       case 'P2002': // Unique constraint violation
+        logger.warn('Prisma unique constraint violation', { ...requestContext, code: err.code, meta: err.meta });
         return res.status(409).json({
           error: { message: 'Resource already exists', code: 'CONFLICT', fields: err.meta?.target },
         });
@@ -88,11 +99,12 @@ export function errorHandler(
           error: { message: 'Resource not found', code: 'NOT_FOUND' },
         });
       case 'P2003': // Foreign key constraint
+        logger.warn('Prisma foreign key constraint', { ...requestContext, code: err.code, meta: err.meta });
         return res.status(400).json({
           error: { message: 'Related resource not found', code: 'BAD_REQUEST' },
         });
       default:
-        logger.error('Prisma error', { code: err.code, meta: err.meta });
+        logger.error('Prisma error', { ...requestContext, code: err.code, meta: err.meta });
     }
   }
 
@@ -102,13 +114,21 @@ export function errorHandler(
   }
 
   // Unknown / unexpected errors
-  logger.error('Unhandled error', { message: err.message, stack: err.stack, path: req.path });
+  logger.error('Unhandled error', {
+    ...requestContext,
+    message: err.message,
+    stack: err.stack,
+    name: err.name,
+  });
 
   return res.status(500).json({
     error: {
-      message: 'Internal server error',
+      message: process.env['NODE_ENV'] === 'production'
+        ? 'Internal server error'
+        : err.message,
       code: 'INTERNAL_ERROR',
       ...(process.env['NODE_ENV'] === 'development' ? { stack: err.stack } : {}),
+      ...(requestContext.requestId ? { requestId: requestContext.requestId } : {}),
     },
   });
 }

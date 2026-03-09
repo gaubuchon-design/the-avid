@@ -2,25 +2,42 @@ import { Router, Request, Response } from 'express';
 import { db } from '../../db/client';
 import { authenticate } from '../../middleware/auth';
 import {
-  validate, validateAll, schemas, paginationQuery, paginate,
+  validate, validateAll, schemas, cursorPaginationQuery,
   uuidParam, slugParam,
 } from '../../utils/validation';
 import { NotFoundError, ConflictError, InsufficientTokensError } from '../../utils/errors';
 import { tokenService } from '../../services/token.service';
+import { z } from 'zod';
+import crypto from 'crypto';
 
 const router = Router();
 
+// ─── Query schemas ────────────────────────────────────────────────────────────
+
+const marketplaceListQuery = cursorPaginationQuery.extend({
+  type: z.string().max(50).optional(),
+  featured: z.string().optional(),
+  search: z.string().max(200).optional(),
+});
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function generateETag(data: unknown): string {
+  const hash = crypto.createHash('md5').update(JSON.stringify(data)).digest('hex');
+  return `"${hash}"`;
+}
+
 // ─── GET /marketplace -- public listing ────────────────────────────────────────
-router.get('/', validate(paginationQuery, 'query'), async (req: Request, res: Response) => {
-  const { page, limit, sortBy, sortOrder } = req.query as any;
-  const { type, featured, search } = req.query as any;
-  const skip = (page - 1) * limit;
+router.get('/', validate(marketplaceListQuery, 'query'), async (req: Request, res: Response) => {
+  const { cursor, limit, sort, order } = req.query as any;
+  const type = req.query['type'] as string | undefined;
+  const featured = req.query['featured'] as string | undefined;
+  const search = req.query['search'] as string | undefined;
 
-  // Allowlist sortable fields to prevent invalid field injection
   const allowedSortFields = ['downloadCount', 'createdAt', 'name', 'priceTokens'];
-  const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'downloadCount';
+  const safeSortBy = allowedSortFields.includes(sort) ? sort : 'downloadCount';
 
-  const where: any = {
+  const where: Record<string, unknown> = {
     isPublished: true,
     ...(type ? { type } : {}),
     ...(featured === 'true' ? { isFeatured: true } : {}),
@@ -35,18 +52,34 @@ router.get('/', validate(paginationQuery, 'query'), async (req: Request, res: Re
       : {}),
   };
 
+  const cursorClause = cursor ? { cursor: { id: cursor }, skip: 1 } : {};
+
   const [items, total] = await Promise.all([
     db.marketplaceItem.findMany({
       where,
-      skip,
-      take: limit,
-      orderBy: { [safeSortBy]: sortOrder },
+      take: limit + 1,
+      orderBy: { [safeSortBy]: order },
       include: { author: { select: { id: true, displayName: true, avatarUrl: true } } },
+      ...cursorClause,
     }),
     db.marketplaceItem.count({ where }),
   ]);
 
-  res.json({ items, pagination: paginate(total, page, limit) });
+  const hasMore = items.length > limit;
+  const data = hasMore ? items.slice(0, limit) : items;
+  const lastItem = data[data.length - 1];
+  const firstItem = data[0];
+
+  res.json({
+    items: data,
+    pagination: {
+      nextCursor: hasMore && lastItem ? lastItem.id : null,
+      prevCursor: firstItem ? firstItem.id : null,
+      limit,
+      total,
+      hasMore,
+    },
+  });
 });
 
 // ─── GET /marketplace/me/library -- user's purchased items ─────────────────────
@@ -67,13 +100,23 @@ router.get('/me/library', authenticate, async (req: Request, res: Response) => {
 // ─── GET /marketplace/:slug ────────────────────────────────────────────────────
 router.get('/:slug', validate(slugParam, 'params'), async (req: Request, res: Response) => {
   const item = await db.marketplaceItem.findUnique({
-    where: { slug: req.params['slug'], isPublished: true },
+    where: { slug: req.params['slug']!, isPublished: true },
     include: {
       author: { select: { id: true, displayName: true, avatarUrl: true } },
       _count: { select: { purchases: true } },
     },
   });
   if (!item) throw new NotFoundError('Marketplace item');
+
+  const etag = generateETag(item);
+  res.setHeader('ETag', etag);
+  res.setHeader('Last-Modified', item.updatedAt.toUTCString());
+
+  if (req.headers['if-none-match'] === etag) {
+    res.status(304).send();
+    return;
+  }
+
   res.json({ item });
 });
 
@@ -81,7 +124,7 @@ router.get('/:slug', validate(slugParam, 'params'), async (req: Request, res: Re
 router.post('/:id/purchase', authenticate, validate(uuidParam, 'params'), async (req: Request, res: Response) => {
   const userId = req.user!.id;
 
-  const item = await db.marketplaceItem.findUnique({ where: { id: req.params['id'] } });
+  const item = await db.marketplaceItem.findUnique({ where: { id: req.params['id']! } });
   if (!item || !item.isPublished) throw new NotFoundError('Marketplace item');
 
   // Check already purchased
@@ -92,11 +135,15 @@ router.post('/:id/purchase', authenticate, validate(uuidParam, 'params'), async 
 
   // Free items
   if (item.priceTokens === 0 && item.priceCents === 0) {
-    const purchase = await db.marketplacePurchase.create({
-      data: { userId, itemId: item.id, paidTokens: 0, paidCents: 0 },
+    const purchase = await db.$transaction(async (tx: any) => {
+      const p = await tx.marketplacePurchase.create({
+        data: { userId, itemId: item.id, paidTokens: 0, paidCents: 0 },
+      });
+      await tx.marketplaceItem.update({ where: { id: item.id }, data: { downloadCount: { increment: 1 } } });
+      return p;
     });
-    await db.marketplaceItem.update({ where: { id: item.id }, data: { downloadCount: { increment: 1 } } });
-    return res.status(201).json({ purchase, downloadUrl: item.downloadUrl });
+    res.status(201).json({ purchase, downloadUrl: item.downloadUrl });
+    return;
   }
 
   // Token payment
@@ -106,11 +153,13 @@ router.post('/:id/purchase', authenticate, validate(uuidParam, 'params'), async 
     await tokenService.debit(userId, item.priceTokens, 'marketplace_purchase', item.id);
   }
 
-  const purchase = await db.marketplacePurchase.create({
-    data: { userId, itemId: item.id, paidTokens: item.priceTokens, paidCents: item.priceCents },
+  const purchase = await db.$transaction(async (tx: any) => {
+    const p = await tx.marketplacePurchase.create({
+      data: { userId, itemId: item.id, paidTokens: item.priceTokens, paidCents: item.priceCents },
+    });
+    await tx.marketplaceItem.update({ where: { id: item.id }, data: { downloadCount: { increment: 1 } } });
+    return p;
   });
-
-  await db.marketplaceItem.update({ where: { id: item.id }, data: { downloadCount: { increment: 1 } } });
 
   // 70/30 split -- credit author 70% of tokens
   if (item.priceTokens > 0) {
@@ -132,11 +181,11 @@ router.post('/', authenticate, validate(schemas.createMarketplaceItem), async (r
 // ─── PATCH /marketplace/:id -- update item ──────────────────────────────────────
 router.patch('/:id', authenticate, validateAll({ params: uuidParam, body: schemas.updateMarketplaceItem }), async (req: Request, res: Response) => {
   // Verify ownership
-  const existing = await db.marketplaceItem.findUnique({ where: { id: req.params['id'] } });
+  const existing = await db.marketplaceItem.findUnique({ where: { id: req.params['id']! } });
   if (!existing || existing.authorId !== req.user!.id) throw new NotFoundError('Marketplace item');
 
   const item = await db.marketplaceItem.update({
-    where: { id: req.params['id'] },
+    where: { id: req.params['id']! },
     data: req.body,
   });
   res.json({ item });

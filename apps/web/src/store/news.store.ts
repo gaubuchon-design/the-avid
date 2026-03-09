@@ -5,6 +5,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { create } from 'zustand';
+import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import type {
   NRCSConnection,
@@ -289,12 +290,17 @@ interface NewsActions {
   getActiveStory: () => RundownEvent | null;
   getStoriesByStatus: (status: StoryStatus) => RundownEvent[];
   getUnacknowledgedAlerts: () => BreakingNewsAlert[];
+
+  // Reset
+  clearError: () => void;
+  resetStore: () => void;
 }
 
 // ─── Store ─────────────────────────────────────────────────────────────────
 
 export const useNewsStore = create<NewsState & NewsActions>()(
-  immer((set, get) => ({
+  devtools(
+    immer((set, get) => ({
     // Initial state
     nrcsConnection: {
       id: 'demo-nrcs',
@@ -568,5 +574,21 @@ export const useNewsStore = create<NewsState & NewsActions>()(
     getUnacknowledgedAlerts: () => {
       return get().breakingAlerts.filter((a) => !a.acknowledged);
     },
+
+    clearError: () => {
+      set((state) => {
+        state.lastError = null;
+      });
+    },
+
+    resetStore: () => {
+      set((state) => {
+        state.rundowns = [];
+        state.activeRundownId = null;
+        state.activeStoryId = null;
+        state.breakingAlerts = [];
+        state.lastError = null;
+      });
+    },
   })),
-);
+));

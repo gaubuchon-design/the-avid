@@ -106,6 +106,12 @@ const MAX_HISTORY_SIZE = 1_000;
 /** Percentage of history to prune when the limit is reached. */
 const HISTORY_PRUNE_PERCENT = 0.1;
 
+/** Maximum retry attempts for a single step before giving up. */
+const DEFAULT_STEP_RETRY_COUNT = 2;
+
+/** Token budget overshoot tolerance (10% headroom). */
+const TOKEN_BUDGET_HEADROOM = 0.1;
+
 // ---------------------------------------------------------------------------
 // OrchestratorService
 // ---------------------------------------------------------------------------
@@ -136,6 +142,8 @@ export class OrchestratorService {
   private readonly tools: ToolDefinition[];
   private readonly executionMode: ExecutionMode;
   private readonly parallelConcurrency: number;
+  private readonly stepRetryCount: number;
+  private readonly tokenBudgetEnabled: boolean;
 
   /** All plans keyed by plan ID. */
   private plans: Map<string, AgentPlan> = new Map();
@@ -145,6 +153,8 @@ export class OrchestratorService {
   private subscribers: Set<PlanUpdateSubscriber> = new Set();
   /** Tracks how many plans are currently executing. */
   private executingPlanCount = 0;
+  /** Set of plan IDs that have been requested for cancellation. */
+  private cancelledPlanIds: Set<string> = new Set();
 
   /**
    * @param config - Orchestrator configuration.
@@ -164,6 +174,8 @@ export class OrchestratorService {
     this.tools = [...DEFAULT_TOOLS];
     this.executionMode = config.executionMode ?? 'sequential';
     this.parallelConcurrency = DEFAULT_PARALLEL_CONCURRENCY;
+    this.stepRetryCount = config.stepRetryCount ?? DEFAULT_STEP_RETRY_COUNT;
+    this.tokenBudgetEnabled = config.tokenBudgetEnabled ?? true;
   }
 
   // -----------------------------------------------------------------------
@@ -260,6 +272,22 @@ export class OrchestratorService {
       }
     }
 
+    // Guard again right before execution in case multiple approvals raced.
+    if (this.executingPlanCount >= MAX_CONCURRENT_PLANS) {
+      plan.status = 'preview';
+      plan.updatedAt = new Date().toISOString();
+      for (const step of plan.steps) {
+        if (step.status === 'approved') {
+          (step as { status: string }).status = 'pending';
+        }
+      }
+      this.notify(plan);
+      throw new Error(
+        `Concurrent plan execution limit reached (${MAX_CONCURRENT_PLANS}). ` +
+        `Wait for an active plan to complete before approving another.`,
+      );
+    }
+
     // Execute
     plan.status = 'executing';
     plan.updatedAt = new Date().toISOString();
@@ -340,15 +368,24 @@ export class OrchestratorService {
   }
 
   /**
-   * Cancel a plan that may already be executing.
+   * Cancel a plan that may already be executing and compensate any
+   * completed destructive steps automatically.
    *
-   * @param planId - The plan to cancel.
+   * @param planId       - The plan to cancel.
+   * @param compensate   - Whether to automatically compensate executed steps (default: true).
+   * @returns Compensation summary if compensation was performed.
    */
-  async cancelPlan(planId: string): Promise<void> {
+  async cancelPlan(
+    planId: string,
+    compensate = true,
+  ): Promise<{ compensated: number; failed: number; skipped: number; totalDurationMs: number } | void> {
     const plan = this.plans.get(planId);
     if (!plan) {
       throw new Error(`Plan "${planId}" not found.`);
     }
+
+    // Signal cancellation so in-flight steps stop at the next checkpoint.
+    this.cancelledPlanIds.add(planId);
 
     plan.status = 'cancelled';
     plan.updatedAt = new Date().toISOString();
@@ -359,8 +396,36 @@ export class OrchestratorService {
       }
     }
 
+    this.toolLogger.logPlanEvent({
+      type: 'plan-failed',
+      planId,
+      metadata: { reason: 'Cancelled' },
+    });
+
+    // Auto-compensate completed destructive steps.
+    let result: { compensated: number; failed: number; skipped: number; totalDurationMs: number } | undefined;
+    if (compensate) {
+      const hasCompletedSteps = plan.steps.some((s) => s.status === 'completed');
+      if (hasCompletedSteps) {
+        result = await this.compensationManager.compensatePlan(planId, plan.steps);
+        for (const step of plan.steps) {
+          if (step.status === 'completed') {
+            const compensation = this.compensationManager
+              .getCompensations(planId)
+              .find((c) => c.stepId === step.id);
+            if (compensation?.success) {
+              (step as { status: string }).status = 'compensated';
+            }
+          }
+        }
+      }
+    }
+
+    this.cancelledPlanIds.delete(planId);
     this.archivePlan(plan);
     this.notify(plan);
+
+    return result;
   }
 
   /**
@@ -534,10 +599,21 @@ export class OrchestratorService {
   }
 
   /**
-   * Sequential execution: steps run one at a time, halting on first failure.
+   * Sequential execution: steps run one at a time, halting on first failure
+   * or if the plan has been cancelled.
    */
   private async executeStepsSequential(plan: AgentPlan): Promise<boolean> {
     for (const step of plan.steps) {
+      // Check cancellation before each step.
+      if (this.isPlanCancelled(plan.id)) {
+        for (const remaining of plan.steps) {
+          if (remaining.status === 'approved') {
+            (remaining as { status: string }).status = 'cancelled';
+          }
+        }
+        return false;
+      }
+
       if (step.status === 'cancelled') continue;
       if (step.status !== 'approved') continue;
 
@@ -621,22 +697,108 @@ export class OrchestratorService {
   }
 
   /**
-   * Execute a single step: route the tool call, log the result, register
-   * compensation if applicable, and track analytics.
+   * Check whether the plan has been flagged for cancellation.
+   */
+  private isPlanCancelled(planId: string): boolean {
+    return this.cancelledPlanIds.has(planId);
+  }
+
+  /**
+   * Check whether executing the next step would exceed the plan's token budget.
+   *
+   * @param plan     - The plan being executed.
+   * @param toolName - The tool about to be invoked.
+   * @returns `true` if the budget would be exceeded.
+   */
+  private wouldExceedTokenBudget(plan: AgentPlan, toolName: string): boolean {
+    if (!this.tokenBudgetEnabled) return false;
+    if (plan.tokensEstimated <= 0) return false;
+
+    // Find the tool definition to estimate the upcoming cost.
+    const toolDef = this.tools.find((t) => t.name === toolName);
+    const estimatedStepCost = toolDef?.tokenCost ?? 10;
+
+    const budgetCeiling = plan.tokensEstimated * (1 + TOKEN_BUDGET_HEADROOM);
+    return plan.tokensUsed + estimatedStepCost > budgetCeiling;
+  }
+
+  /**
+   * Execute a single step with retry logic: route the tool call, log the
+   * result, register compensation if applicable, and track analytics.
+   *
+   * The step is retried up to `stepRetryCount` times for transient failures
+   * (as determined by the ToolCallRouter). Destructive tools are never
+   * retried at the orchestrator level; the router handles its own retry
+   * for non-destructive tools.
    */
   private async executeSingleStep(plan: AgentPlan, step: AgentStep): Promise<boolean> {
+    // Check for cancellation before starting.
+    if (this.isPlanCancelled(plan.id)) {
+      (step as { status: string }).status = 'cancelled';
+      return false;
+    }
+
+    // Check token budget before execution.
+    if (this.wouldExceedTokenBudget(plan, step.toolName)) {
+      (step as { status: string }).status = 'failed';
+      (step as { error?: string }).error =
+        `Token budget exceeded: used ${plan.tokensUsed} of ${plan.tokensEstimated} estimated tokens.`;
+      (step as { completedAt?: string }).completedAt = new Date().toISOString();
+      plan.updatedAt = new Date().toISOString();
+      this.notify(plan);
+      return false;
+    }
+
     (step as { status: string }).status = 'executing';
     (step as { startedAt?: string }).startedAt = new Date().toISOString();
     this.notify(plan);
 
-    let result: ToolCallResult;
-    try {
-      result = await this.toolRouter.route(step.toolName, step.toolArgs as Record<string, unknown>);
-    } catch (err) {
-      // Defensive: if the router itself throws (should not normally happen)
-      const errorMsg = err instanceof Error ? err.message : String(err);
+    // Destructive tools should not be retried at the orchestrator level.
+    const destructiveTools = new Set([
+      'extract', 'lift', 'split_clip', 'overwrite', 'ripple_trim', 'remove_silence',
+    ]);
+    const isDestructive = destructiveTools.has(step.toolName);
+    const maxAttempts = isDestructive ? 1 : Math.max(1, this.stepRetryCount + 1);
+    let result: ToolCallResult | null = null;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      // Check cancellation between retries.
+      if (attempt > 0 && this.isPlanCancelled(plan.id)) {
+        (step as { status: string }).status = 'cancelled';
+        return false;
+      }
+
+      // Brief backoff between retries (skip first attempt).
+      if (attempt > 0) {
+        const backoffMs = Math.min(300 * Math.pow(2, attempt - 1), 3_000);
+        await new Promise<void>((resolve) => setTimeout(resolve, backoffMs));
+      }
+
+      try {
+        result = await this.toolRouter.route(step.toolName, step.toolArgs as Record<string, unknown>);
+      } catch (err) {
+        // Defensive: if the router itself throws (should not normally happen)
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        if (attempt < maxAttempts - 1) continue; // retry
+        (step as { status: string }).status = 'failed';
+        (step as { error?: string }).error = errorMsg;
+        (step as { completedAt?: string }).completedAt = new Date().toISOString();
+        plan.updatedAt = new Date().toISOString();
+        this.notify(plan);
+        return false;
+      }
+
+      // If the call succeeded, break out of the retry loop.
+      if (result.success) break;
+
+      // If the call failed but we have retries left, continue.
+      if (attempt < maxAttempts - 1) continue;
+    }
+
+    // Should never be null given the loop, but guard defensively.
+    if (!result) {
       (step as { status: string }).status = 'failed';
-      (step as { error?: string }).error = errorMsg;
+      (step as { error?: string }).error = 'No result after retry attempts.';
       (step as { completedAt?: string }).completedAt = new Date().toISOString();
       plan.updatedAt = new Date().toISOString();
       this.notify(plan);
@@ -665,10 +827,7 @@ export class OrchestratorService {
         typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
 
       // Register compensation for destructive tools
-      const destructiveTools = new Set([
-        'extract', 'lift', 'split_clip', 'overwrite', 'ripple_trim', 'remove_silence',
-      ]);
-      if (destructiveTools.has(step.toolName)) {
+      if (isDestructive) {
         const capturedToolName = step.toolName;
         const capturedArgs = step.toolArgs;
         this.compensationManager.registerCompensation(

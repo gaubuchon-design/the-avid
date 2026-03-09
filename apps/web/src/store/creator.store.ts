@@ -4,6 +4,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { create } from 'zustand';
+import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 
 import type {
@@ -176,6 +177,9 @@ interface CreatorActions {
   setPodcastChapters: (chapters: ChapterMarker[]) => void;
   setPodcastAnalyzing: (analyzing: boolean) => void;
   setPodcastStats: (stats: CreatorState['podcastStats']) => void;
+
+  // Reset
+  resetStore: () => void;
 }
 
 // ─── Default Values ───────────────────────────────────────────────────────
@@ -211,68 +215,59 @@ const DEFAULT_PODCAST_CONFIG: PodcastConfig = {
   preserveBreathSounds: true,
 };
 
+// ─── Initial State ────────────────────────────────────────────────────────
+
+const INITIAL_CREATOR_STATE: CreatorState = {
+  activeCreatorPanel: null,
+  workspacePreset: 'standard',
+  simplifiedMode: false,
+  reframeConfig: DEFAULT_REFRAME_CONFIG,
+  reframeResults: [],
+  reframeProcessing: false,
+  chapters: [],
+  chaptersValidation: null,
+  thumbnailDesigns: [],
+  activeThumbnailId: null,
+  thumbnailCandidates: [],
+  colorBoostPresets: [],
+  stockBrowserTab: 'music',
+  musicSearchParams: {},
+  musicSearchResults: [],
+  musicSearchLoading: false,
+  selectedMusicTrack: null,
+  musicPreviewPlaying: null,
+  videoSearchParams: {},
+  videoSearchResults: [],
+  videoSearchLoading: false,
+  selectedVideoClip: null,
+  brollSuggestions: [],
+  beatSyncConfig: DEFAULT_BEAT_SYNC_CONFIG,
+  beatSyncResult: null,
+  detectedBeats: [],
+  beatSyncProcessing: false,
+  seriesList: [],
+  activeSeriesId: null,
+  activeEpisodeId: null,
+  podcastConfig: DEFAULT_PODCAST_CONFIG,
+  silenceRegions: [],
+  fillerWords: [],
+  podcastChapters: [],
+  podcastAnalyzing: false,
+  podcastStats: {
+    totalSilenceDuration: 0,
+    fillerWordCount: 0,
+    estimatedTimeSaved: 0,
+    chapterCount: 0,
+  },
+};
+
 // ─── Store ────────────────────────────────────────────────────────────────
 
 export const useCreatorStore = create<CreatorState & CreatorActions>()(
-  immer((set) => ({
-    // ── Initial State ───────────────────────────────────────────────────
-    activeCreatorPanel: null,
-    workspacePreset: 'standard',
-    simplifiedMode: false,
-
-    // Auto-Reframe
-    reframeConfig: DEFAULT_REFRAME_CONFIG,
-    reframeResults: [],
-    reframeProcessing: false,
-
-    // Chapters
-    chapters: [],
-    chaptersValidation: null,
-
-    // Thumbnail
-    thumbnailDesigns: [],
-    activeThumbnailId: null,
-    thumbnailCandidates: [],
-    colorBoostPresets: [],
-
-    // Stock Music
-    stockBrowserTab: 'music',
-    musicSearchParams: {},
-    musicSearchResults: [],
-    musicSearchLoading: false,
-    selectedMusicTrack: null,
-    musicPreviewPlaying: null,
-
-    // Stock Video
-    videoSearchParams: {},
-    videoSearchResults: [],
-    videoSearchLoading: false,
-    selectedVideoClip: null,
-    brollSuggestions: [],
-
-    // Beat Sync
-    beatSyncConfig: DEFAULT_BEAT_SYNC_CONFIG,
-    beatSyncResult: null,
-    detectedBeats: [],
-    beatSyncProcessing: false,
-
-    // Series
-    seriesList: [],
-    activeSeriesId: null,
-    activeEpisodeId: null,
-
-    // Podcast
-    podcastConfig: DEFAULT_PODCAST_CONFIG,
-    silenceRegions: [],
-    fillerWords: [],
-    podcastChapters: [],
-    podcastAnalyzing: false,
-    podcastStats: {
-      totalSilenceDuration: 0,
-      fillerWordCount: 0,
-      estimatedTimeSaved: 0,
-      chapterCount: 0,
-    },
+  devtools(
+    immer((set) => ({
+      // ── Initial State ───────────────────────────────────────────────────
+      ...INITIAL_CREATOR_STATE,
 
     // ── Actions ─────────────────────────────────────────────────────────
 
@@ -376,5 +371,54 @@ export const useCreatorStore = create<CreatorState & CreatorActions>()(
     setPodcastChapters: (chapters) => set((s) => { s.podcastChapters = chapters; }),
     setPodcastAnalyzing: (analyzing) => set((s) => { s.podcastAnalyzing = analyzing; }),
     setPodcastStats: (stats) => set((s) => { s.podcastStats = stats; }),
+
+    // Reset
+    resetStore: () => set(() => ({
+      ...INITIAL_CREATOR_STATE,
+      reframeConfig: { ...DEFAULT_REFRAME_CONFIG },
+      beatSyncConfig: { ...DEFAULT_BEAT_SYNC_CONFIG },
+      podcastConfig: { ...DEFAULT_PODCAST_CONFIG },
+    }), true, 'creator/resetStore'),
   })),
+  { name: 'CreatorStore', enabled: process.env["NODE_ENV"] === 'development' },
+  )
 );
+
+// ─── Named Selectors ────────────────────────────────────────────────────────
+
+type CreatorStoreState = CreatorState & CreatorActions;
+
+export const selectActiveCreatorPanel = (state: CreatorStoreState) => state.activeCreatorPanel;
+export const selectWorkspacePreset = (state: CreatorStoreState) => state.workspacePreset;
+export const selectSimplifiedMode = (state: CreatorStoreState) => state.simplifiedMode;
+export const selectReframeConfig = (state: CreatorStoreState) => state.reframeConfig;
+export const selectReframeResults = (state: CreatorStoreState) => state.reframeResults;
+export const selectReframeProcessing = (state: CreatorStoreState) => state.reframeProcessing;
+export const selectChapters = (state: CreatorStoreState) => state.chapters;
+export const selectChaptersValidation = (state: CreatorStoreState) => state.chaptersValidation;
+export const selectThumbnailDesigns = (state: CreatorStoreState) => state.thumbnailDesigns;
+export const selectActiveThumbnailId = (state: CreatorStoreState) => state.activeThumbnailId;
+export const selectStockBrowserTab = (state: CreatorStoreState) => state.stockBrowserTab;
+export const selectMusicSearchResults = (state: CreatorStoreState) => state.musicSearchResults;
+export const selectMusicSearchLoading = (state: CreatorStoreState) => state.musicSearchLoading;
+export const selectSelectedMusicTrack = (state: CreatorStoreState) => state.selectedMusicTrack;
+export const selectVideoSearchResults = (state: CreatorStoreState) => state.videoSearchResults;
+export const selectVideoSearchLoading = (state: CreatorStoreState) => state.videoSearchLoading;
+export const selectSelectedVideoClip = (state: CreatorStoreState) => state.selectedVideoClip;
+export const selectBRollSuggestions = (state: CreatorStoreState) => state.brollSuggestions;
+export const selectBeatSyncConfig = (state: CreatorStoreState) => state.beatSyncConfig;
+export const selectBeatSyncResult = (state: CreatorStoreState) => state.beatSyncResult;
+export const selectDetectedBeats = (state: CreatorStoreState) => state.detectedBeats;
+export const selectBeatSyncProcessing = (state: CreatorStoreState) => state.beatSyncProcessing;
+export const selectSeriesList = (state: CreatorStoreState) => state.seriesList;
+export const selectActiveSeriesId = (state: CreatorStoreState) => state.activeSeriesId;
+export const selectActiveSeries = (state: CreatorStoreState) =>
+  state.seriesList.find((s) => s.id === state.activeSeriesId) ?? null;
+export const selectPodcastConfig = (state: CreatorStoreState) => state.podcastConfig;
+export const selectSilenceRegions = (state: CreatorStoreState) => state.silenceRegions;
+export const selectFillerWords = (state: CreatorStoreState) => state.fillerWords;
+export const selectPodcastAnalyzing = (state: CreatorStoreState) => state.podcastAnalyzing;
+export const selectPodcastStats = (state: CreatorStoreState) => state.podcastStats;
+export const selectCreatorIsLoading = (state: CreatorStoreState) =>
+  state.reframeProcessing || state.musicSearchLoading || state.videoSearchLoading ||
+  state.beatSyncProcessing || state.podcastAnalyzing;
