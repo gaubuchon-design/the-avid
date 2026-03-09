@@ -28,6 +28,8 @@ export interface CacheStats {
   readonly hits: number;
   /** Total cache misses since creation or last clear. */
   readonly misses: number;
+  /** Hit rate as a ratio in [0, 1] (0 if no lookups have occurred). */
+  readonly hitRate: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,12 +140,59 @@ export class ContextCache {
   }
 
   /**
+   * Retrieve a value from the cache, populating it on a miss using the
+   * supplied factory function (compute-if-absent pattern).
+   *
+   * This avoids the common read-then-write race when multiple callers
+   * independently compute the same value.
+   *
+   * @param key     - Cache key.
+   * @param factory - Async factory invoked on a cache miss.
+   * @param ttlMs   - Time-to-live in milliseconds (default: 5 minutes).
+   * @returns The cached or freshly computed value.
+   */
+  async getOrSet<T>(
+    key: string,
+    factory: () => T | Promise<T>,
+    ttlMs: number = DEFAULT_TTL_MS,
+  ): Promise<T> {
+    const existing = this.get<T>(key);
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    const value = await factory();
+    this.set(key, value, ttlMs);
+    return value;
+  }
+
+  /**
    * Remove a specific key from the cache.
    *
    * @param key - Cache key to invalidate.
    */
   invalidate(key: string): void {
     this.store.delete(key);
+  }
+
+  /**
+   * Invalidate all keys that match a prefix.
+   *
+   * Useful for bulk-invalidating related entries (e.g. all plan caches
+   * for a specific project).
+   *
+   * @param prefix - The key prefix to match.
+   * @returns Number of entries removed.
+   */
+  invalidateByPrefix(prefix: string): number {
+    let removed = 0;
+    for (const key of this.store.keys()) {
+      if (key.startsWith(prefix)) {
+        this.store.delete(key);
+        removed++;
+      }
+    }
+    return removed;
   }
 
   /**
@@ -158,16 +207,19 @@ export class ContextCache {
   /**
    * Get cache usage statistics.
    *
-   * @returns Current size, hit count, and miss count.
+   * @returns Current size, hit count, miss count, and hit rate.
    */
   getStats(): CacheStats {
     // Prune expired entries before reporting size
     this.pruneExpired();
 
+    const total = this.hits + this.misses;
+
     return {
       size: this.store.size,
       hits: this.hits,
       misses: this.misses,
+      hitRate: total > 0 ? Math.round((this.hits / total) * 10_000) / 10_000 : 0,
     };
   }
 

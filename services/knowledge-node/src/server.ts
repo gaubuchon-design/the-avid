@@ -213,6 +213,71 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 // ---------------------------------------------------------------------------
+// Search result cache (in-memory, TTL-based)
+// ---------------------------------------------------------------------------
+
+/** Lightweight TTL cache for search results to reduce redundant queries. */
+interface SearchCacheEntry {
+  result: unknown;
+  createdAt: number;
+  ttlMs: number;
+}
+
+class SearchCache {
+  private readonly store = new Map<string, SearchCacheEntry>();
+  private readonly maxSize: number;
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor(maxSize: number = 500, cleanupIntervalMs: number = 60_000) {
+    this.maxSize = maxSize;
+    this.cleanupTimer = setInterval(() => this.prune(), cleanupIntervalMs);
+    this.cleanupTimer.unref();
+  }
+
+  get<T>(key: string): T | undefined {
+    const entry = this.store.get(key);
+    if (!entry) return undefined;
+
+    if (Date.now() - entry.createdAt > entry.ttlMs) {
+      this.store.delete(key);
+      return undefined;
+    }
+
+    return entry.result as T;
+  }
+
+  set(key: string, value: unknown, ttlMs: number = 30_000): void {
+    // Evict oldest entries if at capacity
+    if (this.store.size >= this.maxSize && !this.store.has(key)) {
+      const firstKey = this.store.keys().next();
+      if (!firstKey.done) {
+        this.store.delete(firstKey.value);
+      }
+    }
+    this.store.set(key, { result: value, createdAt: Date.now(), ttlMs });
+  }
+
+  private prune(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.store) {
+      if (now - entry.createdAt > entry.ttlMs) {
+        this.store.delete(key);
+      }
+    }
+  }
+
+  destroy(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
+    this.store.clear();
+  }
+}
+
+const searchCache = new SearchCache();
+
+// ---------------------------------------------------------------------------
 // Mesh service reference — set via `attachMeshService()`.
 // ---------------------------------------------------------------------------
 let meshService: MeshService | null = null;
@@ -233,12 +298,22 @@ export function attachMeshService(mesh: MeshService): void {
 // Health check
 // ---------------------------------------------------------------------------
 app.get('/health', (_req: Request, res: Response) => {
+  const mem = process.memoryUsage();
   res.json({
-    status: 'ok',
+    status: meshService ? 'ok' : 'degraded',
     service: SERVICE_NAME,
     version: SERVICE_VERSION,
     uptime: process.uptime(),
     mesh: meshService ? 'attached' : 'detached',
+    wsClients: standaloneWsClients.size,
+    memory: {
+      heapUsed: mem.heapUsed,
+      heapTotal: mem.heapTotal,
+      rss: mem.rss,
+    },
+    nodeVersion: process.version,
+    platform: process.platform,
+    arch: process.arch,
   });
 });
 
@@ -347,8 +422,18 @@ app.post('/mesh/search', async (req: Request, res: Response) => {
     includeProvenance: req.body.includeProvenance,
   };
 
+  // Check search result cache
+  const cacheKey = JSON.stringify(query);
+  const cachedResult = searchCache.get(cacheKey);
+  if (cachedResult) {
+    res.json(cachedResult);
+    return;
+  }
+
   try {
     const results = await meshService.search(query);
+    // Cache results for 30 seconds
+    searchCache.set(cacheKey, results, 30_000);
     res.json(results);
   } catch (err) {
     log('error', 'Mesh search failed', {
@@ -486,6 +571,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
   clearInterval(heartbeatInterval);
   rateLimiter.destroy();
+  searchCache.destroy();
 
   // Stop the mesh service if attached
   if (meshService) {

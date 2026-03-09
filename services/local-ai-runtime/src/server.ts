@@ -387,6 +387,37 @@ app.get('/models/:id', (req: Request, res: Response) => {
   res.json(model);
 });
 
+/**
+ * GET /models/:id/stats
+ *
+ * Retrieve runtime statistics for a model (load state, invocation count,
+ * average inference time, etc.).
+ */
+app.get('/models/:id/stats', (req: Request, res: Response) => {
+  const modelId = req.params['id'] as string;
+  const model = registry.getModel(modelId);
+  if (!model) {
+    res.status(404).json({ error: `Model not found.` });
+    return;
+  }
+
+  const stats = registry.getModelStats(modelId);
+  res.json({ modelId, ...stats });
+});
+
+/**
+ * GET /models/memory
+ *
+ * Return the estimated memory footprint of all currently loaded models.
+ */
+app.get('/models/memory', (_req: Request, res: Response) => {
+  const totalBytes = registry.getLoadedMemoryEstimate();
+  res.json({
+    loadedMemoryBytes: totalBytes,
+    loadedMemoryMB: Math.round(totalBytes / (1024 * 1024) * 100) / 100,
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Routes — Inference
 // ---------------------------------------------------------------------------
@@ -693,6 +724,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   log('info', `Received ${signal}, shutting down gracefully...`);
 
   rateLimiter.destroy();
+  backendCache.clear();
 
   // Shut down all backends (release GPU memory, unload models)
   for (const backend of allBackends) {
