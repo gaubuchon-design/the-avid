@@ -329,7 +329,7 @@ export class DeltaCompressor {
       }
 
       default:
-        throw new Error(`Unknown op type tag: 0x${tag.toString(16)}`);
+        throw new Error(`Unknown op type tag: 0x${tag!.toString(16)}`);
     }
 
     return { op, bytesRead: offset - startOffset };

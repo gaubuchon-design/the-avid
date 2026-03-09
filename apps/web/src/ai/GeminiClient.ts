@@ -325,7 +325,7 @@ class GeminiClient {
     ];
 
     return {
-      text: genericResponses[Math.floor(Math.random() * genericResponses.length)],
+      text: genericResponses[Math.floor(Math.random() * genericResponses.length)]!,
       tokensUsed: 28 + Math.floor(Math.random() * 20),
     };
   }

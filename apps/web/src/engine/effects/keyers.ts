@@ -9,9 +9,9 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
   const match = hex.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
   if (!match) return { r: 0, g: 0, b: 0 };
   return {
-    r: parseInt(match[1], 16),
-    g: parseInt(match[2], 16),
-    b: parseInt(match[3], 16),
+    r: parseInt(match[1]!, 16),
+    g: parseInt(match[2]!, 16),
+    b: parseInt(match[3]!, 16),
   };
 }
 
@@ -71,9 +71,9 @@ export function applyDifferenceKey(
 
   const len = data.length;
   for (let i = 0; i < len; i += 4) {
-    const dr = data[i] - referenceData[i];
-    const dg = data[i + 1] - referenceData[i + 1];
-    const db = data[i + 2] - referenceData[i + 2];
+    const dr = data[i]! - referenceData[i]!;
+    const dg = data[i + 1]! - referenceData[i + 1]!;
+    const db = data[i + 2]! - referenceData[i + 2]!;
     const dist = Math.sqrt(dr * dr + dg * dg + db * db);
 
     if (dist < threshNorm) {
@@ -82,7 +82,7 @@ export function applyDifferenceKey(
     } else if (dist < threshNorm + softNorm) {
       // Soft transition
       const alpha = (dist - threshNorm) / softNorm;
-      data[i + 3] = clamp(data[i + 3] * alpha);
+      data[i + 3] = clamp(data[i + 3]! * alpha);
     }
     // else: fully opaque, keep as-is
   }
@@ -116,7 +116,7 @@ export function applyColorRangeKey(
 
   const len = data.length;
   for (let i = 0; i < len; i += 4) {
-    const [h, s, l] = rgbToHsl(data[i], data[i + 1], data[i + 2]);
+    const [h, s, l] = rgbToHsl(data[i]!, data[i + 1]!, data[i + 2]!);
 
     // Check if pixel is within the specified range
     let hueInRange: boolean;
@@ -149,7 +149,7 @@ export function applyColorRangeKey(
     } else if (softRange > 0 && totalDist < softRange) {
       // Soft edge
       const alpha = totalDist / softRange;
-      data[i + 3] = clamp(data[i + 3] * alpha);
+      data[i + 3] = clamp(data[i + 3]! * alpha);
     }
     // else: outside range — keep opaque
   }
@@ -186,13 +186,13 @@ export function applyLinearColorKey(
     const b = data[i + 2];
 
     // RGB distance
-    const dr = r - key.r;
-    const dg = g - key.g;
-    const db = b - key.b;
+    const dr = r! - key.r;
+    const dg = g! - key.g;
+    const db = b! - key.b;
     const dist = Math.sqrt(dr * dr + dg * dg + db * db);
 
     // Luminance of the pixel (0-1)
-    const lum = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+    const lum = (r! * 0.299 + g! * 0.587 + b! * 0.114) / 255;
 
     // Adjust effective range based on luminance and balance
     const balanceFactor = lum < 0.5
@@ -205,7 +205,7 @@ export function applyLinearColorKey(
       data[i + 3] = 0;
     } else if (dist < effectiveRange) {
       const alpha = (dist - effectiveRange * 0.7) / (effectiveRange * 0.3);
-      data[i + 3] = clamp(data[i + 3] * alpha);
+      data[i + 3] = clamp(data[i + 3]! * alpha);
     }
   }
 }
@@ -240,17 +240,17 @@ export function applyIBKKeyer(
     let keyVal: number;
     if (isGreen) {
       // Green screen: key = green - max(red, blue)
-      const maxRB = Math.max(r, b);
-      keyVal = Math.max(0, g - maxRB) / 255;
+      const maxRB = Math.max(r!, b!);
+      keyVal = Math.max(0, g! - maxRB) / 255;
     } else {
       // Blue screen: key = blue - max(red, green)
-      const maxRG = Math.max(r, g);
-      keyVal = Math.max(0, b - maxRG) / 255;
+      const maxRG = Math.max(r!, g!);
+      keyVal = Math.max(0, b! - maxRG) / 255;
     }
 
     // Apply edge weighting — preserve edges by reducing key at contrast boundaries
     // Simple approach: reduce key strength based on local luminance gradient
-    const lum = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+    const lum = (r! * 0.299 + g! * 0.587 + b! * 0.114) / 255;
     const edgeFactor = 1.0 - edgeNorm * (1.0 - lum) * 0.5;
     keyVal = Math.min(1, keyVal * edgeFactor);
 
@@ -261,13 +261,13 @@ export function applyIBKKeyer(
     // Despill — remove screen color contamination
     if (despillNorm > 0 && alpha > 0) {
       if (isGreen) {
-        const maxRB = Math.max(r, b);
-        const spillAmount = Math.max(0, g - maxRB);
-        data[i + 1] = clamp(g - spillAmount * despillNorm);
+        const maxRB = Math.max(r!, b!);
+        const spillAmount = Math.max(0, g! - maxRB);
+        data[i + 1] = clamp(g! - spillAmount * despillNorm);
       } else {
-        const maxRG = Math.max(r, g);
-        const spillAmount = Math.max(0, b - maxRG);
-        data[i + 2] = clamp(b - spillAmount * despillNorm);
+        const maxRG = Math.max(r!, g!);
+        const spillAmount = Math.max(0, b! - maxRG);
+        data[i + 2] = clamp(b! - spillAmount * despillNorm);
       }
     }
   }

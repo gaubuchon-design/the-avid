@@ -431,12 +431,12 @@ export class TransitionEngine {
       const clipB = sorted[i + 1];
 
       if (
-        Math.abs(clipA.endTime - editPointTime) < epsilon ||
-        Math.abs(clipB.startTime - editPointTime) < epsilon
+        Math.abs(clipA!.endTime! - editPointTime) < epsilon ||
+        Math.abs(clipB!.startTime! - editPointTime) < epsilon
       ) {
         return {
-          clipA: { id: clipA.id, startTime: clipA.startTime, endTime: clipA.endTime },
-          clipB: { id: clipB.id, startTime: clipB.startTime, endTime: clipB.endTime },
+          clipA: { id: clipA!.id!, startTime: clipA!.startTime!, endTime: clipA!.endTime! },
+          clipB: { id: clipB!.id!, startTime: clipB!.startTime!, endTime: clipB!.endTime! },
         };
       }
     }
@@ -467,10 +467,10 @@ export class TransitionEngine {
       for (let i = 0; i < sorted.length - 1; i++) {
         const clipA = sorted[i];
         const clipB = sorted[i + 1];
-        const editTime = clipA.endTime;
+        const editTime = clipA!.endTime!;
 
         // Check adjacency (gap less than epsilon means the clips abut)
-        if (Math.abs(clipB.startTime - clipA.endTime) > epsilon) continue;
+        if (Math.abs(clipB!.startTime! - clipA!.endTime!) > epsilon) continue;
 
         if (position === 'at-playhead') {
           const playhead = this.getPlayheadTime();

@@ -20,7 +20,7 @@ function simpleBlur(data: Uint8ClampedArray, width: number, height: number, r: n
       for (let dx = -r; dx <= r; dx++) {
         const nx = Math.min(Math.max(x + dx, 0), width - 1);
         const idx = (y * width + nx) * 4;
-        sr += data[idx]; sg += data[idx + 1]; sb += data[idx + 2]; sa += data[idx + 3];
+        sr += data[idx]!; sg += data[idx + 1]!; sb += data[idx + 2]!; sa += data[idx + 3]!;
         count++;
       }
       const idx = (y * width + x) * 4;
@@ -38,7 +38,7 @@ function simpleBlur(data: Uint8ClampedArray, width: number, height: number, r: n
       for (let dy = -r; dy <= r; dy++) {
         const ny = Math.min(Math.max(y + dy, 0), height - 1);
         const idx = (ny * width + x) * 4;
-        sr += temp[idx]; sg += temp[idx + 1]; sb += temp[idx + 2]; sa += temp[idx + 3];
+        sr += temp[idx]!; sg += temp[idx + 1]!; sb += temp[idx + 2]!; sa += temp[idx + 3]!;
         count++;
       }
       const idx = (y * width + x) * 4;
@@ -84,7 +84,7 @@ export function applyLightWrap(
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const idx = (y * width + x) * 4;
-      const alpha = data[idx + 3] / 255;
+      const alpha = data[idx + 3]! / 255;
 
       if (alpha > 0.1 && alpha < 0.95) {
         // Semi-transparent edge — wrap candidate
@@ -98,7 +98,7 @@ export function applyLightWrap(
             const nx = x + dx;
             if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
               const nIdx = (ny * width + nx) * 4;
-              if (data[nIdx + 3] < 26) { // < 10% alpha
+              if (data[nIdx + 3]! < 26) { // < 10% alpha
                 const dist = Math.sqrt(dx * dx + dy * dy);
                 if (dist <= wrapPx) {
                   nearEdge = true;
@@ -118,13 +118,13 @@ export function applyLightWrap(
   const wrapLayer = new Uint8ClampedArray(data.length);
   for (let i = 0; i < data.length; i += 4) {
     const maskIdx = i / 4;
-    const mask = edgeMask[maskIdx] / 255;
+    const mask = edgeMask[maskIdx]! / 255;
     if (mask > 0) {
-      const lum = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255;
+      const lum = (data[i]! * 0.299 + data[i + 1]! * 0.587 + data[i + 2]! * 0.114) / 255;
       const lumFactor = 1.0 - softNorm * (1.0 - lum);
-      wrapLayer[i] = clamp(data[i] * mask * lumFactor);
-      wrapLayer[i + 1] = clamp(data[i + 1] * mask * lumFactor);
-      wrapLayer[i + 2] = clamp(data[i + 2] * mask * lumFactor);
+      wrapLayer[i] = clamp(data[i]! * mask * lumFactor);
+      wrapLayer[i + 1] = clamp(data[i + 1]! * mask * lumFactor);
+      wrapLayer[i + 2] = clamp(data[i + 2]! * mask * lumFactor);
       wrapLayer[i + 3] = 255;
     }
   }
@@ -136,9 +136,9 @@ export function applyLightWrap(
 
   // Additive composite
   for (let i = 0; i < data.length; i += 4) {
-    data[i] = clamp(data[i] + wrapLayer[i] * intNorm);
-    data[i + 1] = clamp(data[i + 1] + wrapLayer[i + 1] * intNorm);
-    data[i + 2] = clamp(data[i + 2] + wrapLayer[i + 2] * intNorm);
+    data[i] = clamp(data[i]! + wrapLayer[i]! * intNorm);
+    data[i + 1] = clamp(data[i + 1]! + wrapLayer[i + 1]! * intNorm);
+    data[i + 2] = clamp(data[i + 2]! + wrapLayer[i + 2]! * intNorm);
   }
 }
 
@@ -211,9 +211,9 @@ export function applyLensFlare(
       const totalG = (glowIntensity * 0.8 + ring * 0.9 + streak * 0.7 + ghost * 0.6) * 255;
       const totalB = (glowIntensity * 0.4 + ring * 0.5 + streak * 0.3 + ghost * 0.8) * 255;
 
-      data[idx] = clamp(data[idx] + totalR);
-      data[idx + 1] = clamp(data[idx + 1] + totalG);
-      data[idx + 2] = clamp(data[idx + 2] + totalB);
+      data[idx] = clamp(data[idx]! + totalR);
+      data[idx + 1] = clamp(data[idx + 1]! + totalG);
+      data[idx + 2] = clamp(data[idx + 2]! + totalB);
     }
   }
 }
@@ -260,18 +260,18 @@ export function applyBokehBlur(
       const dist = Math.sqrt(rdx * rdx + rdy * rdy);
 
       if (shape === 'circle') {
-        kernel[ky][kx] = dist <= r;
+        kernel[ky]![kx] = dist <= r;
       } else if (shape === 'hexagon') {
         // Hexagonal: 6-sided check
         const angle = Math.atan2(rdy, rdx);
         const hexR = r * Math.cos(Math.PI / 6) / Math.cos((angle % (Math.PI / 3)) - Math.PI / 6);
-        kernel[ky][kx] = dist <= Math.abs(hexR);
+        kernel[ky]![kx] = dist <= Math.abs(hexR);
       } else {
         // Octagon: 8-sided check
         const absDx = Math.abs(rdx);
         const absDy = Math.abs(rdy);
         const octDist = absDx + absDy;
-        kernel[ky][kx] = dist <= r && octDist <= r * 1.4;
+        kernel[ky]![kx] = dist <= r && octDist <= r * 1.4;
       }
     }
   }
@@ -282,20 +282,20 @@ export function applyBokehBlur(
 
       for (let ky = 0; ky < kernelSize; ky++) {
         for (let kx = 0; kx < kernelSize; kx++) {
-          if (!kernel[ky][kx]) continue;
+          if (!kernel[ky]![kx]) continue;
 
           const sx = Math.min(Math.max(x + kx - r, 0), width - 1);
           const sy = Math.min(Math.max(y + ky - r, 0), height - 1);
           const sIdx = (sy * width + sx) * 4;
 
           // Highlight boost: weight bright pixels more
-          const lum = (src[sIdx] * 0.299 + src[sIdx + 1] * 0.587 + src[sIdx + 2] * 0.114) / 255;
+          const lum = (src[sIdx]! * 0.299 + src[sIdx + 1]! * 0.587 + src[sIdx + 2]! * 0.114) / 255;
           const weight = 1.0 + lum * lum * boostNorm * 3;
 
-          sr += src[sIdx] * weight;
-          sg += src[sIdx + 1] * weight;
-          sb += src[sIdx + 2] * weight;
-          sa += src[sIdx + 3];
+          sr += src[sIdx]! * weight;
+          sg += src[sIdx + 1]! * weight;
+          sb += src[sIdx + 2]! * weight;
+          sa += src[sIdx + 3]!;
           count += weight;
         }
       }
@@ -344,11 +344,11 @@ export function applyLightRays(
   // Create bright-pass copy
   const brightPass = new Uint8ClampedArray(data.length);
   for (let i = 0; i < data.length; i += 4) {
-    const lum = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+    const lum = data[i]! * 0.299 + data[i + 1]! * 0.587 + data[i + 2]! * 0.114;
     if (lum > threshVal) {
-      brightPass[i] = data[i];
-      brightPass[i + 1] = data[i + 1];
-      brightPass[i + 2] = data[i + 2];
+      brightPass[i] = data[i]!;
+      brightPass[i + 1] = data[i + 1]!;
+      brightPass[i + 2] = data[i + 2]!;
       brightPass[i + 3] = 255;
     }
   }
@@ -370,9 +370,9 @@ export function applyLightRays(
         if (sx >= 0 && sx < width && sy >= 0 && sy < height) {
           const sIdx = (sy * width + sx) * 4;
           const weight = 1.0 - (s / numSamples) * 0.5; // fade with distance
-          sr += brightPass[sIdx] * weight;
-          sg += brightPass[sIdx + 1] * weight;
-          sb += brightPass[sIdx + 2] * weight;
+          sr += brightPass[sIdx]! * weight;
+          sg += brightPass[sIdx + 1]! * weight;
+          sb += brightPass[sIdx + 2]! * weight;
         }
       }
 
@@ -384,9 +384,9 @@ export function applyLightRays(
 
   // Additive composite
   for (let i = 0; i < data.length; i += 4) {
-    data[i] = clamp(data[i] + rays[i] * bright);
-    data[i + 1] = clamp(data[i + 1] + rays[i + 1] * bright);
-    data[i + 2] = clamp(data[i + 2] + rays[i + 2] * bright);
+    data[i] = clamp(data[i]! + rays[i]! * bright);
+    data[i + 1] = clamp(data[i + 1]! + rays[i + 1]! * bright);
+    data[i + 2] = clamp(data[i + 2]! + rays[i + 2]! * bright);
   }
 }
 
@@ -461,9 +461,9 @@ export function applyPrism(
       const bY = Math.min(Math.max(Math.round(y + bShiftY), 0), height - 1);
       const bIdx = (bY * width + bX) * 4;
 
-      data[idx] = src[rIdx];         // Red from shifted
-      data[idx + 1] = src[idx + 1];  // Green stays
-      data[idx + 2] = src[bIdx + 2]; // Blue from opposite shift
+      data[idx] = src[rIdx]!;         // Red from shifted
+      data[idx + 1] = src[idx + 1]!;  // Green stays
+      data[idx + 2] = src[bIdx + 2]!; // Blue from opposite shift
       // Alpha stays as-is
     }
   }

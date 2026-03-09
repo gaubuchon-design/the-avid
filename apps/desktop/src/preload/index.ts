@@ -25,6 +25,8 @@ const ALLOWED_INVOKE_CHANNELS = new Set([
   'app:get-media-tools',
   'app:get-paths',
   'app:reveal-in-finder',
+  'app:download-update',
+  'app:check-for-updates',
   'app:install-update',
   'dialog:open-file',
   'dialog:open',
@@ -117,6 +119,7 @@ const ALLOWED_SUBSCRIBE_CHANNELS = new Set([
   'app:update-available',
   'app:update-progress',
   'app:update-downloaded',
+  'app:deep-link',
 ]);
 
 /**
@@ -155,6 +158,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     platform: process.platform,
     getPaths: () => safeInvoke('app:get-paths') as Promise<Record<string, string>>,
     revealInFinder: (filePath: string) => safeInvoke('app:reveal-in-finder', filePath) as Promise<boolean>,
+    downloadUpdate: () => safeInvoke('app:download-update') as Promise<boolean>,
+    checkForUpdates: () => safeInvoke('app:check-for-updates') as Promise<unknown>,
     installUpdate: () => safeInvoke('app:install-update') as Promise<void>,
   },
   gpu: {
@@ -259,16 +264,43 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onMarkOut:    (cb: () => void) => safeSubscribe('menu:mark-out', cb),
   onClearMarks: (cb: () => void) => safeSubscribe('menu:clear-marks', cb),
   onAddMarker:  (cb: () => void) => safeSubscribe('menu:add-marker', cb),
+  onNextMarker: (cb: () => void) => safeSubscribe('menu:next-marker', cb),
+  onPrevMarker: (cb: () => void) => safeSubscribe('menu:prev-marker', cb),
+  onGotoIn:     (cb: () => void) => safeSubscribe('menu:goto-in', cb),
+  onGotoOut:    (cb: () => void) => safeSubscribe('menu:goto-out', cb),
   onRazor:      (cb: () => void) => safeSubscribe('menu:razor', cb),
   onSplit:      (cb: () => void) => safeSubscribe('menu:split', cb),
   onLift:       (cb: () => void) => safeSubscribe('menu:lift', cb),
   onExtract:    (cb: () => void) => safeSubscribe('menu:extract', cb),
+  onToggleLink: (cb: () => void) => safeSubscribe('menu:toggle-link', cb),
+  onGroup:      (cb: () => void) => safeSubscribe('menu:group', cb),
+  onUngroup:    (cb: () => void) => safeSubscribe('menu:ungroup', cb),
+  onNest:       (cb: () => void) => safeSubscribe('menu:nest', cb),
   onMatchFrame: (cb: () => void) => safeSubscribe('menu:match-frame', cb),
+
+  // Edit menu events
+  onPasteInsert:  (cb: () => void) => safeSubscribe('menu:paste-insert', cb),
+  onDelete:       (cb: () => void) => safeSubscribe('menu:delete', cb),
+  onRippleDelete: (cb: () => void) => safeSubscribe('menu:ripple-delete', cb),
+  onDeselectAll:  (cb: () => void) => safeSubscribe('menu:deselect-all', cb),
+
+  // View panel events
+  onViewSource:   (cb: () => void) => safeSubscribe('menu:view-source', cb),
+  onViewRecord:   (cb: () => void) => safeSubscribe('menu:view-record', cb),
+  onViewTimeline: (cb: () => void) => safeSubscribe('menu:view-timeline', cb),
+  onViewBins:     (cb: () => void) => safeSubscribe('menu:view-bins', cb),
+  onViewEffects:  (cb: () => void) => safeSubscribe('menu:view-effects', cb),
+
+  // Keyboard shortcuts menu
+  onKeyboardShortcuts: (cb: () => void) => safeSubscribe('menu:keyboard-shortcuts', cb),
 
   // Auto-update events
   onUpdateAvailable:  (cb: (info: { version: string }) => void) => safeSubscribe('app:update-available', cb),
   onUpdateProgress:   (cb: (info: { percent: number }) => void) => safeSubscribe('app:update-progress', cb),
   onUpdateDownloaded: (cb: (info: { version: string }) => void) => safeSubscribe('app:update-downloaded', cb),
+
+  // Deep link events
+  onDeepLink: (cb: (url: string) => void) => safeSubscribe('app:deep-link', cb),
 
   // Cleanup
   removeAllListeners: (channel: string) => {

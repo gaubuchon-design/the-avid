@@ -143,7 +143,7 @@ export class SpeedEffectsEngine {
     // Adjust clip end time to match the last keyframe's timeline time
     // if the keyframes extend or contract the clip
     const lastKeyframe = sorted[sorted.length - 1];
-    const newEndTime = Math.max(clip.endTime, lastKeyframe.timelineTime);
+    const newEndTime = Math.max(clip.endTime, lastKeyframe!.timelineTime!);
 
     const timeRemap: TimeRemapState = {
       enabled: true,
@@ -321,13 +321,13 @@ export class SpeedEffectsEngine {
     const keyframes = clip.timeRemap.keyframes;
 
     // Before the first keyframe
-    if (clampedTime <= keyframes[0].timelineTime) {
-      return keyframes[0].sourceTime;
+    if (clampedTime <= keyframes[0]!.timelineTime) {
+      return keyframes[0]!.sourceTime;
     }
 
     // After the last keyframe
-    if (clampedTime >= keyframes[keyframes.length - 1].timelineTime) {
-      return keyframes[keyframes.length - 1].sourceTime;
+    if (clampedTime >= keyframes[keyframes.length - 1]!.timelineTime) {
+      return keyframes[keyframes.length - 1]!.sourceTime;
     }
 
     // Find the surrounding keyframes
@@ -335,17 +335,17 @@ export class SpeedEffectsEngine {
       const kf0 = keyframes[i];
       const kf1 = keyframes[i + 1];
 
-      if (clampedTime >= kf0.timelineTime && clampedTime <= kf1.timelineTime) {
+      if (clampedTime >= kf0!.timelineTime! && clampedTime <= kf1!.timelineTime!) {
         // Hold interpolation: source time stays at kf0 until kf1
-        if (kf0.interpolation === 'hold') {
-          return kf0.sourceTime;
+        if (kf0!.interpolation! === 'hold') {
+          return kf0!.sourceTime!;
         }
 
         // Linear interpolation
         const t =
-          (clampedTime - kf0.timelineTime) /
-          (kf1.timelineTime - kf0.timelineTime);
-        return kf0.sourceTime + t * (kf1.sourceTime - kf0.sourceTime);
+          (clampedTime - kf0!.timelineTime!) /
+          (kf1!.timelineTime! - kf0!.timelineTime!);
+        return kf0!.sourceTime! + t * (kf1!.sourceTime! - kf0!.sourceTime!);
       }
     }
 
@@ -376,15 +376,15 @@ export class SpeedEffectsEngine {
       const kf0 = keyframes[i];
       const kf1 = keyframes[i + 1];
 
-      if (clampedTime >= kf0.timelineTime && clampedTime <= kf1.timelineTime) {
-        if (kf0.interpolation === 'hold') {
+      if (clampedTime >= kf0!.timelineTime! && clampedTime <= kf1!.timelineTime!) {
+        if (kf0!.interpolation! === 'hold') {
           return 0; // Frozen — no playback
         }
 
-        const timelineDelta = kf1.timelineTime - kf0.timelineTime;
+        const timelineDelta = kf1!.timelineTime! - kf0!.timelineTime!;
         if (timelineDelta === 0) return 0;
 
-        const sourceDelta = kf1.sourceTime - kf0.sourceTime;
+        const sourceDelta = kf1!.sourceTime! - kf0!.sourceTime!;
         return sourceDelta / timelineDelta;
       }
     }

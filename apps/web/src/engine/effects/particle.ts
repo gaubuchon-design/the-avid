@@ -13,9 +13,9 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
   const match = hex.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
   if (!match) return { r: 255, g: 255, b: 255 };
   return {
-    r: parseInt(match[1], 16),
-    g: parseInt(match[2], 16),
-    b: parseInt(match[3], 16),
+    r: parseInt(match[1]!, 16),
+    g: parseInt(match[2]!, 16),
+    b: parseInt(match[3]!, 16),
   };
 }
 
@@ -191,7 +191,7 @@ export class ParticleIllusion {
    */
   render(imageData: ImageData, frame: number): void {
     const { width, height, data } = imageData;
-    const preset = EMITTER_PRESETS[this.emitterType] || EMITTER_PRESETS.spark;
+    const preset = EMITTER_PRESETS[this.emitterType] || EMITTER_PRESETS['spark'];
 
     // Calculate delta time
     const dt = this.lastFrame >= 0 ? Math.min((frame - this.lastFrame) / this.frameRate, 0.1) : 1 / this.frameRate;
@@ -206,22 +206,22 @@ export class ParticleIllusion {
     this.emitAccumulator -= toEmit;
 
     for (let i = 0; i < toEmit; i++) {
-      const angleDeg = preset.angleRange[0] + Math.random() * (preset.angleRange[1] - preset.angleRange[0]);
+      const angleDeg = preset!.angleRange[0]! + Math.random() * (preset!.angleRange[1]! - preset!.angleRange[0]!);
       const angleRad = (angleDeg * Math.PI) / 180;
-      const speed = (preset.velocityRange[0] + Math.random() * (preset.velocityRange[1] - preset.velocityRange[0])) * (this.velocity / 100);
-      const life = (preset.lifetimeRange[0] + Math.random() * (preset.lifetimeRange[1] - preset.lifetimeRange[0])) * this.lifetime;
-      const size = (preset.sizeRange[0] + Math.random() * (preset.sizeRange[1] - preset.sizeRange[0])) * (this.particleSize / 10);
+      const speed = (preset!.velocityRange[0]! + Math.random() * (preset!.velocityRange[1]! - preset!.velocityRange[0]!)) * (this.velocity / 100);
+      const life = (preset!.lifetimeRange[0]! + Math.random() * (preset!.lifetimeRange[1]! - preset!.lifetimeRange[0]!)) * this.lifetime;
+      const size = (preset!.sizeRange[0]! + Math.random() * (preset!.sizeRange[1]! - preset!.sizeRange[0]!)) * (this.particleSize / 10);
 
       // Color variation
-      const cv = preset.colorVariation;
+      const cv = preset!.colorVariation!;
       const cr = clamp(this.baseColor.r + (Math.random() - 0.5) * cv * 510);
       const cg = clamp(this.baseColor.g + (Math.random() - 0.5) * cv * 510);
       const cb = clamp(this.baseColor.b + (Math.random() - 0.5) * cv * 510);
 
       // Apply fire-specific color: yellow -> orange -> red over lifetime
       const particle: Particle = {
-        x: emitCx + (Math.random() - 0.5) * preset.spread * 2,
-        y: emitCy + (Math.random() - 0.5) * preset.spread * 2,
+        x: emitCx + (Math.random() - 0.5) * preset!.spread! * 2,
+        y: emitCy + (Math.random() - 0.5) * preset!.spread! * 2,
         vx: Math.cos(angleRad) * speed,
         vy: Math.sin(angleRad) * speed,
         life: life,
@@ -237,50 +237,50 @@ export class ParticleIllusion {
     }
 
     // Update physics
-    const gravityAccel = (this.gravity / 100) * 200 * preset.gravityMultiplier;
+    const gravityAccel = (this.gravity / 100) * 200 * preset!.gravityMultiplier!;
 
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
-      p.life -= dt;
+      p!.life! -= dt;
 
-      if (p.life <= 0) {
+      if (p!.life! <= 0) {
         this.particles.splice(i, 1);
         continue;
       }
 
       // Apply gravity
-      p.vy += gravityAccel * dt;
+      p!.vy! += gravityAccel * dt;
 
       // Add slight random drift for smoke/dust
       if (this.emitterType === 'smoke' || this.emitterType === 'dust') {
-        p.vx += (Math.random() - 0.5) * 20 * dt;
+        p!.vx! += (Math.random() - 0.5) * 20 * dt;
       }
 
       // Add wind for snow
       if (this.emitterType === 'snow') {
-        p.vx += Math.sin(frame * 0.05 + p.y * 0.01) * 10 * dt;
+        p!.vx! += Math.sin(frame * 0.05 + p!.y! * 0.01) * 10 * dt;
       }
 
       // Update position
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
+      p!.x! += p!.vx! * dt;
+      p!.y! += p!.vy! * dt;
 
       // Calculate alpha based on lifetime phase
-      const lifeRatio = 1.0 - (p.life / p.maxLife);
-      if (lifeRatio < preset.fadeIn) {
-        p.alpha = lifeRatio / preset.fadeIn;
-      } else if (lifeRatio > (1.0 - preset.fadeOut)) {
-        p.alpha = (1.0 - lifeRatio) / preset.fadeOut;
+      const lifeRatio = 1.0 - (p!.life! / p!.maxLife!);
+      if (lifeRatio < preset!.fadeIn!) {
+        p!.alpha! = lifeRatio / preset!.fadeIn!;
+      } else if (lifeRatio > (1.0 - preset!.fadeOut!)) {
+        p!.alpha! = (1.0 - lifeRatio) / preset!.fadeOut!;
       } else {
-        p.alpha = 1.0;
+        p!.alpha! = 1.0;
       }
 
       // Fire color shift: interpolate from base -> orange -> dark red
       if (this.emitterType === 'fire') {
         const t = lifeRatio;
-        p.r = clamp(p.r * (1.0 - t * 0.3));
-        p.g = clamp(p.g * (1.0 - t * 0.7));
-        p.b = clamp(p.b * (1.0 - t * 0.9));
+        p!.r! = clamp(p!.r! * (1.0 - t * 0.3));
+        p!.g! = clamp(p!.g! * (1.0 - t * 0.7));
+        p!.b! = clamp(p!.b! * (1.0 - t * 0.9));
       }
     }
 
@@ -309,14 +309,14 @@ export class ParticleIllusion {
 
           // Additive blending for light-emitting particles
           if (this.emitterType === 'spark' || this.emitterType === 'fire' || this.emitterType === 'explosion') {
-            data[idx] = clamp(data[idx] + p.r * a);
-            data[idx + 1] = clamp(data[idx + 1] + p.g * a);
-            data[idx + 2] = clamp(data[idx + 2] + p.b * a);
+            data[idx] = clamp(data[idx]! + p.r * a);
+            data[idx + 1] = clamp(data[idx + 1]! + p.g * a);
+            data[idx + 2] = clamp(data[idx + 2]! + p.b * a);
           } else {
             // Alpha blending for solid particles
-            data[idx] = clamp(data[idx] * (1 - a) + p.r * a);
-            data[idx + 1] = clamp(data[idx + 1] * (1 - a) + p.g * a);
-            data[idx + 2] = clamp(data[idx + 2] * (1 - a) + p.b * a);
+            data[idx] = clamp(data[idx]! * (1 - a) + p.r * a);
+            data[idx + 1] = clamp(data[idx + 1]! * (1 - a) + p.g * a);
+            data[idx + 2] = clamp(data[idx + 2]! * (1 - a) + p.b * a);
           }
         }
       }

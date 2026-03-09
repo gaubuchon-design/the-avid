@@ -72,7 +72,7 @@ export function initWebSocket(httpServer: HttpServer) {
   // ─── Auth middleware ─────────────────────────────────────────────────────────
   io.use(async (socket, next) => {
     try {
-      const token = socket.handshake.auth.token ?? socket.handshake.headers.authorization?.slice(7);
+      const token = socket.handshake.auth['token'] ?? socket.handshake.headers.authorization?.slice(7);
       if (!token) {
         return next(new Error('Authentication required: no token provided'));
       }
@@ -136,7 +136,7 @@ export function initWebSocket(httpServer: HttpServer) {
         // Record collaboration event (fire-and-forget)
         db.collaborationEvent.create({
           data: { projectId, userId: user.userId, sessionId: socket.id, eventType: 'JOIN', payload: {} },
-        }).catch((err) => logger.error('Failed to record join event', { error: err.message }));
+        }).catch((err: Error) => logger.error('Failed to record join event', { error: err.message }));
 
         callback(true);
         logger.debug('User joined project', { userId: user.userId, projectId });
@@ -233,7 +233,7 @@ export function initWebSocket(httpServer: HttpServer) {
         eventType: 'LEAVE',
         payload: {},
       },
-    }).catch((err) => logger.error('Failed to record leave event', { error: err.message }));
+    }).catch((err: Error) => logger.error('Failed to record leave event', { error: err.message }));
   }
 
   // ─── Utility: broadcast to project ──────────────────────────────────────────

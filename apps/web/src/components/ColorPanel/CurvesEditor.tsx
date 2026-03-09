@@ -98,7 +98,7 @@ function CurveCanvas({
     ctx.strokeStyle = color;
     ctx.lineWidth = 1.5;
     for (let x = 0; x < width; x++) {
-      const y = height - lut[x] * height;
+      const y = height - lut[x]! * height;
       if (x === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
@@ -131,8 +131,8 @@ function CurveCanvas({
     const threshold = 12 / rect.width;
     let found = -1;
     for (let i = 0; i < points.length; i++) {
-      const dx = points[i].x - mx;
-      const dy = points[i].y - my;
+      const dx = points[i]!.x - mx;
+      const dy = points[i]!.y - my;
       if (Math.sqrt(dx * dx + dy * dy) < threshold) {
         found = i;
         break;

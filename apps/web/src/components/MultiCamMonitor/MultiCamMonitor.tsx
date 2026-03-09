@@ -350,10 +350,10 @@ function AnglesTab({
             return (
               <div
                 key={angle.id}
-                style={S.monitorCell(isActive, color)}
+                style={S.monitorCell(isActive, color!)}
                 onClick={() => onSelectAngle(angle.id)}
               >
-                <div style={S.monitorLabel(color)}>{angle.label}</div>
+                <div style={S.monitorLabel(color!)}>{angle.label}</div>
                 <div style={{ fontSize: '9px', color: '#666', marginTop: '4px' }}>
                   {angle.fileName}
                 </div>
@@ -390,10 +390,10 @@ function AnglesTab({
           return (
             <div
               key={angle.id}
-              style={S.angleCard(isActive, color)}
+              style={S.angleCard(isActive, color!)}
               onClick={() => onSelectAngle(angle.id)}
             >
-              <div style={S.angleBadge(color)}>{angle.label.split(' ').pop()}</div>
+              <div style={S.angleBadge(color!)}>{angle.label.split(' ').pop()}</div>
               <div style={{ flex: 1 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <span style={S.value}>{angle.label}</span>
@@ -651,7 +651,7 @@ function PreviewTab({
           marginBottom: '8px',
         }}>
           {activeAngle && (
-            <div style={S.monitorLabel(color)}>{activeAngle.label}</div>
+            <div style={S.monitorLabel(color!)}>{activeAngle.label}</div>
           )}
           <div style={S.timecodeDisplay}>
             {secondsToTC(currentTimeSeconds, group.frameRate)}
@@ -709,8 +709,8 @@ export function MultiCamMonitor() {
       const nextIdx = (currentIdx + 1) % group.angles.length;
       aiSuggestions.push({
         id: `ai-switch-${aiSuggestions.length}`,
-        fromAngleId: group.angles[currentIdx].id,
-        toAngleId: group.angles[nextIdx].id,
+        fromAngleId: group.angles[currentIdx]!.id,
+        toAngleId: group.angles[nextIdx]!.id,
         switchTimeSeconds: t,
         switchType: 'ai-suggestion',
       });

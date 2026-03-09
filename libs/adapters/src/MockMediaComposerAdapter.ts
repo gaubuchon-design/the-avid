@@ -119,9 +119,9 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
     for (let i = 0; i < trackDefs.length; i++) {
       const def = trackDefs[i];
       const track: MutableTrack = {
-        id: `track_${def.name.toLowerCase()}`,
-        name: def.name,
-        kind: def.kind,
+        id: `track_${def!.name.toLowerCase()}`,
+        name: def!.name,
+        kind: def!.kind,
         index: i,
         clips: [],
         isMuted: false,
@@ -542,7 +542,7 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
   async getSelection(): Promise<SelectionSnapshot> {
     // Return a plausible default selection
     return {
-      clipIds: this.clips.size > 0 ? [Array.from(this.clips.keys())[0]] : [],
+      clipIds: this.clips.size! > 0 ? [Array.from(this.clips.keys())[0]!] : [],
       trackIds: ['track_v1'],
       markIn: undefined,
       markOut: undefined,

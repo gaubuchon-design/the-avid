@@ -53,10 +53,10 @@ export function applyGlitch(
 
         const di = (y * width + x) * 4;
         const si = (y * width + sx) * 4;
-        data[di] = src[si];
-        data[di + 1] = src[si + 1];
-        data[di + 2] = src[si + 2];
-        data[di + 3] = src[si + 3];
+        data[di] = src[si]!;
+        data[di + 1] = src[si + 1]!;
+        data[di + 2] = src[si + 2]!;
+        data[di + 3] = src[si + 3]!;
       }
     }
   }
@@ -71,8 +71,8 @@ export function applyGlitch(
         // Shift red channel left, blue channel right
         const rxSrc = Math.min(width - 1, Math.max(0, x + split));
         const bxSrc = Math.min(width - 1, Math.max(0, x - split));
-        data[di] = current[(y * width + rxSrc) * 4];         // red from offset
-        data[di + 2] = current[(y * width + bxSrc) * 4 + 2]; // blue from offset
+        data[di] = current[(y * width + rxSrc) * 4]!;         // red from offset
+        data[di + 2] = current[(y * width + bxSrc) * 4 + 2]!; // blue from offset
       }
     }
   }
@@ -82,9 +82,9 @@ export function applyGlitch(
     for (let y = 0; y < height; y += 2) {
       for (let x = 0; x < width; x++) {
         const di = (y * width + x) * 4;
-        data[di] = Math.round(data[di] * 0.85);
-        data[di + 1] = Math.round(data[di + 1] * 0.85);
-        data[di + 2] = Math.round(data[di + 2] * 0.85);
+        data[di] = Math.round(data[di]! * 0.85);
+        data[di + 1] = Math.round(data[di + 1]! * 0.85);
+        data[di + 2] = Math.round(data[di + 2]! * 0.85);
       }
     }
   }

@@ -229,7 +229,7 @@ export class MultiCamEngine {
         syncOffsetSeconds: offset,
         enabled: true,
         audioChannel: idx,
-        color: ANGLE_COLORS[idx % ANGLE_COLORS.length],
+        color: ANGLE_COLORS[idx % ANGLE_COLORS.length]!,
         thumbnailUrl: asset.thumbnailUrl,
         durationSeconds: asset.durationSeconds,
         timecodeStart: asset.timecodeStart,
@@ -318,7 +318,7 @@ export class MultiCamEngine {
       syncOffsetSeconds: 0,
       enabled: true,
       audioChannel: idx,
-      color: ANGLE_COLORS[idx % ANGLE_COLORS.length],
+      color: ANGLE_COLORS[idx % ANGLE_COLORS.length]!,
       thumbnailUrl: asset.thumbnailUrl,
       durationSeconds: asset.durationSeconds,
       timecodeStart: asset.timecodeStart,
@@ -375,7 +375,7 @@ export class MultiCamEngine {
     if (angleIndex < 0 || angleIndex >= group.angles.length) {
       throw new MultiCamError(`Invalid angle index: ${angleIndex}`, 'INVALID_ANGLE');
     }
-    if (!group.angles[angleIndex].enabled) {
+    if (!group!.angles[angleIndex]!.enabled) {
       throw new MultiCamError(`Angle ${angleIndex} is disabled`, 'INVALID_ANGLE');
     }
 
@@ -394,7 +394,7 @@ export class MultiCamEngine {
       history.push({
         timeSeconds: group.playheadSeconds,
         angleIndex,
-        angleLabel: group.angles[angleIndex].label,
+        angleLabel: group!.angles[angleIndex]!.label,
         durationSeconds: 0, // Will be calculated on next switch or stop
       });
 
@@ -426,7 +426,7 @@ export class MultiCamEngine {
     this.switchHistory.set(groupId, [{
       timeSeconds: group.playheadSeconds,
       angleIndex: group.activeAngleIndex,
-      angleLabel: group.angles[group.activeAngleIndex].label,
+      angleLabel: group!.angles[group.activeAngleIndex]!.label,
       durationSeconds: 0,
     }]);
     this.switchStartTime.set(groupId, group.playheadSeconds);
@@ -448,7 +448,7 @@ export class MultiCamEngine {
     // Close the last event's duration
     if (history.length > 0) {
       const last = history[history.length - 1];
-      last.durationSeconds = group.playheadSeconds - last.timeSeconds;
+      last!.durationSeconds = group.playheadSeconds - last!.timeSeconds;
     }
 
     // Remove zero-duration events at the end
@@ -615,6 +615,6 @@ export class MultiCamEngine {
     const match = tc.match(/^(\d{2}):(\d{2}):(\d{2})[:;](\d{2})$/);
     if (!match) return 0;
     const [, h, m, s, f] = match.map(Number);
-    return h * 3600 + m * 60 + s + f / 30;
+    return h! * 3600 + m! * 60 + s! + f! / 30;
   }
 }

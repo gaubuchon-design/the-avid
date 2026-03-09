@@ -110,7 +110,7 @@ type ProjectRole = keyof typeof ROLE_HIERARCHY;
 export function requireProjectAccess(minRole: ProjectRole = 'VIEWER') {
   return async (req: Request, _res: Response, next: NextFunction) => {
     try {
-      const projectId = req.params.projectId ?? req.params.id;
+      const projectId = req.params['projectId'] ?? req.params['id'];
       if (!projectId) {
         throw new ForbiddenError('Project ID is required');
       }
@@ -169,7 +169,7 @@ export function requireTier(minTier: SubscriptionTier) {
 export function requireOrgAccess(minRole: ProjectRole = 'VIEWER') {
   return async (req: Request, _res: Response, next: NextFunction) => {
     try {
-      const orgId = req.params.orgId ?? req.body?.orgId ?? (req.query.orgId as string);
+      const orgId = req.params['orgId'] ?? req.body?.orgId ?? (req.query['orgId'] as string);
       if (!orgId) throw new ForbiddenError('Organization ID is required');
 
       const userId = req.user!.id;

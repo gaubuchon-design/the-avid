@@ -154,10 +154,10 @@ export class FrameTransport {
         const byteOffset = readSlot * this.slotSize;
 
         // Read header
-        const width = this.uint32View[(byteOffset + 4) >> 2];
-        const height = this.uint32View[(byteOffset + 8) >> 2];
-        const frameNumber = this.uint32View[(byteOffset + 12) >> 2];
-        const timestamp = this.float64View[(byteOffset + 16) >> 3];
+        const width = this.uint32View[(byteOffset + 4) >> 2]!;
+        const height = this.uint32View[(byteOffset + 8) >> 2]!;
+        const frameNumber = this.uint32View[(byteOffset + 12) >> 2]!;
+        const timestamp = this.float64View[(byteOffset + 16) >> 3]!;
 
         // Read timecode string
         const tcSlice = this.uint8View.subarray(

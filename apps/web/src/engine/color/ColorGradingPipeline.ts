@@ -475,9 +475,9 @@ export class ColorGradingPipeline {
 
     for (let i = 0; i < len; i += 4) {
       // Linearize
-      let r = srgbToLinear(data[i] / 255);
-      let g = srgbToLinear(data[i + 1] / 255);
-      let b = srgbToLinear(data[i + 2] / 255);
+      let r = srgbToLinear(data[i]! / 255);
+      let g = srgbToLinear(data[i + 1]! / 255);
+      let b = srgbToLinear(data[i + 2]! / 255);
 
       // Lift/Gamma/Gain
       r = liftGammaGain(r, p.lift.r, 1 + p.gamma.r, 1 + p.gain.r, p.offset.r);
@@ -519,17 +519,17 @@ export class ColorGradingPipeline {
       const bi = data[i + 2];
 
       // Per-channel curves, then master
-      let r = redLut[ri];
-      let g = greenLut[gi];
-      let b = blueLut[bi];
+      let r = redLut[ri!];
+      let g = greenLut[gi!];
+      let b = blueLut[bi!];
 
-      const mr = Math.round(clamp01(r) * 255);
-      const mg = Math.round(clamp01(g) * 255);
-      const mb = Math.round(clamp01(b) * 255);
+      const mr = Math.round(clamp01(r!) * 255);
+      const mg = Math.round(clamp01(g!) * 255);
+      const mb = Math.round(clamp01(b!) * 255);
 
-      data[i]     = Math.round(clamp01(masterLut[mr]) * 255);
-      data[i + 1] = Math.round(clamp01(masterLut[mg]) * 255);
-      data[i + 2] = Math.round(clamp01(masterLut[mb]) * 255);
+      data[i]     = Math.round(clamp01(masterLut[mr]!) * 255);
+      data[i + 1] = Math.round(clamp01(masterLut[mg]!) * 255);
+      data[i + 2] = Math.round(clamp01(masterLut[mb]!) * 255);
     }
   }
 
@@ -541,9 +541,9 @@ export class ColorGradingPipeline {
     const lumVsSat = bakeCurveToLUT(p.lumVsSat);
 
     for (let i = 0; i < len; i += 4) {
-      const r = data[i] / 255;
-      const g = data[i + 1] / 255;
-      const b = data[i + 2] / 255;
+      const r = data[i]! / 255;
+      const g = data[i + 1]! / 255;
+      const b = data[i + 2]! / 255;
 
       const hsl = rgbToHsl(r, g, b);
       const hIdx = Math.round(clamp01(hsl.h / 360) * 255);
@@ -551,10 +551,10 @@ export class ColorGradingPipeline {
       const lIdx = Math.round(clamp01(hsl.l) * 255);
 
       // Apply curves (0.5 = no change, 1.0 = 2x, 0.0 = 0x)
-      hsl.s = clamp01(hsl.s * hueVsSat[hIdx] * 2);
-      hsl.l = clamp01(hsl.l * hueVsLum[hIdx] * 2);
-      hsl.s = clamp01(hsl.s * lumVsSat[lIdx] * 2);
-      hsl.s = clamp01(hsl.s * satVsSat[sIdx] * 2);
+      hsl.s = clamp01(hsl.s * hueVsSat[hIdx]! * 2);
+      hsl.l = clamp01(hsl.l * hueVsLum[hIdx]! * 2);
+      hsl.s = clamp01(hsl.s * lumVsSat[lIdx]! * 2);
+      hsl.s = clamp01(hsl.s * satVsSat[sIdx]! * 2);
 
       const rgb = hslToRgb(hsl.h, hsl.s, hsl.l);
       data[i]     = Math.round(clamp01(rgb.r) * 255);
@@ -574,9 +574,9 @@ export class ColorGradingPipeline {
 
   private cpuMixer(data: Uint8ClampedArray, len: number, p: MixerParams): void {
     for (let i = 0; i < len; i += 4) {
-      const r = data[i] / 255;
-      const g = data[i + 1] / 255;
-      const b = data[i + 2] / 255;
+      const r = data[i]! / 255;
+      const g = data[i + 1]! / 255;
+      const b = data[i + 2]! / 255;
 
       const nr = r * p.redOut.r + g * p.redOut.g + b * p.redOut.b;
       const ng = r * p.greenOut.r + g * p.greenOut.g + b * p.greenOut.b;

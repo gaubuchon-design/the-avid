@@ -36,10 +36,10 @@ export type AssetAlphaMap = Map<string, AlphaMode>;
 function premultiplyAlpha(imageData: ImageData): void {
   const d = imageData.data;
   for (let i = 0; i < d.length; i += 4) {
-    const a = d[i + 3] / 255;
-    d[i] = Math.round(d[i] * a);
-    d[i + 1] = Math.round(d[i + 1] * a);
-    d[i + 2] = Math.round(d[i + 2] * a);
+    const a = d[i + 3]! / 255;
+    d[i] = Math.round(d[i]! * a);
+    d[i + 1] = Math.round(d[i + 1]! * a);
+    d[i + 2] = Math.round(d[i + 2]! * a);
   }
 }
 
@@ -51,10 +51,10 @@ function unpremultiplyAlpha(imageData: ImageData): void {
   for (let i = 0; i < d.length; i += 4) {
     const a = d[i + 3];
     if (a === 0) continue;
-    const invA = 255 / a;
-    d[i] = Math.min(255, Math.round(d[i] * invA));
-    d[i + 1] = Math.min(255, Math.round(d[i + 1] * invA));
-    d[i + 2] = Math.min(255, Math.round(d[i + 2] * invA));
+    const invA = 255 / a!;
+    d[i] = Math.min(255, Math.round(d[i]! * invA));
+    d[i + 1] = Math.min(255, Math.round(d[i + 1]! * invA));
+    d[i + 2] = Math.min(255, Math.round(d[i + 2]! * invA));
   }
 }
 
@@ -171,24 +171,24 @@ class FrameCompositorClass {
     const absTime = clip.startTime + clipOffset;
 
     // Before first keyframe
-    if (absTime <= kfs[0].timelineTime) return kfs[0].sourceTime;
+    if (absTime <= kfs[0]!.timelineTime) return kfs[0]!.sourceTime;
     // After last keyframe
-    if (absTime >= kfs[kfs.length - 1].timelineTime) return kfs[kfs.length - 1].sourceTime;
+    if (absTime >= kfs[kfs.length - 1]!.timelineTime) return kfs[kfs.length - 1]!.sourceTime;
 
     // Find surrounding keyframes
     for (let i = 0; i < kfs.length - 1; i++) {
       const a = kfs[i], b = kfs[i + 1];
-      if (absTime >= a.timelineTime && absTime <= b.timelineTime) {
-        const t = (absTime - a.timelineTime) / (b.timelineTime - a.timelineTime);
+      if (absTime >= a!.timelineTime! && absTime <= b!.timelineTime!) {
+        const t = (absTime - a!.timelineTime!) / (b!.timelineTime! - a!.timelineTime!);
 
-        if (a.interpolation === 'hold') return a.sourceTime;
-        if (a.interpolation === 'linear') {
-          return a.sourceTime + t * (b.sourceTime - a.sourceTime);
+        if (a!.interpolation! === 'hold') return a!.sourceTime!;
+        if (a!.interpolation! === 'linear') {
+          return a!.sourceTime! + t * (b!.sourceTime! - a!.sourceTime!);
         }
         // Bezier interpolation (cubic approximation)
-        if (a.interpolation === 'bezier') {
-          const ct = this.cubicBezier(t, a.bezierOut?.y ?? t, b.bezierIn?.y ?? t);
-          return a.sourceTime + ct * (b.sourceTime - a.sourceTime);
+        if (a!.interpolation! === 'bezier') {
+          const ct = this.cubicBezier(t, a!.bezierOut?.y! ?? t, b!.bezierIn?.y! ?? t);
+          return a!.sourceTime! + ct * (b!.sourceTime! - a!.sourceTime!);
         }
       }
     }

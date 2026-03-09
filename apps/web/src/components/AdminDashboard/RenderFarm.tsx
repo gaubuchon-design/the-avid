@@ -215,15 +215,15 @@ function statusBadge(status: string) {
     complete: { bg: 'rgba(34,197,94,.15)', color: 'var(--success)' },
     failed: { bg: 'rgba(239,68,68,.15)', color: 'var(--error)' },
   };
-  const style = map[status] || map.offline;
+  const style = map[status] || map['offline'];
   return (
     <span
       style={{
         fontSize: 9,
         padding: '2px 6px',
         borderRadius: 3,
-        background: style.bg,
-        color: style.color,
+        background: style!.bg!,
+        color: style!.color!,
         fontWeight: 700,
         letterSpacing: '0.04em',
         textTransform: 'uppercase',

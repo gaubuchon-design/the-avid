@@ -164,12 +164,12 @@ function smoothKeyframes(
 ): ReframeKeyframe[] {
   if (keyframes.length < 2) return keyframes;
 
-  const smoothed: ReframeKeyframe[] = [keyframes[0]];
+  const smoothed: ReframeKeyframe[] = [keyframes[0]!];
   const alpha = 1 - smoothing;
 
   for (let i = 1; i < keyframes.length; i++) {
-    const prev = smoothed[i - 1].cropRegion;
-    const curr = keyframes[i].cropRegion;
+    const prev = smoothed[i - 1]!.cropRegion;
+    const curr = keyframes[i]!.cropRegion;
 
     // Exponential moving average
     let newX = prev.x * (1 - alpha) + curr.x * alpha;
@@ -191,7 +191,7 @@ function smoothKeyframes(
     newY = Math.max(0, Math.min(1 - curr.height, newY));
 
     smoothed.push({
-      ...keyframes[i],
+      ...keyframes[i]!,
       cropRegion: {
         x: newX,
         y: newY,
@@ -216,7 +216,7 @@ function calculateRetentionScore(keyframes: ReframeKeyframe[]): number {
       continue;
     }
 
-    const primarySubject = kf.subjects[0];
+    const primarySubject = kf.subjects[0]!;
     const subjectCenterX = primarySubject.boundingBox.x + primarySubject.boundingBox.width / 2;
     const subjectCenterY = primarySubject.boundingBox.y + primarySubject.boundingBox.height / 2;
 
@@ -241,8 +241,8 @@ export class AutoReframeEngine {
 
   constructor(config?: Partial<AutoReframeConfig>) {
     this.config = {
-      sourceAspect: ASPECT_RATIOS['16:9'],
-      targetAspect: ASPECT_RATIOS['9:16'],
+      sourceAspect: ASPECT_RATIOS['16:9']!,
+      targetAspect: ASPECT_RATIOS['9:16']!,
       subjectLockStrength: 0.8,
       motionSmoothing: 0.6,
       subjectPriority: ['face', 'salient_object'],
@@ -433,13 +433,13 @@ export class AutoReframeEngine {
     if (keyframes.length <= 2) return keyframes;
 
     // Keep first and last, then every 12th frame, plus any with significant movement
-    const reduced: ReframeKeyframe[] = [keyframes[0]];
+    const reduced: ReframeKeyframe[] = [keyframes[0]!];
     const step = Math.max(1, Math.round(frameRate / 2));
 
     for (let i = 1; i < keyframes.length - 1; i++) {
       const isStepFrame = i % step === 0;
-      const prev = reduced[reduced.length - 1];
-      const curr = keyframes[i];
+      const prev = reduced[reduced.length - 1]!;
+      const curr = keyframes[i]!;
       const dx = Math.abs(curr.cropRegion.x - prev.cropRegion.x);
       const dy = Math.abs(curr.cropRegion.y - prev.cropRegion.y);
       const hasSignificantMotion = dx > 0.02 || dy > 0.02;
@@ -449,7 +449,7 @@ export class AutoReframeEngine {
       }
     }
 
-    reduced.push(keyframes[keyframes.length - 1]);
+    reduced.push(keyframes[keyframes.length - 1]!);
     return reduced;
   }
 }

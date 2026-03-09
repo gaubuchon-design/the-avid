@@ -9,7 +9,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   orientation: 'landscape',
   icon: './assets/icon.png',
   userInterfaceStyle: 'dark',
-  newArchEnabled: true,
   splash: {
     image: './assets/splash.png',
     resizeMode: 'contain',

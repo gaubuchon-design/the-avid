@@ -81,12 +81,12 @@ describe('Lease Loss Reliability', () => {
     expect(losers.length).toBe(4);
 
     // The winner should be the first one (racer-1) since Node.js is single-threaded
-    expect(winners[0].nodeId).toBe('racer-1');
+    expect(winners[0]!.nodeId).toBe('racer-1');
 
     // Verify that the winner is indeed the lease holder
     const currentLease = leaseManager.getLease('contested-shard');
     expect(currentLease).not.toBeNull();
-    expect(currentLease!.holderId).toBe(winners[0].nodeId);
+    expect(currentLease!.holderId).toBe(winners[0]!.nodeId);
 
     // None of the losers should be the holder
     for (const loser of losers) {

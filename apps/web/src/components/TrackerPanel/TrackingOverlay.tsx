@@ -92,9 +92,9 @@ export const TrackingOverlay: React.FC<TrackingOverlayProps> = ({
       // Reset drawing points to rectangle corners
       for (let i = 0; i < 4; i++) {
         if (i < drawingPoints.length) {
-          updateDrawingPoint(i, points[i]);
+          updateDrawingPoint(i, points[i]!);
         } else {
-          addDrawingPoint(points[i]);
+          addDrawingPoint(points[i]!);
         }
       }
     }
@@ -249,8 +249,8 @@ export const TrackingOverlay: React.FC<TrackingOverlayProps> = ({
               {/* Confidence indicator */}
               {trackedCorners && confidence < 0.5 && (
                 <text
-                  x={displayPoints[0].x}
-                  y={displayPoints[0].y - 8}
+                  x={displayPoints[0]!.x}
+                  y={displayPoints[0]!.y - 8}
                   fill="#f38ba8"
                   fontSize={10}
                   fontFamily="monospace"

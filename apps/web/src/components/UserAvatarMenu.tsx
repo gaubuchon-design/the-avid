@@ -58,7 +58,7 @@ export function UserAvatarMenu() {
         onClick={() => setOpen(!open)}
         title="Account"
         aria-label="Account menu"
-        style={styles.avatar}
+        style={styles['avatar']}
       >
         {initials}
       </button>
@@ -67,20 +67,20 @@ export function UserAvatarMenu() {
         <div
           ref={dropdownRef}
           style={{
-            ...styles.dropdown,
+            ...styles['dropdown'],
             top: dropdownPos.top,
             right: dropdownPos.right,
           }}
         >
-          <div style={styles.userInfo}>
-            <div style={styles.userName}>{user?.name || 'User'}</div>
-            <div style={styles.userEmail}>{user?.email}</div>
+          <div style={styles['userInfo']}>
+            <div style={styles['userName']}>{user?.name || 'User'}</div>
+            <div style={styles['userEmail']}>{user?.email}</div>
             {isLocalSession && (
-              <div style={styles.localBadge}>Local session</div>
+              <div style={styles['localBadge']}>Local session</div>
             )}
           </div>
-          <div style={styles.divider} />
-          <button style={styles.menuItem} onClick={handleLogout}>
+          <div style={styles['divider']} />
+          <button style={styles['menuItem']} onClick={handleLogout}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
               <polyline points="16 17 21 12 16 7" />

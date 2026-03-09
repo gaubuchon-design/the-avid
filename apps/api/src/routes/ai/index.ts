@@ -93,7 +93,7 @@ router.get('/jobs', validate(paginationQuery, 'query'), async (req: Request, res
 // ─── GET /ai/jobs/:id ─────────────────────────────────────────────────────────
 router.get('/jobs/:id', async (req: Request, res: Response) => {
   const job = await db.aIJob.findFirst({
-    where: { id: req.params.id, userId: req.user!.id },
+    where: { id: req.params['id'], userId: req.user!.id },
   });
   assertFound(job, 'AI Job');
   res.json({ job });
@@ -102,7 +102,7 @@ router.get('/jobs/:id', async (req: Request, res: Response) => {
 // ─── DELETE /ai/jobs/:id -- cancel ─────────────────────────────────────────────
 router.delete('/jobs/:id', async (req: Request, res: Response) => {
   const job = await db.aIJob.findFirst({
-    where: { id: req.params.id, userId: req.user!.id },
+    where: { id: req.params['id'], userId: req.user!.id },
   });
   assertFound(job, 'AI Job');
 

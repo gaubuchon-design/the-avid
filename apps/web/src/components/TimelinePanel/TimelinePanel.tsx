@@ -93,7 +93,7 @@ function useKeyboardShortcuts(): void {
         case 's':
           if (!isMod && state.selectedClipIds.length > 0) {
             e.preventDefault();
-            state.splitClip(state.selectedClipIds[0], state.playheadTime);
+            state.splitClip(state.selectedClipIds[0]!, state.playheadTime);
           }
           break;
         case 'c':
@@ -101,7 +101,7 @@ function useKeyboardShortcuts(): void {
             e.preventDefault();
             // If clips selected, split; otherwise switch to razor tool
             if (state.selectedClipIds.length > 0) {
-              state.splitClip(state.selectedClipIds[0], state.playheadTime);
+              state.splitClip(state.selectedClipIds[0]!, state.playheadTime);
             } else {
               state.setActiveTool('razor');
             }
@@ -123,7 +123,7 @@ function useKeyboardShortcuts(): void {
         case 'd': case 'D':
           if (isMod && state.selectedClipIds.length > 0) {
             e.preventDefault();
-            state.duplicateClip(state.selectedClipIds[0]);
+            state.duplicateClip(state.selectedClipIds[0]!);
           }
           break;
 
@@ -307,7 +307,7 @@ export function TimelinePanel() {
           title="Split Clip (S)"
           aria-label="Split selected clip at playhead"
           onClick={() => {
-            if (selectedClipIds.length > 0) splitClip(selectedClipIds[0], playheadTime);
+            if (selectedClipIds.length > 0) splitClip(selectedClipIds[0]!, playheadTime);
           }}
         >
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

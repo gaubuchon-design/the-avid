@@ -383,7 +383,7 @@ export class TitleEngine {
     const videoTracks = state.tracks
       .filter((t) => t.type === 'VIDEO' || t.type === 'GRAPHIC')
       .sort((a, b) => a.sortOrder - b.sortOrder);
-    return videoTracks.length > 0 ? videoTracks[0].id : null;
+    return videoTracks.length > 0 ? videoTracks[0]!.id : null;
   }
 
   /**
@@ -571,7 +571,7 @@ export class TitleEngine {
 
     // Merge patch while preserving the ID
     title.objects[objIdx] = {
-      ...title.objects[objIdx],
+      ...title.objects[objIdx]!,
       ...patch,
       id: objectId,
     };

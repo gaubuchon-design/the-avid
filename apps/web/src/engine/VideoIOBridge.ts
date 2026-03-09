@@ -116,7 +116,7 @@ type TimecodeCallback = (event: {
 
 function getAPI(): Record<string, (...args: unknown[]) => unknown> | null {
   const w = window as unknown as Record<string, unknown>;
-  return (w.electronAPI as Record<string, (...args: unknown[]) => unknown>) ?? null;
+  return (w['electronAPI'] as Record<string, (...args: unknown[]) => unknown>) ?? null;
 }
 
 function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {

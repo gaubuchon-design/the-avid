@@ -28,9 +28,9 @@ export function applyBrightnessContrast(
     const factor = (259 * (c * 255 + 255)) / (255 * (259 - c * 255));
 
     for (let i = 0; i < len; i += 4) {
-      data[i]     = clamp(factor * (data[i]     - 128 + b) + 128);
-      data[i + 1] = clamp(factor * (data[i + 1] - 128 + b) + 128);
-      data[i + 2] = clamp(factor * (data[i + 2] - 128 + b) + 128);
+      data[i]     = clamp(factor * (data[i]!     - 128 + b) + 128);
+      data[i + 1] = clamp(factor * (data[i + 1]! - 128 + b) + 128);
+      data[i + 2] = clamp(factor * (data[i + 2]! - 128 + b) + 128);
       // Alpha unchanged
     }
   } else {
@@ -43,7 +43,7 @@ export function applyBrightnessContrast(
 
     for (let i = 0; i < len; i += 4) {
       for (let c = 0; c < 3; c++) {
-        let val = data[i + c] / 255;
+        let val = data[i + c]! / 255;
         // Brightness
         if (bNorm > 0) {
           val = val + (1 - val) * bNorm;

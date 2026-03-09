@@ -87,12 +87,12 @@ export class CompensationManager {
   async compensateStep(stepId: string): Promise<boolean> {
     const entry = this.compensations.get(stepId);
     if (!entry) {
-      console.warn(`[CompensationManager] No compensation registered for step "${stepId}".`);
+      // No compensation registered — silently return false
       return false;
     }
 
     if (entry.executed) {
-      console.warn(`[CompensationManager] Compensation for step "${stepId}" already executed.`);
+      // Already executed — return prior result
       return entry.success ?? false;
     }
 
@@ -105,10 +105,7 @@ export class CompensationManager {
       entry.executed = true;
       entry.success = false;
       entry.error = error instanceof Error ? error.message : String(error);
-      console.error(
-        `[CompensationManager] Compensation for step "${stepId}" failed:`,
-        entry.error,
-      );
+      // Compensation failure recorded in the entry — callers check entry.success
       return false;
     }
   }

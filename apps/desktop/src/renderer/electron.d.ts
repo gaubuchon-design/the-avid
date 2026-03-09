@@ -120,6 +120,8 @@ interface DesktopBridge {
     platform: string;
     getPaths: () => Promise<AppPaths>;
     revealInFinder: (filePath: string) => Promise<boolean>;
+    downloadUpdate: () => Promise<boolean>;
+    checkForUpdates: () => Promise<unknown>;
     installUpdate: () => Promise<void>;
   };
   gpu: {
@@ -212,16 +214,43 @@ interface DesktopBridge {
   onMarkOut: (callback: () => void) => () => void;
   onClearMarks: (callback: () => void) => () => void;
   onAddMarker: (callback: () => void) => () => void;
+  onNextMarker: (callback: () => void) => () => void;
+  onPrevMarker: (callback: () => void) => () => void;
+  onGotoIn: (callback: () => void) => () => void;
+  onGotoOut: (callback: () => void) => () => void;
   onRazor: (callback: () => void) => () => void;
   onSplit: (callback: () => void) => () => void;
   onLift: (callback: () => void) => () => void;
   onExtract: (callback: () => void) => () => void;
+  onToggleLink: (callback: () => void) => () => void;
+  onGroup: (callback: () => void) => () => void;
+  onUngroup: (callback: () => void) => () => void;
+  onNest: (callback: () => void) => () => void;
   onMatchFrame: (callback: () => void) => () => void;
+
+  // Edit menu events
+  onPasteInsert: (callback: () => void) => () => void;
+  onDelete: (callback: () => void) => () => void;
+  onRippleDelete: (callback: () => void) => () => void;
+  onDeselectAll: (callback: () => void) => () => void;
+
+  // View panel events
+  onViewSource: (callback: () => void) => () => void;
+  onViewRecord: (callback: () => void) => () => void;
+  onViewTimeline: (callback: () => void) => () => void;
+  onViewBins: (callback: () => void) => () => void;
+  onViewEffects: (callback: () => void) => () => void;
+
+  // Keyboard shortcuts
+  onKeyboardShortcuts: (callback: () => void) => () => void;
 
   // Auto-update events
   onUpdateAvailable: (callback: (info: { version: string }) => void) => () => void;
   onUpdateProgress: (callback: (info: { percent: number }) => void) => () => void;
   onUpdateDownloaded: (callback: (info: { version: string }) => void) => () => void;
+
+  // Deep link events
+  onDeepLink: (callback: (url: string) => void) => () => void;
 
   // Cleanup
   removeAllListeners: (channel: string) => void;

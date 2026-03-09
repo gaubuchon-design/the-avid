@@ -26,10 +26,10 @@ export function applyMirror(
         if (mirroredX < 0 || mirroredX >= width) continue;
         const di = (y * width + x) * 4;
         const si = (y * width + mirroredX) * 4;
-        data[di] = src[si];
-        data[di + 1] = src[si + 1];
-        data[di + 2] = src[si + 2];
-        data[di + 3] = src[si + 3];
+        data[di] = src[si]!;
+        data[di + 1] = src[si + 1]!;
+        data[di + 2] = src[si + 2]!;
+        data[di + 3] = src[si + 3]!;
       }
     }
   }
@@ -44,10 +44,10 @@ export function applyMirror(
       for (let x = 0; x < width; x++) {
         const di = (y * width + x) * 4;
         const si = (mirroredY * width + x) * 4;
-        data[di] = current[si];
-        data[di + 1] = current[si + 1];
-        data[di + 2] = current[si + 2];
-        data[di + 3] = current[si + 3];
+        data[di] = current[si]!;
+        data[di + 1] = current[si + 1]!;
+        data[di + 2] = current[si + 2]!;
+        data[di + 3] = current[si + 3]!;
       }
     }
   }

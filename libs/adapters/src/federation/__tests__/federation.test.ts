@@ -147,7 +147,7 @@ describe('ResultMerger', () => {
     expect(merged.length).toBe(4);
     // Scores should be descending
     for (let i = 1; i < merged.length; i++) {
-      expect(merged[i].score).toBeLessThanOrEqual(merged[i - 1].score);
+      expect(merged[i]!.score).toBeLessThanOrEqual(merged[i - 1]!.score);
     }
   });
 
@@ -163,21 +163,21 @@ describe('ResultMerger', () => {
     const remote = [makeRemote('same_id', 0.2)];
     const merged = merger.merge(local, remote, 10);
     expect(merged.length).toBe(1);
-    expect(merged[0].id).toBe('same_id');
+    expect(merged[0]!.id).toBe('same_id');
   });
 
   it('handles empty local results', () => {
     const remote = [makeRemote('r1', 0.8)];
     const merged = merger.merge([], remote, 5);
     expect(merged.length).toBe(1);
-    expect(merged[0].source).toBe('content-core');
+    expect(merged[0]!.source).toBe('content-core');
   });
 
   it('handles empty remote results', () => {
     const local = [makeLocal('l1', 0.7)];
     const merged = merger.merge(local, [], 5);
     expect(merged.length).toBe(1);
-    expect(merged[0].source).toBe('local');
+    expect(merged[0]!.source).toBe('local');
   });
 
   it('handles both lists empty', () => {
@@ -203,7 +203,7 @@ describe('ContentCoreClient', () => {
     const results = await client.searchMetadata('interview');
     expect(results.length).toBeGreaterThan(0);
     // Hydration level should be stub for newly searched results
-    expect(client.getHydrationLevel(results[0].id)).toBe('stub');
+    expect(client.getHydrationLevel(results[0]!.id)).toBe('stub');
   });
 
   it('semanticSearch returns results', async () => {
@@ -216,7 +216,7 @@ describe('ContentCoreClient', () => {
     const results = await client.searchMetadata('interview');
     expect(results.length).toBeGreaterThan(0);
 
-    const id = results[0].id;
+    const id = results[0]!.id;
     expect(client.getHydrationLevel(id)).toBe('stub');
 
     // Now hydrate to full.

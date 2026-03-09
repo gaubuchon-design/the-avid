@@ -17,23 +17,23 @@ export function AppearanceSettings() {
 
   return (
     <div>
-      <div style={ss.sectionHeader}>
-        <h3 style={ss.sectionTitle}>Appearance</h3>
-        <button style={ss.resetBtn} onClick={() => resetSection('appearance')}>Reset</button>
+      <div style={ss['sectionHeader']}>
+        <h3 style={ss['sectionTitle']}>Appearance</h3>
+        <button style={ss['resetBtn']} onClick={() => resetSection('appearance')}>Reset</button>
       </div>
 
-      <div style={ss.field}>
-        <label style={ss.label}>Theme</label>
-        <div style={ss.radioGroup}>
+      <div style={ss['field']}>
+        <label style={ss['label']}>Theme</label>
+        <div style={ss['radioGroup']}>
           {THEMES.map((t) => (
-            <label key={t.value} style={ss.radioLabel}>
+            <label key={t.value} style={ss['radioLabel']}>
               <input
                 type="radio"
                 name="theme"
                 value={t.value}
                 checked={settings.theme === t.value}
                 onChange={() => updateSetting('theme', t.value)}
-                style={ss.radio}
+                style={ss['radio']}
               />
               {t.label}
             </label>
@@ -41,8 +41,8 @@ export function AppearanceSettings() {
         </div>
       </div>
 
-      <div style={ss.field}>
-        <label style={ss.label}>Accent Color</label>
+      <div style={ss['field']}>
+        <label style={ss['label']}>Accent Color</label>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {ACCENT_COLORS.map((c) => (
             <button
@@ -65,8 +65,8 @@ export function AppearanceSettings() {
         </div>
       </div>
 
-      <div style={ss.field}>
-        <label style={ss.label}>UI Scale ({Math.round(settings.uiScale * 100)}%)</label>
+      <div style={ss['field']}>
+        <label style={ss['label']}>UI Scale ({Math.round(settings.uiScale * 100)}%)</label>
         <input
           type="range"
           min={0.8}
@@ -74,9 +74,9 @@ export function AppearanceSettings() {
           step={0.05}
           value={settings.uiScale}
           onChange={(e) => updateSetting('uiScale', parseFloat(e.target.value))}
-          style={ss.range}
+          style={ss['range']}
         />
-        <div style={ss.rangeLabels}>
+        <div style={ss['rangeLabels']}>
           <span>80%</span>
           <span>150%</span>
         </div>

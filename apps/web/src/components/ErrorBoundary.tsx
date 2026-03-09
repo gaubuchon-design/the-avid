@@ -26,7 +26,7 @@ interface State {
 }
 
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { hasError: false, error: null, errorInfo: null };
+  override state: State = { hasError: false, error: null, errorInfo: null };
 
   /** Stash the previous resetKeys for comparison in componentDidUpdate. */
   private prevResetKeys: unknown[] | undefined = undefined;
@@ -35,7 +35,7 @@ export class ErrorBoundary extends Component<Props, State> {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo): void {
+  override componentDidCatch(error: Error, info: ErrorInfo): void {
     logger.error('Uncaught error in component tree', error, {
       componentStack: info.componentStack || '',
     });
@@ -43,11 +43,11 @@ export class ErrorBoundary extends Component<Props, State> {
     this.props.onError?.(error, info);
   }
 
-  componentDidMount(): void {
+  override componentDidMount(): void {
     this.prevResetKeys = this.props.resetKeys;
   }
 
-  componentDidUpdate(prevProps: Readonly<Props>): void {
+  override componentDidUpdate(prevProps: Readonly<Props>): void {
     // Auto-reset when resetKeys change while in an error state
     if (this.state.hasError && this.props.resetKeys) {
       const prev = prevProps.resetKeys ?? [];
@@ -61,7 +61,7 @@ export class ErrorBoundary extends Component<Props, State> {
     this.prevResetKeys = this.props.resetKeys;
   }
 
-  render(): ReactNode {
+  override render(): ReactNode {
     if (this.state.hasError) {
       if (this.props.fallback) {
         return this.props.fallback;
@@ -69,7 +69,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
       const isDev =
         typeof import.meta !== 'undefined' &&
-        (import.meta as unknown as Record<string, Record<string, unknown>>).env?.DEV === true;
+        (import.meta as unknown as Record<string, Record<string, unknown>>)['env']?.['DEV'] === true;
 
       return (
         <div

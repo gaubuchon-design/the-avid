@@ -167,7 +167,7 @@ const DEFAULT_METADATA: SportsMetadata = {
   competitionName: '',
   venue: '',
   league: 'EPL',
-  gameDate: new Date().toISOString().split('T')[0],
+  gameDate: new Date().toISOString().split('T')[0]!,
 };
 
 const DEFAULT_CAM_GRID: SportsCamGridConfig = {

@@ -960,7 +960,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     selectedTrackId: null,
     bins: DEMO_BINS,
     selectedBinId: 'b1a',
-    activeBinAssets: DEMO_BINS[0].children[0].assets,
+    activeBinAssets: DEMO_BINS[0]!.children[0]!.assets,
     smartBins: DEMO_SMART_BINS,
     selectedSmartBinId: null,
     sequenceSettings: {
@@ -1114,7 +1114,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       let movedClip: Clip | undefined;
       s.tracks.forEach(t => {
         const idx = t.clips.findIndex(c => c.id === clipId);
-        if (idx >= 0) { movedClip = { ...t.clips[idx] }; t.clips.splice(idx, 1); }
+        if (idx >= 0) { movedClip = { ...t.clips[idx]! }; t.clips.splice(idx, 1); }
       });
       if (movedClip) {
         const dur = movedClip.endTime - movedClip.startTime;
@@ -1139,9 +1139,9 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         const idx = t.clips.findIndex(c => c.id === clipId);
         if (idx >= 0) {
           const orig = t.clips[idx];
-          if (time <= orig.startTime || time >= orig.endTime) return;
-          const newClip: Clip = { ...orig, id: `${orig.id}_split_${Date.now()}`, startTime: time };
-          orig.endTime = time;
+          if (time <= orig!.startTime! || time >= orig!.endTime!) return;
+          const newClip: Clip = { ...orig!, id: `${orig!.id!}_split_${Date.now()}`, startTime: time };
+          orig!.endTime! = time;
           t.clips.splice(idx + 1, 0, newClip);
         }
       });
@@ -1151,9 +1151,9 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         const idx = t.clips.findIndex(c => c.id === clipId);
         if (idx >= 0) {
           const orig = t.clips[idx];
-          if (time <= orig.startTime || time >= orig.endTime) return;
-          const newClip: Clip = { ...orig, id: newClipId, startTime: time };
-          orig.endTime = time;
+          if (time <= orig!.startTime! || time >= orig!.endTime!) return;
+          const newClip: Clip = { ...orig!, id: newClipId, startTime: time };
+          orig!.endTime! = time;
           t.clips.splice(idx + 1, 0, newClip);
           return;
         }
@@ -1299,13 +1299,13 @@ export const useEditorStore = create<EditorState & EditorActions>()(
 
         for (let index = 0; index < track.clips.length; index += 1) {
           const clip = track.clips[index];
-          if (clip.startTime < splitTime && clip.endTime > splitTime) {
+          if (clip!.startTime! < splitTime && clip!.endTime! > splitTime) {
             const nextClip: Clip = {
-              ...clip,
+              ...clip!,
               id: createId('clip'),
               startTime: splitTime,
             };
-            clip.endTime = splitTime;
+            clip!.endTime! = splitTime;
             track.clips.splice(index + 1, 0, nextClip);
             index += 1;
           }
@@ -1479,14 +1479,14 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         const idx = t.clips.findIndex(c => c.id === clipId);
         if (idx >= 0) {
           const clip = t.clips[idx];
-          const dur = clip.endTime - clip.startTime;
+          const dur = clip!.endTime! - clip!.startTime!;
           // Remove the clip
           t.clips.splice(idx, 1);
           // Shift all subsequent clips left by the deleted duration
           for (let i = idx; i < t.clips.length; i++) {
-            if (t.clips[i].startTime >= clip.startTime) {
-              t.clips[i].startTime -= dur;
-              t.clips[i].endTime -= dur;
+            if (t.clips[i]!.startTime >= clip!.startTime!) {
+              t.clips[i]!.startTime -= dur;
+              t.clips[i]!.endTime -= dur;
             }
           }
           // Remove from selection
@@ -1509,15 +1509,15 @@ export const useEditorStore = create<EditorState & EditorActions>()(
           if (delta < 0) {
             // Sliding left: trim prev clip shorter, next clip starts earlier
             if (prev) prev.endTime = Math.max(prev.startTime + 0.1, prev.endTime + delta);
-            if (next) next.startTime = Math.max(clip.endTime + delta, clip.endTime - (next.endTime - next.startTime) + 0.1);
+            if (next) next.startTime = Math.max(clip!.endTime! + delta, clip!.endTime! - (next.endTime - next.startTime) + 0.1);
           } else {
             // Sliding right: trim next clip shorter, prev clip ends later
             if (next) next.startTime = Math.min(next.endTime - 0.1, next.startTime + delta);
-            if (prev) prev.endTime = Math.min(clip.startTime + delta, clip.startTime + (prev.endTime - prev.startTime) - 0.1);
+            if (prev) prev.endTime = Math.min(clip!.startTime! + delta, clip!.startTime! + (prev.endTime - prev.startTime) - 0.1);
           }
           // Adjust the source offset (trim points)
-          clip.trimStart = Math.max(0, clip.trimStart + delta);
-          clip.trimEnd = Math.max(0, clip.trimEnd - delta);
+          clip!.trimStart! = Math.max(0, clip!.trimStart! + delta);
+          clip!.trimEnd! = Math.max(0, clip!.trimEnd! - delta);
           return;
         }
       }
@@ -1734,27 +1734,27 @@ export const useEditorStore = create<EditorState & EditorActions>()(
 
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
-          const mime = file.type || '';
-          const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+          const mime = file!.type! || '';
+          const ext = file!.name.split('.').pop()?.toLowerCase()! ?? '';
           const isVideo = mime.startsWith('video/') || ['mov', 'mxf', 'avi', 'mkv'].includes(ext);
           const isAudio = mime.startsWith('audio/');
           const isImage = mime.startsWith('image/') || ['exr', 'dpx', 'tga', 'psd'].includes(ext);
           const isSvg = ext === 'svg' || mime === 'image/svg+xml';
-          const url = URL.createObjectURL(file);
+          const url = URL.createObjectURL(file!);
 
           const assetId = createId('asset');
           assetIds.push(assetId);
 
           const asset: MediaAsset = {
             id: assetId,
-            name: file.name,
+            name: file!.name!,
             type: isSvg ? 'GRAPHIC' : isVideo ? 'VIDEO' : isAudio ? 'AUDIO' : isImage ? 'IMAGE' : 'DOCUMENT',
             duration: 0,
             status: 'INGESTING',
             playbackUrl: url,
             tags: [],
             isFavorite: false,
-            fileSize: file.size,
+            fileSize: file!.size!,
             mimeType: mime,
             fileHandle: file,
           };

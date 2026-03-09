@@ -58,7 +58,7 @@ function drawWaveform(
   c.beginPath();
   for (let i = 0; i < data.length; i++) {
     const px = x + i * step;
-    const amp = data[i] * hw * 0.85;
+    const amp = data[i]! * hw * 0.85;
     c.moveTo(px, cy - amp);
     c.lineTo(px, cy + amp);
   }
@@ -86,10 +86,10 @@ function drawClip(
   const w = Math.max(2, width);
 
   // Clip background gradient
-  const fills = CLIP_FILLS[clip.type] || CLIP_FILLS.video;
+  const fills = CLIP_FILLS[clip.type] || CLIP_FILLS['video'];
   const grad = c.createLinearGradient(left, y, left, y + h);
-  grad.addColorStop(0, fills[0]);
-  grad.addColorStop(1, fills[1]);
+  grad.addColorStop(0, fills![0]);
+  grad.addColorStop(1, fills![1]);
 
   roundRect(c, left, y, w, h, r);
   c.fillStyle = grad;
@@ -158,8 +158,8 @@ function render() {
   // Track backgrounds
   let y = 0;
   for (const track of s.tracks) {
-    const bgColor = TRACK_BG[track.type] || TRACK_BG.VIDEO;
-    ctx.fillStyle = bgColor;
+    const bgColor = TRACK_BG[track.type] || TRACK_BG['VIDEO'];
+    ctx.fillStyle! = bgColor!;
     ctx.fillRect(0, y, W, s.trackHeight);
 
     if (track.muted) {

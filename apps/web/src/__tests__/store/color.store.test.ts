@@ -18,7 +18,7 @@ describe('useColorStore', () => {
   });
 
   it('selectNode() sets selectedNodeId', () => {
-    const nodeId = useColorStore.getState().nodes[0].id;
+    const nodeId = useColorStore.getState().nodes[0]!.id;
     useColorStore.getState().selectNode(nodeId);
     expect(useColorStore.getState().selectedNodeId).toBe(nodeId);
   });

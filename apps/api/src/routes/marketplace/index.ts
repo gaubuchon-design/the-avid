@@ -75,7 +75,7 @@ router.get('/me/published', authenticate, async (req: Request, res: Response) =>
 // ─── GET /marketplace/:slug ────────────────────────────────────────────────────
 router.get('/:slug', optionalAuth, async (req: Request, res: Response) => {
   const item = await db.marketplaceItem.findUnique({
-    where: { slug: req.params.slug, isPublished: true },
+    where: { slug: req.params['slug'], isPublished: true },
     include: {
       author: { select: { id: true, displayName: true, avatarUrl: true } },
       _count: { select: { purchases: true } },
@@ -99,7 +99,7 @@ router.get('/:slug', optionalAuth, async (req: Request, res: Response) => {
 router.post('/:id/purchase', authenticate, async (req: Request, res: Response) => {
   const userId = req.user!.id;
 
-  const item = await db.marketplaceItem.findUnique({ where: { id: req.params.id } });
+  const item = await db.marketplaceItem.findUnique({ where: { id: req.params['id'] } });
   if (!item || !item.isPublished) throw new NotFoundError('Marketplace item');
 
   // Cannot purchase own item
@@ -161,7 +161,7 @@ router.post(
 
 // ─── PATCH /marketplace/:id -- update item (author only) ───────────────────────
 router.patch('/:id', authenticate, async (req: Request, res: Response) => {
-  const item = await db.marketplaceItem.findUnique({ where: { id: req.params.id } });
+  const item = await db.marketplaceItem.findUnique({ where: { id: req.params['id'] } });
   assertFound(item, 'Marketplace item');
 
   if (item.authorId !== req.user!.id) {
@@ -176,7 +176,7 @@ router.patch('/:id', authenticate, async (req: Request, res: Response) => {
   allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
 
   const updated = await db.marketplaceItem.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data,
   });
   res.json({ item: updated });

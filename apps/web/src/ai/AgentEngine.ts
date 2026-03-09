@@ -500,8 +500,8 @@ export class AgentEngine {
     switch (toolName) {
       // ── VFX AI Tools (routed to VFXAgent) ──────────────────────────
       case 'ai_object_removal': {
-        const clipId = toolArgs.clipId || 'current';
-        const description = toolArgs.description || 'object';
+        const clipId = toolArgs['clipId'] || 'current';
+        const description = toolArgs['description'] || 'object';
         // VFXAgent handles segmentation + inpainting pipeline
         const job = await vfxAgent.removeObject(
           clipId,
@@ -514,8 +514,8 @@ export class AgentEngine {
       }
 
       case 'ai_rotoscope': {
-        const clipId = toolArgs.clipId || 'current';
-        const description = toolArgs.description || 'subject';
+        const clipId = toolArgs['clipId'] || 'current';
+        const description = toolArgs['description'] || 'subject';
         const job = await vfxAgent.rotoscope(
           clipId,
           description,
@@ -527,7 +527,7 @@ export class AgentEngine {
       }
 
       case 'ai_sky_replacement': {
-        const clipId = toolArgs.clipId || 'current';
+        const clipId = toolArgs['clipId'] || 'current';
         const replacementImage = new ImageData(1, 1);
         const job = await vfxAgent.replaceSky(
           clipId,
@@ -540,13 +540,13 @@ export class AgentEngine {
       }
 
       case 'ai_face_beauty':
-        return `Beauty enhancement applied to clip ${toolArgs.clipId}: smoothing=${toolArgs.smoothing ?? 60}%, blemish=${toolArgs.blemishRemoval ?? 50}%`;
+        return `Beauty enhancement applied to clip ${toolArgs['clipId']}: smoothing=${toolArgs['smoothing'] ?? 60}%, blemish=${toolArgs['blemishRemoval'] ?? 50}%`;
 
       case 'ai_color_match':
-        return `Color matched ${(toolArgs.targetClipIds as string[])?.length ?? 0} clips to reference ${toolArgs.referenceClipId}`;
+        return `Color matched ${(toolArgs['targetClipIds'] as string[])?.length ?? 0} clips to reference ${toolArgs['referenceClipId']}`;
 
       case 'ai_stabilize':
-        return `Content-aware stabilization applied to clip ${toolArgs.clipId}: method=${toolArgs.method ?? 'content-aware'}, smoothing=${toolArgs.smoothing ?? 0.8}`;
+        return `Content-aware stabilization applied to clip ${toolArgs['clipId']}: method=${toolArgs['method'] ?? 'content-aware'}, smoothing=${toolArgs['smoothing'] ?? 0.8}`;
 
       // ── Standard editing tools (simulated for now) ─────────────────
       default: {

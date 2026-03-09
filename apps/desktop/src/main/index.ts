@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, Menu, screen, crashReporter } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu, screen, crashReporter, protocol } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import { watch as watchFs } from 'node:fs';
 import { mkdir, readdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
@@ -25,6 +25,15 @@ import {
   writeMediaIndexManifest,
 } from './mediaPipeline';
 
+// ─── Supported File Extensions ────────────────────────────────────────────────
+
+const NLE_FILE_EXTENSIONS = ['.avid', '.aaf', '.omf', '.mxf', '.avidproj', '.avidproj.json'] as const;
+
+function isSupportedMediaFile(filePath: string): boolean {
+  const lower = filePath.toLowerCase();
+  return NLE_FILE_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
 // ─── Crash Reporter ────────────────────────────────────────────────────────────
 
 crashReporter.start({
@@ -33,6 +42,29 @@ crashReporter.start({
   uploadToServer: false,
   compress: true,
 });
+
+// ─── Protocol Handler Registration ────────────────────────────────────────────
+
+// Register avid:// as a privileged scheme before app is ready.
+// This must happen synchronously at module load time.
+if (process.defaultApp) {
+  const entryScript = process.argv[1];
+  if (entryScript) {
+    app.setAsDefaultProtocolClient('avid', process.execPath, [path.resolve(entryScript)]);
+  }
+} else {
+  app.setAsDefaultProtocolClient('avid');
+}
+
+// Queue deep links received before the renderer is ready.
+let pendingDeepLink: string | null = null;
+
+// ─── File Association Queue ───────────────────────────────────────────────────
+
+// On macOS, files opened via Finder arrive through the 'open-file' event before
+// the renderer is ready. Queue the path so we can forward it once the window is
+// available.
+let pendingFileOpen: string | null = null;
 
 // ─── Structured Logger ─────────────────────────────────────────────────────────
 
@@ -184,7 +216,7 @@ async function ensureProjectPackageDir(projectId: string): Promise<void> {
 async function readPersistedProject(filePath: string): Promise<EditorProject | null> {
   try {
     const serialized = await readFile(filePath, 'utf8');
-    return JSON.parse(serialized) as EditorProject;
+    return JSON.parse(serialized) as unknown as EditorProject;
   } catch {
     return null;
   }
@@ -380,7 +412,7 @@ async function importMediaIntoProject(projectId: string, filePaths: string[]): P
   const assets: EditorMediaAsset[] = [];
 
   for (let index = 0; index < filePaths.length; index += 1) {
-    const sourcePath = filePaths[index];
+    const sourcePath = filePaths[index]!;
 
     upsertDesktopJob({
       ...desktopJobs.get(jobId)!,
@@ -580,7 +612,7 @@ async function createMainWindow(): Promise<BrowserWindow> {
 
   // Dev vs production
   if (!app.isPackaged) {
-    win.loadURL(process.env.ELECTRON_RENDERER_URL ?? process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:3000');
+    win.loadURL(process.env['ELECTRON_RENDERER_URL'] ?? process.env['VITE_DEV_SERVER_URL'] ?? 'http://localhost:3000');
     win.webContents.openDevTools();
   } else {
     win.loadFile(path.join(__dirname, '../renderer/index.html'));
@@ -606,7 +638,7 @@ async function createMainWindow(): Promise<BrowserWindow> {
   win.webContents.on('will-navigate', (event, url) => {
     if (!app.isPackaged) {
       const devServerOrigin = new URL(
-        process.env.ELECTRON_RENDERER_URL ?? process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:3000',
+        process.env['ELECTRON_RENDERER_URL'] ?? process.env['VITE_DEV_SERVER_URL'] ?? 'http://localhost:3000',
       ).origin;
       if (new URL(url).origin === devServerOrigin) return;
     }
@@ -694,7 +726,7 @@ function createSecondaryWindow(title: string, width = 800, height = 600): Browse
   });
 
   if (!app.isPackaged) {
-    const devUrl = process.env.ELECTRON_RENDERER_URL ?? process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:3000';
+    const devUrl = process.env['ELECTRON_RENDERER_URL'] ?? process.env['VITE_DEV_SERVER_URL'] ?? 'http://localhost:3000';
     win.loadURL(`${devUrl}#/secondary/${encodeURIComponent(title.toLowerCase().replace(/\s+/g, '-'))}`);
   } else {
     win.loadFile(path.join(__dirname, '../renderer/index.html'));
@@ -731,10 +763,75 @@ if (!gotTheLock) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
-    // Handle file open from OS (double-click .avidproj file while app is running)
-    const projectArg = argv.find((arg) => arg.endsWith('.avidproj') || arg.endsWith('.avidproj.json'));
-    if (projectArg) {
-      mainWindow?.webContents.send('menu:open-project', projectArg);
+
+    // Handle deep link (avid://) from second instance on Windows/Linux
+    const deepLinkArg = argv.find((arg) => arg.startsWith('avid://'));
+    if (deepLinkArg) {
+      handleDeepLink(deepLinkArg);
+      return;
+    }
+
+    // Handle file open from OS (double-click on supported file while app is running)
+    const fileArg = argv.find((arg) => isSupportedMediaFile(arg));
+    if (fileArg) {
+      handleFileOpen(fileArg);
+    }
+  });
+
+  // ─── Deep Link & File Open Helpers ──────────────────────────────────────────
+
+  function handleDeepLink(url: string): void {
+    log('info', 'DeepLink', 'Received deep link', { url });
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('app:deep-link', url);
+    } else {
+      pendingDeepLink = url;
+    }
+  }
+
+  function handleFileOpen(filePath: string): void {
+    log('info', 'FileOpen', 'Received file open request', { filePath });
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('menu:open-project', filePath);
+    } else {
+      pendingFileOpen = filePath;
+    }
+  }
+
+  // macOS: deep link via open-url (avid://...)
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    handleDeepLink(url);
+  });
+
+  // macOS: file association via Finder double-click
+  app.on('open-file', (event, filePath) => {
+    event.preventDefault();
+    if (isSupportedMediaFile(filePath)) {
+      handleFileOpen(filePath);
+    }
+  });
+
+  // ─── GPU Process Crash Recovery ────────────────────────────────────────────
+
+  app.on('child-process-gone', (_event, details) => {
+    if (details.type === 'GPU') {
+      log('error', 'GPU', 'GPU process crashed', {
+        reason: details.reason,
+        exitCode: details.exitCode,
+        name: details.name,
+      });
+
+      // The GPU process will auto-restart for the first crash. If it keeps
+      // crashing (reason === 'launch-failed'), inform the user.
+      if (details.reason === 'launch-failed' && mainWindow && !mainWindow.isDestroyed()) {
+        dialog.showMessageBox(mainWindow, {
+          type: 'warning',
+          title: 'GPU Acceleration Unavailable',
+          message: 'The GPU process failed to start. The editor will continue with software rendering, which may affect playback performance.',
+          buttons: ['OK'],
+        });
+      }
     }
   });
 
@@ -742,9 +839,29 @@ if (!gotTheLock) {
     await logger.init();
     log('info', 'App', `Starting The Avid v${app.getVersion()} on ${process.platform} (${process.arch})`);
 
+    // Register avid:// protocol to handle local file serving if needed
+    protocol.handle('avid', (request) => {
+      // avid://open?project=<id> style links are handled via IPC, not file serving.
+      // Return an empty response to avoid ERR_UNKNOWN_URL_SCHEME.
+      log('info', 'Protocol', 'Protocol request received', { url: request.url });
+      return new Response('', { status: 204 });
+    });
+
     mainWindow = await createMainWindow();
     createAppMenu();
     void syncAllProjectWatchers();
+
+    // Deliver any deep link or file open that arrived before the window was ready
+    mainWindow.webContents.once('did-finish-load', () => {
+      if (pendingDeepLink) {
+        mainWindow?.webContents.send('app:deep-link', pendingDeepLink);
+        pendingDeepLink = null;
+      }
+      if (pendingFileOpen) {
+        mainWindow?.webContents.send('menu:open-project', pendingFileOpen);
+        pendingFileOpen = null;
+      }
+    });
 
     // Initialize professional I/O subsystems (non-blocking — missing modules are OK)
     videoIOManager.registerIPCHandlers();
@@ -770,6 +887,10 @@ if (!gotTheLock) {
 
     // Auto-updater (production only)
     if (app.isPackaged) {
+      // Do not auto-download — wait for user confirmation via renderer
+      autoUpdater.autoDownload = false;
+      autoUpdater.autoInstallOnAppQuit = true;
+
       autoUpdater.logger = {
         info: (msg: string) => log('info', 'AutoUpdater', msg),
         warn: (msg: string) => log('warn', 'AutoUpdater', msg),
@@ -799,7 +920,7 @@ if (!gotTheLock) {
         log('error', 'AutoUpdater', err.message);
       });
 
-      autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+      autoUpdater.checkForUpdates().catch((err) => {
         log('error', 'AutoUpdater', `Failed to check for updates: ${err}`);
       });
     }
@@ -1004,10 +1125,10 @@ ipcMain.handle('projects:get', async (_event, projectId: unknown) => {
 
 ipcMain.handle('projects:save', async (_event, project: unknown) => {
   assertObject(project, 'project');
-  if (!('id' in project) || typeof project.id !== 'string') {
+  if (!('id' in project) || typeof project['id'] !== 'string') {
     throw new Error('Project must have a valid string "id" field');
   }
-  return savePersistedProject(project as EditorProject);
+  return savePersistedProject(project as unknown as EditorProject);
 });
 
 ipcMain.handle('projects:delete', async (_event, projectId: unknown) => {
@@ -1063,10 +1184,10 @@ ipcMain.handle('jobs:list', async () => {
 
 ipcMain.handle('jobs:start-export', async (_event, project: unknown) => {
   assertObject(project, 'project');
-  if (!('id' in project) || typeof project.id !== 'string') {
+  if (!('id' in project) || typeof project['id'] !== 'string') {
     throw new Error('Project must have a valid string "id" field');
   }
-  return startExportJob(project as EditorProject);
+  return startExportJob(project as unknown as EditorProject);
 });
 
 // ─── File System Handlers (path sanitization) ─────────────────────────────────
@@ -1104,6 +1225,14 @@ ipcMain.handle('app:reveal-in-finder', async (_event, filePath: unknown) => {
   assertString(filePath, 'filePath');
   shell.showItemInFolder(path.resolve(filePath));
   return true;
+});
+ipcMain.handle('app:download-update', async () => {
+  await autoUpdater.downloadUpdate();
+  return true;
+});
+ipcMain.handle('app:check-for-updates', async () => {
+  if (!app.isPackaged) return null;
+  return autoUpdater.checkForUpdates();
 });
 ipcMain.handle('app:install-update', () => {
   autoUpdater.quitAndInstall(false, true);

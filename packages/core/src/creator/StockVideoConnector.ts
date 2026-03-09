@@ -227,7 +227,7 @@ function suggestBRollForTranscript(
         query,
         reason: `Matches keywords: ${keywords.slice(0, 3).join(', ')}`,
         suggestedResults: scored.slice(0, 3).map((s) => s.video),
-        confidence: scored[0].score,
+        confidence: scored[0]!.score,
       });
     }
   }

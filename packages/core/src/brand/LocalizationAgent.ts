@@ -42,7 +42,7 @@ const LANGUAGE_EXPANSION_FACTORS: Record<string, number> = {
 };
 
 export function getExpansionFactor(languageCode: string): number {
-  const base = languageCode.split('-')[0].toLowerCase();
+  const base = (languageCode.split('-')[0] ?? languageCode).toLowerCase();
   return LANGUAGE_EXPANSION_FACTORS[base] ?? 1.15;
 }
 
@@ -66,7 +66,7 @@ const LANGUAGE_DISPLAY_NAMES: Record<string, string> = {
 };
 
 export function getLanguageName(code: string): string {
-  const base = code.split('-')[0].toLowerCase();
+  const base = (code.split('-')[0] ?? code).toLowerCase();
   return LANGUAGE_DISPLAY_NAMES[base] ?? code;
 }
 
@@ -275,8 +275,8 @@ export async function localize(
         // Consistency check on a sample
         if (translated.length > 0) {
           result.consistencyScore = await roundTripConsistencyCheck(
-            captions[0].text,
-            translated[0].text,
+            captions[0]!.text,
+            translated[0]!.text,
             sourceLanguage,
             lang,
           );

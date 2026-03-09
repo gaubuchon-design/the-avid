@@ -92,8 +92,8 @@ describe('useEditorStore', () => {
 
   it('should add and remove clips', () => {
     // Use the first track ID from current demo data (t-v3)
-    const trackId = useEditorStore.getState().tracks[0].id;
-    const initialClipCount = useEditorStore.getState().tracks[0].clips.length;
+    const trackId = useEditorStore.getState().tracks[0]!.id;
+    const initialClipCount = useEditorStore.getState().tracks[0]!.clips.length;
     useEditorStore.getState().addClip({
       id: 'test-clip',
       trackId,
@@ -107,64 +107,64 @@ describe('useEditorStore', () => {
       intrinsicAudio: DEFAULT_INTRINSIC_AUDIO,
       timeRemap: DEFAULT_TIME_REMAP,
     });
-    expect(useEditorStore.getState().tracks[0].clips.length).toBe(initialClipCount + 1);
+    expect(useEditorStore.getState().tracks[0]!.clips.length).toBe(initialClipCount + 1);
 
     useEditorStore.getState().removeClip('test-clip');
-    expect(useEditorStore.getState().tracks[0].clips.length).toBe(initialClipCount);
+    expect(useEditorStore.getState().tracks[0]!.clips.length).toBe(initialClipCount);
   });
 
   // ── Split Clip ────────────────────────────────────────────────────────
 
   it('should split clip', () => {
     const track = useEditorStore.getState().tracks[0];
-    const clip = track.clips[0];
-    const splitTime = (clip.startTime + clip.endTime) / 2;
+    const clip = track!.clips[0]!;
+    const splitTime = (clip.startTime! + clip.endTime!) / 2;
 
-    useEditorStore.getState().splitClip(clip.id, splitTime);
+    useEditorStore.getState().splitClip(clip.id!, splitTime);
 
     const updatedTrack = useEditorStore.getState().tracks[0];
-    expect(updatedTrack.clips.length).toBe(track.clips.length + 1);
+    expect(updatedTrack!.clips.length!).toBe(track!.clips.length! + 1);
 
-    const originalClip = updatedTrack.clips.find(c => c.id === clip.id);
+    const originalClip = updatedTrack!.clips.find(c => c.id === clip.id!)!;
     expect(originalClip?.endTime).toBe(splitTime);
 
     // The new clip should start at the split time
-    const newClip = updatedTrack.clips.find(c => c.id !== clip.id && c.startTime === splitTime);
+    const newClip = updatedTrack!.clips.find(c => c.id !== clip.id! && c.startTime === splitTime)!;
     expect(newClip).toBeDefined();
   });
 
   it('should not split if time is outside clip bounds', () => {
     const track = useEditorStore.getState().tracks[0];
-    const clip = track.clips[0];
-    const clipCount = track.clips.length;
+    const clip = track!.clips[0]!;
+    const clipCount = track!.clips.length!;
 
     // Split at a time before clip start
-    useEditorStore.getState().splitClip(clip.id, clip.startTime - 1);
-    expect(useEditorStore.getState().tracks[0].clips.length).toBe(clipCount);
+    useEditorStore.getState().splitClip(clip.id!, clip.startTime! - 1);
+    expect(useEditorStore.getState().tracks[0]!.clips.length).toBe(clipCount);
 
     // Split at a time after clip end
-    useEditorStore.getState().splitClip(clip.id, clip.endTime + 1);
-    expect(useEditorStore.getState().tracks[0].clips.length).toBe(clipCount);
+    useEditorStore.getState().splitClip(clip.id!, clip.endTime! + 1);
+    expect(useEditorStore.getState().tracks[0]!.clips.length).toBe(clipCount);
   });
 
   // ── Track mute/solo/lock ──────────────────────────────────────────────
 
   it('should toggle track mute/solo/lock', () => {
-    const trackId = useEditorStore.getState().tracks[0].id;
+    const trackId = useEditorStore.getState().tracks[0]!.id;
     const track = useEditorStore.getState().tracks[0];
 
     useEditorStore.getState().toggleMute(trackId);
-    expect(useEditorStore.getState().tracks.find(t => t.id === trackId)?.muted).toBe(!track.muted);
+    expect(useEditorStore.getState().tracks.find(t => t.id === trackId)?.muted).toBe(!track!.muted!);
 
     useEditorStore.getState().toggleSolo(trackId);
-    expect(useEditorStore.getState().tracks.find(t => t.id === trackId)?.solo).toBe(!track.solo);
+    expect(useEditorStore.getState().tracks.find(t => t.id === trackId)?.solo).toBe(!track!.solo!);
 
     useEditorStore.getState().toggleLock(trackId);
-    expect(useEditorStore.getState().tracks.find(t => t.id === trackId)?.locked).toBe(!track.locked);
+    expect(useEditorStore.getState().tracks.find(t => t.id === trackId)?.locked).toBe(!track!.locked!);
   });
 
   it('should toggle track properties back off', () => {
-    const trackId = useEditorStore.getState().tracks[0].id;
+    const trackId = useEditorStore.getState().tracks[0]!.id;
     // V3 starts with locked: true, so first toggle unlocks it
     const initialMuted = useEditorStore.getState().tracks.find(t => t.id === trackId)?.muted;
     useEditorStore.getState().toggleMute(trackId);
@@ -177,12 +177,12 @@ describe('useEditorStore', () => {
   it('should move clip between tracks', () => {
     const srcTrack = useEditorStore.getState().tracks[0];
     const dstTrack = useEditorStore.getState().tracks[1];
-    const clipId = srcTrack.clips[0].id;
+    const clipId = srcTrack!.clips[0]!.id!;
 
-    useEditorStore.getState().moveClip(clipId, dstTrack.id, 20);
+    useEditorStore.getState().moveClip(clipId, dstTrack!.id!, 20);
 
-    const srcClips = useEditorStore.getState().tracks.find(t => t.id === srcTrack.id)?.clips || [];
-    const dstClips = useEditorStore.getState().tracks.find(t => t.id === dstTrack.id)?.clips || [];
+    const srcClips = useEditorStore.getState().tracks.find(t => t.id === srcTrack!.id!)?.clips || [];
+    const dstClips = useEditorStore.getState().tracks.find(t => t.id === dstTrack!.id!)?.clips || [];
 
     expect(srcClips.find(c => c.id === clipId)).toBeUndefined();
     expect(dstClips.find(c => c.id === clipId)).toBeDefined();
@@ -192,12 +192,12 @@ describe('useEditorStore', () => {
   it('should preserve clip duration when moving', () => {
     const srcTrack = useEditorStore.getState().tracks[0];
     const dstTrack = useEditorStore.getState().tracks[1];
-    const clip = srcTrack.clips[0];
-    const originalDuration = clip.endTime - clip.startTime;
+    const clip = srcTrack!.clips[0]!;
+    const originalDuration = clip.endTime! - clip.startTime!;
 
-    useEditorStore.getState().moveClip(clip.id, dstTrack.id, 15);
+    useEditorStore.getState().moveClip(clip.id!, dstTrack!.id!, 15);
 
-    const movedClip = useEditorStore.getState().tracks.find(t => t.id === dstTrack.id)?.clips.find(c => c.id === clip.id);
+    const movedClip = useEditorStore.getState().tracks.find(t => t.id === dstTrack!.id!)?.clips.find(c => c.id === clip.id!);
     expect(movedClip).toBeDefined();
     expect(movedClip!.endTime - movedClip!.startTime).toBeCloseTo(originalDuration);
   });
@@ -205,25 +205,25 @@ describe('useEditorStore', () => {
   // ── Trim Clip ─────────────────────────────────────────────────────────
 
   it('should trim clip left edge', () => {
-    const clip = useEditorStore.getState().tracks[0].clips[0];
-    const trimTime = clip.startTime + 1;
-    useEditorStore.getState().trimClip(clip.id, 'left', trimTime);
-    const updated = useEditorStore.getState().tracks[0].clips.find(c => c.id === clip.id);
+    const clip = useEditorStore.getState().tracks[0]!.clips[0];
+    const trimTime = clip!.startTime! + 1;
+    useEditorStore.getState().trimClip(clip!.id!, 'left', trimTime);
+    const updated = useEditorStore.getState().tracks[0]!.clips.find(c => c.id === clip!.id!);
     expect(updated?.startTime).toBe(trimTime);
   });
 
   it('should trim clip right edge', () => {
-    const clip = useEditorStore.getState().tracks[0].clips[0];
-    const trimTime = clip.endTime - 1;
-    useEditorStore.getState().trimClip(clip.id, 'right', trimTime);
-    const updated = useEditorStore.getState().tracks[0].clips.find(c => c.id === clip.id);
+    const clip = useEditorStore.getState().tracks[0]!.clips[0];
+    const trimTime = clip!.endTime! - 1;
+    useEditorStore.getState().trimClip(clip!.id!, 'right', trimTime);
+    const updated = useEditorStore.getState().tracks[0]!.clips.find(c => c.id === clip!.id!);
     expect(updated?.endTime).toBe(trimTime);
   });
 
   // ── Track volume ──────────────────────────────────────────────────────
 
   it('should set track volume', () => {
-    const trackId = useEditorStore.getState().tracks[0].id;
+    const trackId = useEditorStore.getState().tracks[0]!.id;
     useEditorStore.getState().setTrackVolume(trackId, 0.5);
     expect(useEditorStore.getState().tracks.find(t => t.id === trackId)?.volume).toBe(0.5);
   });
@@ -336,22 +336,22 @@ describe('useEditorStore', () => {
   // ── Slip Clip ─────────────────────────────────────────────────────────
 
   it('should slip clip media offset', () => {
-    const clip = useEditorStore.getState().tracks[0].clips[0];
-    expect(clip.trimStart).toBe(0);
+    const clip = useEditorStore.getState().tracks[0]!.clips[0];
+    expect(clip!.trimStart!).toBe(0);
 
-    useEditorStore.getState().slipClip(clip.id, 2);
-    const updated = useEditorStore.getState().tracks[0].clips.find(c => c.id === clip.id);
+    useEditorStore.getState().slipClip(clip!.id!, 2);
+    const updated = useEditorStore.getState().tracks[0]!.clips.find(c => c.id === clip!.id!);
     expect(updated?.trimStart).toBe(2);
   });
 
   // ── Delete Selected Clips ───────────────────────────────────────────────
 
   it('should delete selected clips', () => {
-    const clip = useEditorStore.getState().tracks[0].clips[0];
-    const trackId = useEditorStore.getState().tracks[0].id;
-    const initialCount = useEditorStore.getState().tracks[0].clips.length;
+    const clip = useEditorStore.getState().tracks[0]!.clips[0];
+    const trackId = useEditorStore.getState().tracks[0]!.id;
+    const initialCount = useEditorStore.getState().tracks[0]!.clips.length;
 
-    useEditorStore.getState().selectClip(clip.id);
+    useEditorStore.getState().selectClip(clip!.id!);
     useEditorStore.getState().deleteSelectedClips();
 
     expect(useEditorStore.getState().tracks.find(t => t.id === trackId)?.clips.length).toBe(initialCount - 1);
@@ -368,16 +368,16 @@ describe('useEditorStore', () => {
   // ── Duplicate Clip ──────────────────────────────────────────────────────
 
   it('should duplicate a clip', () => {
-    const trackId = useEditorStore.getState().tracks[0].id;
-    const clip = useEditorStore.getState().tracks[0].clips[0];
-    const initialCount = useEditorStore.getState().tracks[0].clips.length;
+    const trackId = useEditorStore.getState().tracks[0]!.id;
+    const clip = useEditorStore.getState().tracks[0]!.clips[0];
+    const initialCount = useEditorStore.getState().tracks[0]!.clips.length;
 
-    useEditorStore.getState().duplicateClip(clip.id);
+    useEditorStore.getState().duplicateClip(clip!.id!);
 
     const track = useEditorStore.getState().tracks.find(t => t.id === trackId)!;
     expect(track.clips.length).toBe(initialCount + 1);
     // New clip should start where original ends
-    const duped = track.clips.find(c => c.id !== clip.id && c.startTime === clip.endTime);
+    const duped = track.clips.find(c => c.id !== clip!.id! && c.startTime === clip!.endTime!);
     expect(duped).toBeDefined();
   });
 
@@ -432,21 +432,21 @@ describe('useEditorStore', () => {
     useEditorStore.getState().addBin('Test Bin');
     expect(useEditorStore.getState().bins.length).toBe(initialCount + 1);
     const newBin = useEditorStore.getState().bins[useEditorStore.getState().bins.length - 1];
-    expect(newBin.name).toBe('Test Bin');
+    expect(newBin!.name!).toBe('Test Bin');
   });
 
   it('should add a child bin to a parent', () => {
-    const parentId = useEditorStore.getState().bins[0].id;
-    const initialChildren = useEditorStore.getState().bins[0].children.length;
+    const parentId = useEditorStore.getState().bins[0]!.id;
+    const initialChildren = useEditorStore.getState().bins[0]!.children.length;
     useEditorStore.getState().addBin('Child Bin', parentId);
-    expect(useEditorStore.getState().bins[0].children.length).toBe(initialChildren + 1);
+    expect(useEditorStore.getState().bins[0]!.children.length).toBe(initialChildren + 1);
   });
 
   // ── Smart Bins ──────────────────────────────────────────────────────────
 
   it('should have initial smart bins', () => {
     expect(useEditorStore.getState().smartBins.length).toBe(5);
-    expect(useEditorStore.getState().smartBins[0].name).toBe('All Video');
+    expect(useEditorStore.getState().smartBins[0]!.name).toBe('All Video');
   });
 
   it('should add a smart bin', () => {
@@ -456,13 +456,13 @@ describe('useEditorStore', () => {
     ]);
     expect(useEditorStore.getState().smartBins.length).toBe(initialCount + 1);
     const last = useEditorStore.getState().smartBins[useEditorStore.getState().smartBins.length - 1];
-    expect(last.name).toBe('Test Smart');
-    expect(last.rules.length).toBe(1);
+    expect(last!.name!).toBe('Test Smart');
+    expect(last!.rules.length!).toBe(1);
   });
 
   it('should remove a smart bin', () => {
     const initialCount = useEditorStore.getState().smartBins.length;
-    const id = useEditorStore.getState().smartBins[0].id;
+    const id = useEditorStore.getState().smartBins[0]!.id;
     useEditorStore.getState().removeSmartBin(id);
     expect(useEditorStore.getState().smartBins.length).toBe(initialCount - 1);
   });
@@ -508,17 +508,17 @@ describe('useEditorStore', () => {
 
     const clipToDelete = track.clips[0];
     const nextClip = track.clips[1];
-    const deletedDuration = clipToDelete.endTime - clipToDelete.startTime;
-    const nextOriginalStart = nextClip.startTime;
+    const deletedDuration = clipToDelete!.endTime! - clipToDelete!.startTime!;
+    const nextOriginalStart = nextClip!.startTime!;
     const origClipCount = track.clips.length;
 
-    state.rippleDelete(clipToDelete.id);
+    state.rippleDelete(clipToDelete!.id!);
 
     const updatedTrack = useEditorStore.getState().tracks.find(t => t.id === track.id)!;
     expect(updatedTrack.clips.length).toBe(origClipCount - 1);
     // Only assert shift if the next clip was after the deleted one
-    if (nextOriginalStart >= clipToDelete.endTime) {
-      const shifted = updatedTrack.clips.find(c => c.id === nextClip.id);
+    if (nextOriginalStart >= clipToDelete!.endTime!) {
+      const shifted = updatedTrack.clips.find(c => c.id === nextClip!.id!);
       expect(shifted).toBeDefined();
       if (shifted) {
         expect(shifted.startTime).toBe(nextOriginalStart - deletedDuration);

@@ -74,6 +74,71 @@ export function paginate(total: number, page: number, limit: number) {
   };
 }
 
+// ─── Common param schemas ─────────────────────────────────────────────────────
+
+export const projectAndUserParams = z.object({
+  projectId: z.string().uuid(),
+  userId: z.string().uuid(),
+});
+
+export const projectIdAndBinIdParams = z.object({
+  projectId: z.string().uuid(),
+  binId: z.string().uuid(),
+});
+
+export const projectIdAndAssetIdParams = z.object({
+  projectId: z.string().uuid(),
+  assetId: z.string().uuid(),
+});
+
+export const projectIdAndTimelineIdParams = z.object({
+  projectId: z.string().uuid(),
+  timelineId: z.string().uuid(),
+});
+
+export const timelineAndTrackParams = z.object({
+  projectId: z.string().uuid(),
+  timelineId: z.string().uuid(),
+  trackId: z.string().uuid(),
+});
+
+export const timelineAndClipParams = z.object({
+  projectId: z.string().uuid(),
+  timelineId: z.string().uuid(),
+  clipId: z.string().uuid(),
+});
+
+export const timelineClipAndEffectParams = z.object({
+  projectId: z.string().uuid(),
+  timelineId: z.string().uuid(),
+  clipId: z.string().uuid(),
+  effectId: z.string().uuid(),
+});
+
+export const timelineAndMarkerParams = z.object({
+  projectId: z.string().uuid(),
+  timelineId: z.string().uuid(),
+  markerId: z.string().uuid(),
+});
+
+export const projectIdAndCommentIdParams = z.object({
+  projectId: z.string().uuid(),
+  commentId: z.string().uuid(),
+});
+
+export const projectIdAndJobIdParams = z.object({
+  projectId: z.string().uuid(),
+  jobId: z.string().uuid(),
+});
+
+export const resourceLockParams = z.object({
+  projectId: z.string().uuid(),
+  resourceType: z.string().min(1).max(50),
+  resourceId: z.string().uuid(),
+});
+
+export const slugParam = z.object({ slug: z.string().min(1).max(200) });
+
 // ─── Reusable schema fragments ────────────────────────────────────────────────
 
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Must be a valid hex color');
@@ -111,6 +176,10 @@ export const schemas = {
     avatarUrl: z.string().url().optional().nullable(),
   }),
 
+  logoutBody: z.object({
+    refreshToken: z.string().optional(),
+  }),
+
   // Projects
   createProject: z.object({
     name: z.string().min(1).max(200),
@@ -139,6 +208,15 @@ export const schemas = {
   createVersion: z.object({
     version: z.string().max(100).optional(),
     notes: z.string().max(2000).optional(),
+  }),
+
+  duplicateProject: z.object({
+    name: z.string().min(1).max(200).optional(),
+  }),
+
+  projectQuery: paginationQuery.extend({
+    search: z.string().max(200).optional(),
+    status: z.string().optional(),
   }),
 
   // Bins
@@ -172,6 +250,18 @@ export const schemas = {
     reel: z.string().max(100).optional(),
     scene: z.string().max(100).optional(),
     take: z.string().max(100).optional(),
+  }),
+
+  moveAsset: z.object({
+    binId: z.string().uuid('Target binId is required'),
+  }),
+
+  mediaQuery: paginationQuery.extend({
+    binId: z.string().uuid().optional(),
+    type: z.string().optional(),
+    search: z.string().max(200).optional(),
+    isFavorite: z.enum(['true', 'false']).optional(),
+    status: z.string().optional(),
   }),
 
   // Timeline
@@ -261,6 +351,13 @@ export const schemas = {
     notes: z.string().max(1000).optional(),
   }),
 
+  updateMarker: z.object({
+    name: z.string().min(1).max(200).optional(),
+    color: hexColor.optional(),
+    notes: z.string().max(1000).optional(),
+    time: timecode.optional(),
+  }),
+
   // AI Jobs
   createAIJob: z.object({
     type: z.enum([
@@ -307,6 +404,12 @@ export const schemas = {
     maxDuration: z.number().int().min(10).max(600).default(90),
   }),
 
+  aiJobQuery: paginationQuery.extend({
+    type: z.string().optional(),
+    status: z.string().optional(),
+    projectId: z.string().uuid().optional(),
+  }),
+
   // Comments
   createComment: z.object({
     text: z.string().min(1).max(5000),
@@ -318,6 +421,11 @@ export const schemas = {
   updateComment: z.object({
     text: z.string().min(1).max(5000).optional(),
     isResolved: z.boolean().optional(),
+  }),
+
+  commentQuery: z.object({
+    timelineId: z.string().uuid().optional(),
+    resolved: z.enum(['true', 'false']).optional(),
   }),
 
   // Approval
@@ -347,6 +455,18 @@ export const schemas = {
     autoCaption: z.boolean().default(false),
     smartReframe: z.boolean().default(false),
     scheduledAt: z.string().datetime().optional(),
+  }),
+
+  updatePublishJob: z.object({
+    title: z.string().max(300).optional(),
+    description: z.string().max(5000).optional(),
+    tags: z.array(z.string().max(50)).max(30).optional(),
+    aspectRatio: z.string().optional(),
+    resolution: z.string().optional(),
+    format: z.string().optional(),
+    autoCaption: z.boolean().optional(),
+    smartReframe: z.boolean().optional(),
+    scheduledAt: z.string().datetime().optional().nullable(),
   }),
 
   // Export
@@ -382,6 +502,46 @@ export const schemas = {
     stemAssignments: z.record(z.unknown()).optional(),
   }),
 
+  importAAFComposition: z.object({
+    composition: z.record(z.unknown()),
+  }),
+
+  relinkScan: z.object({
+    scanPaths: z.array(z.string().min(1).max(1000)).min(1, 'scanPaths must be a non-empty array'),
+  }),
+
+  relinkApply: z.object({
+    proposals: z.array(z.object({
+      assetId: z.string().uuid(),
+      newPath: z.string().min(1).max(1000),
+    })).min(1, 'proposals must be a non-empty array'),
+  }),
+
+  createMulticam: z.object({
+    name: z.string().min(1).max(200),
+    syncMethod: z.enum(['TIMECODE', 'AUDIO_WAVEFORM', 'IN_POINT', 'MARKER']),
+    assetIds: z.array(z.string().uuid()).min(2, 'At least 2 angles (assetIds) are required').max(16, 'Maximum 16 angles allowed'),
+  }),
+
+  sequenceCompare: z.object({
+    sequenceA: z.object({
+      id: z.string().uuid().optional(),
+      name: z.string().max(200).optional(),
+    }),
+    sequenceB: z.object({
+      id: z.string().uuid().optional(),
+      name: z.string().max(200).optional(),
+    }),
+  }),
+
+  binLockMessage: z.object({
+    message: z.string().max(500).optional(),
+  }),
+
+  complianceCheck: z.object({
+    brandKitId: z.string().uuid().optional(),
+  }),
+
   // Marketplace
   createMarketplaceItem: z.object({
     type: z.enum(['EFFECT_PLUGIN', 'AI_MODEL', 'TEMPLATE', 'PRESET_PACK', 'FONT_PACK', 'WORKFLOW_SCRIPT']),
@@ -393,5 +553,64 @@ export const schemas = {
     tags: z.array(z.string().max(50)).max(20).default([]),
     downloadUrl: z.string().url().optional(),
     previewUrl: z.string().url().optional(),
+  }),
+
+  updateMarketplaceItem: z.object({
+    name: z.string().min(1).max(200).optional(),
+    description: z.string().max(5000).optional(),
+    tags: z.array(z.string().max(50)).max(20).optional(),
+    priceTokens: z.number().int().min(0).optional(),
+    priceCents: z.number().int().min(0).optional(),
+    downloadUrl: z.string().url().optional().nullable(),
+    previewUrl: z.string().url().optional().nullable(),
+    isPublished: z.boolean().optional(),
+    isFeatured: z.boolean().optional(),
+  }),
+
+  // Creator
+  updateEpisode: z.object({
+    title: z.string().min(1).max(200).optional(),
+    description: z.string().max(2000).optional(),
+    projectId: z.string().uuid().optional().nullable(),
+    status: z.enum(['DRAFT', 'IN_PRODUCTION', 'REVIEW', 'PUBLISHED']).optional(),
+  }),
+
+  updatePlaybook: z.object({
+    name: z.string().min(1).max(200).optional(),
+    description: z.string().max(2000).optional(),
+    vertical: z.string().max(50).optional(),
+    steps: z.array(z.record(z.unknown())).optional(),
+    variables: z.array(z.record(z.unknown())).optional(),
+    priceTokens: z.number().int().min(0).optional(),
+    isPublished: z.boolean().optional(),
+  }),
+
+  // Brand
+  updateCampaign: z.object({
+    name: z.string().min(1).max(200).optional(),
+    brief: z.string().max(5000).optional(),
+    objective: z.string().max(500).optional(),
+    targetAudience: z.string().max(500).optional(),
+    startDate: z.string().datetime().optional().nullable(),
+    endDate: z.string().datetime().optional().nullable(),
+    tokenBudget: z.number().int().min(0).optional(),
+    status: z.string().max(50).optional(),
+  }),
+
+  updateDeliverable: z.object({
+    name: z.string().min(1).max(200).optional(),
+    type: z.string().max(100).optional(),
+    targetDuration: z.number().positive().optional(),
+    aspectRatio: z.string().max(20).optional(),
+    assignedEditorId: z.string().uuid().optional().nullable(),
+    status: z.string().max(50).optional(),
+  }),
+
+  updateBrandTemplate: z.object({
+    name: z.string().min(1).max(200).optional(),
+    description: z.string().max(1000).optional(),
+    elements: z.array(z.record(z.unknown())).optional(),
+    lockedElementIds: z.array(z.string()).optional(),
+    category: z.string().max(100).optional(),
   }),
 };

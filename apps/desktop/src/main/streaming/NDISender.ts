@@ -22,7 +22,7 @@ interface NDISource {
   urlAddress: string;
 }
 
-interface NDIReceiver {
+interface NDIReceiverInterface {
   video(): Promise<NDIVideoFrame>;
   audio(): Promise<NDIAudioFrame>;
   metadata(): Promise<{ data: string }>;
@@ -191,7 +191,7 @@ export class NDISender {
  */
 export class NDIReceiver {
   private grandiose: GrandioseModule | null = null;
-  private receiver: NDIReceiver | null = null;
+  private receiver: NDIReceiverInterface | null = null;
 
   async loadModule(): Promise<boolean> {
     try {

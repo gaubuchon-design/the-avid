@@ -167,7 +167,9 @@ export function mapTracksToPresets(
 
   for (const name of trackNames) {
     if (roleIndex < roleOrder.length) {
-      const preset = getPresetForRole(roleOrder[roleIndex]);
+      const role = roleOrder[roleIndex];
+      if (!role) continue;
+      const preset = getPresetForRole(role);
       if (preset) {
         result.set(name, { ...preset, trackName: name });
       }

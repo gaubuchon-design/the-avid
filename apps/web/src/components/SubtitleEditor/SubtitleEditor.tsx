@@ -404,7 +404,7 @@ export const SubtitleEditor: React.FC = () => {
 
   const activeCueIdx = useMemo(() => {
     for (let i = 0; i < segments.length; i++) {
-      if (playheadTime >= segments[i].start && playheadTime <= segments[i].end) {
+      if (playheadTime >= segments[i]!.start && playheadTime <= segments[i]!.end) {
         return i;
       }
     }
@@ -472,7 +472,7 @@ export const SubtitleEditor: React.FC = () => {
     (idx: number, newText: string) => {
       setSegments((prev) => {
         const next = [...prev];
-        next[idx] = { ...next[idx], text: newText };
+        next[idx] = { ...next[idx]!, text: newText };
         return next;
       });
     },

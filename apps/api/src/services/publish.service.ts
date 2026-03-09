@@ -115,7 +115,7 @@ class PublishService {
           status: 'FAILED',
           errorMessage: err.message?.slice(0, 2000),
         },
-      }).catch((dbErr) =>
+      }).catch((dbErr: Error) =>
         logger.error('Failed to update publish job status', { jobId: job.id, error: dbErr.message })
       );
     }

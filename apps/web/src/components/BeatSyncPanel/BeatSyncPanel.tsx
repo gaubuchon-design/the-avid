@@ -223,7 +223,7 @@ function BeatVisualization({ beats }: { beats: BeatMarker[] }) {
 
     if (beats.length === 0) return;
 
-    const maxTime = beats[beats.length - 1].time;
+    const maxTime = beats[beats.length - 1]!.time;
     if (maxTime === 0) return;
 
     // Draw beats as vertical bars

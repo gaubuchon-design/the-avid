@@ -12,17 +12,17 @@ interface ErrorBoundaryState {
 }
 
 class ErrorBoundary extends React.Component<{ children: ReactNode }, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { error: null };
+  override state: ErrorBoundaryState = { error: null };
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { error };
   }
 
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
+  override componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
     console.error('[ErrorBoundary] Uncaught error:', error, errorInfo);
   }
 
-  render(): ReactNode {
+  override render(): ReactNode {
     if (this.state.error) {
       return (
         <div style={{
@@ -68,21 +68,27 @@ class ErrorBoundary extends React.Component<{ children: ReactNode }, ErrorBounda
 // ─── Update Banner ──────────────────────────────────────────────────────────────
 
 function UpdateBanner() {
-  const [updateInfo, setUpdateInfo] = useState<{ version: string; downloaded: boolean } | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<{
+    version: string;
+    state: 'available' | 'downloading' | 'downloaded';
+  } | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
+  const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
     if (!window.electronAPI) return;
 
     const disposeAvailable = window.electronAPI.onUpdateAvailable((info) => {
-      setUpdateInfo({ version: info.version, downloaded: false });
+      setUpdateInfo({ version: info.version, state: 'available' });
+      setDismissed(false);
     });
     const disposeProgress = window.electronAPI.onUpdateProgress((info) => {
       setDownloadProgress(info.percent);
     });
     const disposeDownloaded = window.electronAPI.onUpdateDownloaded((info) => {
-      setUpdateInfo({ version: info.version, downloaded: true });
+      setUpdateInfo({ version: info.version, state: 'downloaded' });
       setDownloadProgress(null);
+      setDismissed(false);
     });
 
     return () => {
@@ -92,7 +98,12 @@ function UpdateBanner() {
     };
   }, []);
 
-  if (!updateInfo) return null;
+  if (!updateInfo || dismissed) return null;
+
+  const handleDownload = () => {
+    setUpdateInfo((prev) => prev ? { ...prev, state: 'downloading' } : prev);
+    window.electronAPI?.app.downloadUpdate();
+  };
 
   return (
     <div style={{
@@ -106,12 +117,12 @@ function UpdateBanner() {
       color: '#e0e7ff',
       fontSize: 13,
       zIndex: 9999,
-      maxWidth: 320,
+      maxWidth: 360,
       display: 'flex',
       alignItems: 'center',
       gap: 12,
     }}>
-      {updateInfo.downloaded ? (
+      {updateInfo.state === 'downloaded' ? (
         <>
           <span>Update {updateInfo.version} ready</span>
           <button
@@ -129,12 +140,57 @@ function UpdateBanner() {
           >
             Restart to Update
           </button>
+          <button
+            onClick={() => setDismissed(true)}
+            style={{
+              backgroundColor: 'transparent',
+              color: '#94a3b8',
+              border: 'none',
+              fontSize: 12,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Later
+          </button>
         </>
-      ) : (
+      ) : updateInfo.state === 'downloading' ? (
         <span>
           Downloading update {updateInfo.version}
           {downloadProgress !== null ? ` (${Math.round(downloadProgress)}%)` : '...'}
         </span>
+      ) : (
+        <>
+          <span>Update {updateInfo.version} available</span>
+          <button
+            onClick={handleDownload}
+            style={{
+              backgroundColor: '#6366f1',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 6,
+              padding: '6px 12px',
+              fontSize: 12,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Download
+          </button>
+          <button
+            onClick={() => setDismissed(true)}
+            style={{
+              backgroundColor: 'transparent',
+              color: '#94a3b8',
+              border: 'none',
+              fontSize: 12,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Later
+          </button>
+        </>
       )}
     </div>
   );
@@ -158,6 +214,30 @@ export default function App() {
     }
   }, [navigate]);
 
+  // Handle deep links (avid://open?project=<id>)
+  const handleDeepLink = useCallback((url: string) => {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== 'avid:') return;
+
+      const projectId = parsed.searchParams.get('project');
+      if (parsed.hostname === 'open' && projectId) {
+        navigate(`/editor/${encodeURIComponent(projectId)}`);
+        return;
+      }
+
+      // avid://new -> create new project
+      if (parsed.hostname === 'new') {
+        navigate('/editor/new');
+        return;
+      }
+
+      console.warn('[DeepLink] Unrecognized deep link:', url);
+    } catch (error) {
+      console.error('[DeepLink] Failed to parse deep link:', error);
+    }
+  }, [navigate]);
+
   useEffect(() => {
     if (!window.electronAPI) {
       return;
@@ -165,12 +245,14 @@ export default function App() {
 
     const disposeNewProject = window.electronAPI.onNewProject(() => navigate('/editor/new'));
     const disposeOpenProject = window.electronAPI.onOpenProject(handleOpenProject);
+    const disposeDeepLink = window.electronAPI.onDeepLink(handleDeepLink);
 
     return () => {
       disposeNewProject();
       disposeOpenProject();
+      disposeDeepLink();
     };
-  }, [navigate, handleOpenProject]);
+  }, [navigate, handleOpenProject, handleDeepLink]);
 
   return (
     <ErrorBoundary>

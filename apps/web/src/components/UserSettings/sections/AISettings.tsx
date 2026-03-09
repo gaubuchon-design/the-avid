@@ -15,13 +15,13 @@ export function AISettings() {
 
   return (
     <div>
-      <div style={ss.sectionHeader}>
-        <h3 style={ss.sectionTitle}>AI</h3>
-        <button style={ss.resetBtn} onClick={() => resetSection('ai')}>Reset</button>
+      <div style={ss['sectionHeader']}>
+        <h3 style={ss['sectionTitle']}>AI</h3>
+        <button style={ss['resetBtn']} onClick={() => resetSection('ai')}>Reset</button>
       </div>
 
-      <div style={ss.field}>
-        <label style={ss.label}>AI Assistance Level</label>
+      <div style={ss['field']}>
+        <label style={ss['label']}>AI Assistance Level</label>
         <input
           type="range"
           min={1}
@@ -29,7 +29,7 @@ export function AISettings() {
           step={1}
           value={settings.aiAggressionLevel}
           onChange={(e) => updateSetting('aiAggressionLevel', parseInt(e.target.value) as 1 | 2 | 3 | 4 | 5)}
-          style={ss.range}
+          style={ss['range']}
         />
         <div style={{ marginTop: 6 }}>
           {AI_LEVELS.map((l) => (
@@ -42,24 +42,24 @@ export function AISettings() {
         </div>
       </div>
 
-      <div style={ss.field}>
-        <label style={ss.toggleLabel}>
+      <div style={ss['field']}>
+        <label style={ss['toggleLabel']}>
           <input
             type="checkbox"
             checked={settings.aiAutoSuggest}
             onChange={(e) => updateSetting('aiAutoSuggest', e.target.checked)}
-            style={ss.checkbox}
+            style={ss['checkbox']}
           />
           Auto-suggest edits while working
         </label>
       </div>
 
-      <div style={ss.field}>
-        <label style={ss.label}>AI Model</label>
+      <div style={ss['field']}>
+        <label style={ss['label']}>AI Model</label>
         <select
           value={settings.aiModel}
           onChange={(e) => updateSetting('aiModel', e.target.value)}
-          style={ss.select}
+          style={ss['select']}
         >
           <option value="default">Default (Auto)</option>
           <option value="flash">Flash (Fast)</option>

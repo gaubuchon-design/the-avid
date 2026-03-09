@@ -201,7 +201,7 @@ export class AudioDescriptionTrack {
     let gapStart: number | null = null;
 
     for (let i = 0; i < programAudioPeaks.length; i++) {
-      const level = Math.abs(programAudioPeaks[i]);
+      const level = Math.abs(programAudioPeaks[i] ?? 0);
       const timeSeconds = i / samplesPerSecond;
 
       if (level < thresholdLinear) {
@@ -367,7 +367,7 @@ export class AudioDescriptionTrack {
     let sum = 0;
     let count = 0;
     for (let i = startIndex; i < endIndex && i < peaks.length; i++) {
-      sum += Math.abs(peaks[i]);
+      sum += Math.abs(peaks[i] ?? 0);
       count++;
     }
     const avgLinear = count > 0 ? sum / count : 0;

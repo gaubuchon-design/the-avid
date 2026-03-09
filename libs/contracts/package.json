@@ -10,6 +10,7 @@
     "./*": "./src/*"
   },
   "scripts": {
+    "dev": "tsc --watch --project tsconfig.json",
     "build": "tsc --project tsconfig.json",
     "lint": "eslint src --ext .ts",
     "type-check": "tsc --noEmit",

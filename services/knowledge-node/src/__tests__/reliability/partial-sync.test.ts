@@ -56,8 +56,8 @@ describe('Partial Sync Reliability', () => {
     // A replica that already has events 1-50 requests from seq 50
     const deltaEvents = primaryRM.getEventsSince('shard-mid-sync', 50);
     expect(deltaEvents.length).toBe(50);
-    expect(deltaEvents[0].sequence).toBe(51);
-    expect(deltaEvents[deltaEvents.length - 1].sequence).toBe(100);
+    expect(deltaEvents[0]!.sequence).toBe(51);
+    expect(deltaEvents[deltaEvents.length - 1]!.sequence).toBe(100);
 
     // Apply the delta to a replica ReplicationManager
     const replicaRM = new ReplicationManager(shardManager);
@@ -139,7 +139,7 @@ describe('Partial Sync Reliability', () => {
 
     // Verify strict ordering
     for (let i = 1; i < ordered.length; i++) {
-      expect(ordered[i].sequence).toBe(ordered[i - 1].sequence + 1);
+      expect(ordered[i]!.sequence).toBe(ordered[i - 1]!.sequence + 1);
     }
 
     const replicaRM = new ReplicationManager(shardManager);
@@ -189,8 +189,8 @@ describe('Partial Sync Reliability', () => {
     // Verify the gap events can be retrieved
     const gapEvents = primaryRM.getEventsSince('shard-gap', replicaSeq);
     expect(gapEvents.length).toBe(900);
-    expect(gapEvents[0].sequence).toBe(101);
-    expect(gapEvents[gapEvents.length - 1].sequence).toBe(1000);
+    expect(gapEvents[0]!.sequence).toBe(101);
+    expect(gapEvents[gapEvents.length - 1]!.sequence).toBe(1000);
 
     // Apply gap events to bring replica up to date
     const replicaRM = new ReplicationManager(shardManager);
@@ -240,14 +240,14 @@ describe('Partial Sync Reliability', () => {
     // But only the last 50 events should be retained
     const allEvents = smallBufferRM.getEventsSince('shard-overflow', 0);
     expect(allEvents.length).toBe(50);
-    expect(allEvents[0].sequence).toBe(51); // Oldest retained
-    expect(allEvents[allEvents.length - 1].sequence).toBe(100);
+    expect(allEvents[0]!.sequence).toBe(51); // Oldest retained
+    expect(allEvents[allEvents.length - 1]!.sequence).toBe(100);
 
     // Events before seq 51 are gone — a replica requesting from seq 10
     // would only get events 51-100 (a detectable gap)
     const fromEarly = smallBufferRM.getEventsSince('shard-overflow', 10);
     expect(fromEarly.length).toBe(50); // Only 51-100 available
-    expect(fromEarly[0].sequence).toBe(51);
+    expect(fromEarly[0]!.sequence).toBe(51);
   });
 
   // ── Duplicate Event Rejection ─────────────────────────────────────────

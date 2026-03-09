@@ -36,10 +36,10 @@ function bilinearSample(
   const i01 = (y1 * width + x0) * 4;
   const i11 = (y1 * width + x1) * 4;
 
-  const r = src[i00] * (1 - fx) * (1 - fy) + src[i10] * fx * (1 - fy) + src[i01] * (1 - fx) * fy + src[i11] * fx * fy;
-  const g = src[i00 + 1] * (1 - fx) * (1 - fy) + src[i10 + 1] * fx * (1 - fy) + src[i01 + 1] * (1 - fx) * fy + src[i11 + 1] * fx * fy;
-  const b = src[i00 + 2] * (1 - fx) * (1 - fy) + src[i10 + 2] * fx * (1 - fy) + src[i01 + 2] * (1 - fx) * fy + src[i11 + 2] * fx * fy;
-  const a = src[i00 + 3] * (1 - fx) * (1 - fy) + src[i10 + 3] * fx * (1 - fy) + src[i01 + 3] * (1 - fx) * fy + src[i11 + 3] * fx * fy;
+  const r = src[i00]! * (1 - fx) * (1 - fy) + src[i10]! * fx * (1 - fy) + src[i01]! * (1 - fx) * fy + src[i11]! * fx * fy;
+  const g = src[i00 + 1]! * (1 - fx) * (1 - fy) + src[i10 + 1]! * fx * (1 - fy) + src[i01 + 1]! * (1 - fx) * fy + src[i11 + 1]! * fx * fy;
+  const b = src[i00 + 2]! * (1 - fx) * (1 - fy) + src[i10 + 2]! * fx * (1 - fy) + src[i01 + 2]! * (1 - fx) * fy + src[i11 + 2]! * fx * fy;
+  const a = src[i00 + 3]! * (1 - fx) * (1 - fy) + src[i10 + 3]! * fx * (1 - fy) + src[i01 + 3]! * (1 - fx) * fy + src[i11 + 3]! * fx * fy;
 
   return [Math.round(r), Math.round(g), Math.round(b), Math.round(a)];
 }

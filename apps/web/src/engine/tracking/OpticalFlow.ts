@@ -34,7 +34,7 @@ function toGrayscale(imageData: ImageData): Float32Array {
   const { data, width, height } = imageData;
   const gray = new Float32Array(width * height);
   for (let i = 0; i < data.length; i += 4) {
-    gray[i / 4] = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+    gray[i / 4] = data[i]! * 0.299 + data[i + 1]! * 0.587 + data[i + 2]! * 0.114;
   }
   return gray;
 }
@@ -59,10 +59,10 @@ function buildPyramid(gray: Float32Array, w: number, h: number, levels: number):
         const sx1 = Math.min(sx + 1, cw - 1);
         const sy1 = Math.min(sy + 1, ch - 1);
         next[y * nw + x] = (
-          current[sy * cw + sx] +
-          current[sy * cw + sx1] +
-          current[sy1 * cw + sx] +
-          current[sy1 * cw + sx1]
+          current[sy * cw + sx]! +
+          current[sy * cw + sx1]! +
+          current[sy1 * cw + sx]! +
+          current[sy1 * cw + sx1]!
         ) * 0.25;
       }
     }
@@ -89,14 +89,14 @@ function computeGradients(
     for (let x = 1; x < w - 1; x++) {
       // Scharr kernel for X
       Ix[y * w + x] =
-        -3 * gray[(y - 1) * w + (x - 1)] + 3 * gray[(y - 1) * w + (x + 1)] +
-        -10 * gray[y * w + (x - 1)] + 10 * gray[y * w + (x + 1)] +
-        -3 * gray[(y + 1) * w + (x - 1)] + 3 * gray[(y + 1) * w + (x + 1)];
+        -3 * gray[(y - 1) * w + (x - 1)]! + 3 * gray[(y - 1) * w + (x + 1)]! +
+        -10 * gray[y * w + (x - 1)]! + 10 * gray[y * w + (x + 1)]! +
+        -3 * gray[(y + 1) * w + (x - 1)]! + 3 * gray[(y + 1) * w + (x + 1)]!;
 
       // Scharr kernel for Y
       Iy[y * w + x] =
-        -3 * gray[(y - 1) * w + (x - 1)] - 10 * gray[(y - 1) * w + x] - 3 * gray[(y - 1) * w + (x + 1)] +
-        3 * gray[(y + 1) * w + (x - 1)] + 10 * gray[(y + 1) * w + x] + 3 * gray[(y + 1) * w + (x + 1)];
+        -3 * gray[(y - 1) * w + (x - 1)]! - 10 * gray[(y - 1) * w + x]! - 3 * gray[(y - 1) * w + (x + 1)]! +
+        3 * gray[(y + 1) * w + (x - 1)]! + 10 * gray[(y + 1) * w + x]! + 3 * gray[(y + 1) * w + (x + 1)]!;
     }
   }
 
@@ -116,10 +116,10 @@ function sampleBilinear(data: Float32Array, w: number, h: number, x: number, y: 
   const fy = y - y0;
 
   return (
-    data[y0 * w + x0] * (1 - fx) * (1 - fy) +
-    data[y0 * w + x1] * fx * (1 - fy) +
-    data[y1 * w + x0] * (1 - fx) * fy +
-    data[y1 * w + x1] * fx * fy
+    data[y0 * w + x0]! * (1 - fx) * (1 - fy) +
+    data[y0 * w + x1]! * fx * (1 - fy) +
+    data[y1 * w + x0]! * (1 - fx) * fy +
+    data[y1 * w + x1]! * fx * fy
   );
 }
 
@@ -178,7 +178,7 @@ export class OpticalFlowEngine {
         }
 
         // Compute gradient structure tensor in the window
-        const { Ix, Iy } = computeGradients(pl.data, pl.w, pl.h);
+        const { Ix, Iy } = computeGradients(pl!.data!, pl!.w!, pl!.h!);
 
         let sumIxIx = 0, sumIxIy = 0, sumIyIy = 0;
 
@@ -186,13 +186,13 @@ export class OpticalFlowEngine {
           for (let wx = -halfWin; wx <= halfWin; wx++) {
             const sx = Math.round(px + wx);
             const sy = Math.round(py + wy);
-            if (sx < 0 || sx >= pl.w || sy < 0 || sy >= pl.h) continue;
+            if (sx < 0 || sx >= pl!.w! || sy < 0 || sy >= pl!.h!) continue;
 
-            const ix = Ix[sy * pl.w + sx];
-            const iy = Iy[sy * pl.w + sx];
-            sumIxIx += ix * ix;
-            sumIxIy += ix * iy;
-            sumIyIy += iy * iy;
+            const ix = Ix[sy * pl!.w! + sx];
+            const iy = Iy[sy * pl!.w! + sx];
+            sumIxIx += ix! * ix!;
+            sumIxIy += ix! * iy!;
+            sumIyIy += iy! * iy!;
           }
         }
 
@@ -213,16 +213,16 @@ export class OpticalFlowEngine {
             for (let wx = -halfWin; wx <= halfWin; wx++) {
               const sx = Math.round(px + wx);
               const sy = Math.round(py + wy);
-              if (sx < 0 || sx >= pl.w || sy < 0 || sy >= pl.h) continue;
+              if (sx < 0 || sx >= pl!.w! || sy < 0 || sy >= pl!.h!) continue;
 
-              const ix = Ix[sy * pl.w + sx];
-              const iy = Iy[sy * pl.w + sx];
-              const prevVal = sampleBilinear(pl.data, pl.w, pl.h, px + wx, py + wy);
-              const nextVal = sampleBilinear(nl.data, nl.w, nl.h, px + wx + ux, py + wy + uy);
+              const ix = Ix[sy * pl!.w! + sx];
+              const iy = Iy[sy * pl!.w! + sx];
+              const prevVal = sampleBilinear(pl!.data!, pl!.w!, pl!.h!, px + wx, py + wy);
+              const nextVal = sampleBilinear(nl!.data!, nl!.w!, nl!.h!, px + wx + ux, py + wy + uy);
               const it = nextVal - prevVal;
 
-              sumIxIt += ix * it;
-              sumIyIt += iy * it;
+              sumIxIt += ix! * it;
+              sumIyIt += iy! * it;
             }
           }
 
@@ -278,7 +278,7 @@ export class OpticalFlowEngine {
     // Temporal gradient
     const It = new Float32Array(ow * oh);
     for (let i = 0; i < It.length; i++) {
-      It[i] = nextSmall[i] - prevSmall[i];
+      It[i] = nextSmall[i]! - prevSmall[i]!;
     }
 
     const dx = new Float32Array(ow * oh);
@@ -296,11 +296,11 @@ export class OpticalFlowEngine {
             const ix = Ix[idx];
             const iy = Iy[idx];
             const it = It[idx];
-            sumIxIx += ix * ix;
-            sumIxIy += ix * iy;
-            sumIyIy += iy * iy;
-            sumIxIt += ix * it;
-            sumIyIt += iy * it;
+            sumIxIx += ix! * ix!;
+            sumIxIy += ix! * iy!;
+            sumIyIy += iy! * iy!;
+            sumIxIt += ix! * it!;
+            sumIyIt += iy! * it!;
           }
         }
 
@@ -346,13 +346,13 @@ export class OpticalFlowEngine {
     let angleCount = 0;
 
     for (let i = 0; i < validPts.length; i++) {
-      const px = validPts[i].x - cx;
-      const py = validPts[i].y - cy;
+      const px = validPts[i]!.x - cx;
+      const py = validPts[i]!.y - cy;
       const dist = Math.sqrt(px * px + py * py);
       if (dist < 10) continue; // skip points near center
 
-      const fx = validFlow[i].dx - medianDx;
-      const fy = validFlow[i].dy - medianDy;
+      const fx = validFlow[i]!.dx - medianDx!;
+      const fy = validFlow[i]!.dy - medianDy!;
 
       // Cross product gives angular velocity
       const cross = (px * fy - py * fx) / (dist * dist);
@@ -362,7 +362,7 @@ export class OpticalFlowEngine {
 
     const rotation = angleCount > 0 ? sumAngle / angleCount : 0;
 
-    return { dx: medianDx, dy: medianDy, rotation, scale: 1 };
+    return { dx: medianDx!, dy: medianDy!, rotation, scale: 1 };
   }
 
   /**
@@ -386,8 +386,8 @@ export class OpticalFlowEngine {
         const fy = Math.min(Math.floor(y * scaleY), flowField.height - 1);
         const fidx = fy * flowField.width + fx;
 
-        const srcX = x - flowField.dx[fidx] * t / scaleX;
-        const srcY = y - flowField.dy[fidx] * t / scaleY;
+        const srcX = x - flowField.dx[fidx]! * t / scaleX;
+        const srcY = y - flowField.dy[fidx]! * t / scaleY;
 
         // Bilinear sample from source
         const x0 = Math.floor(srcX);
@@ -397,10 +397,10 @@ export class OpticalFlowEngine {
 
         if (x0 < 0 || y0 < 0 || x0 >= width || y0 >= height) {
           const didx = (y * width + x) * 4;
-          out[didx] = data[didx];
-          out[didx + 1] = data[didx + 1];
-          out[didx + 2] = data[didx + 2];
-          out[didx + 3] = data[didx + 3];
+          out[didx] = data[didx]!;
+          out[didx + 1] = data[didx + 1]!;
+          out[didx + 2] = data[didx + 2]!;
+          out[didx + 3] = data[didx + 3]!;
           continue;
         }
 
@@ -415,10 +415,10 @@ export class OpticalFlowEngine {
         const didx = (y * width + x) * 4;
         for (let c = 0; c < 4; c++) {
           out[didx + c] = Math.round(
-            data[i00 + c] * (1 - fxl) * (1 - fyl) +
-            data[i10 + c] * fxl * (1 - fyl) +
-            data[i01 + c] * (1 - fxl) * fyl +
-            data[i11 + c] * fxl * fyl,
+            data[i00 + c]! * (1 - fxl) * (1 - fyl) +
+            data[i10 + c]! * fxl * (1 - fyl) +
+            data[i01 + c]! * (1 - fxl) * fyl +
+            data[i11 + c]! * fxl * fyl,
           );
         }
       }
@@ -436,7 +436,7 @@ export class OpticalFlowEngine {
       for (let x = 0; x < dw; x++) {
         const sx = Math.min(Math.floor(x * scaleX), sw - 1);
         const sy = Math.min(Math.floor(y * scaleY), sh - 1);
-        dst[y * dw + x] = src[sy * sw + sx];
+        dst[y * dw + x] = src[sy * sw + sx]!;
       }
     }
 

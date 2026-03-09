@@ -470,7 +470,7 @@ function AppliedEffectsList() {
     if (selectedClipId) {
       const newOrder = effects.map((e) => e.id);
       const [moved] = newOrder.splice(dragIdx.current, 1);
-      newOrder.splice(idx, 0, moved);
+      newOrder.splice(idx, 0, moved!);
       reorderEffects(selectedClipId, newOrder);
       dragIdx.current = idx;
     }
@@ -837,12 +837,12 @@ function KeyframeBar() {
 
   const goPrev = () => {
     const prev = sortedFrames.filter((f) => f < currentFrame);
-    if (prev.length > 0) setCurrentFrame(prev[prev.length - 1]);
+    if (prev.length > 0) setCurrentFrame(prev[prev.length - 1]!);
   };
 
   const goNext = () => {
     const next = sortedFrames.filter((f) => f > currentFrame);
-    if (next.length > 0) setCurrentFrame(next[0]);
+    if (next.length > 0) setCurrentFrame(next[0]!);
   };
 
   return (
@@ -897,7 +897,7 @@ export function EffectsPanel() {
   // Keep effects store in sync with editor selection
   React.useEffect(() => {
     if (editorSelectedClipId !== selectedClipId) {
-      selectClip(editorSelectedClipId);
+      selectClip(editorSelectedClipId!);
     }
   }, [editorSelectedClipId, selectedClipId, selectClip]);
 

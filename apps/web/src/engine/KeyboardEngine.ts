@@ -372,7 +372,7 @@ export class KeyboardEngine {
       ...l,
       bindings: l.bindings.map((b) => ({ ...b })),
     }));
-    this.defaultLayout = this.presetLayouts[0];
+    this.defaultLayout = this.presetLayouts[0]!;
     this.layout = {
       ...this.defaultLayout,
       bindings: this.defaultLayout.bindings.map((b) => ({ ...b })),

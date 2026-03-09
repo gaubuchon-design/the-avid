@@ -46,7 +46,7 @@ router.get('/nrcs-connections', async (req: Request, res: Response) => {
 
 router.get('/nrcs-connections/:id', async (req: Request, res: Response) => {
   const connection = await db.nRCSConnection.findUnique({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     include: { rundowns: { take: 10, orderBy: { airDate: 'desc' } } },
   });
   assertFound(connection, 'NRCS connection');
@@ -59,22 +59,22 @@ router.post('/nrcs-connections', validate(createNRCSSchema), async (req: Request
 });
 
 router.patch('/nrcs-connections/:id', validate(updateNRCSSchema), async (req: Request, res: Response) => {
-  const existing = await db.nRCSConnection.findUnique({ where: { id: req.params.id } });
+  const existing = await db.nRCSConnection.findUnique({ where: { id: req.params['id'] } });
   assertFound(existing, 'NRCS connection');
 
   const connection = await db.nRCSConnection.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: req.body,
   });
   res.json({ connection });
 });
 
 router.delete('/nrcs-connections/:id', async (req: Request, res: Response) => {
-  const existing = await db.nRCSConnection.findUnique({ where: { id: req.params.id } });
+  const existing = await db.nRCSConnection.findUnique({ where: { id: req.params['id'] } });
   assertFound(existing, 'NRCS connection');
 
   await db.nRCSConnection.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: { isActive: false },
   });
   res.status(204).send();
@@ -109,7 +109,7 @@ router.get('/rundowns', async (req: Request, res: Response) => {
 
 router.get('/rundowns/:id', async (req: Request, res: Response) => {
   const rundown = await db.rundown.findUnique({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     include: {
       stories: { orderBy: { sortOrder: 'asc' } },
       nrcsConnection: true,
@@ -134,7 +134,7 @@ const sendToAirSchema = z.object({
 
 router.get('/stories/:id', async (req: Request, res: Response) => {
   const story = await db.newsStory.findUnique({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     include: { rundown: true },
   });
   assertFound(story, 'News story');
@@ -142,11 +142,11 @@ router.get('/stories/:id', async (req: Request, res: Response) => {
 });
 
 router.patch('/stories/:id', validate(updateStorySchema), async (req: Request, res: Response) => {
-  const existing = await db.newsStory.findUnique({ where: { id: req.params.id } });
+  const existing = await db.newsStory.findUnique({ where: { id: req.params['id'] } });
   assertFound(existing, 'News story');
 
   const story = await db.newsStory.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: req.body,
   });
   res.json({ story });
@@ -154,18 +154,18 @@ router.patch('/stories/:id', validate(updateStorySchema), async (req: Request, r
 
 router.post('/stories/:id/assign', async (req: Request, res: Response) => {
   const userId = req.user!.id;
-  const existing = await db.newsStory.findUnique({ where: { id: req.params.id } });
+  const existing = await db.newsStory.findUnique({ where: { id: req.params['id'] } });
   assertFound(existing, 'News story');
 
   const story = await db.newsStory.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: { assignedEditorId: userId, status: 'IN_EDIT' },
   });
   res.json({ story });
 });
 
 router.post('/stories/:id/mark-ready', async (req: Request, res: Response) => {
-  const existing = await db.newsStory.findUnique({ where: { id: req.params.id } });
+  const existing = await db.newsStory.findUnique({ where: { id: req.params['id'] } });
   assertFound(existing, 'News story');
 
   // Only the assigned editor or an unassigned story can be marked ready
@@ -174,7 +174,7 @@ router.post('/stories/:id/mark-ready', async (req: Request, res: Response) => {
   }
 
   const story = await db.newsStory.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: { status: 'READY' },
   });
   res.json({ story });
@@ -183,7 +183,7 @@ router.post('/stories/:id/mark-ready', async (req: Request, res: Response) => {
 router.post('/stories/:id/send-to-air', validate(sendToAirSchema), async (req: Request, res: Response) => {
   const { destinationId } = req.body;
 
-  const story = await db.newsStory.findUnique({ where: { id: req.params.id } });
+  const story = await db.newsStory.findUnique({ where: { id: req.params['id'] } });
   assertFound(story, 'News story');
 
   if (story.status !== 'READY') {
@@ -203,7 +203,7 @@ router.post('/stories/:id/send-to-air', validate(sendToAirSchema), async (req: R
 
   // In production: export MXF and FTP to playout server
   const updated = await db.newsStory.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: { status: 'AIRED' },
   });
 
@@ -254,7 +254,7 @@ router.get('/playout-destinations', async (req: Request, res: Response) => {
 
 router.get('/playout-destinations/:id', async (req: Request, res: Response) => {
   const destination = await db.playoutDestination.findUnique({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
   });
   assertFound(destination, 'Playout destination');
   res.json({ destination });
@@ -266,22 +266,22 @@ router.post('/playout-destinations', validate(createPlayoutSchema), async (req: 
 });
 
 router.patch('/playout-destinations/:id', validate(updatePlayoutSchema), async (req: Request, res: Response) => {
-  const existing = await db.playoutDestination.findUnique({ where: { id: req.params.id } });
+  const existing = await db.playoutDestination.findUnique({ where: { id: req.params['id'] } });
   assertFound(existing, 'Playout destination');
 
   const destination = await db.playoutDestination.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: req.body,
   });
   res.json({ destination });
 });
 
 router.delete('/playout-destinations/:id', async (req: Request, res: Response) => {
-  const existing = await db.playoutDestination.findUnique({ where: { id: req.params.id } });
+  const existing = await db.playoutDestination.findUnique({ where: { id: req.params['id'] } });
   assertFound(existing, 'Playout destination');
 
   await db.playoutDestination.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: { isActive: false },
   });
   res.status(204).send();

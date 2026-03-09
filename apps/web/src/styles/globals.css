@@ -239,6 +239,36 @@
   color: var(--brand);
 }
 
+/* Inline loading spinner (used inside panels) */
+.loading-spinner-inline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: var(--space-3);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  padding: var(--space-6);
+}
+
+.loading-spinner-ring {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border-subtle);
+  border-top-color: var(--brand);
+  border-radius: var(--radius-full);
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.loading-spinner-label {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  letter-spacing: var(--tracking-wide);
+}
+
 .progress-bar {
   height: 3px;
   background: var(--bg-overlay);
@@ -393,4 +423,204 @@
     break-inside: avoid;
     border: 1px solid #ccc;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   11. SMOOTH SCROLL BEHAVIOR
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   12. ENHANCED SCROLLBAR STYLES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Auto-hide scrollbar until hover on panels */
+.panel-body,
+.settings-page-content,
+.auth-layout {
+  scrollbar-gutter: stable;
+}
+
+/* Thinner scrollbar for panels that auto-show */
+.panel-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.panel-body::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: var(--radius-full);
+  transition: background 0.3s;
+}
+
+.panel-body:hover::-webkit-scrollbar-thumb {
+  background: var(--bg-overlay);
+}
+
+.panel-body:hover::-webkit-scrollbar-thumb:hover {
+  background: var(--bg-popover);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   13. GLOBAL TRANSITION ENHANCEMENTS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Add subtle transitions to common interactive patterns */
+.btn,
+.toolbar-icon-btn,
+.toolbar-nav-tab,
+.panel-tab,
+.page-nav-tab,
+.dashboard-nav-item,
+.project-card,
+.bin-item,
+.context-menu-item,
+.ws-tab {
+  transition: var(--transition-colors), var(--transition-shadow);
+}
+
+/* Ensure all links within the app have transitions */
+a {
+  transition: color var(--dur-fast) var(--ease-default);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   14. CURSOR STYLES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Grab cursors for draggable items */
+.draggable {
+  cursor: grab;
+}
+
+.draggable:active {
+  cursor: grabbing;
+}
+
+/* Resize cursors for panel dividers */
+.resize-handle-h {
+  cursor: col-resize;
+}
+
+.resize-handle-v {
+  cursor: row-resize;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   15. SKELETON LOADER VARIANTS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.skeleton-text {
+  height: 12px;
+  border-radius: var(--radius-sm);
+}
+
+.skeleton-text.w-full  { width: 100%; }
+.skeleton-text.w-3-4   { width: 75%; }
+.skeleton-text.w-1-2   { width: 50%; }
+.skeleton-text.w-1-4   { width: 25%; }
+
+.skeleton-circle {
+  border-radius: var(--radius-full);
+}
+
+.skeleton-thumb {
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-md);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   16. CARD COMPONENT
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition: var(--transition-all), var(--transition-shadow);
+}
+
+.card:hover {
+  border-color: var(--border-strong);
+}
+
+.card-interactive {
+  cursor: pointer;
+}
+
+.card-interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.card-body {
+  padding: var(--space-3) var(--space-4);
+}
+
+.card-header {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.card-footer {
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-raised);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   17. TOOLTIP ENHANCEMENTS (bottom/left/right variants)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.tooltip-bottom {
+  top: calc(100% + 6px);
+  bottom: auto;
+}
+
+.tooltip-left {
+  right: calc(100% + 6px);
+  left: auto;
+  top: 50%;
+  bottom: auto;
+  transform: translateY(-50%);
+}
+
+.tooltip-right {
+  left: calc(100% + 6px);
+  top: 50%;
+  bottom: auto;
+  transform: translateY(-50%);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   18. RESPONSIVE VISIBILITY UTILITIES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  .hide-mobile { display: none !important; }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .hide-tablet { display: none !important; }
+}
+
+@media (min-width: 1025px) {
+  .hide-desktop { display: none !important; }
+}
+
+/* Only show on specific breakpoints */
+.show-mobile  { display: none !important; }
+.show-tablet  { display: none !important; }
+
+@media (max-width: 768px) {
+  .show-mobile { display: initial !important; }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .show-tablet { display: initial !important; }
 }

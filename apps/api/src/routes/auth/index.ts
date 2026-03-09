@@ -272,7 +272,7 @@ router.get('/sessions', authenticate, async (req: Request, res: Response) => {
 // ─── DELETE /auth/sessions/:id ─────────────────────────────────────────────────
 router.delete('/sessions/:id', authenticate, async (req: Request, res: Response) => {
   await db.refreshToken.updateMany({
-    where: { id: req.params.id, userId: req.user!.id },
+    where: { id: req.params['id'], userId: req.user!.id },
     data: { revokedAt: new Date() },
   });
   res.status(204).send();

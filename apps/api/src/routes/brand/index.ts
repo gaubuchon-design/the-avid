@@ -49,7 +49,7 @@ router.get('/brand-kits', async (req: Request, res: Response) => {
 
 router.get('/brand-kits/:id', async (req: Request, res: Response) => {
   const kit = await db.brandKit.findUnique({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     include: { templates: true, campaigns: true },
   });
   assertFound(kit, 'Brand kit');
@@ -63,14 +63,14 @@ router.post('/brand-kits', validate(createBrandKitSchema), async (req: Request, 
 
 router.patch('/brand-kits/:id', validate(updateBrandKitSchema), async (req: Request, res: Response) => {
   const kit = await db.brandKit.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: req.body,
   });
   res.json({ brandKit: kit });
 });
 
 router.delete('/brand-kits/:id', async (req: Request, res: Response) => {
-  await db.brandKit.delete({ where: { id: req.params.id } });
+  await db.brandKit.delete({ where: { id: req.params['id'] } });
   res.status(204).send();
 });
 
@@ -86,7 +86,7 @@ const createTemplateSchema = z.object({
 
 router.get('/brand-kits/:kitId/templates', async (req: Request, res: Response) => {
   const templates = await db.brandTemplate.findMany({
-    where: { brandKitId: req.params.kitId },
+    where: { brandKitId: req.params['kitId'] },
     orderBy: { createdAt: 'desc' },
   });
   res.json({ templates });
@@ -94,18 +94,18 @@ router.get('/brand-kits/:kitId/templates', async (req: Request, res: Response) =
 
 router.post('/brand-kits/:kitId/templates', validate(createTemplateSchema), async (req: Request, res: Response) => {
   // Verify brand kit exists
-  const kit = await db.brandKit.findUnique({ where: { id: req.params.kitId } });
+  const kit = await db.brandKit.findUnique({ where: { id: req.params['kitId'] } });
   assertFound(kit, 'Brand kit');
 
   const template = await db.brandTemplate.create({
-    data: { brandKitId: req.params.kitId, ...req.body },
+    data: { brandKitId: req.params['kitId'], ...req.body },
   });
   res.status(201).json({ template });
 });
 
 router.patch('/brand-kits/:kitId/templates/:id', async (req: Request, res: Response) => {
   const template = await db.brandTemplate.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: req.body,
   });
   res.json({ template });
@@ -154,7 +154,7 @@ router.get('/campaigns', validate(paginationQuery, 'query'), async (req: Request
 
 router.get('/campaigns/:id', async (req: Request, res: Response) => {
   const campaign = await db.campaign.findUnique({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     include: {
       brandKit: true,
       deliverables: { orderBy: { createdAt: 'asc' } },
@@ -180,7 +180,7 @@ router.post('/campaigns', validate(createCampaignSchema), async (req: Request, r
 
 router.patch('/campaigns/:id', async (req: Request, res: Response) => {
   const campaign = await db.campaign.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: req.body,
   });
   res.json({ campaign });
@@ -201,7 +201,7 @@ router.post(
   validate(createDeliverableSchema),
   async (req: Request, res: Response) => {
     const deliverable = await db.campaignDeliverable.create({
-      data: { campaignId: req.params.campaignId, ...req.body },
+      data: { campaignId: req.params['campaignId'], ...req.body },
     });
     res.status(201).json({ deliverable });
   }
@@ -209,7 +209,7 @@ router.post(
 
 router.patch('/campaigns/:campaignId/deliverables/:id', async (req: Request, res: Response) => {
   const deliverable = await db.campaignDeliverable.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: req.body,
   });
   res.json({ deliverable });
@@ -226,7 +226,7 @@ const createVariantSchema = z.object({
 
 router.get('/campaigns/:campaignId/variants', async (req: Request, res: Response) => {
   const variants = await db.contentVariant.findMany({
-    where: { campaignId: req.params.campaignId },
+    where: { campaignId: req.params['campaignId'] },
     orderBy: { createdAt: 'desc' },
   });
   res.json({ variants });
@@ -237,7 +237,7 @@ router.post(
   validate(createVariantSchema),
   async (req: Request, res: Response) => {
     const variant = await db.contentVariant.create({
-      data: { campaignId: req.params.campaignId, ...req.body },
+      data: { campaignId: req.params['campaignId'], ...req.body },
     });
     res.status(201).json({ variant });
   }
@@ -245,7 +245,7 @@ router.post(
 
 router.post('/campaigns/:campaignId/variants/generate-all', async (req: Request, res: Response) => {
   const variants = await db.contentVariant.findMany({
-    where: { campaignId: req.params.campaignId, status: 'PENDING' },
+    where: { campaignId: req.params['campaignId'], status: 'PENDING' },
   });
 
   if (variants.length === 0) {
@@ -254,7 +254,7 @@ router.post('/campaigns/:campaignId/variants/generate-all', async (req: Request,
 
   // In production: queue variant generation jobs
   const updated = await Promise.all(
-    variants.map(v =>
+    variants.map((v: { id: string }) =>
       db.contentVariant.update({
         where: { id: v.id },
         data: { status: 'GENERATING' },
@@ -269,7 +269,7 @@ router.post('/campaigns/:campaignId/variants/generate-all', async (req: Request,
 
 router.get('/compliance/:projectId', async (req: Request, res: Response) => {
   const reports = await db.complianceReport.findMany({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
     orderBy: { checkedAt: 'desc' },
     take: 10,
   });
@@ -283,7 +283,7 @@ router.post('/compliance/:projectId/check', async (req: Request, res: Response) 
   // In production: run AI compliance check
   const report = await db.complianceReport.create({
     data: {
-      projectId: req.params.projectId,
+      projectId: req.params['projectId'],
       brandKitId,
       overallStatus: 'PASS',
       findings: [],
@@ -322,7 +322,7 @@ router.post('/dam-connections', validate(createDAMSchema), async (req: Request, 
 
 router.delete('/dam-connections/:id', async (req: Request, res: Response) => {
   await db.dAMConnection.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: { isActive: false },
   });
   res.status(204).send();
@@ -334,7 +334,7 @@ router.get('/analytics/:projectId', async (req: Request, res: Response) => {
   const { period } = req.query as Record<string, string>;
   const analytics = await db.videoPerformance.findMany({
     where: {
-      projectId: req.params.projectId,
+      projectId: req.params['projectId'],
       ...(period ? { periodDays: parseInt(period, 10) } : {}),
     },
     orderBy: { measuredAt: 'desc' },

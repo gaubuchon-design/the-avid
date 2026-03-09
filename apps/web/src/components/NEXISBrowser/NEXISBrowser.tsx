@@ -228,7 +228,7 @@ const S = {
 
 const USER_COLORS = ['#5b6af5', '#7c5cfc', '#e05dbb', '#f59e0b', '#22c55e', '#06b6d4', '#ef4444', '#8b5cf6'];
 function userColor(idx: number): string {
-  return USER_COLORS[idx % USER_COLORS.length];
+  return USER_COLORS[idx % USER_COLORS.length]!;
 }
 
 // --- Workspaces Tab ---------------------------------------------------------

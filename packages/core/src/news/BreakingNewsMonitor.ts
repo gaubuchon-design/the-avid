@@ -310,10 +310,10 @@ export class BreakingNewsMonitor {
     this.ws.onmessage = (event) => {
       try {
         const data = JSON.parse(String(event.data)) as Record<string, unknown>;
-        if (data.type === 'rundown_update' && data.rundown) {
-          this.processRundownUpdate(data.rundown as RundownState);
-        } else if (data.type === 'story_update' && data.story) {
-          this.processStory(data.story as RundownEvent);
+        if (data['type'] === 'rundown_update' && data['rundown']) {
+          this.processRundownUpdate(data['rundown'] as RundownState);
+        } else if (data['type'] === 'story_update' && data['story']) {
+          this.processStory(data['story'] as RundownEvent);
         }
       } catch {
         // Ignore parse errors on the alert channel

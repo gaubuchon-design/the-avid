@@ -292,7 +292,7 @@ export class VFXAgent {
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const idx = (y * width + x) * 4;
-        const alpha = mask[idx] / 255; // mask intensity = sky region
+        const alpha = mask[idx]! / 255; // mask intensity = sky region
 
         // Sample replacement (nearest neighbor scaling)
         const rx = Math.min(Math.floor((x / width) * rw), rw - 1);
@@ -300,9 +300,9 @@ export class VFXAgent {
         const ridx = (ry * rw + rx) * 4;
 
         // Blend: sky region gets replacement, non-sky keeps original
-        out[idx] = Math.round(orig[idx] * (1 - alpha) + rep[ridx] * alpha);
-        out[idx + 1] = Math.round(orig[idx + 1] * (1 - alpha) + rep[ridx + 1] * alpha);
-        out[idx + 2] = Math.round(orig[idx + 2] * (1 - alpha) + rep[ridx + 2] * alpha);
+        out[idx] = Math.round(orig[idx]! * (1 - alpha) + rep[ridx]! * alpha);
+        out[idx + 1] = Math.round(orig[idx + 1]! * (1 - alpha) + rep[ridx + 1]! * alpha);
+        out[idx + 2] = Math.round(orig[idx + 2]! * (1 - alpha) + rep[ridx + 2]! * alpha);
         out[idx + 3] = 255;
       }
     }

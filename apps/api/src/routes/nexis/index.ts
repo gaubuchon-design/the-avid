@@ -58,7 +58,7 @@ router.get('/workspaces', async (req: Request, res: Response) => {
 
 router.get('/workspaces/:id', async (req: Request, res: Response) => {
   const workspace = await db.nEXISWorkspace.findUnique({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     include: {
       mediaPaths: {
         take: 50,
@@ -76,23 +76,23 @@ router.post('/workspaces', validate(createWorkspaceSchema), async (req: Request,
 });
 
 router.patch('/workspaces/:id', validate(updateWorkspaceSchema), async (req: Request, res: Response) => {
-  const existing = await db.nEXISWorkspace.findUnique({ where: { id: req.params.id } });
+  const existing = await db.nEXISWorkspace.findUnique({ where: { id: req.params['id'] } });
   assertFound(existing, 'NEXIS workspace');
 
   const workspace = await db.nEXISWorkspace.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: req.body,
   });
   res.json({ workspace });
 });
 
 router.post('/workspaces/:id/connect', async (req: Request, res: Response) => {
-  const existing = await db.nEXISWorkspace.findUnique({ where: { id: req.params.id } });
+  const existing = await db.nEXISWorkspace.findUnique({ where: { id: req.params['id'] } });
   assertFound(existing, 'NEXIS workspace');
 
   // In production: authenticate via Avid Connection Manager
   const workspace = await db.nEXISWorkspace.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: {
       isConnected: true,
       lastHealthCheck: new Date(),
@@ -102,23 +102,23 @@ router.post('/workspaces/:id/connect', async (req: Request, res: Response) => {
 });
 
 router.post('/workspaces/:id/disconnect', async (req: Request, res: Response) => {
-  const existing = await db.nEXISWorkspace.findUnique({ where: { id: req.params.id } });
+  const existing = await db.nEXISWorkspace.findUnique({ where: { id: req.params['id'] } });
   assertFound(existing, 'NEXIS workspace');
 
   const workspace = await db.nEXISWorkspace.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: { isConnected: false },
   });
   res.json({ workspace });
 });
 
 router.post('/workspaces/:id/health-check', async (req: Request, res: Response) => {
-  const existing = await db.nEXISWorkspace.findUnique({ where: { id: req.params.id } });
+  const existing = await db.nEXISWorkspace.findUnique({ where: { id: req.params['id'] } });
   assertFound(existing, 'NEXIS workspace');
 
   // In production: ping NEXIS server, check connection status
   const workspace = await db.nEXISWorkspace.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: { lastHealthCheck: new Date() },
   });
 
@@ -140,11 +140,11 @@ router.post('/workspaces/:id/health-check', async (req: Request, res: Response) 
 // ─── NEXIS Media Paths ───────────────────────────────────────────────────────
 
 router.get('/workspaces/:workspaceId/media', async (req: Request, res: Response) => {
-  const workspace = await db.nEXISWorkspace.findUnique({ where: { id: req.params.workspaceId } });
+  const workspace = await db.nEXISWorkspace.findUnique({ where: { id: req.params['workspaceId'] } });
   assertFound(workspace, 'NEXIS workspace');
 
   const { locked } = req.query as Record<string, string>;
-  const where: any = { workspaceId: req.params.workspaceId };
+  const where: any = { workspaceId: req.params['workspaceId'] };
   if (locked === 'true') where.isLocked = true;
   if (locked === 'false') where.isLocked = false;
 
@@ -156,12 +156,12 @@ router.get('/workspaces/:workspaceId/media', async (req: Request, res: Response)
 });
 
 router.post('/workspaces/:workspaceId/media', validate(createMediaPathSchema), async (req: Request, res: Response) => {
-  const workspace = await db.nEXISWorkspace.findUnique({ where: { id: req.params.workspaceId } });
+  const workspace = await db.nEXISWorkspace.findUnique({ where: { id: req.params['workspaceId'] } });
   assertFound(workspace, 'NEXIS workspace');
 
   const path = await db.nEXISMediaPath.create({
     data: {
-      workspaceId: req.params.workspaceId,
+      workspaceId: req.params['workspaceId'],
       ...req.body,
       ownerId: req.user!.id,
     },
@@ -171,7 +171,7 @@ router.post('/workspaces/:workspaceId/media', validate(createMediaPathSchema), a
 
 router.post('/workspaces/:workspaceId/media/:id/lock', async (req: Request, res: Response) => {
   const mediaPath = await db.nEXISMediaPath.findFirst({
-    where: { id: req.params.id, workspaceId: req.params.workspaceId },
+    where: { id: req.params['id'], workspaceId: req.params['workspaceId'] },
   });
   assertFound(mediaPath, 'NEXIS media path');
 
@@ -187,7 +187,7 @@ router.post('/workspaces/:workspaceId/media/:id/lock', async (req: Request, res:
   }
 
   const path = await db.nEXISMediaPath.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: { isLocked: true, ownerId: req.user!.id },
   });
   res.json({ mediaPath: path });
@@ -195,7 +195,7 @@ router.post('/workspaces/:workspaceId/media/:id/lock', async (req: Request, res:
 
 router.post('/workspaces/:workspaceId/media/:id/unlock', async (req: Request, res: Response) => {
   const mediaPath = await db.nEXISMediaPath.findFirst({
-    where: { id: req.params.id, workspaceId: req.params.workspaceId },
+    where: { id: req.params['id'], workspaceId: req.params['workspaceId'] },
   });
   assertFound(mediaPath, 'NEXIS media path');
 
@@ -205,7 +205,7 @@ router.post('/workspaces/:workspaceId/media/:id/unlock', async (req: Request, re
   }
 
   const path = await db.nEXISMediaPath.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: { isLocked: false },
   });
   res.json({ mediaPath: path });
@@ -213,12 +213,12 @@ router.post('/workspaces/:workspaceId/media/:id/unlock', async (req: Request, re
 
 router.patch('/workspaces/:workspaceId/media/:id/cache', validate(updateCacheSchema), async (req: Request, res: Response) => {
   const mediaPath = await db.nEXISMediaPath.findFirst({
-    where: { id: req.params.id, workspaceId: req.params.workspaceId },
+    where: { id: req.params['id'], workspaceId: req.params['workspaceId'] },
   });
   assertFound(mediaPath, 'NEXIS media path');
 
   const path = await db.nEXISMediaPath.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: req.body,
   });
   res.json({ mediaPath: path });
@@ -239,10 +239,10 @@ router.get('/admin/overview', async (req: Request, res: Response) => {
     },
   });
 
-  const totalCapacity = workspaces.reduce((s, w) => s + (w.totalCapacityGB || 0), 0);
-  const totalUsed = workspaces.reduce((s, w) => s + (w.usedCapacityGB || 0), 0);
-  const lockedPaths = workspaces.flatMap(w => w.mediaPaths);
-  const connectedCount = workspaces.filter(w => w.isConnected).length;
+  const totalCapacity = workspaces.reduce((s: number, w: { totalCapacityGB: number | null }) => s + (w.totalCapacityGB || 0), 0);
+  const totalUsed = workspaces.reduce((s: number, w: { usedCapacityGB: number | null }) => s + (w.usedCapacityGB || 0), 0);
+  const lockedPaths = workspaces.flatMap((w: { mediaPaths: { id: string; ownerId: string | null; nexisPath: string }[] }) => w.mediaPaths);
+  const connectedCount = workspaces.filter((w: { isConnected: boolean }) => w.isConnected).length;
 
   res.json({
     overview: {
@@ -253,7 +253,7 @@ router.get('/admin/overview', async (req: Request, res: Response) => {
       usedPercent: totalCapacity > 0 ? parseFloat(((totalUsed / totalCapacity) * 100).toFixed(1)) : 0,
       activeLocks: lockedPaths.length,
     },
-    workspaces: workspaces.map(w => ({
+    workspaces: workspaces.map((w: any) => ({
       id: w.id,
       name: w.name,
       host: w.host,

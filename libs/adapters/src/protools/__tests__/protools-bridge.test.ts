@@ -41,7 +41,7 @@ describe('SharedJobHistory', () => {
     history.recordJob(entry);
     const jobs = history.getHistory();
     expect(jobs.length).toBe(1);
-    expect(jobs[0].id).toBe('j1');
+    expect(jobs[0]!.id).toBe('j1');
   });
 
   it('replaces an entry with the same id', () => {
@@ -61,7 +61,7 @@ describe('SharedJobHistory', () => {
     });
     const jobs = history.getHistory();
     expect(jobs.length).toBe(1);
-    expect(jobs[0].status).toBe('completed');
+    expect(jobs[0]!.status).toBe('completed');
   });
 
   it('filters by type', () => {
@@ -80,7 +80,7 @@ describe('SharedJobHistory', () => {
 
     const failed = history.getHistory({ status: 'failed' });
     expect(failed.length).toBe(1);
-    expect(failed[0].id).toBe('j2');
+    expect(failed[0]!.id).toBe('j2');
   });
 
   it('computes stats correctly', () => {
@@ -105,7 +105,7 @@ describe('SharedJobHistory', () => {
     const json = history.exportJSON();
     const parsed = JSON.parse(json) as JobHistoryEntry[];
     expect(parsed.length).toBe(1);
-    expect(parsed[0].id).toBe('j1');
+    expect(parsed[0]!.id).toBe('j1');
   });
 });
 
@@ -142,8 +142,8 @@ describe('HandoffManager', () => {
     const history = manager.getHandoffHistory();
     expect(history.length).toBe(2);
     // Most recent first
-    expect(history[0].direction).toBe('pt-to-mc');
-    expect(history[1].direction).toBe('mc-to-pt');
+    expect(history[0]!.direction).toBe('pt-to-mc');
+    expect(history[1]!.direction).toBe('mc-to-pt');
 
     expect(back.entry.direction).toBe('pt-to-mc');
   });

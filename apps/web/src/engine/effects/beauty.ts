@@ -49,20 +49,20 @@ export function applyBeautyStudio(
     // Skin detection in RGB space (simplified)
     // Skin tends to have R > G > B with specific ratios
     const isSkinLike =
-      r > 60 && g > 40 && b > 20 &&
-      r > g && r > b &&
-      (r - g) > 10 &&
-      Math.abs(r - g) < 100 &&
-      (r - b) > 20;
+      r! > 60 && g! > 40 && b! > 20 &&
+      r! > g! && r! > b! &&
+      (r! - g!) > 10 &&
+      Math.abs(r! - g!) < 100 &&
+      (r! - b!) > 20;
 
     const pixIdx = i / 4;
     if (isSkinLike) {
       // Calculate skin confidence
-      const skinConfidence = Math.min(1, ((r - g) / 80) * ((r - b) / 120));
+      const skinConfidence = Math.min(1, ((r! - g!) / 80) * ((r! - b!) / 120));
       skinWeights[pixIdx] = maskNorm > 0 ? skinConfidence * maskNorm + (1 - maskNorm) : 1.0;
-      avgSkinR += r;
-      avgSkinG += g;
-      avgSkinB += b;
+      avgSkinR += r!;
+      avgSkinG += g!;
+      avgSkinB += b!;
       skinCount++;
     } else {
       skinWeights[pixIdx] = maskNorm > 0 ? (1 - maskNorm) : 1.0;
@@ -89,7 +89,7 @@ export function applyBeautyStudio(
         const pixIdx = y * width + x;
         const weight = skinWeights[pixIdx];
 
-        if (weight < 0.01) continue;
+        if (weight! < 0.01) continue;
 
         let sumR = 0, sumG = 0, sumB = 0, sumW = 0;
         const cr = src[idx];
@@ -110,25 +110,25 @@ export function applyBeautyStudio(
 
             // Color similarity weight (Gaussian)
             const colorDist = Math.sqrt(
-              (src[nIdx] - cr) * (src[nIdx] - cr) +
-              (src[nIdx + 1] - cg) * (src[nIdx + 1] - cg) +
-              (src[nIdx + 2] - cb) * (src[nIdx + 2] - cb),
+              (src[nIdx]! - cr!) * (src[nIdx]! - cr!) +
+              (src[nIdx + 1]! - cg!) * (src[nIdx + 1]! - cg!) +
+              (src[nIdx + 2]! - cb!) * (src[nIdx + 2]! - cb!),
             );
             const colorW = Math.exp(-(colorDist * colorDist) / (2 * sigmaColor * sigmaColor));
 
             const w = spatialW * colorW;
-            sumR += src[nIdx] * w;
-            sumG += src[nIdx + 1] * w;
-            sumB += src[nIdx + 2] * w;
+            sumR += src[nIdx]! * w;
+            sumG += src[nIdx + 1]! * w;
+            sumB += src[nIdx + 2]! * w;
             sumW += w;
           }
         }
 
         if (sumW > 0) {
-          const blend = weight * smoothNorm;
-          data[idx] = clamp(cr * (1 - blend) + (sumR / sumW) * blend);
-          data[idx + 1] = clamp(cg * (1 - blend) + (sumG / sumW) * blend);
-          data[idx + 2] = clamp(cb * (1 - blend) + (sumB / sumW) * blend);
+          const blend = weight! * smoothNorm;
+          data[idx] = clamp(cr! * (1 - blend) + (sumR / sumW) * blend);
+          data[idx + 1] = clamp(cg! * (1 - blend) + (sumG / sumW) * blend);
+          data[idx + 2] = clamp(cb! * (1 - blend) + (sumB / sumW) * blend);
         }
       }
     }
@@ -145,7 +145,7 @@ export function applyBeautyStudio(
         const pixIdx = y * width + x;
         const weight = skinWeights[pixIdx];
 
-        if (weight < 0.01) continue;
+        if (weight! < 0.01) continue;
 
         const cr = src[idx];
         const cg = src[idx + 1];
@@ -157,9 +157,9 @@ export function applyBeautyStudio(
           for (let dx = -bRadius; dx <= bRadius; dx++) {
             if (dx * dx + dy * dy > bRadius * bRadius) continue;
             const nIdx = ((y + dy) * width + (x + dx)) * 4;
-            avgR += src[nIdx];
-            avgG += src[nIdx + 1];
-            avgB += src[nIdx + 2];
+            avgR += src[nIdx]!;
+            avgG += src[nIdx + 1]!;
+            avgB += src[nIdx + 2]!;
             count++;
           }
         }
@@ -169,17 +169,17 @@ export function applyBeautyStudio(
 
         // If pixel deviates significantly from local average, blend towards average
         const deviation = Math.sqrt(
-          (cr - avgR) * (cr - avgR) +
-          (cg - avgG) * (cg - avgG) +
-          (cb - avgB) * (cb - avgB),
+          (cr! - avgR) * (cr! - avgR) +
+          (cg! - avgG) * (cg! - avgG) +
+          (cb! - avgB) * (cb! - avgB),
         );
 
         const deviationThreshold = 30 - blemishNorm * 20;
         if (deviation > deviationThreshold) {
-          const blend = weight * blemishNorm * Math.min(1, (deviation - deviationThreshold) / 40);
-          data[idx] = clamp(data[idx] * (1 - blend) + avgR * blend);
-          data[idx + 1] = clamp(data[idx + 1] * (1 - blend) + avgG * blend);
-          data[idx + 2] = clamp(data[idx + 2] * (1 - blend) + avgB * blend);
+          const blend = weight! * blemishNorm * Math.min(1, (deviation - deviationThreshold) / 40);
+          data[idx] = clamp(data[idx]! * (1 - blend) + avgR * blend);
+          data[idx + 1] = clamp(data[idx + 1]! * (1 - blend) + avgG * blend);
+          data[idx + 2] = clamp(data[idx + 2]! * (1 - blend) + avgB * blend);
         }
       }
     }
@@ -190,12 +190,12 @@ export function applyBeautyStudio(
     for (let i = 0; i < data.length; i += 4) {
       const pixIdx = i / 4;
       const weight = skinWeights[pixIdx];
-      if (weight < 0.3) continue; // only affect skin-like pixels
+      if (weight! < 0.3) continue; // only affect skin-like pixels
 
-      const blend = weight * toneNorm * 0.3; // subtle effect
-      data[i] = clamp(data[i] * (1 - blend) + avgSkinR * blend);
-      data[i + 1] = clamp(data[i + 1] * (1 - blend) + avgSkinG * blend);
-      data[i + 2] = clamp(data[i + 2] * (1 - blend) + avgSkinB * blend);
+      const blend = weight! * toneNorm * 0.3; // subtle effect
+      data[i] = clamp(data[i]! * (1 - blend) + avgSkinR * blend);
+      data[i + 1] = clamp(data[i + 1]! * (1 - blend) + avgSkinG * blend);
+      data[i + 2] = clamp(data[i + 2]! * (1 - blend) + avgSkinB * blend);
     }
   }
 }

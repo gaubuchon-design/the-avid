@@ -237,8 +237,8 @@ describe('Node Drop Reliability', () => {
     // Get events since seq 20 — should return the gap
     const gapEvents = rm.getEventsSince('shard-repl-test', 20);
     expect(gapEvents.length).toBe(30);
-    expect(gapEvents[0].sequence).toBe(21);
-    expect(gapEvents[gapEvents.length - 1].sequence).toBe(50);
+    expect(gapEvents[0]!.sequence).toBe(21);
+    expect(gapEvents[gapEvents.length - 1]!.sequence).toBe(50);
 
     // Record and detect a partial-replication conflict
     const conflictHandler = nodeC.conflictHandler;

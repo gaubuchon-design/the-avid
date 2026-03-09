@@ -186,18 +186,18 @@ export function KeyboardSettingsPanel() {
   return (
     <div>
       {/* Top controls */}
-      <div style={styles.topBar}>
+      <div style={styles['topBar']}>
         <input
           type="text"
           placeholder="Search shortcuts..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          style={styles.searchInput}
+          style={styles['searchInput']}
         />
         <select
           value={settings.keyboardLayoutId}
           onChange={(e) => handleLayoutChange(e.target.value)}
-          style={styles.layoutSelect}
+          style={styles['layoutSelect']}
         >
           {availableLayouts.map((l) => (
             <option key={l.id} value={l.id}>{l.name}</option>
@@ -206,67 +206,67 @@ export function KeyboardSettingsPanel() {
       </div>
 
       {/* Action buttons */}
-      <div style={styles.actionBar}>
-        <button style={styles.actionBtn} onClick={handleResetAll} title="Reset all to defaults">
+      <div style={styles['actionBar']}>
+        <button style={styles['actionBtn']} onClick={handleResetAll} title="Reset all to defaults">
           Reset All
         </button>
-        <button style={styles.actionBtn} onClick={handleImport} title="Import keyboard layout">
+        <button style={styles['actionBtn']} onClick={handleImport} title="Import keyboard layout">
           Import
         </button>
-        <button style={styles.actionBtn} onClick={handleExport} title="Export keyboard layout">
+        <button style={styles['actionBtn']} onClick={handleExport} title="Export keyboard layout">
           Export
         </button>
       </div>
 
       {/* Conflicts banner */}
       {conflicts.length > 0 && (
-        <div style={styles.conflictBanner}>
+        <div style={styles['conflictBanner']}>
           {conflicts.length} conflicting binding{conflicts.length > 1 ? 's' : ''} detected
         </div>
       )}
 
       {conflictInfo && (
-        <div style={styles.conflictBanner}>
+        <div style={styles['conflictBanner']}>
           Key reassigned from: {conflictInfo.description}
         </div>
       )}
 
       {/* Category accordion list */}
-      <div style={styles.list}>
+      <div style={styles['list']}>
         {CATEGORY_ORDER.map((cat) => {
           const bindings = groupedBindings.get(cat);
           if (!bindings || bindings.length === 0) return null;
           const isExpanded = expandedCategories.has(cat);
 
           return (
-            <div key={cat} style={styles.category}>
+            <div key={cat} style={styles['category']}>
               <button
-                style={styles.categoryHeader}
+                style={styles['categoryHeader']}
                 onClick={() => toggleCategory(cat)}
               >
                 <span style={{ transform: isExpanded ? 'rotate(90deg)' : 'none', transition: 'transform 100ms', display: 'inline-block' }}>
                   ▸
                 </span>
-                <span style={styles.categoryLabel}>{CATEGORY_LABELS[cat]}</span>
-                <span style={styles.categoryCount}>{bindings.length}</span>
+                <span style={styles['categoryLabel']}>{CATEGORY_LABELS[cat]}</span>
+                <span style={styles['categoryCount']}>{bindings.length}</span>
               </button>
 
               {isExpanded && (
-                <div style={styles.categoryBody}>
+                <div style={styles['categoryBody']}>
                   {bindings.map((binding) => (
-                    <div key={binding.id} style={styles.bindingRow}>
-                      <div style={styles.bindingDescription}>
+                    <div key={binding.id} style={styles['bindingRow']}>
+                      <div style={styles['bindingDescription']}>
                         {binding.description}
-                        {binding.isCustom && <span style={styles.customBadge}>custom</span>}
+                        {binding.isCustom && <span style={styles['customBadge']}>custom</span>}
                       </div>
-                      <div style={styles.bindingActions}>
+                      <div style={styles['bindingActions']}>
                         {editingBindingId === binding.id && isCapturing ? (
-                          <span style={styles.captureHint}>Press a key...</span>
+                          <span style={styles['captureHint']}>Press a key...</span>
                         ) : (
                           <KeyCaptureBadge keyName={binding.key} modifiers={binding.modifiers} />
                         )}
                         <button
-                          style={styles.editBtn}
+                          style={styles['editBtn']}
                           onClick={() => handleEditBinding(binding)}
                           title="Edit binding"
                         >
@@ -274,7 +274,7 @@ export function KeyboardSettingsPanel() {
                         </button>
                         {binding.isCustom && (
                           <button
-                            style={styles.resetBtn}
+                            style={styles['resetBtn']}
                             onClick={() => handleResetBinding(binding)}
                             title="Reset to default"
                           >

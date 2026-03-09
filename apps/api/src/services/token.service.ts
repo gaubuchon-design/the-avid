@@ -122,8 +122,8 @@ class TokenService {
       },
     });
 
-    const totalSpent = transactions.filter(t => t.delta < 0).reduce((sum, t) => sum + Math.abs(t.delta), 0);
-    const totalEarned = transactions.filter(t => t.delta > 0).reduce((sum, t) => sum + t.delta, 0);
+    const totalSpent = transactions.filter((t: { delta: number }) => t.delta < 0).reduce((sum: number, t: { delta: number }) => sum + Math.abs(t.delta), 0);
+    const totalEarned = transactions.filter((t: { delta: number }) => t.delta > 0).reduce((sum: number, t: { delta: number }) => sum + t.delta, 0);
 
     return {
       totalSpent,

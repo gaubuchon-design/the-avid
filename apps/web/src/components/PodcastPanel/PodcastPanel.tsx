@@ -363,7 +363,7 @@ function CleanupTab() {
 
       const fillers: FillerWord[] = Array.from({ length: 12 }, (_, i) => {
         const types: FillerWordType[] = ['um', 'uh', 'like', 'you_know', 'so'];
-        const type = types[Math.floor(Math.random() * types.length)];
+        const type = types[Math.floor(Math.random() * types.length)]!;
         const start = 5 + i * 30 + Math.random() * 20;
         return {
           id: `filler-${i}`,

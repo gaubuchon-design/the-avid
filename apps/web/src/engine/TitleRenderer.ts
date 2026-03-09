@@ -208,7 +208,7 @@ function renderBackground(
     const gradient = ctx.createLinearGradient(x, y, x + w, y);
     const stops = background.gradientColors.length;
     for (let i = 0; i < stops; i++) {
-      gradient.addColorStop(i / (stops - 1), background.gradientColors[i]);
+      gradient.addColorStop(i / (stops - 1), background.gradientColors[i]!);
     }
     ctx.fillStyle = gradient;
     ctx.fillRect(x, y, w, h);
@@ -323,10 +323,10 @@ export function renderTitle(
     if (animation?.type === 'typewriter') {
       const remaining = totalChars - charsRendered;
       if (remaining <= 0) break;
-      if (remaining < lineText.length) {
-        lineText = lineText.substring(0, remaining);
+      if (remaining < lineText!.length!) {
+        lineText = lineText!.substring(0, remaining)!;
       }
-      charsRendered += lineText.length;
+      charsRendered += lineText!.length!;
     }
 
     // ── Outline / Stroke text ──────────────────────────────────────────
@@ -334,12 +334,12 @@ export function renderTitle(
       ctx.strokeStyle = style.outlineColor;
       ctx.lineWidth = style.outlineWidth * 2; // *2 because strokeText straddles the path
       ctx.lineJoin = 'round';
-      ctx.strokeText(lineText, textX, lineY);
+      ctx.strokeText(lineText!, textX, lineY);
     }
 
     // ── Fill text ──────────────────────────────────────────────────────
     ctx.fillStyle = style.color;
-    ctx.fillText(lineText, textX, lineY);
+    ctx.fillText(lineText!, textX, lineY);
   }
 
   // ── Restore context state ──────────────────────────────────────────────

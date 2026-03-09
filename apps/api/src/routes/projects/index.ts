@@ -103,7 +103,7 @@ router.post('/', validate(schemas.createProject), async (req: Request, res: Resp
 // ─── GET /projects/:id ─────────────────────────────────────────────────────────
 router.get('/:id', requireProjectAccess('VIEWER'), async (req: Request, res: Response) => {
   const project = await db.project.findUnique({
-    where: { id: req.params.id, deletedAt: null },
+    where: { id: req.params['id'], deletedAt: null },
     include: {
       bins: {
         where: { parentId: null },
@@ -134,7 +134,7 @@ router.patch(
   validate(schemas.updateProject),
   async (req: Request, res: Response) => {
     const project = await db.project.update({
-      where: { id: req.params.id },
+      where: { id: req.params['id'] },
       data: { ...req.body, lastEditedAt: new Date() },
     });
     res.json({ project });
@@ -145,7 +145,7 @@ router.patch(
 router.delete('/:id', requireProjectAccess('OWNER'), async (req: Request, res: Response) => {
   // Soft delete
   await db.project.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: { deletedAt: new Date(), status: 'DELETED' },
   });
   res.status(204).send();
@@ -154,7 +154,7 @@ router.delete('/:id', requireProjectAccess('OWNER'), async (req: Request, res: R
 // ─── POST /projects/:id/duplicate ──────────────────────────────────────────────
 router.post('/:id/duplicate', requireProjectAccess('EDITOR'), async (req: Request, res: Response) => {
   const source = await db.project.findUnique({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     include: { bins: true, timelines: { include: { tracks: true } } },
   });
   assertFound(source, 'Project');
@@ -182,7 +182,7 @@ router.post('/:id/duplicate', requireProjectAccess('EDITOR'), async (req: Reques
 // ─── GET /projects/:projectId/members ──────────────────────────────────────────
 router.get('/:projectId/members', requireProjectAccess('VIEWER'), async (req: Request, res: Response) => {
   const members = await db.projectMember.findMany({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
     include: {
       user: {
         select: { id: true, displayName: true, email: true, avatarUrl: true, lastActiveAt: true },
@@ -204,9 +204,9 @@ router.post(
     if (!user) throw new NotFoundError('User with that email');
 
     const member = await db.projectMember.upsert({
-      where: { projectId_userId: { projectId: req.params.projectId, userId: user.id } },
+      where: { projectId_userId: { projectId: req.params['projectId'], userId: user.id } },
       update: { role },
-      create: { projectId: req.params.projectId, userId: user.id, role },
+      create: { projectId: req.params['projectId'], userId: user.id, role },
       include: { user: { select: { id: true, displayName: true, email: true, avatarUrl: true } } },
     });
     res.status(201).json({ member });
@@ -216,20 +216,20 @@ router.post(
 // ─── DELETE /projects/:projectId/members/:userId ────────────────────────────────
 router.delete('/:projectId/members/:userId', requireProjectAccess('ADMIN'), async (req: Request, res: Response) => {
   // Cannot remove yourself
-  if (req.params.userId === req.user!.id) {
+  if (req.params['userId'] === req.user!.id) {
     throw new ForbiddenError('Cannot remove yourself from the project');
   }
 
   // Cannot remove the owner
   const targetMember = await db.projectMember.findUnique({
-    where: { projectId_userId: { projectId: req.params.projectId, userId: req.params.userId } },
+    where: { projectId_userId: { projectId: req.params['projectId'], userId: req.params['userId'] } },
   });
   if (targetMember?.role === 'OWNER') {
     throw new ForbiddenError('Cannot remove the project owner');
   }
 
   await db.projectMember.delete({
-    where: { projectId_userId: { projectId: req.params.projectId, userId: req.params.userId } },
+    where: { projectId_userId: { projectId: req.params['projectId'], userId: req.params['userId'] } },
   });
   res.status(204).send();
 });
@@ -237,7 +237,7 @@ router.delete('/:projectId/members/:userId', requireProjectAccess('ADMIN'), asyn
 // ─── GET /projects/:projectId/versions ─────────────────────────────────────────
 router.get('/:projectId/versions', requireProjectAccess('VIEWER'), async (req: Request, res: Response) => {
   const versions = await db.projectVersion.findMany({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
     orderBy: { createdAt: 'desc' },
     take: 50,
   });
@@ -253,9 +253,9 @@ router.post(
     const { version, notes } = req.body;
     const snap = await db.projectVersion.create({
       data: {
-        projectId: req.params.projectId,
+        projectId: req.params['projectId'],
         version: version ?? `v${Date.now()}`,
-        snapshotUrl: `snapshots/${req.params.projectId}/${version ?? Date.now()}.json`,
+        snapshotUrl: `snapshots/${req.params['projectId']}/${version ?? Date.now()}.json`,
         notes,
         createdById: req.user!.id,
       },

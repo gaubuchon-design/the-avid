@@ -56,15 +56,15 @@ export function computeWaveform(imageData: ImageData): Float32Array {
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const offset = (y * width + x) * 4;
-      const r = data[offset] / 255;
-      const g = data[offset + 1] / 255;
-      const b = data[offset + 2] / 255;
+      const r = data[offset]! / 255;
+      const g = data[offset + 1]! / 255;
+      const b = data[offset + 2]! / 255;
 
       // Rec. 709 luma
       const luma = LUMA_R * r + LUMA_G * g + LUMA_B * b;
       const bin = clamp(Math.floor(luma * (WAVEFORM_BINS - 1)), 0, WAVEFORM_BINS - 1);
 
-      result[x * WAVEFORM_BINS + bin] += 1;
+      result[x * WAVEFORM_BINS + bin]! += 1;
     }
   }
 
@@ -73,7 +73,7 @@ export function computeWaveform(imageData: ImageData): Float32Array {
     for (let x = 0; x < width; x++) {
       const base = x * WAVEFORM_BINS;
       for (let bin = 0; bin < WAVEFORM_BINS; bin++) {
-        result[base + bin] /= height;
+        result[base + bin]! /= height;
       }
     }
   }
@@ -98,9 +98,9 @@ export function computeVectorscope(imageData: ImageData): { cb: Float32Array; cr
 
   for (let i = 0; i < pixelCount; i++) {
     const offset = i * 4;
-    const r = data[offset] / 255;
-    const g = data[offset + 1] / 255;
-    const b = data[offset + 2] / 255;
+    const r = data[offset]! / 255;
+    const g = data[offset + 1]! / 255;
+    const b = data[offset + 2]! / 255;
 
     // BT.709 YCbCr conversion
     const y = LUMA_R * r + LUMA_G * g + LUMA_B * b;
@@ -137,9 +137,9 @@ export function computeHistogram(imageData: ImageData): {
 
   for (let i = 0; i < pixelCount; i++) {
     const offset = i * 4;
-    rHist[data[offset]]++;
-    gHist[data[offset + 1]]++;
-    bHist[data[offset + 2]]++;
+    rHist[data[offset]!]!++;
+    gHist[data[offset + 1]!]!++;
+    bHist[data[offset + 2]!]!++;
   }
 
   return { r: rHist, g: gHist, b: bHist };
@@ -169,13 +169,13 @@ export function computeParade(imageData: ImageData): {
     for (let x = 0; x < width; x++) {
       const offset = (y * width + x) * 4;
 
-      const rBin = clamp(Math.floor((data[offset] / 255) * (WAVEFORM_BINS - 1)), 0, WAVEFORM_BINS - 1);
-      const gBin = clamp(Math.floor((data[offset + 1] / 255) * (WAVEFORM_BINS - 1)), 0, WAVEFORM_BINS - 1);
-      const bBin = clamp(Math.floor((data[offset + 2] / 255) * (WAVEFORM_BINS - 1)), 0, WAVEFORM_BINS - 1);
+      const rBin = clamp(Math.floor((data[offset]! / 255) * (WAVEFORM_BINS - 1)), 0, WAVEFORM_BINS - 1);
+      const gBin = clamp(Math.floor((data[offset + 1]! / 255) * (WAVEFORM_BINS - 1)), 0, WAVEFORM_BINS - 1);
+      const bBin = clamp(Math.floor((data[offset + 2]! / 255) * (WAVEFORM_BINS - 1)), 0, WAVEFORM_BINS - 1);
 
-      rResult[x * WAVEFORM_BINS + rBin] += 1;
-      gResult[x * WAVEFORM_BINS + gBin] += 1;
-      bResult[x * WAVEFORM_BINS + bBin] += 1;
+      rResult[x * WAVEFORM_BINS + rBin]! += 1;
+      gResult[x * WAVEFORM_BINS + gBin]! += 1;
+      bResult[x * WAVEFORM_BINS + bBin]! += 1;
     }
   }
 
@@ -184,9 +184,9 @@ export function computeParade(imageData: ImageData): {
     for (let x = 0; x < width; x++) {
       const base = x * WAVEFORM_BINS;
       for (let bin = 0; bin < WAVEFORM_BINS; bin++) {
-        rResult[base + bin] /= height;
-        gResult[base + bin] /= height;
-        bResult[base + bin] /= height;
+        rResult[base + bin]! /= height;
+        gResult[base + bin]! /= height;
+        bResult[base + bin]! /= height;
       }
     }
   }
@@ -229,19 +229,19 @@ export function renderWaveform(waveformData: Float32Array, canvas: HTMLCanvasEle
   ctx.fillStyle = 'rgba(120, 120, 120, 0.8)';
 
   for (let i = 0; i < graticuleLevels.length; i++) {
-    const y = graticuleLevels[i] * canvasH;
+    const y = graticuleLevels[i]! * canvasH;
     ctx.beginPath();
     ctx.moveTo(0, y);
     ctx.lineTo(canvasW, y);
     ctx.stroke();
-    ctx.fillText(graticuleLabels[i], 4, y - 3);
+    ctx.fillText(graticuleLabels[i]!, 4, y - 3);
   }
   ctx.setLineDash([]);
 
   // Find max density for auto-gain
   let maxDensity = 0;
   for (let i = 0; i < waveformData.length; i++) {
-    if (waveformData[i] > maxDensity) maxDensity = waveformData[i];
+    if (waveformData[i]! > maxDensity) maxDensity = waveformData[i]!;
   }
   if (maxDensity === 0) return;
 
@@ -255,10 +255,10 @@ export function renderWaveform(waveformData: Float32Array, canvas: HTMLCanvasEle
 
     for (let bin = 0; bin < WAVEFORM_BINS; bin++) {
       const density = waveformData[base + bin];
-      if (density <= 0) continue;
+      if (density! <= 0) continue;
 
       // Normalise density and apply a square root curve for visibility
-      const normDensity = Math.sqrt(density / maxDensity);
+      const normDensity = Math.sqrt(density! / maxDensity);
       const alpha = clamp(normDensity, 0.05, 1.0);
 
       // Bin 0 = bottom of scope (darkest), bin 255 = top (brightest)
@@ -364,18 +364,18 @@ export function renderVectorscope(
 
   for (let i = 0; i < pixelCount; i++) {
     // Map CbCr [-0.5, 0.5] to grid coordinates
-    const gx = Math.floor(((data.cb[i] / 0.5) * 0.5 + 0.5) * (gridSize - 1));
-    const gy = Math.floor(((-data.cr[i] / 0.5) * 0.5 + 0.5) * (gridSize - 1));
+    const gx = Math.floor(((data.cb[i]! / 0.5) * 0.5 + 0.5) * (gridSize - 1));
+    const gy = Math.floor(((-data.cr[i]! / 0.5) * 0.5 + 0.5) * (gridSize - 1));
 
     if (gx >= 0 && gx < gridSize && gy >= 0 && gy < gridSize) {
-      densityGrid[gy * gridSize + gx] += 1;
+      densityGrid[gy * gridSize + gx]! += 1;
     }
   }
 
   // Find max density for normalisation
   let maxDensity = 0;
   for (let i = 0; i < densityGrid.length; i++) {
-    if (densityGrid[i] > maxDensity) maxDensity = densityGrid[i];
+    if (densityGrid[i]! > maxDensity) maxDensity = densityGrid[i]!;
   }
 
   if (maxDensity === 0) return;
@@ -387,9 +387,9 @@ export function renderVectorscope(
   for (let gy = 0; gy < gridSize; gy++) {
     for (let gx = 0; gx < gridSize; gx++) {
       const density = densityGrid[gy * gridSize + gx];
-      if (density <= 0) continue;
+      if (density! <= 0) continue;
 
-      const normDensity = Math.sqrt(density / maxDensity);
+      const normDensity = Math.sqrt(density! / maxDensity);
       const alpha = clamp(normDensity, 0.1, 1.0);
 
       ctx.fillStyle = `rgba(0, 255, 0, ${alpha.toFixed(3)})`;
@@ -428,9 +428,9 @@ export function renderHistogram(
   // Find overall max for normalisation
   let maxCount = 0;
   for (let i = 0; i < 256; i++) {
-    if (data.r[i] > maxCount) maxCount = data.r[i];
-    if (data.g[i] > maxCount) maxCount = data.g[i];
-    if (data.b[i] > maxCount) maxCount = data.b[i];
+    if (data.r[i]! > maxCount) maxCount = data.r[i]!;
+    if (data.g[i]! > maxCount) maxCount = data.g[i]!;
+    if (data.b[i]! > maxCount) maxCount = data.b[i]!;
   }
 
   if (maxCount === 0) return;
@@ -451,7 +451,7 @@ export function renderHistogram(
 
     for (let i = 0; i < 256; i++) {
       const x = (i / 255) * canvasW;
-      const h = (ch.hist[i] / maxCount) * canvasH;
+      const h = (ch.hist[i]! / maxCount) * canvasH;
       ctx.lineTo(x, canvasH - h);
     }
 
@@ -530,7 +530,7 @@ export function renderParade(
   const allData = [data.r, data.g, data.b];
   for (const chData of allData) {
     for (let i = 0; i < chData.length; i++) {
-      if (chData[i] > maxDensity) maxDensity = chData[i];
+      if (chData[i]! > maxDensity) maxDensity = chData[i]!;
     }
   }
 
@@ -555,9 +555,9 @@ export function renderParade(
 
       for (let bin = 0; bin < WAVEFORM_BINS; bin++) {
         const density = ch.data[base + bin];
-        if (density <= 0) continue;
+        if (density! <= 0) continue;
 
-        const normDensity = Math.sqrt(density / maxDensity);
+        const normDensity = Math.sqrt(density! / maxDensity);
         const alpha = clamp(normDensity, 0.05, 1.0);
 
         // Bin 0 = bottom (dark), bin 255 = top (bright)

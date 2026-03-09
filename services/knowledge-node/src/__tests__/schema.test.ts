@@ -100,7 +100,7 @@ describe('Migration', () => {
       .prepare('SELECT name FROM _migrations')
       .all() as Array<{ name: string }>;
     expect(rows).toHaveLength(1);
-    expect(rows[0].name).toBe('001-initial');
+    expect(rows[0]!.name).toBe('001-initial');
   });
 
   it('should be idempotent — re-opening does not fail', () => {
@@ -144,7 +144,7 @@ describe('Assets', () => {
     db.insertAsset(makeAsset({ id: 'a2', shardId: 'shard-2' }));
     const filtered = db.listAssets('shard-1');
     expect(filtered).toHaveLength(1);
-    expect(filtered[0].id).toBe('a1');
+    expect(filtered[0]!.id).toBe('a1');
   });
 
   it('should update asset fields', () => {
@@ -166,7 +166,7 @@ describe('Assets', () => {
     db.insertAsset(makeAsset({ id: 'a2', name: 'B-Roll Park' }));
     const results = db.searchAssets('Interview');
     expect(results).toHaveLength(1);
-    expect(results[0].name).toBe('Interview Day1');
+    expect(results[0]!.name).toBe('Interview Day1');
   });
 });
 
@@ -197,9 +197,9 @@ describe('Transcript Segments', () => {
 
     const segments = db.getTranscriptForAsset('asset-1');
     expect(segments).toHaveLength(1);
-    expect(segments[0].text).toBe('Hello world');
-    expect(segments[0].confidence).toBeCloseTo(0.95);
-    expect(segments[0].speakerName).toBe('Host');
+    expect(segments[0]!.text).toBe('Hello world');
+    expect(segments[0]!.confidence).toBeCloseTo(0.95);
+    expect(segments[0]!.speakerName).toBe('Host');
   });
 
   it('should search transcript text', () => {
@@ -230,7 +230,7 @@ describe('Transcript Segments', () => {
 
     const results = db.searchTranscripts('quick');
     expect(results).toHaveLength(1);
-    expect(results[0].id).toBe('seg-1');
+    expect(results[0]!.id).toBe('seg-1');
   });
 
   it('should cascade delete segments when asset is deleted', () => {
@@ -276,8 +276,8 @@ describe('Vision Events', () => {
 
     const events = db.getVisionEventsForAsset('asset-1');
     expect(events).toHaveLength(1);
-    expect(events[0].eventType).toBe('scene-change');
-    expect(events[0].label).toBe('Cut to wide shot');
+    expect(events[0]!.eventType).toBe('scene-change');
+    expect(events[0]!.label).toBe('Cut to wide shot');
   });
 });
 
@@ -303,11 +303,11 @@ describe('Embedding Chunks', () => {
 
     const retrieved = db.getEmbeddingsForSource('seg-1');
     expect(retrieved).toHaveLength(1);
-    expect(retrieved[0].modelId).toBe('bge-m3');
-    expect(retrieved[0].dimensions).toBe(4);
+    expect(retrieved[0]!.modelId).toBe('bge-m3');
+    expect(retrieved[0]!.dimensions).toBe(4);
 
     // Verify the vector round-trips correctly.
-    const roundTripped = bufferToVector(retrieved[0].vector);
+    const roundTripped = bufferToVector(retrieved[0]!.vector);
     expect(roundTripped.length).toBe(4);
     expect(roundTripped[0]).toBeCloseTo(0.1);
     expect(roundTripped[1]).toBeCloseTo(0.2);
@@ -372,8 +372,8 @@ describe('Markers', () => {
 
     const markers = db.getMarkersForAsset('asset-1');
     expect(markers).toHaveLength(1);
-    expect(markers[0].label).toBe('Good take');
-    expect(markers[0].color).toBe('#00ff00');
+    expect(markers[0]!.label).toBe('Good take');
+    expect(markers[0]!.color).toBe('#00ff00');
   });
 
   it('should retrieve markers for a sequence', () => {
@@ -393,7 +393,7 @@ describe('Markers', () => {
 
     const markers = db.getMarkersForSequence('seq-1');
     expect(markers).toHaveLength(1);
-    expect(markers[0].label).toBe('Chapter 1');
+    expect(markers[0]!.label).toBe('Chapter 1');
   });
 });
 
@@ -450,9 +450,9 @@ describe('Tool Traces', () => {
 
     const traces = db.getTracesForPlan('plan-1');
     expect(traces).toHaveLength(1);
-    expect(traces[0].toolName).toBe('transcribe');
-    expect(traces[0].status).toBe('completed');
-    expect(traces[0].tokensCost).toBeCloseTo(150.5);
+    expect(traces[0]!.toolName).toBe('transcribe');
+    expect(traces[0]!.status).toBe('completed');
+    expect(traces[0]!.tokensCost).toBeCloseTo(150.5);
   });
 });
 
@@ -478,8 +478,8 @@ describe('Publish Variants', () => {
 
     const variants = db.getVariantsForSequence('seq-1');
     expect(variants).toHaveLength(1);
-    expect(variants[0].platform).toBe('youtube');
-    expect(variants[0].status).toBe('draft');
+    expect(variants[0]!.platform).toBe('youtube');
+    expect(variants[0]!.status).toBe('draft');
   });
 });
 
@@ -550,7 +550,7 @@ describe('Vector Helpers', () => {
 
     expect(restored.length).toBe(original.length);
     for (let i = 0; i < original.length; i++) {
-      expect(restored[i]).toBeCloseTo(original[i], 5);
+      expect(restored[i]).toBeCloseTo(original[i]!, 5);
     }
   });
 

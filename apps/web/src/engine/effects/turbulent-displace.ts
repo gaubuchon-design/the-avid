@@ -31,7 +31,7 @@ function perlinNoise(x: number, y: number): number {
 
   const dot = (gx: number, gy: number, dx: number, dy: number) => {
     const g = GRAD[hash(gx, gy)];
-    return g[0] * dx + g[1] * dy;
+    return g![0]! * dx + g![1]! * dy;
   };
 
   const n00 = dot(x0, y0, x - x0, y - y0);
@@ -105,10 +105,10 @@ export function applyTurbulentDisplace(
       }
 
       const si = (srcY * width + srcX) * 4;
-      data[di] = src[si];
-      data[di + 1] = src[si + 1];
-      data[di + 2] = src[si + 2];
-      data[di + 3] = src[si + 3];
+      data[di] = src[si]!;
+      data[di + 1] = src[si + 1]!;
+      data[di + 2] = src[si + 2]!;
+      data[di + 3] = src[si + 3]!;
     }
   }
 }

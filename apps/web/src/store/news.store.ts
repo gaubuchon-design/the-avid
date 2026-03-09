@@ -407,7 +407,7 @@ export const useNewsStore = create<NewsState & NewsActions>()(
       const idx = rundown.stories.findIndex((st) => st.storyId === storyId);
       if (idx < 0) return;
       const [story] = rundown.stories.splice(idx, 1);
-      rundown.stories.splice(newIndex, 0, story);
+      rundown.stories.splice(newIndex, 0, story!);
       rundown.stories.forEach((st, i) => { st.sortOrder = i; });
     }),
 
@@ -492,7 +492,7 @@ export const useNewsStore = create<NewsState & NewsActions>()(
       const idx = rundown.stories.findIndex((st) => st.storyId === storyId);
       if (idx < 0 || idx === newIndex) return;
       const [story] = rundown.stories.splice(idx, 1);
-      rundown.stories.splice(newIndex, 0, story);
+      rundown.stories.splice(newIndex, 0, story!);
       rundown.stories.forEach((st, i) => { st.sortOrder = i; });
     }),
 

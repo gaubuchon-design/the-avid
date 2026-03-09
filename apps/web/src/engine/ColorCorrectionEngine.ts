@@ -134,19 +134,19 @@ function clamp(value: number, min: number, max: number): number {
  */
 function evaluateCurve(points: CurvesPoint[], input: number): number {
   if (points.length === 0) return input;
-  if (points.length === 1) return points[0].output;
+  if (points.length === 1) return points[0]!.output;
 
   // Clamp to first/last point
-  if (input <= points[0].input) return points[0].output;
-  if (input >= points[points.length - 1].input) return points[points.length - 1].output;
+  if (input <= points[0]!.input) return points[0]!.output;
+  if (input >= points[points.length - 1]!.input) return points[points.length - 1]!.output;
 
   // Find surrounding points
   for (let i = 0; i < points.length - 1; i++) {
     const p0 = points[i];
     const p1 = points[i + 1];
-    if (input >= p0.input && input <= p1.input) {
-      const t = (input - p0.input) / (p1.input - p0.input);
-      return p0.output + t * (p1.output - p0.output);
+    if (input >= p0!.input! && input <= p1!.input!) {
+      const t = (input - p0!.input!) / (p1!.input! - p0!.input!);
+      return p0!.output! + t * (p1!.output! - p0!.output!);
     }
   }
 

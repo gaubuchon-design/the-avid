@@ -36,7 +36,7 @@ export function applyEdgeCleaner(
   // Extract alpha channel
   const alpha = new Float32Array(width * height);
   for (let i = 0; i < data.length; i += 4) {
-    alpha[i / 4] = data[i + 3] / 255;
+    alpha[i / 4] = data[i + 3]! / 255;
   }
 
   // Step 1: Erode — minimum filter on alpha
@@ -52,7 +52,7 @@ export function applyEdgeCleaner(
             if (dx * dx + dy * dy > erodeR * erodeR) continue;
             const ny = Math.min(Math.max(y + dy, 0), height - 1);
             const nx = Math.min(Math.max(x + dx, 0), width - 1);
-            minVal = Math.min(minVal, temp[ny * width + nx]);
+            minVal = Math.min(minVal, temp[ny * width + nx]!);
           }
         }
         alpha[y * width + x] = minVal;
@@ -64,8 +64,8 @@ export function applyEdgeCleaner(
   if (contract > 0) {
     const contractThreshold = 1.0 - (contract / 100) * 0.5;
     for (let i = 0; i < alpha.length; i++) {
-      if (alpha[i] < contractThreshold) {
-        alpha[i] = Math.max(0, alpha[i] * (alpha[i] / contractThreshold));
+      if (alpha[i]! < contractThreshold) {
+        alpha[i] = Math.max(0, alpha[i]! * (alpha[i]! / contractThreshold));
       }
     }
   }
@@ -81,7 +81,7 @@ export function applyEdgeCleaner(
         let sum = 0, count = 0;
         for (let dx = -blurR; dx <= blurR; dx++) {
           const nx = Math.min(Math.max(x + dx, 0), width - 1);
-          sum += tempH[y * width + nx];
+          sum += tempH[y * width + nx]!;
           count++;
         }
         alpha[y * width + x] = sum / count;
@@ -95,7 +95,7 @@ export function applyEdgeCleaner(
         let sum = 0, count = 0;
         for (let dy = -blurR; dy <= blurR; dy++) {
           const ny = Math.min(Math.max(y + dy, 0), height - 1);
-          sum += tempV[ny * width + x];
+          sum += tempV[ny * width + x]!;
           count++;
         }
         alpha[y * width + x] = sum / count;
@@ -111,8 +111,8 @@ export function applyEdgeCleaner(
 
     for (let i = 0; i < alpha.length; i++) {
       const a = alpha[i];
-      if (a > 0 && a < 1) {
-        const t = Math.max(0, Math.min(1, (a - low) / (high - low)));
+      if (a! > 0 && a! < 1) {
+        const t = Math.max(0, Math.min(1, (a! - low) / (high - low)));
         alpha[i] = t * t * (3 - 2 * t); // smoothstep
       }
     }
@@ -120,7 +120,7 @@ export function applyEdgeCleaner(
 
   // Write alpha back
   for (let i = 0; i < data.length; i += 4) {
-    data[i + 3] = clamp(alpha[i / 4] * 255);
+    data[i + 3] = clamp(alpha[i / 4]! * 255);
   }
 }
 
@@ -150,7 +150,7 @@ export function applyMatteChoker(
   // Extract alpha channel
   const alpha = new Float32Array(width * height);
   for (let i = 0; i < data.length; i += 4) {
-    alpha[i / 4] = data[i + 3] / 255;
+    alpha[i / 4] = data[i + 3]! / 255;
   }
 
   // Step 1: Choke/expand using morphological operations
@@ -171,16 +171,16 @@ export function applyMatteChoker(
             const val = temp[ny * width + nx];
 
             if (isContract) {
-              resultVal = Math.min(resultVal, val); // erosion
+              resultVal = Math.min(resultVal, val!); // erosion
             } else {
-              resultVal = Math.max(resultVal, val); // dilation
+              resultVal = Math.max(resultVal, val!); // dilation
             }
           }
         }
 
         // Blend with original based on chokeAmount strength
         const strength = Math.abs(chokeAmount) / 100;
-        alpha[y * width + x] = temp[y * width + x] * (1 - strength) + resultVal * strength;
+        alpha[y * width + x] = temp[y * width + x]! * (1 - strength) + resultVal * strength;
       }
     }
   }
@@ -194,14 +194,14 @@ export function applyMatteChoker(
       for (let x = 0; x < width; x++) {
         const orig = temp[y * width + x];
         // Only smooth semi-transparent areas
-        if (orig <= 0.01 || orig >= 0.99) continue;
+        if (orig! <= 0.01 || orig! >= 0.99) continue;
 
         let sum = 0, count = 0;
         for (let dy = -smoothR; dy <= smoothR; dy++) {
           for (let dx = -smoothR; dx <= smoothR; dx++) {
             const ny = Math.min(Math.max(y + dy, 0), height - 1);
             const nx = Math.min(Math.max(x + dx, 0), width - 1);
-            sum += temp[ny * width + nx];
+            sum += temp[ny * width + nx]!;
             count++;
           }
         }
@@ -221,7 +221,7 @@ export function applyMatteChoker(
         let sum = 0, count = 0;
         for (let dx = -softR; dx <= softR; dx++) {
           const nx = Math.min(Math.max(x + dx, 0), width - 1);
-          sum += tempH[y * width + nx];
+          sum += tempH[y * width + nx]!;
           count++;
         }
         alpha[y * width + x] = sum / count;
@@ -235,7 +235,7 @@ export function applyMatteChoker(
         let sum = 0, count = 0;
         for (let dy = -softR; dy <= softR; dy++) {
           const ny = Math.min(Math.max(y + dy, 0), height - 1);
-          sum += tempV[ny * width + x];
+          sum += tempV[ny * width + x]!;
           count++;
         }
         alpha[y * width + x] = sum / count;
@@ -245,6 +245,6 @@ export function applyMatteChoker(
 
   // Write alpha back
   for (let i = 0; i < data.length; i += 4) {
-    data[i + 3] = clamp(alpha[i / 4] * 255);
+    data[i + 3] = clamp(alpha[i / 4]! * 255);
   }
 }

@@ -109,7 +109,7 @@ function estimateBPM(
     let correlation = 0;
     const count = Math.min(energyProfile.length - lag, 1000);
     for (let i = 0; i < count; i++) {
-      correlation += energyProfile[i] * energyProfile[i + lag];
+      correlation += (energyProfile[i] ?? 0) * (energyProfile[i + lag] ?? 0);
     }
     correlation /= count;
 
@@ -146,10 +146,10 @@ function generateAutoCuts(
   let clipIndex = 0;
 
   for (let i = 0; i < filteredBeats.length; i += everyNBeats) {
-    const beat = filteredBeats[i];
+    const beat = filteredBeats[i]!;
     cuts.push({
       time: beat.time,
-      clipId: sourceClipIds[clipIndex % sourceClipIds.length],
+      clipId: sourceClipIds[clipIndex % sourceClipIds.length]!,
     });
     clipIndex++;
   }
@@ -187,28 +187,28 @@ function generateSpeedRamps(
 
   for (let i = 0; i < filteredBeats.length; i++) {
     const beat = filteredBeats[i];
-    const isDownbeat = beat.type === 'downbeat';
+    const isDownbeat = beat!.type === 'downbeat';
 
     // On downbeats, ramp up speed; between beats, slow down
     if (isDownbeat) {
       // Impact moment: accelerate
       keyframes.push({
-        time: beat.time,
+        time: beat!.time,
         speed: 1 + intensity * 0.8,
       });
       // Return to normal shortly after
       keyframes.push({
-        time: beat.time + 0.15,
+        time: beat!.time + 0.15,
         speed: 1.0,
       });
-    } else if (beat.strength > 0.6) {
+    } else if (beat!.strength > 0.6) {
       // Strong off-beat: slight slow-down for dramatic effect
       keyframes.push({
-        time: beat.time - 0.1,
+        time: beat!.time - 0.1,
         speed: 1 - intensity * 0.3,
       });
       keyframes.push({
-        time: beat.time + 0.1,
+        time: beat!.time + 0.1,
         speed: 1.0,
       });
     }
@@ -383,7 +383,7 @@ export class BeatSyncEngine {
   quantizeToNearestBeat(time: number): number {
     if (!this.cachedBeats || this.cachedBeats.length === 0) return time;
 
-    let nearest = this.cachedBeats[0].time;
+    let nearest = this.cachedBeats[0]!.time;
     let minDistance = Math.abs(time - nearest);
 
     for (const beat of this.cachedBeats) {

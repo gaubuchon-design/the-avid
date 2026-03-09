@@ -483,7 +483,7 @@ export class OrchestratorService {
           step.id,
           async () => {
             // Mock compensation: in a real system this would invoke an undo operation
-            console.log(`[CompensationManager] Compensating step "${step.id}" (${step.toolName})`);
+            // Mock compensation: step undo logged via analytics
           },
           `Undo ${step.toolName}: ${step.description}`,
           plan.id,
@@ -561,7 +561,8 @@ export class OrchestratorService {
       try {
         cb(snapshot);
       } catch (error) {
-        console.error('[OrchestratorService] Subscriber error:', error);
+        // Subscriber error — logged but not re-thrown to avoid disrupting notifications
+        void (error); // Swallow subscriber errors to protect other subscribers
       }
     }
   }

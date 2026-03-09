@@ -84,7 +84,7 @@ class AIService {
           completedAt: new Date(),
           errorMessage: err.message?.slice(0, 2000),
         },
-      }).catch((dbErr) => logger.error('Failed to update AI job status', { jobId: job.id, error: dbErr.message }));
+      }).catch((dbErr: Error) => logger.error('Failed to update AI job status', { jobId: job.id, error: dbErr.message }));
     }
 
     // Process next job in queue
@@ -135,7 +135,7 @@ class AIService {
           { start: 0, end: 2.5, text: 'This is a mock' },
           { start: 2.5, end: 5.0, text: 'transcription of the media asset.' },
         ],
-        language: params.language ?? 'en',
+        language: params['language'] ?? 'en',
       };
 
       await db.mediaAsset.update({
@@ -175,7 +175,7 @@ class AIService {
       where: {
         bin: { projectId: job.projectId! },
         transcript: { not: null },
-        ...(params.mediaAssetIds?.length ? { id: { in: params.mediaAssetIds } } : {}),
+        ...(params['mediaAssetIds']?.length ? { id: { in: params['mediaAssetIds'] } } : {}),
       },
       select: { id: true, name: true, duration: true, transcript: true, autoTags: true },
       take: 50,
@@ -186,14 +186,14 @@ class AIService {
     }
 
     const systemPrompt = `You are an expert video editor assembling a first-pass timeline.
-Role: ${params.role ?? 'editor'}
+Role: ${params['role'] ?? 'editor'}
 Create a JSON timeline assembly from the provided media clips based on their transcripts.
 Return valid JSON: { clips: [{ assetId, startTime, endTime, trimStart, trimEnd, notes }], narrative: string }`;
 
     const userPrompt = `Assemble a compelling sequence using these clips:
 ${assets.map((a: { name: string; duration: number | null; transcript: string | null }) => `- ${a.name} (${a.duration?.toFixed(1)}s): "${a.transcript?.slice(0, 200)}..."`).join('\n')}
 
-${params.prompt ? `Additional direction: ${params.prompt}` : ''}`;
+${params['prompt'] ? `Additional direction: ${params['prompt']}` : ''}`;
 
     try {
       const completion = await openai.chat.completions.create({
@@ -233,7 +233,7 @@ ${params.prompt ? `Additional direction: ${params.prompt}` : ''}`;
   private async runHighlights(job: QueuedAIJob, params: Record<string, any>): Promise<JobResult> {
     logger.info('Detecting highlights', { jobId: job.id, projectId: job.projectId });
     // In production: analyze visual + audio features to detect key moments
-    return { summary: `Detected highlights: 5 moments (${params.criteria ?? 'action,emotion'})` };
+    return { summary: `Detected highlights: 5 moments (${params['criteria'] ?? 'action,emotion'})` };
   }
 
   // ─── Scene Detection ─────────────────────────────────────────────────────────
@@ -256,7 +256,7 @@ ${params.prompt ? `Additional direction: ${params.prompt}` : ''}`;
   private async runSmartReframe(job: QueuedAIJob, params: Record<string, any>): Promise<JobResult> {
     logger.info('Running smart reframe', { jobId: job.id, assetId: job.mediaAssetId });
     // In production: detect subject/speaker, apply crop for target aspect ratio
-    return { summary: `Smart reframe applied to ${params.aspectRatio ?? '9:16'}` };
+    return { summary: `Smart reframe applied to ${params['aspectRatio'] ?? '9:16'}` };
   }
 
   // ─── Voice Isolation ─────────────────────────────────────────────────────────
@@ -284,7 +284,7 @@ ${params.prompt ? `Additional direction: ${params.prompt}` : ''}`;
   private async runScriptSync(job: QueuedAIJob, params: Record<string, any>): Promise<JobResult> {
     logger.info('Running script sync', { jobId: job.id, projectId: job.projectId });
     // In production: align script text to transcribed audio via forced alignment
-    const wordCount = (params.scriptText as string)?.split(/\s+/).length ?? 0;
+    const wordCount = (params['scriptText'] as string)?.split(/\s+/).length ?? 0;
     return { summary: `Script synced: ${wordCount} words aligned to footage` };
   }
 

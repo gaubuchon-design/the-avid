@@ -175,8 +175,8 @@ function getNeighbors(
   if (idx < 0) return { left: null, right: null };
 
   return {
-    left: idx > 0 ? sorted[idx - 1] : null,
-    right: idx < sorted.length - 1 ? sorted[idx + 1] : null,
+    left: idx! > 0 ? sorted[idx - 1]! : null,
+    right: idx! < sorted.length - 1 ? sorted[idx + 1]! : null,
   };
 }
 
@@ -867,7 +867,7 @@ export class TrimEngine {
     }
 
     // Use the first roller's edit point as the reference
-    const currentEditTime = this.state.rollers[0].editPointTime + this.state.totalDelta;
+    const currentEditTime = this.state.rollers[0]!.editPointTime + this.state.totalDelta;
     const delta = time - currentEditTime;
 
     return this.trimByDelta(delta);

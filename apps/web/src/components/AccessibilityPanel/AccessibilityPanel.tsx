@@ -239,8 +239,8 @@ function ComplianceBadge({ score }: { score: number }) {
       fontSize: 10,
       padding: '3px 8px',
       borderRadius: 3,
-      background: c.bg,
-      color: c.fg,
+      background: c!.bg!,
+      color: c!.fg!,
       fontWeight: 700,
       letterSpacing: '0.04em',
     }}>

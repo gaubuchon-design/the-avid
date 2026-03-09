@@ -82,7 +82,7 @@ export class BasicCaptionValidator {
     const sorted = [...cues].sort((a, b) => a.startTime - b.startTime);
 
     for (let i = 0; i < sorted.length; i++) {
-      const cue = sorted[i];
+      const cue = sorted[i]!;
       const duration = cue.endTime - cue.startTime;
 
       // Empty cue check
@@ -101,7 +101,7 @@ export class BasicCaptionValidator {
 
       // Overlap check
       if (i < sorted.length - 1) {
-        const next = sorted[i + 1];
+        const next = sorted[i + 1]!;
         if (cue.endTime > next.startTime + 0.001) {
           errors.push({ cueId: cue.id, type: 'TIMING_OVERLAP', message: `Overlaps with next cue by ${(cue.endTime - next.startTime).toFixed(3)}s`, severity: 'error' });
         } else if (next.startTime - cue.endTime < this.minGap) {
@@ -129,7 +129,7 @@ export class BasicCaptionValidator {
     }
 
     const totalDuration = sorted.length > 0
-      ? sorted[sorted.length - 1].endTime - sorted[0].startTime
+      ? sorted[sorted.length - 1]!.endTime - sorted[0]!.startTime
       : 0;
     const coveredTime = sorted.reduce((sum, c) => sum + (c.endTime - c.startTime), 0);
     const totalWords = sorted.reduce((sum, c) => sum + c.text.split(/\s+/).length, 0);

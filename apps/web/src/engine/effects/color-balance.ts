@@ -47,7 +47,7 @@ export function applyColorBalance(
     const b = data[i + 2];
 
     // Luminance (Rec. 709)
-    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    const lum = 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
     const lumNorm = lum / 255; // 0..1
 
     // Shadow weight: strongest at dark values, fades to 0 at mid
@@ -57,9 +57,9 @@ export function applyColorBalance(
     // Midtone weight: bell curve centered at 0.5
     const midW = 1 - shadowW - highW;
 
-    let nr = r + (shadowsR * scale * shadowW + midtonesR * scale * midW + highlightsR * scale * highW) / 100;
-    let ng = g + (shadowsG * scale * shadowW + midtonesG * scale * midW + highlightsG * scale * highW) / 100;
-    let nb = b + (shadowsB * scale * shadowW + midtonesB * scale * midW + highlightsB * scale * highW) / 100;
+    let nr = r! + (shadowsR * scale * shadowW + midtonesR * scale * midW + highlightsR * scale * highW) / 100;
+    let ng = g! + (shadowsG * scale * shadowW + midtonesG * scale * midW + highlightsG * scale * highW) / 100;
+    let nb = b! + (shadowsB * scale * shadowW + midtonesB * scale * midW + highlightsB * scale * highW) / 100;
 
     if (preserveLuminosity) {
       const newLum = 0.2126 * nr + 0.7152 * ng + 0.0722 * nb;

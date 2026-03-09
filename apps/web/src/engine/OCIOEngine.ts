@@ -91,10 +91,10 @@ function mulMat4(a: Mat4, b: Mat4): Mat4 {
   for (let row = 0; row < 4; row++) {
     for (let col = 0; col < 4; col++) {
       r[row * 4 + col] =
-        a[row * 4 + 0] * b[0 * 4 + col] +
-        a[row * 4 + 1] * b[1 * 4 + col] +
-        a[row * 4 + 2] * b[2 * 4 + col] +
-        a[row * 4 + 3] * b[3 * 4 + col];
+        a[row * 4 + 0]! * b[0 * 4 + col]! +
+        a[row * 4 + 1]! * b[1 * 4 + col]! +
+        a[row * 4 + 2]! * b[2 * 4 + col]! +
+        a[row * 4 + 3]! * b[3 * 4 + col]!;
     }
   }
   return r as Mat4;
@@ -859,30 +859,30 @@ export function parseCubeLUT(text: string): LUT1D | LUT3D | null {
       continue;
     }
     if (line.startsWith('LUT_1D_SIZE')) {
-      size1D = parseInt(line.split(/\s+/)[1], 10);
+      size1D = parseInt(line.split(/\s+/)[1]!, 10);
       continue;
     }
     if (line.startsWith('LUT_3D_SIZE')) {
-      size3D = parseInt(line.split(/\s+/)[1], 10);
+      size3D = parseInt(line.split(/\s+/)[1]!, 10);
       continue;
     }
     if (line.startsWith('DOMAIN_MIN')) {
       const parts = line.split(/\s+/);
-      domainMin = [parseFloat(parts[1]), parseFloat(parts[2]), parseFloat(parts[3])];
+      domainMin = [parseFloat(parts[1]!), parseFloat(parts[2]!), parseFloat(parts[3]!)];
       continue;
     }
     if (line.startsWith('DOMAIN_MAX')) {
       const parts = line.split(/\s+/);
-      domainMax = [parseFloat(parts[1]), parseFloat(parts[2]), parseFloat(parts[3])];
+      domainMax = [parseFloat(parts[1]!), parseFloat(parts[2]!), parseFloat(parts[3]!)];
       continue;
     }
 
     // Data line
     const parts = line.split(/\s+/);
     if (parts.length >= 3) {
-      const r = parseFloat(parts[0]);
-      const g = parseFloat(parts[1]);
-      const b = parseFloat(parts[2]);
+      const r = parseFloat(parts[0]!);
+      const g = parseFloat(parts[1]!);
+      const b = parseFloat(parts[2]!);
       if (!isNaN(r) && !isNaN(g) && !isNaN(b)) {
         values.push(r, g, b);
       }
@@ -915,9 +915,9 @@ export function parseCubeLUT(text: string): LUT1D | LUT3D | null {
     const g = new Float32Array(size1D);
     const b = new Float32Array(size1D);
     for (let i = 0; i < size1D; i++) {
-      r[i] = values[i * 3];
-      g[i] = values[i * 3 + 1];
-      b[i] = values[i * 3 + 2];
+      r[i] = values[i * 3]!;
+      g[i] = values[i * 3 + 1]!;
+      b[i] = values[i * 3 + 2]!;
     }
     return {
       type: '1D',
@@ -939,12 +939,12 @@ export function parseCubeLUT(text: string): LUT1D | LUT3D | null {
 export function apply1DLUT(lut: LUT1D, rgb: Vec3): Vec3 {
   const result: Vec3 = [0, 0, 0];
   for (let ch = 0; ch < 3; ch++) {
-    const normalized = (rgb[ch] - lut.domainMin[ch]) / (lut.domainMax[ch] - lut.domainMin[ch]);
+    const normalized = (rgb[ch]! - lut.domainMin[ch]!) / (lut.domainMax[ch]! - lut.domainMin[ch]!);
     const idx = normalized * (lut.size - 1);
     const lo = Math.max(0, Math.min(lut.size - 2, Math.floor(idx)));
     const hi = lo + 1;
     const frac = idx - lo;
-    result[ch] = lerp(lut.data[ch][lo], lut.data[ch][hi], frac);
+    result[ch] = lerp(lut.data[ch]![lo]!, lut.data[ch]![hi]!, frac);
   }
   return result;
 }
@@ -986,10 +986,10 @@ export function apply3DLUT(lut: LUT3D, rgb: Vec3): Vec3 {
     const c011 = lut.data[idx(r0, g1, b1) + ch];
     const c111 = lut.data[idx(r1, g1, b1) + ch];
 
-    const c00 = lerp(c000, c100, fr);
-    const c10 = lerp(c010, c110, fr);
-    const c01 = lerp(c001, c101, fr);
-    const c11 = lerp(c011, c111, fr);
+    const c00 = lerp(c000!, c100!, fr);
+    const c10 = lerp(c010!, c110!, fr);
+    const c01 = lerp(c001!, c101!, fr);
+    const c11 = lerp(c011!, c111!, fr);
 
     const c0 = lerp(c00, c10, fg);
     const c1 = lerp(c01, c11, fg);
@@ -1006,9 +1006,9 @@ export function apply3DLUT(lut: LUT3D, rgb: Vec3): Vec3 {
 export function generate1DLUTTexture(lut: LUT1D): LUTTexture {
   const data = new Float32Array(lut.size * 4);
   for (let i = 0; i < lut.size; i++) {
-    data[i * 4 + 0] = lut.data[0][i];
-    data[i * 4 + 1] = lut.data[1][i];
-    data[i * 4 + 2] = lut.data[2][i];
+    data[i * 4 + 0] = lut.data[0]![i]!;
+    data[i * 4 + 1] = lut.data[1]![i]!;
+    data[i * 4 + 2] = lut.data[2]![i]!;
     data[i * 4 + 3] = 1.0;
   }
   return { type: '1D', width: lut.size, height: 1, depth: 1, data };
@@ -1023,9 +1023,9 @@ export function generate3DLUTTexture(lut: LUT3D): LUTTexture {
   const total = s * s * s;
   const data = new Float32Array(total * 4);
   for (let i = 0; i < total; i++) {
-    data[i * 4 + 0] = lut.data[i * 3 + 0];
-    data[i * 4 + 1] = lut.data[i * 3 + 1];
-    data[i * 4 + 2] = lut.data[i * 3 + 2];
+    data[i * 4 + 0] = lut.data[i * 3 + 0]!;
+    data[i * 4 + 1] = lut.data[i * 3 + 1]!;
+    data[i * 4 + 2] = lut.data[i * 3 + 2]!;
     data[i * 4 + 3] = 1.0;
   }
   return { type: '3D', width: s, height: s, depth: s, data };
@@ -1851,7 +1851,7 @@ export class OCIOEngine {
     const data = imageData.data;
     const len = data.length;
     for (let i = 0; i < len; i += 4) {
-      const rgb: Vec3 = [data[i] / 255, data[i + 1] / 255, data[i + 2] / 255];
+      const rgb: Vec3 = [data[i]! / 255, data[i + 1]! / 255, data[i + 2]! / 255];
       const result = processor.apply(rgb);
       data[i] = clamp(Math.round(result[0] * 255), 0, 255);
       data[i + 1] = clamp(Math.round(result[1] * 255), 0, 255);
@@ -1882,7 +1882,7 @@ export class OCIOEngine {
     const fromProcess = this.buildTransformChain(look.processSpace, refSpace);
 
     for (let i = 0; i < len; i += 4) {
-      let rgb: Vec3 = [data[i] / 255, data[i + 1] / 255, data[i + 2] / 255];
+      let rgb: Vec3 = [data[i]! / 255, data[i + 1]! / 255, data[i + 2]! / 255];
 
       // To process space
       for (const t of toProcess) {
@@ -1966,7 +1966,7 @@ export class OCIOEngine {
     const len = data.length;
 
     for (let i = 0; i < len; i += 4) {
-      const rgb: Vec3 = [data[i] / 255, data[i + 1] / 255, data[i + 2] / 255];
+      const rgb: Vec3 = [data[i]! / 255, data[i + 1]! / 255, data[i + 2]! / 255];
       let result: Vec3;
 
       if (lut.type === '1D') {

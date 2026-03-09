@@ -418,9 +418,9 @@ export class AAFExporter {
 
     for (let trackIdx = 0; trackIdx < tracks.length; trackIdx++) {
       const track = tracks[trackIdx];
-      const isAudio = track.type === 'AUDIO';
+      const isAudio = track!.type === 'AUDIO';
 
-      for (const clip of track.clips) {
+      for (const clip of track!.clips) {
         const asset = clip.assetId ? this.assetMap.get(clip.assetId) : undefined;
         const reelName = asset?.technicalMetadata?.reelName ?? asset?.relinkIdentity?.reelName ?? 'AX';
         const sourceTC = asset?.technicalMetadata?.timecodeStart;
@@ -432,7 +432,7 @@ export class AAFExporter {
           if (isAudio) {
             effects.push({
               name: 'AudioClipGain',
-              value: track.volume,
+              value: track!.volume,
               interpolation: 'constant',
             });
           }
@@ -451,7 +451,7 @@ export class AAFExporter {
           uid: clip.id,
           clipName: clip.name,
           trackIndex: trackIdx,
-          trackName: track.name,
+          trackName: track!.name,
           trackType: isAudio ? 'audio' : 'video',
           timelineStartFrame: secondsToFrames(clip.startTime, frameRate),
           timelineEndFrame: secondsToFrames(clip.endTime, frameRate),
@@ -460,7 +460,7 @@ export class AAFExporter {
           reelName,
           sourceMediaRef: clip.assetId ?? '',
           speedRatio: 1.0,
-          audioClipGainDb: isAudio ? this.volumeToDb(track.volume) : undefined,
+          audioClipGainDb: isAudio ? this.volumeToDb(track!.volume) : undefined,
           audioPan: isAudio ? 0 : undefined,
           effects,
           sourceTimecode: sourceTC
@@ -493,7 +493,7 @@ export class AAFExporter {
       trackIndex: tracks.indexOf(track),
       trackName: track.name,
       channelCount: 1,
-      outputChannel: channelLabels[idx % channelLabels.length],
+      outputChannel: channelLabels[idx % channelLabels.length]!,
     }));
   }
 
@@ -508,10 +508,10 @@ export class AAFExporter {
     if (!match) return undefined;
 
     return {
-      hours: parseInt(match[1], 10),
-      minutes: parseInt(match[2], 10),
-      seconds: parseInt(match[3], 10),
-      frames: parseInt(match[4], 10),
+      hours: parseInt(match[1]!, 10),
+      minutes: parseInt(match[2]!, 10),
+      seconds: parseInt(match[3]!, 10),
+      frames: parseInt(match[4]!, 10),
       dropFrame: tc.includes(';') || dropFrame,
       frameRate,
     };

@@ -101,7 +101,7 @@ const uploadLimiter = rateLimit({
 app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
-    version: process.env.npm_package_version ?? '0.1.0',
+    version: process.env['npm_package_version'] ?? '0.1.0',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     env: config.env,

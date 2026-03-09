@@ -6,8 +6,8 @@ import { KeyboardSettingsPanel } from '../../KeyboardSettings/KeyboardSettingsPa
 export function KeyboardSettings() {
   return (
     <div>
-      <div style={ss.sectionHeader}>
-        <h3 style={ss.sectionTitle}>Keyboard Shortcuts</h3>
+      <div style={ss['sectionHeader']}>
+        <h3 style={ss['sectionTitle']}>Keyboard Shortcuts</h3>
       </div>
       <KeyboardSettingsPanel />
     </div>

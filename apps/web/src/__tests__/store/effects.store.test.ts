@@ -44,29 +44,29 @@ describe('useEffectsStore', () => {
     useEffectsStore.getState().addEffect('clip_1', 'blur-gaussian');
     const state = useEffectsStore.getState();
     expect(state.clipEffects['clip_1']).toBeDefined();
-    expect(state.clipEffects['clip_1'].length).toBe(1);
-    expect(state.clipEffects['clip_1'][0].definitionId).toBe('blur-gaussian');
-    expect(state.selectedEffectId).toBe(state.clipEffects['clip_1'][0].id);
+    expect(state.clipEffects['clip_1']!.length).toBe(1);
+    expect(state.clipEffects['clip_1']![0]!.definitionId).toBe('blur-gaussian');
+    expect(state.selectedEffectId).toBe(state.clipEffects['clip_1']![0]!.id);
   });
 
   it('removeEffect() removes effect from clipEffects', () => {
     useEffectsStore.getState().addEffect('clip_1', 'blur-gaussian');
-    const effectId = useEffectsStore.getState().clipEffects['clip_1'][0].id;
+    const effectId = useEffectsStore.getState().clipEffects['clip_1']![0]!.id;
     useEffectsStore.getState().removeEffect('clip_1', effectId);
-    expect(useEffectsStore.getState().clipEffects['clip_1'].length).toBe(0);
+    expect(useEffectsStore.getState().clipEffects['clip_1']!.length).toBe(0);
     expect(useEffectsStore.getState().selectedEffectId).toBeNull();
   });
 
   it('toggleEffect() toggles enabled state', () => {
     useEffectsStore.getState().addEffect('clip_1', 'brightness-contrast');
-    const effectId = useEffectsStore.getState().clipEffects['clip_1'][0].id;
-    expect(useEffectsStore.getState().clipEffects['clip_1'][0].enabled).toBe(true);
+    const effectId = useEffectsStore.getState().clipEffects['clip_1']![0]!.id;
+    expect(useEffectsStore.getState().clipEffects['clip_1']![0]!.enabled).toBe(true);
 
     useEffectsStore.getState().toggleEffect('clip_1', effectId);
-    expect(useEffectsStore.getState().clipEffects['clip_1'][0].enabled).toBe(false);
+    expect(useEffectsStore.getState().clipEffects['clip_1']![0]!.enabled).toBe(false);
 
     useEffectsStore.getState().toggleEffect('clip_1', effectId);
-    expect(useEffectsStore.getState().clipEffects['clip_1'][0].enabled).toBe(true);
+    expect(useEffectsStore.getState().clipEffects['clip_1']![0]!.enabled).toBe(true);
   });
 
   it('updateParam() modifies effect parameter via engine directly', () => {
@@ -74,7 +74,7 @@ describe('useEffectsStore', () => {
     // the engine's own copy. Test the engine side directly.
     const inst = effectsEngine.createInstance('brightness-contrast')!;
     effectsEngine.updateParam(inst.id, 'brightness', 75);
-    expect(inst.params.brightness).toBe(75);
+    expect(inst.params['brightness']).toBe(75);
   });
 
   it('setSearch() updates search query', () => {
@@ -111,12 +111,12 @@ describe('useEffectsStore', () => {
     useEffectsStore.getState().addEffect('clip_1', 'blur-gaussian');
     useEffectsStore.getState().addEffect('clip_1', 'brightness-contrast');
     const effects = useEffectsStore.getState().clipEffects['clip_1'];
-    const id0 = effects[0].id;
-    const id1 = effects[1].id;
+    const id0 = effects![0]!.id;
+    const id1 = effects![1]!.id;
 
     useEffectsStore.getState().reorderEffects('clip_1', [id1, id0]);
     const reordered = useEffectsStore.getState().clipEffects['clip_1'];
-    expect(reordered[0].id).toBe(id1);
-    expect(reordered[1].id).toBe(id0);
+    expect(reordered![0]!.id).toBe(id1);
+    expect(reordered![1]!.id).toBe(id0);
   });
 });

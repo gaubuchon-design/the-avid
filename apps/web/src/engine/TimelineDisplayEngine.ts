@@ -209,9 +209,9 @@ export class TimelineDisplayEngine {
           // Only one usage of this asset on this track -- not a dupe,
           // but still record it with isDuplicate=false for completeness.
           const clip = clips[0];
-          const range = sourceRange(clip);
+          const range = sourceRange(clip!);
           const info: DupeInfo = {
-            clipId: clip.id,
+            clipId: clip!.id!,
             trackId: track.id,
             isDuplicate: false,
             dupeIndex: 0,
@@ -219,7 +219,7 @@ export class TimelineDisplayEngine {
             sourceAssetId: assetId,
             sourceRange: range,
           };
-          this.dupeCache.set(clip.id, info);
+          this.dupeCache.set(clip!.id!, info);
           continue;
         }
 
@@ -231,9 +231,9 @@ export class TimelineDisplayEngine {
           if (group.length < 2) {
             // Single clip in this overlap group -- not a dupe.
             const clip = group[0];
-            const range = sourceRange(clip);
+            const range = sourceRange(clip!);
             const info: DupeInfo = {
-              clipId: clip.id,
+              clipId: clip!.id!,
               trackId: track.id,
               isDuplicate: false,
               dupeIndex: 0,
@@ -241,7 +241,7 @@ export class TimelineDisplayEngine {
               sourceAssetId: assetId,
               sourceRange: range,
             };
-            this.dupeCache.set(clip.id, info);
+            this.dupeCache.set(clip!.id!, info);
             continue;
           }
 
@@ -254,17 +254,17 @@ export class TimelineDisplayEngine {
 
           for (let i = 0; i < sorted.length; i++) {
             const clip = sorted[i];
-            const range = sourceRange(clip);
+            const range = sourceRange(clip!);
             const info: DupeInfo = {
-              clipId: clip.id,
+              clipId: clip!.id!,
               trackId: track.id,
               isDuplicate: true,
               dupeIndex: i,
-              dupeColor: groupColor,
+              dupeColor: groupColor!,
               sourceAssetId: assetId,
               sourceRange: range,
             };
-            this.dupeCache.set(clip.id, info);
+            this.dupeCache.set(clip!.id!, info);
             results.push(info);
           }
         }
@@ -364,9 +364,9 @@ export class TimelineDisplayEngine {
 
       for (let s = start; s < end; s++) {
         const sample = audioData[s];
-        if (sample > max) max = sample;
-        if (sample < min) min = sample;
-        sumSquares += sample * sample;
+        if (sample! > max) max = sample!;
+        if (sample! < min) min = sample!;
+        sumSquares += sample! * sample!;
       }
 
       peaks[px] = max;
@@ -441,8 +441,8 @@ export class TimelineDisplayEngine {
 
       for (let s = start; s < end; s++) {
         const v = sourceData[s];
-        if (v > max) max = v;
-        if (v < min) min = v;
+        if (v! > max) max = v!;
+        if (v! < min) min = v!;
       }
 
       // Waveform data is typically 0..1 (absolute). Mirror for troughs.
@@ -806,8 +806,8 @@ export class TimelineDisplayEngine {
 
     function find(x: number): number {
       while (parent[x] !== x) {
-        parent[x] = parent[parent[x]]; // path compression
-        x = parent[x];
+        parent[x] = parent[parent[x]!]!; // path compression
+        x = parent[x]!;
       }
       return x;
     }
@@ -820,9 +820,9 @@ export class TimelineDisplayEngine {
 
     // Compare all pairs for source range overlap.
     for (let i = 0; i < n; i++) {
-      const rangeI = sourceRange(clips[i]);
+      const rangeI = sourceRange(clips[i]!);
       for (let j = i + 1; j < n; j++) {
-        const rangeJ = sourceRange(clips[j]);
+        const rangeJ = sourceRange(clips[j]!);
         if (rangesOverlap(rangeI[0], rangeI[1], rangeJ[0], rangeJ[1])) {
           union(i, j);
         }
@@ -838,7 +838,7 @@ export class TimelineDisplayEngine {
         group = [];
         groups.set(root, group);
       }
-      group.push(clips[i]);
+      group.push(clips[i]!);
     }
 
     return [...groups.values()];

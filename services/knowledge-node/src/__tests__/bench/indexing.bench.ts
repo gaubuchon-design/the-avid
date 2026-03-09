@@ -231,7 +231,7 @@ describe('Indexing Benchmarks', () => {
           sourceId: 'emb-parent',
           sourceType: 'transcript',
           shardId: 'bench-shard',
-          vector: vectorToBuffer(vectors[i]),
+          vector: vectorToBuffer(vectors[i]!),
           modelId: 'bge-m3',
           dimensions: dims,
           startTimeMs: i * 500,

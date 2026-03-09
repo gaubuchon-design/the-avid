@@ -506,9 +506,9 @@ function hlgEotf(v: number): number {
  */
 function applyMat3(m: number[], r: number, g: number, b: number): [number, number, number] {
   return [
-    m[0] * r + m[1] * g + m[2] * b,
-    m[3] * r + m[4] * g + m[5] * b,
-    m[6] * r + m[7] * g + m[8] * b,
+    m[0]! * r + m[1]! * g + m[2]! * b,
+    m[3]! * r + m[4]! * g + m[5]! * b,
+    m[6]! * r + m[7]! * g + m[8]! * b,
   ];
 }
 
@@ -649,9 +649,9 @@ function mat3Multiply(a: number[], b: number[]): number[] {
   for (let row = 0; row < 3; row++) {
     for (let col = 0; col < 3; col++) {
       result[row * 3 + col] =
-        a[row * 3 + 0] * b[0 * 3 + col] +
-        a[row * 3 + 1] * b[1 * 3 + col] +
-        a[row * 3 + 2] * b[2 * 3 + col];
+        a[row * 3 + 0]! * b[0 * 3 + col]! +
+        a[row * 3 + 1]! * b[1 * 3 + col]! +
+        a[row * 3 + 2]! * b[2 * 3 + col]!;
     }
   }
   return result;
@@ -766,9 +766,9 @@ export class ColorTransformPipeline {
       const offset = i * 4;
 
       // Read and normalise to [0, 1]
-      let r = srcData[offset] / 255;
-      let g = srcData[offset + 1] / 255;
-      let b = srcData[offset + 2] / 255;
+      let r = srcData[offset]! / 255;
+      let g = srcData[offset + 1]! / 255;
+      let b = srcData[offset + 2]! / 255;
 
       // Step 1: Linearize from source encoding
       r = steps.linearize(r);
@@ -792,7 +792,7 @@ export class ColorTransformPipeline {
       dstData[offset]     = Math.round(clamp01(r) * 255);
       dstData[offset + 1] = Math.round(clamp01(g) * 255);
       dstData[offset + 2] = Math.round(clamp01(b) * 255);
-      dstData[offset + 3] = srcData[offset + 3]; // Preserve alpha
+      dstData[offset + 3] = srcData[offset + 3]!; // Preserve alpha
     }
 
     return result;
@@ -841,10 +841,10 @@ export class ColorTransformPipeline {
 
     for (let i = 0; i < pixelCount; i++) {
       const offset = i * 4;
-      dstData[offset]     = Math.round(clamp01(tfn(srcData[offset] / 255)) * 255);
-      dstData[offset + 1] = Math.round(clamp01(tfn(srcData[offset + 1] / 255)) * 255);
-      dstData[offset + 2] = Math.round(clamp01(tfn(srcData[offset + 2] / 255)) * 255);
-      dstData[offset + 3] = srcData[offset + 3];
+      dstData[offset]     = Math.round(clamp01(tfn(srcData[offset]! / 255)) * 255);
+      dstData[offset + 1] = Math.round(clamp01(tfn(srcData[offset + 1]! / 255)) * 255);
+      dstData[offset + 2] = Math.round(clamp01(tfn(srcData[offset + 2]! / 255)) * 255);
+      dstData[offset + 3] = srcData[offset + 3]!;
     }
 
     return result;

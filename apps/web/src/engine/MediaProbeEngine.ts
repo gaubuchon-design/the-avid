@@ -81,7 +81,7 @@ async function imageHasAlpha(file: File): Promise<boolean> {
     bitmap.close();
     // Check if any pixel has alpha < 255
     for (let i = 3; i < data.length; i += 4) {
-      if (data[i] < 255) return true;
+      if (data[i]! < 255) return true;
     }
   } catch {
     // Fallback: assume alpha if format supports it

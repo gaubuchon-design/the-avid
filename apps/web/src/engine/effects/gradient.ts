@@ -6,7 +6,7 @@
 function hexToRgb(hex: string): [number, number, number] {
   const m = hex.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
   if (!m) return [0, 0, 0];
-  return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+  return [parseInt(m[1]!, 16), parseInt(m[2]!, 16), parseInt(m[3]!, 16)];
 }
 
 /**
@@ -48,9 +48,9 @@ export function applyGradient(
         const gb = sb + (eb - sb) * t;
 
         const i = (y * width + x) * 4;
-        data[i] = Math.round(data[i] * (1 - blendFactor) + gr * blendFactor);
-        data[i + 1] = Math.round(data[i + 1] * (1 - blendFactor) + gg * blendFactor);
-        data[i + 2] = Math.round(data[i + 2] * (1 - blendFactor) + gb * blendFactor);
+        data[i] = Math.round(data[i]! * (1 - blendFactor) + gr * blendFactor);
+        data[i + 1] = Math.round(data[i + 1]! * (1 - blendFactor) + gg * blendFactor);
+        data[i + 2] = Math.round(data[i + 2]! * (1 - blendFactor) + gb * blendFactor);
       }
     }
   } else {
@@ -79,9 +79,9 @@ export function applyGradient(
         const gb = sb + (eb - sb) * t;
 
         const i = (y * width + x) * 4;
-        data[i] = Math.round(data[i] * (1 - blendFactor) + gr * blendFactor);
-        data[i + 1] = Math.round(data[i + 1] * (1 - blendFactor) + gg * blendFactor);
-        data[i + 2] = Math.round(data[i + 2] * (1 - blendFactor) + gb * blendFactor);
+        data[i] = Math.round(data[i]! * (1 - blendFactor) + gr * blendFactor);
+        data[i + 1] = Math.round(data[i + 1]! * (1 - blendFactor) + gg * blendFactor);
+        data[i + 2] = Math.round(data[i + 2]! * (1 - blendFactor) + gb * blendFactor);
       }
     }
   }

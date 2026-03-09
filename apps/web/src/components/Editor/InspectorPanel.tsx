@@ -306,9 +306,9 @@ function TimeRemapSection({ clip }: { clip: Clip }) {
     // Find surrounding keyframes and compute slope
     const kfs = tr.keyframes;
     for (let i = 0; i < kfs.length - 1; i++) {
-      if (clipRelTime >= kfs[i].timelineTime && clipRelTime <= kfs[i + 1].timelineTime) {
-        const dt = kfs[i + 1].timelineTime - kfs[i].timelineTime;
-        const ds = kfs[i + 1].sourceTime - kfs[i].sourceTime;
+      if (clipRelTime >= kfs[i]!.timelineTime && clipRelTime <= kfs[i + 1]!.timelineTime) {
+        const dt = kfs[i + 1]!.timelineTime - kfs[i]!.timelineTime;
+        const ds = kfs[i + 1]!.sourceTime - kfs[i]!.sourceTime;
         currentSpeed = dt > 0 ? (ds / dt) * 100 : 100;
         break;
       }

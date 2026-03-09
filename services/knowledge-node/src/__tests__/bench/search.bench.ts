@@ -274,7 +274,7 @@ describe('Search Benchmarks', () => {
 
     for (let i = 0; i < queryCount; i++) {
       // Text search phase
-      const textQuery = PHRASES[i % PHRASES.length].split(' ').slice(0, 3).join(' ');
+      const textQuery = PHRASES[i % PHRASES.length]!.split(' ').slice(0, 3).join(' ');
       const textResults = db.searchTranscripts(textQuery, topK);
 
       // Vector search phase
@@ -351,8 +351,8 @@ describe('Search Benchmarks', () => {
 
     const start = performance.now();
     for (let i = 0; i < burstSize; i++) {
-      const query = PHRASES[i % PHRASES.length].split(' ')[0];
-      const results = db.searchTranscripts(query, 10);
+      const query = PHRASES[i % PHRASES.length]!.split(' ')[0];
+      const results = db.searchTranscripts(query!, 10);
       totalHits += results.length;
     }
     const durationMs = performance.now() - start;

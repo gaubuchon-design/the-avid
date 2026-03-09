@@ -58,7 +58,7 @@ router.post('/productions', validate(createProductionSchema), async (req: Reques
 
 router.get('/productions/:projectId', async (req: Request, res: Response) => {
   const production = await db.sportsProduction.findUnique({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
     include: {
       highlights: { orderBy: { timestamp: 'asc' }, take: 50 },
       growingFiles: { where: { isGrowing: true } },
@@ -70,12 +70,12 @@ router.get('/productions/:projectId', async (req: Request, res: Response) => {
 });
 
 router.patch('/productions/:projectId', validate(updateProductionSchema), async (req: Request, res: Response) => {
-  const existing = await db.sportsProduction.findUnique({ where: { projectId: req.params.projectId } });
+  const existing = await db.sportsProduction.findUnique({ where: { projectId: req.params['projectId'] } });
   assertFound(existing, 'Sports production');
 
   const data = req.body;
   const production = await db.sportsProduction.update({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
     data: {
       ...data,
       gameDate: data.gameDate ? new Date(data.gameDate) : undefined,
@@ -122,7 +122,7 @@ const updateHighlightSchema = z.object({
 
 router.get('/productions/:projectId/highlights', async (req: Request, res: Response) => {
   const production = await db.sportsProduction.findUnique({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
   });
   assertFound(production, 'Sports production');
 
@@ -146,7 +146,7 @@ router.get('/productions/:projectId/highlights', async (req: Request, res: Respo
 
 router.post('/productions/:projectId/highlights', validate(createHighlightSchema), async (req: Request, res: Response) => {
   const production = await db.sportsProduction.findUnique({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
   });
   assertFound(production, 'Sports production');
 
@@ -158,18 +158,18 @@ router.post('/productions/:projectId/highlights', validate(createHighlightSchema
 
 router.patch('/productions/:projectId/highlights/:id', validate(updateHighlightSchema), async (req: Request, res: Response) => {
   const production = await db.sportsProduction.findUnique({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
   });
   assertFound(production, 'Sports production');
 
   // Verify highlight belongs to this production
   const existing = await db.sportsHighlight.findFirst({
-    where: { id: req.params.id, productionId: production.id },
+    where: { id: req.params['id'], productionId: production.id },
   });
   assertFound(existing, 'Highlight');
 
   const highlight = await db.sportsHighlight.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: req.body,
   });
   res.json({ highlight });
@@ -177,16 +177,16 @@ router.patch('/productions/:projectId/highlights/:id', validate(updateHighlightS
 
 router.delete('/productions/:projectId/highlights/:id', async (req: Request, res: Response) => {
   const production = await db.sportsProduction.findUnique({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
   });
   assertFound(production, 'Sports production');
 
   const existing = await db.sportsHighlight.findFirst({
-    where: { id: req.params.id, productionId: production.id },
+    where: { id: req.params['id'], productionId: production.id },
   });
   assertFound(existing, 'Highlight');
 
-  await db.sportsHighlight.delete({ where: { id: req.params.id } });
+  await db.sportsHighlight.delete({ where: { id: req.params['id'] } });
   res.status(204).send();
 });
 
@@ -206,7 +206,7 @@ const updateGrowingFileSchema = z.object({
 
 router.get('/productions/:projectId/growing-files', async (req: Request, res: Response) => {
   const production = await db.sportsProduction.findUnique({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
   });
   assertFound(production, 'Sports production');
 
@@ -219,7 +219,7 @@ router.get('/productions/:projectId/growing-files', async (req: Request, res: Re
 
 router.post('/productions/:projectId/growing-files', validate(createGrowingFileSchema), async (req: Request, res: Response) => {
   const production = await db.sportsProduction.findUnique({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
   });
   assertFound(production, 'Sports production');
 
@@ -234,18 +234,18 @@ router.post('/productions/:projectId/growing-files', validate(createGrowingFileS
 
 router.patch('/productions/:projectId/growing-files/:id', validate(updateGrowingFileSchema), async (req: Request, res: Response) => {
   const production = await db.sportsProduction.findUnique({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
   });
   assertFound(production, 'Sports production');
 
   // Verify file belongs to this production
   const existing = await db.growingFile.findFirst({
-    where: { id: req.params.id, productionId: production.id },
+    where: { id: req.params['id'], productionId: production.id },
   });
   assertFound(existing, 'Growing file');
 
   const file = await db.growingFile.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: {
       ...req.body,
       lastFrameAt: req.body.lastFrameAt ? new Date(req.body.lastFrameAt) : undefined,
@@ -258,12 +258,12 @@ router.patch('/productions/:projectId/growing-files/:id', validate(updateGrowing
 
 router.get('/productions/:projectId/stats', async (req: Request, res: Response) => {
   const production = await db.sportsProduction.findUnique({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
   });
   assertFound(production, 'Sports production');
 
   const { limit: limitParam } = req.query as Record<string, string>;
-  const take = Math.min(parseInt(limitParam, 10) || 100, 500);
+  const take = Math.min(parseInt(limitParam ?? "100", 10) || 100, 500);
 
   const stats = await db.statsSnapshot.findMany({
     where: { productionId: production.id },
@@ -275,7 +275,7 @@ router.get('/productions/:projectId/stats', async (req: Request, res: Response) 
 
 router.get('/productions/:projectId/stats/latest', async (req: Request, res: Response) => {
   const production = await db.sportsProduction.findUnique({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
   });
   assertFound(production, 'Sports production');
 
@@ -308,7 +308,7 @@ const updatePackageSchema = z.object({
 
 router.get('/productions/:projectId/packages', async (req: Request, res: Response) => {
   const production = await db.sportsProduction.findUnique({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
   });
   assertFound(production, 'Sports production');
 
@@ -321,7 +321,7 @@ router.get('/productions/:projectId/packages', async (req: Request, res: Respons
 
 router.post('/productions/:projectId/packages', validate(createPackageSchema), async (req: Request, res: Response) => {
   const production = await db.sportsProduction.findUnique({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
   });
   assertFound(production, 'Sports production');
 
@@ -333,18 +333,18 @@ router.post('/productions/:projectId/packages', validate(createPackageSchema), a
 
 router.patch('/productions/:projectId/packages/:id', validate(updatePackageSchema), async (req: Request, res: Response) => {
   const production = await db.sportsProduction.findUnique({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
   });
   assertFound(production, 'Sports production');
 
   // Verify package belongs to this production
   const existing = await db.sportsPackage.findFirst({
-    where: { id: req.params.id, productionId: production.id },
+    where: { id: req.params['id'], productionId: production.id },
   });
   assertFound(existing, 'Sports package');
 
   const pkg = await db.sportsPackage.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: req.body,
   });
   res.json({ package: pkg });
@@ -352,16 +352,16 @@ router.patch('/productions/:projectId/packages/:id', validate(updatePackageSchem
 
 router.delete('/productions/:projectId/packages/:id', async (req: Request, res: Response) => {
   const production = await db.sportsProduction.findUnique({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
   });
   assertFound(production, 'Sports production');
 
   const existing = await db.sportsPackage.findFirst({
-    where: { id: req.params.id, productionId: production.id },
+    where: { id: req.params['id'], productionId: production.id },
   });
   assertFound(existing, 'Sports package');
 
-  await db.sportsPackage.delete({ where: { id: req.params.id } });
+  await db.sportsPackage.delete({ where: { id: req.params['id'] } });
   res.status(204).send();
 });
 

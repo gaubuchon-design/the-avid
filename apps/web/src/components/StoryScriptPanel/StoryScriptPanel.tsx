@@ -65,8 +65,8 @@ function ScriptTextRenderer({ text, teleprompterMode }: { text: string; teleprom
         segments.push({ text: text.slice(lastIndex, match.index), type: 'text' });
       }
       segments.push({
-        text: match[2].trim(),
-        type: match[1].toUpperCase() === 'SUPER' ? 'super' : 'location',
+        text: match[2]!.trim(),
+        type: match[1]!.toUpperCase() === 'SUPER' ? 'super' : 'location',
       });
       lastIndex = match.index + match[0].length;
     }

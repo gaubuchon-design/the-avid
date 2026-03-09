@@ -394,7 +394,7 @@ export class EDLExporter {
       let transitionDuration = 0;
       if (events.length > 0) {
         const prevEvent = events[events.length - 1];
-        const prevOutFrames = Math.round(parseTimecodeToSeconds(prevEvent.recordOut, frameRate, dropFrame) * frameRate);
+        const prevOutFrames = Math.round(parseTimecodeToSeconds(prevEvent!.recordOut, frameRate, dropFrame) * frameRate);
         const thisInFrames = Math.round(clip.startTime * frameRate);
         if (thisInFrames < prevOutFrames) {
           transition = 'D';
@@ -437,7 +437,7 @@ function parseTimecodeToSeconds(tc: string, frameRate: number, _dropFrame: boole
   if (parts.length !== 4) return 0;
   const [h, m, s, f] = parts.map(Number);
   const rate = Math.round(frameRate);
-  return h * 3600 + m * 60 + s + f / rate;
+  return h! * 3600 + m! * 60 + s! + f! / rate;
 }
 
 // ─── Re-exports ─────────────────────────────────────────────────────────────

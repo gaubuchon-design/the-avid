@@ -47,15 +47,15 @@ export function applyNoise(
         const n = type === 'gaussian'
           ? gaussianRandom(rand) * strength
           : (rand() - 0.5) * 2 * strength;
-        data[i + c] = Math.max(0, Math.min(255, Math.round(data[i + c] + n)));
+        data[i + c] = Math.max(0, Math.min(255, Math.round(data[i + c]! + n)));
       }
     } else {
       const n = type === 'gaussian'
         ? gaussianRandom(rand) * strength
         : (rand() - 0.5) * 2 * strength;
-      data[i] = Math.max(0, Math.min(255, Math.round(data[i] + n)));
-      data[i + 1] = Math.max(0, Math.min(255, Math.round(data[i + 1] + n)));
-      data[i + 2] = Math.max(0, Math.min(255, Math.round(data[i + 2] + n)));
+      data[i] = Math.max(0, Math.min(255, Math.round(data[i]! + n)));
+      data[i + 1] = Math.max(0, Math.min(255, Math.round(data[i + 1]! + n)));
+      data[i + 2] = Math.max(0, Math.min(255, Math.round(data[i + 2]! + n)));
     }
     // alpha unchanged
   }

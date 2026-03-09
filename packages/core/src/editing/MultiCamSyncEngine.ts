@@ -98,7 +98,7 @@ function timecodeToSeconds(tc: string, frameRate: number): number {
   const parts = tc.split(':').map(Number);
   if (parts.length !== 4) return 0;
   const [hours, minutes, seconds, frames] = parts;
-  return hours * 3600 + minutes * 60 + seconds + frames / frameRate;
+  return hours! * 3600 + minutes! * 60 + seconds! + frames! / frameRate;
 }
 
 function secondsToTimecode(seconds: number, frameRate: number): string {
@@ -128,7 +128,7 @@ function crossCorrelate(signalA: number[], signalB: number[]): { offset: number;
     for (let i = 0; i < len; i++) {
       const j = i + lag;
       if (j >= 0 && j < len) {
-        sum += signalA[i] * signalB[j];
+        sum += signalA[i]! * signalB[j]!;
         count++;
       }
     }
@@ -431,8 +431,8 @@ export class MultiCamSyncEngine {
       const nextAngleIndex = (currentAngleIndex + 1) % group.angles.length;
       suggestions.push({
         id: `ai-switch-${suggestions.length}`,
-        fromAngleId: group.angles[currentAngleIndex].id,
-        toAngleId: group.angles[nextAngleIndex].id,
+        fromAngleId: group!.angles[currentAngleIndex]!.id,
+        toAngleId: group!.angles[nextAngleIndex]!.id,
         switchTimeSeconds: t,
         switchType: 'ai-suggestion',
       });

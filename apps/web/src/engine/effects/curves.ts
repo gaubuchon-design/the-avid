@@ -50,18 +50,18 @@ export function applyCurves(
   for (let i = 0; i < data.length; i += 4) {
     switch (channel) {
       case 'rgb':
-        data[i] = lut[data[i]];
-        data[i + 1] = lut[data[i + 1]];
-        data[i + 2] = lut[data[i + 2]];
+        data[i] = lut[data[i]!]!;
+        data[i + 1] = lut[data[i + 1]!]!;
+        data[i + 2] = lut[data[i + 2]!]!;
         break;
       case 'red':
-        data[i] = lut[data[i]];
+        data[i] = lut[data[i]!]!;
         break;
       case 'green':
-        data[i + 1] = lut[data[i + 1]];
+        data[i + 1] = lut[data[i + 1]!]!;
         break;
       case 'blue':
-        data[i + 2] = lut[data[i + 2]];
+        data[i + 2] = lut[data[i + 2]!]!;
         break;
     }
   }

@@ -43,7 +43,7 @@ router.get('/series', async (req: Request, res: Response) => {
 
 router.get('/series/:id', async (req: Request, res: Response) => {
   const series = await db.series.findUnique({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     include: {
       episodes: { orderBy: { episodeNumber: 'asc' } },
     },
@@ -66,23 +66,23 @@ router.post('/series', validate(createSeriesSchema), async (req: Request, res: R
 
 router.patch('/series/:id', validate(updateSeriesSchema), async (req: Request, res: Response) => {
   // Verify ownership
-  const existing = await db.series.findUnique({ where: { id: req.params.id } });
+  const existing = await db.series.findUnique({ where: { id: req.params['id'] } });
   assertFound(existing, 'Series');
   if (existing.userId !== req.user!.id) throw new ForbiddenError('Not the series owner');
 
   const series = await db.series.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: req.body,
   });
   res.json({ series });
 });
 
 router.delete('/series/:id', async (req: Request, res: Response) => {
-  const existing = await db.series.findUnique({ where: { id: req.params.id } });
+  const existing = await db.series.findUnique({ where: { id: req.params['id'] } });
   assertFound(existing, 'Series');
   if (existing.userId !== req.user!.id) throw new ForbiddenError('Not the series owner');
 
-  await db.series.delete({ where: { id: req.params.id } });
+  await db.series.delete({ where: { id: req.params['id'] } });
   res.status(204).send();
 });
 
@@ -96,19 +96,19 @@ const createEpisodeSchema = z.object({
 
 router.post('/series/:seriesId/episodes', validate(createEpisodeSchema), async (req: Request, res: Response) => {
   // Verify series ownership
-  const series = await db.series.findUnique({ where: { id: req.params.seriesId } });
+  const series = await db.series.findUnique({ where: { id: req.params['seriesId'] } });
   assertFound(series, 'Series');
   if (series.userId !== req.user!.id) throw new ForbiddenError('Not the series owner');
 
   // Auto-calculate next episode number
   const lastEpisode = await db.episode.findFirst({
-    where: { seriesId: req.params.seriesId },
+    where: { seriesId: req.params['seriesId'] },
     orderBy: { episodeNumber: 'desc' },
   });
 
   const episode = await db.episode.create({
     data: {
-      seriesId: req.params.seriesId,
+      seriesId: req.params['seriesId'],
       episodeNumber: (lastEpisode?.episodeNumber || 0) + 1,
       ...req.body,
     },
@@ -118,7 +118,7 @@ router.post('/series/:seriesId/episodes', validate(createEpisodeSchema), async (
 
 router.patch('/series/:seriesId/episodes/:id', async (req: Request, res: Response) => {
   const episode = await db.episode.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: req.body,
   });
   res.json({ episode });
@@ -126,7 +126,7 @@ router.patch('/series/:seriesId/episodes/:id', async (req: Request, res: Respons
 
 router.post('/series/:seriesId/episodes/:id/publish', async (req: Request, res: Response) => {
   const episode = await db.episode.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: {
       status: 'PUBLISHED',
       publishedAt: new Date(),
@@ -154,10 +154,10 @@ const upsertMemorySchema = z.object({
 router.put('/agent-memory/:key', validate(upsertMemorySchema), async (req: Request, res: Response) => {
   const userId = req.user!.id;
   const memory = await db.agentMemory.upsert({
-    where: { userId_key: { userId, key: req.params.key } },
+    where: { userId_key: { userId, key: req.params['key'] } },
     create: {
       userId,
-      key: req.params.key,
+      key: req.params['key'],
       ...req.body,
     },
     update: {
@@ -171,7 +171,7 @@ router.put('/agent-memory/:key', validate(upsertMemorySchema), async (req: Reque
 
 router.delete('/agent-memory/:key', async (req: Request, res: Response) => {
   await db.agentMemory.delete({
-    where: { userId_key: { userId: req.user!.id, key: req.params.key } },
+    where: { userId_key: { userId: req.user!.id, key: req.params['key'] } },
   });
   res.status(204).send();
 });
@@ -217,12 +217,12 @@ router.post('/playbooks', validate(createPlaybookSchema), async (req: Request, r
 
 router.patch('/playbooks/:id', async (req: Request, res: Response) => {
   // Verify ownership
-  const existing = await db.agentPlaybook.findUnique({ where: { id: req.params.id } });
+  const existing = await db.agentPlaybook.findUnique({ where: { id: req.params['id'] } });
   assertFound(existing, 'Playbook');
   if (existing.authorId !== req.user!.id) throw new ForbiddenError('Not the playbook author');
 
   const playbook = await db.agentPlaybook.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: req.body,
   });
   res.json({ playbook });
@@ -230,7 +230,7 @@ router.patch('/playbooks/:id', async (req: Request, res: Response) => {
 
 router.post('/playbooks/:id/use', async (req: Request, res: Response) => {
   const playbook = await db.agentPlaybook.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: { usageCount: { increment: 1 } },
   });
   res.json({ playbook });

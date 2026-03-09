@@ -200,7 +200,7 @@ export class TranscriptEngine {
       if (queryWords.length === 1) {
         // Single word search
         for (let i = 0; i < words.length; i++) {
-          const wordLower = words[i].text.toLowerCase().replace(/[.,!?;:'"]/g, '');
+          const wordLower = words[i]!.text.toLowerCase().replace(/[.,!?;:'"]/g, '');
           if (wordLower.includes(queryLower) || queryLower.includes(wordLower)) {
             // Build context: 3 words before and after
             const ctxStart = Math.max(0, i - 3);
@@ -210,10 +210,10 @@ export class TranscriptEngine {
             results.push({
               clipId,
               clipName: CLIP_NAMES[clipId] ?? clipId,
-              startTime: words[i].startTime,
-              endTime: words[i].endTime,
+              startTime: words[i]!.startTime,
+              endTime: words[i]!.endTime,
               text: contextWords.map(w => w.text).join(' '),
-              score: words[i].confidence,
+              score: words[i]!.confidence,
             });
           }
         }
@@ -226,8 +226,8 @@ export class TranscriptEngine {
             .join(' ');
 
           if (windowText.includes(queryLower) || queryLower.includes(windowText)) {
-            const matchStart = words[i].startTime;
-            const matchEnd = words[i + queryWords.length - 1].endTime;
+            const matchStart = words[i]!.startTime;
+            const matchEnd = words[i + queryWords.length - 1]!.endTime;
 
             // Wider context
             const ctxStart = Math.max(0, i - 2);
@@ -258,7 +258,7 @@ export class TranscriptEngine {
         let wordIdx = 0;
         for (let i = 0; i < words.length; i++) {
           if (charCount >= idx) { wordIdx = i; break; }
-          charCount += words[i].text.length + 1; // +1 for space
+          charCount += words[i]!.text.length + 1; // +1 for space
         }
 
         const ctxStart = Math.max(0, wordIdx - 2);

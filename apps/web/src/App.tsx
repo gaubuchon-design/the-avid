@@ -1,13 +1,18 @@
 import React, { lazy, Suspense } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 import { DashboardPage } from './pages/DashboardPage';
 import { EditorPage } from './pages/EditorPage';
 import { LoginPage } from './pages/LoginPage';
+import { RegisterPage } from './pages/RegisterPage';
+import { SettingsPage } from './pages/SettingsPage';
+import { NotFoundPage } from './pages/NotFoundPage';
 import { AuthGuard } from './components/AuthGuard';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useSettingsEffects } from './hooks/useSettingsEffects';
 import { KeyboardProvider } from './components/KeyboardProvider';
 import { LoadingSpinner } from './components/LoadingSpinner';
+import { MainLayout } from './layouts/MainLayout';
+import { AuthLayout } from './layouts/AuthLayout';
 import { TimelinePanel } from './components/TimelinePanel/TimelinePanel';
 import { SourceMonitor } from './components/SourceMonitor/SourceMonitor';
 import { RecordMonitor } from './components/RecordMonitor/RecordMonitor';
@@ -117,17 +122,19 @@ export default function App() {
   return (
     <KeyboardProvider>
       <Routes>
-        <Route path="/login" element={<ErrorBoundary><LoginPage /></ErrorBoundary>} />
-        <Route
-          path="/"
-          element={
-            <ErrorBoundary>
-              <AuthGuard>
-                <DashboardPage />
-              </AuthGuard>
-            </ErrorBoundary>
-          }
-        />
+        {/* ── Auth Routes (no auth required) ────────────────────────── */}
+        <Route element={<ErrorBoundary><AuthLayout /></ErrorBoundary>}>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+        </Route>
+
+        {/* ── Authenticated Dashboard Routes ────────────────────────── */}
+        <Route element={<ErrorBoundary><AuthGuard><MainLayout /></AuthGuard></ErrorBoundary>}>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+        </Route>
+
+        {/* ── Editor (full-bleed, own layout) ───────────────────────── */}
         <Route
           path="/editor/:projectId"
           element={
@@ -138,7 +145,20 @@ export default function App() {
             </ErrorBoundary>
           }
         />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        {/* Alias: /project/:id redirects to editor */}
+        <Route
+          path="/project/:projectId"
+          element={
+            <ErrorBoundary>
+              <AuthGuard>
+                <EditorPage />
+              </AuthGuard>
+            </ErrorBoundary>
+          }
+        />
+
+        {/* ── 404 Catch-all ─────────────────────────────────────────── */}
+        <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </KeyboardProvider>
   );

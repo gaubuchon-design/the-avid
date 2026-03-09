@@ -7,6 +7,7 @@
     "dev": "expo start",
     "dev:ios": "expo start --ios",
     "dev:android": "expo start --android",
+    "build": "expo export --platform all",
     "build:ios": "eas build --platform ios",
     "build:android": "eas build --platform android",
     "build:all": "eas build --platform all",

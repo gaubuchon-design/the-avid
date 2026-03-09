@@ -24,19 +24,19 @@ interface State {
  * "Reload Panel" button instead of tearing down the entire editor.
  */
 export class PanelErrorBoundary extends Component<Props, State> {
-  state: State = { hasError: false, error: null };
+  override state: State = { hasError: false, error: null };
 
   static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo): void {
+  override componentDidCatch(error: Error, info: ErrorInfo): void {
     logger.error(`Panel "${this.props.panelName}" crashed`, error, {
       componentStack: info.componentStack || '',
     });
   }
 
-  render(): ReactNode {
+  override render(): ReactNode {
     if (this.state.hasError) {
       return (
         <div

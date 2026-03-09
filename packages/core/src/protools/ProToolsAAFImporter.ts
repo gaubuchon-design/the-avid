@@ -122,21 +122,21 @@ export class ProToolsAAFImporter {
 
       const tracks: AAFSourceTrack[] = Array.isArray(data.tracks)
         ? data.tracks.map((t: Record<string, unknown>) => ({
-            trackId: String(t.trackId ?? ''),
-            trackName: String(t.trackName ?? ''),
-            clips: Array.isArray(t.clips)
-              ? t.clips.map((c: Record<string, unknown>) => ({
-                  clipId: String(c.clipId ?? ''),
-                  clipName: String(c.clipName ?? ''),
-                  trackName: String(t.trackName ?? ''),
-                  sourceFilePath: String(c.sourceFilePath ?? ''),
-                  startTimecodeTC: String(c.startTimecodeTC ?? '00:00:00:00'),
-                  endTimecodeTC: String(c.endTimecodeTC ?? '00:00:00:00'),
-                  timelineStartSeconds: Number(c.timelineStartSeconds ?? 0),
-                  timelineEndSeconds: Number(c.timelineEndSeconds ?? 0),
-                  trimStartSeconds: Number(c.trimStartSeconds ?? 0),
-                  trimEndSeconds: Number(c.trimEndSeconds ?? 0),
-                  gainDb: Number(c.gainDb ?? 0),
+            trackId: String(t['trackId'] ?? ''),
+            trackName: String(t['trackName'] ?? ''),
+            clips: Array.isArray(t['clips'])
+              ? t['clips'].map((c: Record<string, unknown>) => ({
+                  clipId: String(c['clipId'] ?? ''),
+                  clipName: String(c['clipName'] ?? ''),
+                  trackName: String(t['trackName'] ?? ''),
+                  sourceFilePath: String(c['sourceFilePath'] ?? ''),
+                  startTimecodeTC: String(c['startTimecodeTC'] ?? '00:00:00:00'),
+                  endTimecodeTC: String(c['endTimecodeTC'] ?? '00:00:00:00'),
+                  timelineStartSeconds: Number(c['timelineStartSeconds'] ?? 0),
+                  timelineEndSeconds: Number(c['timelineEndSeconds'] ?? 0),
+                  trimStartSeconds: Number(c['trimStartSeconds'] ?? 0),
+                  trimEndSeconds: Number(c['trimEndSeconds'] ?? 0),
+                  gainDb: Number(c['gainDb'] ?? 0),
                 }))
               : [],
           }))
@@ -144,10 +144,10 @@ export class ProToolsAAFImporter {
 
       const markers: AAFSourceMarker[] = Array.isArray(data.markers)
         ? data.markers.map((m: Record<string, unknown>) => ({
-            id: String(m.id ?? ''),
-            label: String(m.label ?? ''),
-            timeSeconds: Number(m.timeSeconds ?? 0),
-            color: m.color ? String(m.color) : undefined,
+            id: String(m['id'] ?? ''),
+            label: String(m['label'] ?? ''),
+            timeSeconds: Number(m['timeSeconds'] ?? 0),
+            color: m['color'] ? String(m['color']) : undefined,
           }))
         : [];
 

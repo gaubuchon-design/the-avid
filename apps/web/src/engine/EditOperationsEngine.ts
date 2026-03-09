@@ -1213,15 +1213,15 @@ export class EditOperationsEngine {
         // Process removals from last to first to maintain correct offsets
         for (let i = clipsToRemove.length - 1; i >= 0; i--) {
           const clip = clipsToRemove[i];
-          const duration = clip.endTime - clip.startTime;
+          const duration = clip!.endTime! - clip!.startTime!;
           totalDurationChange -= duration;
 
           // Remove the clip
-          track.clips = track.clips.filter((c) => c.id !== clip.id);
+          track.clips = track.clips.filter((c) => c.id !== clip!.id!);
 
           // Ripple: shift subsequent clips left
           for (const c of track.clips) {
-            if (c.startTime >= clip.endTime) {
+            if (c.startTime >= clip!.endTime!) {
               c.startTime -= duration;
               c.endTime -= duration;
             }
@@ -1531,7 +1531,7 @@ export class EditOperationsEngine {
         let targetTrack = tracks.find((t) => t.id === origTrackId);
         if (!targetTrack || targetTrack.locked) {
           // Find a compatible track
-          const clipType = clips[0].type;
+          const clipType = clips[0]!.type;
           const trackType = clipType === 'audio' ? 'AUDIO' : 'VIDEO';
           targetTrack = tracks.find(
             (t) => t.type === trackType && !t.locked && !t.muted,
@@ -1634,20 +1634,20 @@ export class EditOperationsEngine {
 
         for (let i = 0; i < track.clips.length; i++) {
           const clip = track.clips[i];
-          if (clip.startTime < splitTime && clip.endTime > splitTime) {
+          if (clip!.startTime! < splitTime && clip!.endTime! > splitTime) {
             // Split the clip at the playhead
             const newId = createId('clip');
-            const trimDelta = splitTime - clip.startTime;
+            const trimDelta = splitTime - clip!.startTime!;
 
             const rightClip = makeClip({
-              ...clip,
+              ...clip!,
               id: newId,
               trackId: track.id,
               startTime: splitTime,
-              trimStart: clip.trimStart + trimDelta,
-            });
+              trimStart: clip!.trimStart! + trimDelta,
+            } as any);
 
-            clip.endTime = splitTime;
+            clip!.endTime! = splitTime;
             track.clips.splice(i + 1, 0, rightClip);
             i++; // skip the newly inserted clip
           }

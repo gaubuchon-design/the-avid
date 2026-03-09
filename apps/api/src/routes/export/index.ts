@@ -173,7 +173,7 @@ router.post(
 router.post(
   '/projects/:projectId/export/stems',
   requireProjectAccess('EDITOR'),
-  validate(schemas.exportStems),
+  validate(schemas.exportStems as any),
   async (req: Request, res: Response) => {
     const { projectId } = req.params;
     const options = req.body;

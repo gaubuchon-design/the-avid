@@ -769,7 +769,7 @@ function StepStatusBadge({ status }: { status: AgentStep['status'] }) {
     failed: { bg: 'rgba(239,68,68,0.15)', color: 'var(--error)', label: 'Failed' },
     cancelled: { bg: 'var(--bg-hover)', color: 'var(--text-muted)', label: 'Skipped' },
   };
-  const c = config[status] ?? config.pending;
+  const c = config[status] ?? config['pending'];
   return (
     <span
       style={{
@@ -777,14 +777,14 @@ function StepStatusBadge({ status }: { status: AgentStep['status'] }) {
         fontWeight: 600,
         padding: '2px 6px',
         borderRadius: 'var(--radius-sm)',
-        background: c.bg,
-        color: c.color,
+        background: c!.bg!,
+        color: c!.color!,
         textTransform: 'uppercase',
         letterSpacing: '0.04em',
         flexShrink: 0,
       }}
     >
-      {c.label}
+      {c!.label!}
     </span>
   );
 }

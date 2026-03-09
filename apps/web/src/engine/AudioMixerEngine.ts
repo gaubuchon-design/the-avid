@@ -453,23 +453,23 @@ export class AudioMixerEngine {
     }
 
     // Before first keyframe
-    if (time <= kfs[0].time) return kfs[0].value;
+    if (time <= kfs[0]!.time) return kfs[0]!.value;
     // After last keyframe
-    if (time >= kfs[kfs.length - 1].time) return kfs[kfs.length - 1].value;
+    if (time >= kfs[kfs.length - 1]!.time) return kfs[kfs.length - 1]!.value;
 
     // Find the two surrounding keyframes
     for (let i = 0; i < kfs.length - 1; i++) {
       const a = kfs[i];
       const b = kfs[i + 1];
-      if (time >= a.time && time <= b.time) {
-        if (a.interpolation === 'hold') return a.value;
+      if (time >= a!.time! && time <= b!.time!) {
+        if (a!.interpolation! === 'hold') return a!.value!;
         // Linear interpolation
-        const t = (time - a.time) / (b.time - a.time);
-        return a.value + t * (b.value - a.value);
+        const t = (time - a!.time!) / (b!.time! - a!.time!);
+        return a!.value! + t * (b!.value! - a!.value!);
       }
     }
 
-    return kfs[kfs.length - 1].value;
+    return kfs[kfs.length - 1]!.value;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

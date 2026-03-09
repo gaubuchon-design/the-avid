@@ -136,9 +136,9 @@ export class DeckLinkDevice {
     };
 
     if (config.audioChannels > 0) {
-      macadamConfig.channels = config.audioChannels;
-      macadamConfig.sampleRate = 48000;
-      macadamConfig.sampleType = config.audioBitDepth;
+      macadamConfig['channels'] = config.audioChannels;
+      macadamConfig['sampleRate'] = 48000;
+      macadamConfig['sampleType'] = config.audioBitDepth;
     }
 
     this.activeCapture = this.macadam.capture(macadamConfig);
@@ -266,7 +266,7 @@ export class DeckLinkDevice {
           audioData: rawFrame.audio?.buffer.slice(
             rawFrame.audio.byteOffset,
             rawFrame.audio.byteOffset + rawFrame.audio.byteLength,
-          ),
+          ) as ArrayBuffer | undefined,
           audioChannels: config.audioChannels,
           audioSampleRate: 48000,
           dropFrame: false,
@@ -291,7 +291,7 @@ export class DeckLinkDevice {
 
   private extractDeviceIndex(deviceId: string): number {
     const match = deviceId.match(/decklink-(\d+)/);
-    return match ? parseInt(match[1], 10) : 0;
+    return match ? parseInt(match[1]!, 10) : 0;
   }
 
   private mapPixelFormat(format: string): string {

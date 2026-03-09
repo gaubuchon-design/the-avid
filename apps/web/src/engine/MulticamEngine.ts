@@ -482,7 +482,7 @@ export class MulticamEngine {
 
     return angles.map((a, i) => ({
       ...a,
-      syncOffset: timecodes[i] - minTimecode,
+      syncOffset: timecodes[i]! - minTimecode,
     }));
   }
 
@@ -538,7 +538,7 @@ export class MulticamEngine {
     const reference = angles[0];
     return angles.map((a, i) => ({
       ...a,
-      syncOffset: i === 0 ? 0 : this.simulateWaveformOffset(reference, a),
+      syncOffset: i === 0 ? 0 : this.simulateWaveformOffset(reference!, a),
     }));
   }
 
@@ -829,7 +829,7 @@ export class MulticamEngine {
     const cut: MulticamCut = {
       time: playheadTime,
       angleIndex,
-      angleId: angle.id,
+      angleId: angle!.id!,
       trackId,
     };
 
@@ -918,11 +918,11 @@ export class MulticamEngine {
     // Find the cut segment that contains the current playhead.
     const cutIdx = this.findCutIndexAtTime(playheadTime);
     if (cutIdx !== -1) {
-      const previousAngle = this.state.cuts[cutIdx].angleIndex;
+      const previousAngle = this.state.cuts[cutIdx]!.angleIndex;
       this.state.cuts[cutIdx] = {
-        ...this.state.cuts[cutIdx],
+        ...this.state.cuts[cutIdx]!,
         angleIndex: newAngleIndex,
-        angleId: angle.id,
+        angleId: angle!.id!,
       };
 
       this.state.activeAngleIndex = newAngleIndex;
@@ -1061,12 +1061,12 @@ export class MulticamEngine {
     for (let i = 0; i < cuts.length; i++) {
       const cut = cuts[i];
       const nextCut = cuts[i + 1];
-      const angle = group.angles[cut.angleIndex];
+      const angle = group.angles[cut!.angleIndex!];
 
       if (!angle) continue;
 
       // Segment boundaries.
-      const segmentStart = cut.time;
+      const segmentStart = cut!.time!;
       const segmentEnd = nextCut ? nextCut.time : group.duration;
 
       // Don't create zero-length segments.
@@ -1373,7 +1373,7 @@ export class MulticamEngine {
     // Cuts are sorted by time. Find the last cut whose time <= the given time.
     let result = -1;
     for (let i = 0; i < cuts.length; i++) {
-      if (cuts[i].time <= time + 0.001) {
+      if (cuts[i]!.time <= time + 0.001) {
         result = i;
       } else {
         break;
@@ -1392,7 +1392,7 @@ export class MulticamEngine {
     const playheadTime = useEditorStore.getState().playheadTime;
     const cutIdx = this.findCutIndexAtTime(playheadTime);
     if (cutIdx !== -1) {
-      return this.state.cuts[cutIdx].angleIndex;
+      return this.state.cuts[cutIdx]!.angleIndex;
     }
     return this.state.activeAngleIndex;
   }

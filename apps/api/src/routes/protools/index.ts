@@ -63,7 +63,7 @@ const importAAFSchema = z.object({
 
 router.get('/sessions/:projectId', async (req: Request, res: Response) => {
   const session = await db.proToolsSession.findFirst({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
     include: { markerSyncs: { take: 50, orderBy: { syncedAt: 'desc' } } },
   });
   // Session may not exist yet; return null rather than 404
@@ -95,12 +95,12 @@ router.post('/sessions', validate(createSessionSchema), async (req: Request, res
 });
 
 router.patch('/sessions/:id', validate(updateSessionSchema), async (req: Request, res: Response) => {
-  const existing = await db.proToolsSession.findUnique({ where: { id: req.params.id } });
+  const existing = await db.proToolsSession.findUnique({ where: { id: req.params['id'] } });
   assertFound(existing, 'Pro Tools session');
 
   const data = req.body;
   const session = await db.proToolsSession.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: {
       ...data,
       lastSyncAt: data.lastSyncAt ? new Date(data.lastSyncAt) : undefined,
@@ -110,7 +110,7 @@ router.patch('/sessions/:id', validate(updateSessionSchema), async (req: Request
 });
 
 router.post('/sessions/:id/connect', async (req: Request, res: Response) => {
-  const existing = await db.proToolsSession.findUnique({ where: { id: req.params.id } });
+  const existing = await db.proToolsSession.findUnique({ where: { id: req.params['id'] } });
   assertFound(existing, 'Pro Tools session');
 
   if (existing.status === 'CONNECTED') {
@@ -120,7 +120,7 @@ router.post('/sessions/:id/connect', async (req: Request, res: Response) => {
   }
 
   const session = await db.proToolsSession.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: {
       status: 'CONNECTING',
       connectedUserId: req.user!.id,
@@ -131,11 +131,11 @@ router.post('/sessions/:id/connect', async (req: Request, res: Response) => {
 });
 
 router.post('/sessions/:id/disconnect', async (req: Request, res: Response) => {
-  const existing = await db.proToolsSession.findUnique({ where: { id: req.params.id } });
+  const existing = await db.proToolsSession.findUnique({ where: { id: req.params['id'] } });
   assertFound(existing, 'Pro Tools session');
 
   const session = await db.proToolsSession.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: { status: 'DISCONNECTED' },
   });
   res.json({ session });
@@ -144,23 +144,23 @@ router.post('/sessions/:id/disconnect', async (req: Request, res: Response) => {
 // ─── Marker Sync ─────────────────────────────────────────────────────────────
 
 router.get('/sessions/:sessionId/markers', async (req: Request, res: Response) => {
-  const session = await db.proToolsSession.findUnique({ where: { id: req.params.sessionId } });
+  const session = await db.proToolsSession.findUnique({ where: { id: req.params['sessionId'] } });
   assertFound(session, 'Pro Tools session');
 
   const markers = await db.markerSync.findMany({
-    where: { sessionId: req.params.sessionId },
+    where: { sessionId: req.params['sessionId'] },
     orderBy: { timecode: 'asc' },
   });
   res.json({ markers });
 });
 
 router.post('/sessions/:sessionId/markers', validate(createMarkerSchema), async (req: Request, res: Response) => {
-  const session = await db.proToolsSession.findUnique({ where: { id: req.params.sessionId } });
+  const session = await db.proToolsSession.findUnique({ where: { id: req.params['sessionId'] } });
   assertFound(session, 'Pro Tools session');
 
   const marker = await db.markerSync.create({
     data: {
-      sessionId: req.params.sessionId,
+      sessionId: req.params['sessionId'],
       ...req.body,
     },
   });
@@ -168,7 +168,7 @@ router.post('/sessions/:sessionId/markers', validate(createMarkerSchema), async 
 });
 
 router.post('/sessions/:sessionId/markers/sync', validate(batchSyncSchema), async (req: Request, res: Response) => {
-  const session = await db.proToolsSession.findUnique({ where: { id: req.params.sessionId } });
+  const session = await db.proToolsSession.findUnique({ where: { id: req.params['sessionId'] } });
   assertFound(session, 'Pro Tools session');
 
   const { direction, markers } = req.body;
@@ -177,7 +177,7 @@ router.post('/sessions/:sessionId/markers/sync', validate(batchSyncSchema), asyn
     markers.map((m: any) =>
       db.markerSync.create({
         data: {
-          sessionId: req.params.sessionId,
+          sessionId: req.params['sessionId'],
           avidMarkerId: m.avidMarkerId,
           proToolsLocId: m.proToolsLocId,
           timecode: m.timecode,
@@ -191,7 +191,7 @@ router.post('/sessions/:sessionId/markers/sync', validate(batchSyncSchema), asyn
 
   // Update session last sync timestamp
   await db.proToolsSession.update({
-    where: { id: req.params.sessionId },
+    where: { id: req.params['sessionId'] },
     data: { lastSyncAt: new Date() },
   });
 
@@ -201,7 +201,7 @@ router.post('/sessions/:sessionId/markers/sync', validate(batchSyncSchema), asyn
 // ─── AAF Export/Import ───────────────────────────────────────────────────────
 
 router.post('/sessions/:sessionId/export-aaf', validate(exportAAFSchema), async (req: Request, res: Response) => {
-  const session = await db.proToolsSession.findUnique({ where: { id: req.params.sessionId } });
+  const session = await db.proToolsSession.findUnique({ where: { id: req.params['sessionId'] } });
   assertFound(session, 'Pro Tools session');
 
   const { timelineId, handleDuration, includeVideo } = req.body;
@@ -221,7 +221,7 @@ router.post('/sessions/:sessionId/export-aaf', validate(exportAAFSchema), async 
 });
 
 router.post('/sessions/:sessionId/import-aaf', validate(importAAFSchema), async (req: Request, res: Response) => {
-  const session = await db.proToolsSession.findUnique({ where: { id: req.params.sessionId } });
+  const session = await db.proToolsSession.findUnique({ where: { id: req.params['sessionId'] } });
   assertFound(session, 'Pro Tools session');
 
   const { mergeMode } = req.body;

@@ -30,9 +30,9 @@ export function applyChromaKey(
   const len = data.length;
 
   for (let i = 0; i < len; i += 4) {
-    const r = data[i] / 255;
-    const g = data[i + 1] / 255;
-    const b = data[i + 2] / 255;
+    const r = data[i]! / 255;
+    const g = data[i + 1]! / 255;
+    const b = data[i + 2]! / 255;
 
     const [pH, pS, pL] = rgbToHsl(r, g, b);
 
@@ -55,20 +55,20 @@ export function applyChromaKey(
     } else if (dist < outerThreshold) {
       // Soft edge — partial transparency
       const alpha = (dist - innerThreshold) / (outerThreshold - innerThreshold);
-      data[i + 3] = Math.round(data[i + 3] * alpha);
+      data[i + 3] = Math.round(data[i + 3]! * alpha);
     }
 
     // Spill suppression — reduce key color component on non-keyed pixels
-    if (spillNorm > 0 && data[i + 3] > 0) {
+    if (spillNorm > 0 && data[i + 3]! > 0) {
       // Determine which channel to suppress based on key color
       if (key.g > key.r && key.g > key.b) {
         // Green screen — suppress green
-        const maxRB = Math.max(data[i], data[i + 2]);
-        data[i + 1] = Math.round(data[i + 1] - (data[i + 1] - maxRB) * spillNorm);
+        const maxRB = Math.max(data[i]!, data[i + 2]!);
+        data[i + 1] = Math.round(data[i + 1]! - (data[i + 1]! - maxRB) * spillNorm);
       } else if (key.b > key.r && key.b > key.g) {
         // Blue screen — suppress blue
-        const maxRG = Math.max(data[i], data[i + 1]);
-        data[i + 2] = Math.round(data[i + 2] - (data[i + 2] - maxRG) * spillNorm);
+        const maxRG = Math.max(data[i]!, data[i + 1]!);
+        data[i + 2] = Math.round(data[i + 2]! - (data[i + 2]! - maxRG) * spillNorm);
       }
     }
   }
@@ -78,9 +78,9 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const match = hex.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
   if (!match) return null;
   return {
-    r: parseInt(match[1], 16),
-    g: parseInt(match[2], 16),
-    b: parseInt(match[3], 16),
+    r: parseInt(match[1]!, 16),
+    g: parseInt(match[2]!, 16),
+    b: parseInt(match[3]!, 16),
   };
 }
 

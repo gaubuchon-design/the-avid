@@ -385,7 +385,7 @@ export function ThumbnailDesigner() {
         textOverlays: [],
         background: { type: 'frame', frameTime },
         colorBoost: null,
-        exportSize: THUMBNAIL_EXPORT_SIZES[0],
+        exportSize: THUMBNAIL_EXPORT_SIZES[0]!,
         createdAt: now,
         updatedAt: now,
       };
@@ -430,7 +430,7 @@ export function ThumbnailDesigner() {
       textOverlays: [],
       background: { type: 'frame', frameTime: 0 },
       colorBoost: null,
-      exportSize: THUMBNAIL_EXPORT_SIZES[0],
+      exportSize: THUMBNAIL_EXPORT_SIZES[0]!,
       createdAt: now,
       updatedAt: now,
     };

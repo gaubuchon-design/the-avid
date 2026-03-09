@@ -223,7 +223,7 @@ export class RelinkEngine {
       const candidates: RelinkCandidate[] = [];
 
       for (const file of scannedFiles) {
-        const { confidence, reason } = this.scoreMatch(asset, file);
+        const { confidence, reason } = this.scoreMatch(asset!, file);
         if (confidence > 0) {
           candidates.push({
             filePath: file.filePath,
@@ -246,23 +246,23 @@ export class RelinkEngine {
       // Auto-select if top match exceeds threshold and is significantly better than second
       let selectedIndex: number | null = null;
       let confirmed = false;
-      if (limited.length > 0 && limited[0].confidence >= this.config.autoMatchThreshold) {
-        if (limited.length === 1 || limited[0].confidence - limited[1].confidence > 0.15) {
+      if (limited.length > 0 && limited[0]!.confidence >= this.config.autoMatchThreshold) {
+        if (limited.length === 1 || limited[0]!.confidence - limited[1]!.confidence > 0.15) {
           selectedIndex = 0;
           confirmed = false; // Still needs user confirmation
         }
       }
 
       const status: RelinkAssetStatus = limited.length > 1 &&
-        limited[0].confidence > 0.7 &&
-        limited[1].confidence > 0.7 &&
-        limited[0].confidence - limited[1].confidence < 0.1
+        limited[0]!.confidence > 0.7 &&
+        limited[1]!.confidence > 0.7 &&
+        limited[0]!.confidence - limited[1]!.confidence < 0.1
         ? 'conflict'
         : 'offline';
 
       proposals.push({
-        assetId: asset.id,
-        assetName: asset.name,
+        assetId: asset!.id,
+        assetName: asset!.name,
         currentStatus: status,
         candidates: limited,
         selectedCandidateIndex: selectedIndex,
@@ -270,7 +270,7 @@ export class RelinkEngine {
       });
 
       if (limited.length > 0) {
-        this.events.onMatchFound?.(asset.id, limited[0]);
+        this.events.onMatchFound?.(asset!.id, limited[0]!);
       }
     }
 
@@ -318,21 +318,21 @@ export class RelinkEngine {
       for (const bin of bins) {
         for (let i = 0; i < bin.assets.length; i++) {
           const asset = bin.assets[i];
-          const candidate = relinkMap.get(asset.id);
+          const candidate = relinkMap.get(asset!.id);
 
           if (candidate) {
             // Update locations
-            const pathHistory = [...(asset.locations?.pathHistory ?? [])];
-            if (this.config.updatePathHistory && asset.locations?.originalPath) {
-              pathHistory.push(asset.locations.originalPath);
+            const pathHistory = [...(asset!.locations?.pathHistory ?? [])];
+            if (this.config.updatePathHistory && asset!.locations?.originalPath) {
+              pathHistory.push(asset!.locations.originalPath);
             }
 
             bin.assets[i] = {
-              ...asset,
+              ...asset!,
               status: 'READY',
               indexStatus: 'READY',
               locations: {
-                ...asset.locations,
+                ...asset!.locations,
                 originalPath: candidate.filePath,
                 managedPath: candidate.filePath,
                 pathHistory,
@@ -344,34 +344,34 @@ export class RelinkEngine {
                     sizeBytes: candidate.fileSizeBytes,
                     modifiedAt: new Date().toISOString(),
                   }
-                : asset.fingerprint,
-              technicalMetadata: candidate.technicalMetadata ?? asset.technicalMetadata,
+                : asset!.fingerprint,
+              technicalMetadata: candidate.technicalMetadata ?? asset!.technicalMetadata,
             };
 
             result.relinked++;
             result.details.push({
-              assetId: asset.id,
-              assetName: asset.name,
+              assetId: asset!.id,
+              assetName: asset!.name,
               status: 'relinked',
               newPath: candidate.filePath,
             });
           } else {
             // Check if this is an offline asset that wasn't relinked
-            const proposal = proposals.find((p) => p.assetId === asset.id);
+            const proposal = proposals.find((p) => p.assetId === asset!.id);
             if (proposal) {
               if (proposal.currentStatus === 'conflict') {
                 result.conflicts++;
                 result.details.push({
-                  assetId: asset.id,
-                  assetName: asset.name,
+                  assetId: asset!.id,
+                  assetName: asset!.name,
                   status: 'conflict',
                   error: 'Multiple ambiguous matches found',
                 });
               } else {
                 result.stillOffline++;
                 result.details.push({
-                  assetId: asset.id,
-                  assetName: asset.name,
+                  assetId: asset!.id,
+                  assetName: asset!.name,
                   status: 'offline',
                   error: proposal.candidates.length === 0 ? 'No matches found' : 'Not confirmed',
                 });

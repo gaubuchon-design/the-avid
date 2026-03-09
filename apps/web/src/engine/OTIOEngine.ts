@@ -360,8 +360,8 @@ function computeTimeScalar(clip: AppClip): number {
   const kf = clip.timeRemap.keyframes;
   const first = kf[0];
   const last = kf[kf.length - 1];
-  const timelineDelta = last.timelineTime - first.timelineTime;
-  const sourceDelta = last.sourceTime - first.sourceTime;
+  const timelineDelta = last!.timelineTime! - first!.timelineTime!;
+  const sourceDelta = last!.sourceTime! - first!.sourceTime!;
 
   if (timelineDelta === 0) return 1.0;
   if (sourceDelta === 0) return 0; // freeze
@@ -655,7 +655,7 @@ function otioClipToApp(
   }
 
   // Determine clip type from metadata or media reference
-  const clipType: AppClip['type'] = meta.type ?? 'video';
+  const clipType: AppClip['type'] = meta['type'] ?? 'video';
 
   // Resolve asset URL from external reference
   let assetId: string | undefined;
@@ -668,7 +668,7 @@ function otioClipToApp(
   const hasTimeWarp = Math.abs(timeScalar - 1.0) > 0.001 || timeScalar === 0;
 
   // Use round-trip metadata if available, otherwise build defaults
-  const intrinsicVideo = meta.intrinsicVideo ?? {
+  const intrinsicVideo = meta['intrinsicVideo'] ?? {
     opacity: 100,
     scaleX: 100,
     scaleY: 100,
@@ -679,12 +679,12 @@ function otioClipToApp(
     anchorY: 0,
   };
 
-  const intrinsicAudio = meta.intrinsicAudio ?? {
+  const intrinsicAudio = meta['intrinsicAudio'] ?? {
     volume: 0,
     pan: 0,
   };
 
-  const timeRemap = meta.timeRemap ?? {
+  const timeRemap = meta['timeRemap'] ?? {
     enabled: hasTimeWarp,
     keyframes: hasTimeWarp
       ? [
@@ -705,7 +705,7 @@ function otioClipToApp(
   };
 
   return {
-    id: meta.clipId ?? generateId(),
+    id: meta['clipId'] ?? generateId(),
     trackId,
     name: otioClip.name || 'Untitled Clip',
     startTime,
@@ -713,7 +713,7 @@ function otioClipToApp(
     trimStart: sourceStart,
     trimEnd,
     type: clipType,
-    color: meta.color ?? undefined,
+    color: meta['color'] ?? undefined,
     assetId,
     intrinsicVideo,
     intrinsicAudio,
@@ -776,9 +776,9 @@ function otioTrackToApp(
   index: number,
 ): AppTrack {
   const meta = (otioTrack.metadata?.['the-avid'] ?? {}) as Record<string, any>;
-  const trackId = meta.trackId ?? generateId();
+  const trackId = meta['trackId'] ?? generateId();
 
-  const appType: TrackType = meta.type ?? otioKindToAppTrackType(otioTrack.kind);
+  const appType: TrackType = meta['type'] ?? otioKindToAppTrackType(otioTrack.kind);
 
   const clips = importTrackChildren(otioTrack.children, trackId);
 
@@ -786,13 +786,13 @@ function otioTrackToApp(
     id: trackId,
     name: otioTrack.name || `Track ${index + 1}`,
     type: appType,
-    sortOrder: meta.sortOrder ?? index,
+    sortOrder: meta['sortOrder'] ?? index,
     muted: !otioTrack.enabled,
-    locked: meta.locked ?? false,
-    solo: meta.solo ?? false,
-    volume: meta.volume ?? 100,
+    locked: meta['locked'] ?? false,
+    solo: meta['solo'] ?? false,
+    volume: meta['volume'] ?? 100,
     clips,
-    color: meta.color ?? '#3b82f6',
+    color: meta['color'] ?? '#3b82f6',
   };
 }
 
@@ -803,10 +803,10 @@ function importMarkers(otioMarkers: OTIOMarker[]): AppMarker[] {
   return otioMarkers.map((m) => {
     const meta = (m.metadata?.['the-avid'] ?? {}) as Record<string, any>;
     return {
-      id: meta.markerId ?? generateId(),
+      id: meta['markerId'] ?? generateId(),
       time: rationalToSeconds(m.marked_range.start_time),
       label: m.name,
-      color: meta.originalColor ?? otioMarkerColorToCSS(m.color),
+      color: meta['originalColor'] ?? otioMarkerColorToCSS(m.color),
     };
   });
 }
@@ -836,11 +836,11 @@ export function importFromOTIO(json: unknown): OTIOImportResult {
 
   // Validate top-level schema
   if (
-    !root.OTIO_SCHEMA ||
-    !root.OTIO_SCHEMA.startsWith('Timeline.')
+    !root['OTIO_SCHEMA'] ||
+    !root['OTIO_SCHEMA'].startsWith('Timeline.')
   ) {
     throw new Error(
-      `[OTIOEngine] Expected root OTIO_SCHEMA "Timeline.1", got "${root.OTIO_SCHEMA ?? 'none'}".`,
+      `[OTIOEngine] Expected root OTIO_SCHEMA "Timeline.1", got "${root['OTIO_SCHEMA'] ?? 'none'}".`,
     );
   }
 
@@ -849,7 +849,7 @@ export function importFromOTIO(json: unknown): OTIOImportResult {
   // Determine frame rate from global_start_time or metadata
   const frameRate =
     timeline.global_start_time?.rate ??
-    (timeline.metadata?.['the-avid'] as Record<string, any>)?.frameRate ??
+    (timeline.metadata?.['the-avid'] as Record<string, any>)?.['frameRate'] ??
     24;
 
   // Import tracks from the Stack
@@ -914,9 +914,9 @@ export function deserializeOTIO(jsonStr: string): OTIOTimeline {
   }
 
   const root = parsed as Record<string, any>;
-  if (!root?.OTIO_SCHEMA?.startsWith('Timeline.')) {
+  if (!root?.['OTIO_SCHEMA']?.startsWith('Timeline.')) {
     throw new Error(
-      `[OTIOEngine] Root OTIO_SCHEMA is not a Timeline (got "${root?.OTIO_SCHEMA ?? 'none'}").`,
+      `[OTIOEngine] Root OTIO_SCHEMA is not a Timeline (got "${root?.['OTIO_SCHEMA'] ?? 'none'}").`,
     );
   }
 

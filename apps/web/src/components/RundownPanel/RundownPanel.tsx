@@ -94,9 +94,9 @@ function BreakingBanner() {
           animation: 'pulse 1.5s ease-in-out infinite',
         }}
       >
-        {latest.priority}
+        {latest!.priority!}
       </span>
-      <span style={{ color: '#ef4444', flex: 1 }}>{latest.message}</span>
+      <span style={{ color: '#ef4444', flex: 1 }}>{latest!.message!}</span>
       {unacknowledged.length > 1 && (
         <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>
           +{unacknowledged.length - 1} more
@@ -104,7 +104,7 @@ function BreakingBanner() {
       )}
       <button
         className="tl-btn"
-        onClick={() => acknowledgeAlert(latest.id)}
+        onClick={() => acknowledgeAlert(latest!.id!)}
         style={{
           padding: '3px 10px',
           border: '1px solid rgba(239,68,68,0.4)',
@@ -456,21 +456,17 @@ export function RundownPanel() {
         case 'Home': {
           e.preventDefault();
           if (filteredStories.length > 0) {
-            setActiveStory(filteredStories[0].storyId);
+            setActiveStory(filteredStories[0]!.storyId);
           }
           break;
         }
         case 'End': {
           e.preventDefault();
           if (filteredStories.length > 0) {
-            setActiveStory(filteredStories[filteredStories.length - 1].storyId);
+            setActiveStory(filteredStories[filteredStories.length - 1]!.storyId);
           }
           break;
         }
-        // Alt+Up/Down to reorder stories
-        case 'ArrowUp' && e.altKey:
-        case 'ArrowDown' && e.altKey:
-          break;
         // L key to toggle live mode
         case 'l':
         case 'L': {

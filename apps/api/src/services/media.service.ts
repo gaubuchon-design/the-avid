@@ -152,14 +152,14 @@ class MediaService {
     const asset = await db.mediaAsset.create({
       data: {
         binId,
-        name: metadata.name || path.basename(file.originalname, path.extname(file.originalname)),
+        name: metadata['name'] || path.basename(file.originalname, path.extname(file.originalname)),
         type,
         status: 'PROCESSING',
         s3Key,
         s3Bucket: config.aws.buckets.media,
         mimeType: file.mimetype,
         fileSize: BigInt(file.size),
-        description: metadata.description,
+        description: metadata['description'],
       },
     });
 

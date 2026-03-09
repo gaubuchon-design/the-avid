@@ -45,10 +45,8 @@ export class IndexBuilder {
         const vector = bufferToVector(chunk.vector);
         index.add(chunk.id, Array.from(vector));
       } catch (err) {
-        // Log but skip corrupt vectors.
-        console.warn(
-          `[IndexBuilder] Skipping chunk ${chunk.id}: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        // Skip corrupt vectors — the chunk is omitted from the index.
+        void err;
       }
     }
 

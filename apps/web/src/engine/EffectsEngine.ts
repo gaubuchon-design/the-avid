@@ -909,36 +909,36 @@ class EffectsEngine {
       .sort((a, b) => a.frame - b.frame);
 
     if (keyframes.length === 0) {
-      return instance.params[paramName];
+      return instance.params[paramName]!;
     }
 
-    if (frame <= keyframes[0].frame) return keyframes[0].value;
-    if (frame >= keyframes[keyframes.length - 1].frame) return keyframes[keyframes.length - 1].value;
+    if (frame <= keyframes[0]!.frame) return keyframes[0]!.value;
+    if (frame >= keyframes[keyframes.length - 1]!.frame) return keyframes[keyframes.length - 1]!.value;
 
     let prev = keyframes[0];
     let next = keyframes[keyframes.length - 1];
     for (let i = 0; i < keyframes.length - 1; i++) {
-      if (frame >= keyframes[i].frame && frame <= keyframes[i + 1].frame) {
+      if (frame >= keyframes[i]!.frame && frame <= keyframes[i + 1]!.frame) {
         prev = keyframes[i];
         next = keyframes[i + 1];
         break;
       }
     }
 
-    if (prev.interpolation === 'hold') return prev.value;
+    if (prev!.interpolation! === 'hold') return prev!.value!;
 
-    const t = (frame - prev.frame) / (next.frame - prev.frame);
-    if (typeof prev.value === 'number' && typeof next.value === 'number') {
-      if (prev.interpolation === 'linear') {
-        return prev.value + (next.value - prev.value) * t;
+    const t = (frame - prev!.frame!) / (next!.frame! - prev!.frame!);
+    if (typeof prev!.value! === 'number' && typeof next!.value! === 'number') {
+      if (prev!.interpolation! === 'linear') {
+        return prev!.value! + (next!.value! - prev!.value!) * t;
       }
-      if (prev.interpolation === 'bezier') {
+      if (prev!.interpolation! === 'bezier') {
         const ease = t * t * (3 - 2 * t);
-        return prev.value + (next.value - prev.value) * ease;
+        return prev!.value! + (next!.value! - prev!.value!) * ease;
       }
     }
 
-    return t < 0.5 ? prev.value : next.value;
+    return t < 0.5 ? prev!.value! : next!.value!;
   }
 
   // ── Effect ordering ────────────────────────────────────────────────────
@@ -1259,7 +1259,7 @@ class EffectsEngine {
             const range = inWhite - inBlack || 1;
             for (let i = 0; i < data.length; i += 4) {
               for (let c = 0; c < 3; c++) {
-                let v = (data[i + c] - inBlack) / range;
+                let v = (data[i + c]! - inBlack) / range;
                 v = Math.max(0, Math.min(1, v));
                 v = Math.pow(v, 1 / gamma);
                 data[i + c] = Math.round(outBlack + v * (outWhite - outBlack));

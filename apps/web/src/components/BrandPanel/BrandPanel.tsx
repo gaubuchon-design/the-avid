@@ -659,11 +659,11 @@ function StatusBadge({ status }: { status: string }) {
     failed: { bg: 'rgba(239,68,68,0.15)', color: 'var(--error, #ef4444)' },
     rejected: { bg: 'rgba(239,68,68,0.15)', color: 'var(--error, #ef4444)' },
   };
-  const c = colorMap[status] ?? colorMap.pending;
+  const c = colorMap[status] ?? colorMap['pending'];
   return (
     <span style={{
       fontSize: 9, fontWeight: 600, padding: '2px 6px',
-      borderRadius: 'var(--radius-sm)', background: c.bg, color: c.color,
+      borderRadius: 'var(--radius-sm)', background: c!.bg!, color: c!.color!,
       textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 4,
       display: 'inline-block',
     }}>

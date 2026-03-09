@@ -16,26 +16,26 @@ export function AccountSettings() {
 
   return (
     <div>
-      <div style={ss.sectionHeader}>
-        <h3 style={ss.sectionTitle}>Account</h3>
+      <div style={ss['sectionHeader']}>
+        <h3 style={ss['sectionTitle']}>Account</h3>
       </div>
 
-      <div style={ss.field}>
-        <label style={ss.label}>Email</label>
-        <div style={{ ...ss.input, background: 'transparent', border: '1px solid var(--border-subtle, #1e1e28)', opacity: 0.7 }}>
+      <div style={ss['field']}>
+        <label style={ss['label']}>Email</label>
+        <div style={{ ...ss['input'], background: 'transparent', border: '1px solid var(--border-subtle, #1e1e28)', opacity: 0.7 }}>
           {user?.email || '—'}
         </div>
       </div>
 
-      <div style={ss.field}>
-        <label style={ss.label}>Role</label>
+      <div style={ss['field']}>
+        <label style={ss['label']}>Role</label>
         <div style={{ fontSize: 13, color: 'var(--text-primary, #e8e8ed)', textTransform: 'capitalize' }}>
           {user?.role || 'editor'}
         </div>
       </div>
 
-      <div style={ss.field}>
-        <label style={ss.label}>Device</label>
+      <div style={ss['field']}>
+        <label style={ss['label']}>Device</label>
         <div style={{ fontSize: 13, color: 'var(--text-secondary, #a0a0b0)', textTransform: 'capitalize' }}>
           {settings.deviceType} — {settings.deviceId.slice(0, 8)}
         </div>

@@ -107,10 +107,9 @@ export class PlanGenerator {
           approvalPolicy,
         };
       } catch (error) {
-        console.warn(
-          '[PlanGenerator] Gemini API call failed, falling back to templates:',
-          error instanceof Error ? error.message : error,
-        );
+        // Gemini API call failed — fall back to template matching.
+        // Error is intentionally swallowed here; the template fallback
+        // below will produce a plan without Gemini.
       }
     }
 
@@ -185,11 +184,20 @@ export class PlanGenerator {
 
     const url = `${GEMINI_API_BASE}/models/${this.model}:generateContent?key=${this.apiKey}`;
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+
+    let response: globalThis.Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
@@ -207,18 +215,27 @@ export class PlanGenerator {
    * into {@link AgentStep} objects.
    */
   private parseFunctionCalls(planId: string, data: Record<string, unknown>): AgentStep[] {
-    const candidates = (data as any).candidates;
+    const typedData = data as {
+      candidates?: Array<{
+        content?: {
+          parts?: Array<{
+            functionCall?: { name: string; args?: Record<string, unknown> };
+          }>;
+        };
+      }>;
+    };
+    const candidates = typedData.candidates;
     if (!candidates || !Array.isArray(candidates) || candidates.length === 0) {
       return [];
     }
 
-    const parts: any[] = candidates[0]?.content?.parts ?? [];
+    const parts = candidates[0]?.content?.parts ?? [];
 
     const functionCalls = parts
-      .filter((part: any) => part.functionCall)
-      .map((part: any) => ({
-        name: part.functionCall.name as string,
-        args: (part.functionCall.args ?? {}) as Record<string, unknown>,
+      .filter((part) => part.functionCall)
+      .map((part) => ({
+        name: part.functionCall!.name,
+        args: (part.functionCall!.args ?? {}) as Record<string, unknown>,
       }));
 
     // Limit to MAX_STEPS
