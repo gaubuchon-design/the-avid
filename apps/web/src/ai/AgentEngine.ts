@@ -486,7 +486,11 @@ export class AgentEngine {
       ...plan,
       steps: plan.steps.map(s => ({ ...s })),
     };
-    this.subscribers.forEach(cb => cb(snapshot));
+    this.subscribers.forEach(cb => {
+      try { cb(snapshot); } catch (err) {
+        console.error('[AgentEngine] Listener error:', err);
+      }
+    });
   }
 
   // ── Tool Dispatch ─────────────────────────────────────────────────────

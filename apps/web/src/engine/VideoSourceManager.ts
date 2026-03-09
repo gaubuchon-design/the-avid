@@ -306,7 +306,9 @@ class VideoSourceManager {
    * Dispose all sources.
    */
   dispose(): void {
-    for (const [id] of this.sources) {
+    // Collect IDs first to avoid modifying the map during iteration
+    const ids = Array.from(this.sources.keys());
+    for (const id of ids) {
       this.unloadSource(id);
     }
     this.listeners.clear();

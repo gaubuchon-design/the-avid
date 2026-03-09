@@ -368,8 +368,8 @@ router.post(
   async (req: Request, res: Response) => {
     const { projectId, binId } = req.params;
     const { message } = req.body;
-    const userId = (req as any).user?.id ?? 'anonymous';
-    const displayName = (req as any).user?.displayName ?? 'Unknown';
+    const userId = req.user!.id;
+    const displayName = req.user!.displayName;
 
     // In production, this would use BinLockManager.checkOut()
     const lockResult = {
@@ -396,7 +396,7 @@ router.delete(
   requireProjectAccess('EDITOR'),
   async (req: Request, res: Response) => {
     const { binId } = req.params;
-    const userId = (req as any).user?.id ?? 'anonymous';
+    const userId = req.user!.id;
 
     // In production, this would use BinLockManager.checkIn()
     res.status(200).json({

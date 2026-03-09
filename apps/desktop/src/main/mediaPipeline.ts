@@ -1,8 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { watch as watchFs } from 'node:fs';
-import { copyFile } from 'node:fs/promises';
-import { access, mkdir, open, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, open, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'path';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
@@ -402,7 +400,7 @@ async function extractWaveform(filePath: string, mediaType: EditorMediaAsset['ty
     let bucketSamples = 0;
     let stderr = '';
 
-    const process = spawn(toolPaths.ffmpeg, [
+    const ffmpegProcess = spawn(toolPaths.ffmpeg, [
       '-v',
       'error',
       '-i',
@@ -417,7 +415,7 @@ async function extractWaveform(filePath: string, mediaType: EditorMediaAsset['ty
       'pipe:1',
     ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
-    process.stdout.on('data', (chunk: Buffer) => {
+    ffmpegProcess.stdout.on('data', (chunk: Buffer) => {
       pendingBytes = Buffer.concat([pendingBytes, chunk]);
       while (pendingBytes.length >= 2) {
         const sample = pendingBytes.readInt16LE(0);
@@ -435,11 +433,11 @@ async function extractWaveform(filePath: string, mediaType: EditorMediaAsset['ty
       }
     });
 
-    process.stderr.on('data', (chunk: Buffer) => {
+    ffmpegProcess.stderr.on('data', (chunk: Buffer) => {
       stderr += chunk.toString('utf8');
     });
 
-    process.on('close', (code) => {
+    ffmpegProcess.on('close', (code) => {
       if (bucketSamples > 0) {
         peaks.push(bucketPeak);
       }

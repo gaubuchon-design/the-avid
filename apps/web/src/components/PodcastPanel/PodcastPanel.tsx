@@ -95,6 +95,7 @@ const S = {
     borderRadius: 8,
     background: active ? 'var(--brand)' : 'var(--bg-void)',
     border: `1px solid ${active ? 'var(--brand)' : 'var(--border-default)'}`,
+    padding: 0,
     position: 'relative' as const,
     cursor: 'pointer',
     transition: 'all 150ms',
@@ -446,12 +447,15 @@ function CleanupTab() {
         <div style={S.row}>
           <span style={S.sectionLabel}>Filler Words</span>
           <div style={{ marginLeft: 'auto' }}>
-            <div
+            <button
               style={S.toggle(podcastConfig.fillerWordRemoval)}
               onClick={() => setPodcastConfig({ fillerWordRemoval: !podcastConfig.fillerWordRemoval })}
+              role="switch"
+              aria-checked={podcastConfig.fillerWordRemoval}
+              aria-label="Filler word removal"
             >
               <div style={S.toggleKnob(podcastConfig.fillerWordRemoval)} />
-            </div>
+            </button>
           </div>
         </div>
         {podcastConfig.fillerWordRemoval && (
@@ -588,12 +592,15 @@ function ChaptersTab() {
       {/* Auto-generate toggle */}
       <div style={S.row}>
         <span style={{ ...S.label, minWidth: 'auto', flex: 1 }}>Auto-generate chapters</span>
-        <div
+        <button
           style={S.toggle(podcastConfig.chapterAutoGenerate)}
           onClick={() => setPodcastConfig({ chapterAutoGenerate: !podcastConfig.chapterAutoGenerate })}
+          role="switch"
+          aria-checked={podcastConfig.chapterAutoGenerate}
+          aria-label="Auto-generate chapters"
         >
           <div style={S.toggleKnob(podcastConfig.chapterAutoGenerate)} />
-        </div>
+        </button>
       </div>
 
       <button style={S.secondaryBtn} onClick={handleAutoGenerate}>

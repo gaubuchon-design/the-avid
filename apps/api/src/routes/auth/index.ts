@@ -4,8 +4,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from '../../db/client';
 import { authenticate, generateTokens } from '../../middleware/auth';
 import { validate, schemas } from '../../utils/validation';
-import { UnauthorizedError, ConflictError, NotFoundError } from '../../utils/errors';
+import { UnauthorizedError, ConflictError, NotFoundError, BadRequestError } from '../../utils/errors';
 import { config } from '../../config';
+import { z } from 'zod';
 
 const router = Router();
 
@@ -154,7 +155,15 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
 });
 
 // ─── PATCH /auth/me ────────────────────────────────────────────────────────────
-router.patch('/me', authenticate, async (req: Request, res: Response) => {
+const updateProfileSchema = z.object({
+  displayName: z.string().min(1).max(100).optional(),
+  bio: z.string().max(500).optional(),
+  timezone: z.string().max(50).optional(),
+  locale: z.string().max(10).optional(),
+  avatarUrl: z.string().url().max(2000).optional().nullable(),
+});
+
+router.patch('/me', authenticate, validate(updateProfileSchema), async (req: Request, res: Response) => {
   const { displayName, bio, timezone, locale, avatarUrl } = req.body;
 
   const user = await db.user.update({
@@ -168,7 +177,12 @@ router.patch('/me', authenticate, async (req: Request, res: Response) => {
 });
 
 // ─── POST /auth/change-password ────────────────────────────────────────────────
-router.post('/change-password', authenticate, async (req: Request, res: Response) => {
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8).max(128),
+});
+
+router.post('/change-password', authenticate, validate(changePasswordSchema), async (req: Request, res: Response) => {
   const { currentPassword, newPassword } = req.body;
 
   const user = await db.user.findUnique({

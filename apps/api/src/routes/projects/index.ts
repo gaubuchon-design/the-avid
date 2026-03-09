@@ -2,7 +2,8 @@ import { Router, Request, Response } from 'express';
 import { db } from '../../db/client';
 import { authenticate, requireProjectAccess } from '../../middleware/auth';
 import { validate, schemas, paginationQuery, paginate } from '../../utils/validation';
-import { NotFoundError, ForbiddenError } from '../../utils/errors';
+import { NotFoundError, ForbiddenError, BadRequestError } from '../../utils/errors';
+import { z } from 'zod';
 
 const router = Router();
 router.use(authenticate);
@@ -13,6 +14,10 @@ router.get('/', validate(paginationQuery, 'query'), async (req: Request, res: Re
   const userId = req.user!.id;
   const skip = (page - 1) * limit;
 
+  // Allowlist sortable fields to prevent invalid field injection
+  const allowedSortFields = ['updatedAt', 'createdAt', 'name', 'lastEditedAt'];
+  const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'updatedAt';
+
   const [projects, total] = await Promise.all([
     db.project.findMany({
       where: { members: { some: { userId } }, deletedAt: null },
@@ -22,7 +27,7 @@ router.get('/', validate(paginationQuery, 'query'), async (req: Request, res: Re
       },
       skip,
       take: limit,
-      orderBy: { [sortBy ?? 'updatedAt']: sortOrder },
+      orderBy: { [safeSortBy]: sortOrder },
     }),
     db.project.count({ where: { members: { some: { userId } }, deletedAt: null } }),
   ]);
@@ -123,7 +128,12 @@ router.get('/:projectId/members', requireProjectAccess('VIEWER'), async (req: Re
 });
 
 // ─── POST /projects/:projectId/members ─────────────────────────────────────────
-router.post('/:projectId/members', requireProjectAccess('ADMIN'), async (req: Request, res: Response) => {
+const addMemberSchema = z.object({
+  email: z.string().email(),
+  role: z.enum(['VIEWER', 'REVIEWER', 'EDITOR', 'ASSISTANT', 'ADMIN']).default('EDITOR'),
+});
+
+router.post('/:projectId/members', requireProjectAccess('ADMIN'), validate(addMemberSchema), async (req: Request, res: Response) => {
   const { email, role } = req.body;
   const user = await db.user.findUnique({ where: { email } });
   if (!user) throw new NotFoundError('User');

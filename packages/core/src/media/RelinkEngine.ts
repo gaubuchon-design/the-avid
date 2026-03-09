@@ -280,8 +280,11 @@ export class RelinkEngine {
   // ── Apply relink ────────────────────────────────────────────────────────
 
   /**
-   * Apply confirmed relink proposals to the project, returning an updated
-   * copy of the bins with new file locations.
+   * Apply confirmed relink proposals to the project, updating bins in-place
+   * with new file locations.
+   *
+   * **Note:** This mutates `project.bins` directly. Callers should clone the
+   * project first if immutability is required.
    *
    * This preserves all edit decisions (clip positions, trim points, effects)
    * and only updates the media location references.
@@ -290,7 +293,10 @@ export class RelinkEngine {
     project: EditorProject,
     proposals: RelinkProposal[],
   ): RelinkResult {
-    const confirmed = proposals.filter((p) => p.confirmed && p.selectedCandidateIndex !== null);
+    const confirmed = proposals.filter(
+      (p): p is RelinkProposal & { selectedCandidateIndex: number } =>
+        p.confirmed && p.selectedCandidateIndex !== null,
+    );
 
     if (confirmed.length === 0) {
       throw new RelinkError('No confirmed proposals to apply', 'INVALID_PROPOSAL');
@@ -307,7 +313,7 @@ export class RelinkEngine {
     // Build a lookup from assetId to selected candidate
     const relinkMap = new Map<string, RelinkCandidate>();
     for (const proposal of confirmed) {
-      const candidate = proposal.candidates[proposal.selectedCandidateIndex!];
+      const candidate = proposal.candidates[proposal.selectedCandidateIndex];
       if (candidate) {
         relinkMap.set(proposal.assetId, candidate);
       }

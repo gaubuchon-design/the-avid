@@ -36,9 +36,13 @@ router.post('/nrcs-connections', async (req: Request, res: Response) => {
 });
 
 router.patch('/nrcs-connections/:id', async (req: Request, res: Response) => {
+  const allowed = ['type', 'host', 'port', 'username', 'password', 'isActive'];
+  const data: any = {};
+  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+
   const connection = await db.nRCSConnection.update({
     where: { id: req.params.id },
-    data: req.body,
+    data,
   });
   res.json({ connection });
 });
@@ -59,10 +63,12 @@ router.get('/rundowns', async (req: Request, res: Response) => {
   if (connectionId) where.nrcsConnectionId = connectionId;
   if (date) {
     const d = new Date(date as string);
-    where.airDate = {
-      gte: new Date(d.setHours(0, 0, 0, 0)),
-      lt: new Date(d.setHours(23, 59, 59, 999)),
-    };
+    if (!Number.isNaN(d.getTime())) {
+      where.airDate = {
+        gte: new Date(d.setHours(0, 0, 0, 0)),
+        lt: new Date(d.setHours(23, 59, 59, 999)),
+      };
+    }
   }
   const rundowns = await db.rundown.findMany({
     where,
@@ -111,7 +117,7 @@ router.patch('/stories/:id', async (req: Request, res: Response) => {
 });
 
 router.post('/stories/:id/assign', async (req: Request, res: Response) => {
-  const userId = (req as any).user.id;
+  const userId = req.user!.id;
   const story = await db.newsStory.update({
     where: { id: req.params.id },
     data: { assignedEditorId: userId, status: 'IN_EDIT' },

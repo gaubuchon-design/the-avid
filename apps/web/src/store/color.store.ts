@@ -205,26 +205,56 @@ export const useColorStore = create<ColorState & ColorActions>()(
 
     addNode: (type) => {
       colorEngine.addNode(type);
+      set((s) => {
+        s.nodes = colorEngine.getAllNodes();
+        s.connections = colorEngine.getConnections();
+      });
     },
 
     removeNode: (id) => {
       colorEngine.removeNode(id);
+      set((s) => {
+        s.nodes = colorEngine.getAllNodes();
+        s.connections = colorEngine.getConnections();
+        if (s.selectedNodeId === id) s.selectedNodeId = null;
+      });
     },
 
     updateNodeParams: (id, params) => {
       colorEngine.updateNodeParams(id, params);
+      set((s) => {
+        s.nodes = colorEngine.getAllNodes();
+      });
     },
 
     saveLook: (name) => {
       colorEngine.saveLook(name);
+      set((s) => {
+        s.looks = colorEngine.getLooks().map((l) => ({
+          id: l.id,
+          name: l.name,
+          thumbnail: l.thumbnail,
+        }));
+      });
     },
 
     loadLook: (id) => {
       colorEngine.loadLook(id);
+      set((s) => {
+        s.nodes = colorEngine.getAllNodes();
+        s.connections = colorEngine.getConnections();
+      });
     },
 
     saveStill: (name) => {
       colorEngine.saveStill(name, '');
+      set((s) => {
+        s.stills = colorEngine.getStills().map((st) => ({
+          id: st.id,
+          name: st.name,
+          frame: st.frame,
+        }));
+      });
     },
 
     addPowerWindow: (type) =>

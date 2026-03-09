@@ -6,7 +6,15 @@ import './styles/globals.css';
 import './styles/design-system.css';
 import './styles/editor.css';
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+const rootElement = document.getElementById('root');
+
+if (!rootElement) {
+  throw new Error(
+    'Root element not found. Ensure your index.html contains <div id="root"></div>.'
+  );
+}
+
+ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <App />

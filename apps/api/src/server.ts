@@ -10,6 +10,7 @@ import { logger } from './utils/logger';
 import { connectDb, disconnectDb } from './db/client';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { initWebSocket } from './websocket';
+import { requestLogger } from './utils/logger';
 
 // ─── Route Imports ─────────────────────────────────────────────────────────────
 import authRoutes from './routes/auth';
@@ -25,6 +26,7 @@ import brandRoutes from './routes/brand';
 import protoolsRoutes from './routes/protools';
 import nexisRoutes from './routes/nexis';
 import creatorRoutes from './routes/creator';
+import exportRoutes from './routes/export';
 import renderRoutes from './routes/render';
 
 // ─── App Setup ─────────────────────────────────────────────────────────────────
@@ -44,17 +46,22 @@ app.use(cors({
     if (!origin || config.cors.origins.includes(origin) || config.isDev) {
       callback(null, true);
     } else {
-      callback(new Error(`Origin ${origin} not allowed by CORS`));
+      // Do not leak the origin value in the error message
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
+  maxAge: 86400, // Cache preflight for 24h
 }));
 
 app.use(compression());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// ─── Request Logging ──────────────────────────────────────────────────────────
+app.use(requestLogger());
 
 // ─── Rate Limiting ─────────────────────────────────────────────────────────────
 const limiter = rateLimit({
@@ -116,6 +123,7 @@ api.use('/brand', brandRoutes);
 api.use('/protools', protoolsRoutes);
 api.use('/nexis', nexisRoutes);
 api.use('/creator', creatorRoutes);
+api.use('/', exportRoutes);
 api.use('/render', renderRoutes);
 
 app.use('/api/v1', api);
@@ -161,12 +169,14 @@ async function start() {
 // ─── Graceful Shutdown ─────────────────────────────────────────────────────────
 const shutdown = async (signal: string) => {
   logger.info(`Received ${signal}, shutting down gracefully…`);
+  const forceTimer = setTimeout(() => { logger.error('Forced shutdown'); process.exit(1); }, 10000);
+  forceTimer.unref(); // Don't keep process alive just for this timer
   httpServer.close(async () => {
+    clearTimeout(forceTimer);
     await disconnectDb();
     logger.info('Server closed');
     process.exit(0);
   });
-  setTimeout(() => { logger.error('Forced shutdown'); process.exit(1); }, 10000);
 };
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));

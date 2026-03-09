@@ -598,15 +598,16 @@ export class StemExporter {
   }
 
   private generateStartTimecode(preRollSeconds: number): string {
-    const timelineTC = this.project.settings.frameRate;
-    const preRollFrames = Math.round(preRollSeconds * timelineTC);
+    const frameRate = this.project.settings.frameRate;
+    const nominalRate = Math.round(frameRate);
+    const preRollFrames = Math.round(preRollSeconds * frameRate);
 
     // Default start at 01:00:00:00 minus pre-roll
-    const oneHourFrames = 3600 * timelineTC;
+    const oneHourFrames = 3600 * nominalRate;
     const startFrame = Math.max(0, oneHourFrames - preRollFrames);
 
-    const f = startFrame % Math.round(timelineTC);
-    const totalSec = Math.floor(startFrame / Math.round(timelineTC));
+    const f = startFrame % nominalRate;
+    const totalSec = Math.floor(startFrame / nominalRate);
     const s = totalSec % 60;
     const m = Math.floor(totalSec / 60) % 60;
     const h = Math.floor(totalSec / 3600);

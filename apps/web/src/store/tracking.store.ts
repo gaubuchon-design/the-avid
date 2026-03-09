@@ -24,7 +24,7 @@ export type TrackerMode = 'idle' | 'drawing' | 'tracking' | 'reviewing';
 export interface TrackingStoreState {
   // ── State ──
   mode: TrackerMode;
-  sessions: Map<string, TrackingSession>;
+  sessions: Record<string, TrackingSession>;
   activeRegionId: string | null;
   activeClipId: string | null;
 
@@ -91,7 +91,7 @@ export const useTrackingStore = create<TrackingStoreState>()(
   immer((set, get) => ({
     // ── Initial State ──
     mode: 'idle',
-    sessions: new Map(),
+    sessions: {},
     activeRegionId: null,
     activeClipId: null,
     drawingPoints: [],
@@ -107,8 +107,8 @@ export const useTrackingStore = create<TrackingStoreState>()(
     setActiveClip: (clipId, assetId) => set((s) => {
       s.activeClipId = clipId;
       // Check for existing sessions for this clip
-      for (const [id, session] of s.sessions) {
-        if (session.clipId === clipId) {
+      for (const id of Object.keys(s.sessions)) {
+        if (s.sessions[id].clipId === clipId) {
           s.activeRegionId = id;
           return;
         }
@@ -142,12 +142,12 @@ export const useTrackingStore = create<TrackingStoreState>()(
         type: s.drawingType,
       };
 
-      s.sessions.set(regionId, {
+      s.sessions[regionId] = {
         region,
         data: null,
         clipId: s.activeClipId || '',
         assetId: '',
-      });
+      };
 
       s.activeRegionId = regionId;
       s.drawingPoints = [];
@@ -160,14 +160,14 @@ export const useTrackingStore = create<TrackingStoreState>()(
     }),
 
     deleteRegion: (regionId) => set((s) => {
-      s.sessions.delete(regionId);
+      delete s.sessions[regionId];
       if (s.activeRegionId === regionId) {
         s.activeRegionId = null;
       }
     }),
 
     updateRegionPoints: (regionId, points) => set((s) => {
-      const session = s.sessions.get(regionId);
+      const session = s.sessions[regionId];
       if (session) {
         session.region.points = points;
         // Invalidate tracking data when region changes
@@ -176,7 +176,7 @@ export const useTrackingStore = create<TrackingStoreState>()(
     }),
 
     trackForward: async (regionId, startFrame, endFrame, getFrame) => {
-      const session = get().sessions.get(regionId);
+      const session = get().sessions[regionId];
       if (!session) return;
 
       set((s) => { s.mode = 'tracking'; });
@@ -189,14 +189,14 @@ export const useTrackingStore = create<TrackingStoreState>()(
           getFrame,
           (progress) => {
             set((s) => {
-              const sess = s.sessions.get(regionId);
+              const sess = s.sessions[regionId];
               if (sess) sess.data = progress;
             });
           },
         );
 
         set((s) => {
-          const sess = s.sessions.get(regionId);
+          const sess = s.sessions[regionId];
           if (sess) sess.data = data;
           s.mode = 'reviewing';
         });
@@ -206,7 +206,7 @@ export const useTrackingStore = create<TrackingStoreState>()(
     },
 
     trackBackward: async (regionId, startFrame, endFrame, getFrame) => {
-      const session = get().sessions.get(regionId);
+      const session = get().sessions[regionId];
       if (!session) return;
 
       set((s) => { s.mode = 'tracking'; });
@@ -219,14 +219,14 @@ export const useTrackingStore = create<TrackingStoreState>()(
           getFrame,
           (progress) => {
             set((s) => {
-              const sess = s.sessions.get(regionId);
+              const sess = s.sessions[regionId];
               if (sess) sess.data = progress;
             });
           },
         );
 
         set((s) => {
-          const sess = s.sessions.get(regionId);
+          const sess = s.sessions[regionId];
           if (sess) sess.data = data;
           s.mode = 'reviewing';
         });
@@ -241,14 +241,14 @@ export const useTrackingStore = create<TrackingStoreState>()(
     },
 
     getTrackingResult: (regionId, frame) => {
-      const session = get().sessions.get(regionId);
+      const session = get().sessions[regionId];
       return session?.data?.frames.get(frame);
     },
 
-    getSession: (regionId) => get().sessions.get(regionId),
+    getSession: (regionId) => get().sessions[regionId],
 
     applyToCornerPin: (regionId, _targetClipId, imageWidth, imageHeight) => {
-      const session = get().sessions.get(regionId);
+      const session = get().sessions[regionId];
       if (!session?.data) return;
 
       const keyframes = planarTracker.exportAsCornerPin(session.data, imageWidth, imageHeight);
@@ -258,7 +258,7 @@ export const useTrackingStore = create<TrackingStoreState>()(
     },
 
     applyToStabilizer: (regionId, _targetClipId) => {
-      const session = get().sessions.get(regionId);
+      const session = get().sessions[regionId];
       if (!session?.data) return;
 
       const keyframes = planarTracker.exportAsKeyframes(session.data);
@@ -275,12 +275,12 @@ export const useTrackingStore = create<TrackingStoreState>()(
     setSelectedFrame: (frame) => set((s) => { s.selectedFrame = frame; }),
 
     clearSession: (regionId) => set((s) => {
-      s.sessions.delete(regionId);
+      delete s.sessions[regionId];
       if (s.activeRegionId === regionId) s.activeRegionId = null;
     }),
 
     clearAll: () => set((s) => {
-      s.sessions.clear();
+      s.sessions = {};
       s.activeRegionId = null;
       s.mode = 'idle';
     }),

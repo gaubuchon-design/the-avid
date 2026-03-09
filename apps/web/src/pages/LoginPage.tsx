@@ -6,7 +6,7 @@ type AuthMode = 'login' | 'register';
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { login, register, quickLogin, loginAsDemo, isLoading, error, clearError } = useAuthStore();
+  const { login, register, quickLogin, isLoading, error, clearError } = useAuthStore();
   const [quickEmail, setQuickEmail] = useState('');
 
   const [mode, setMode] = useState<AuthMode>('login');
@@ -96,17 +96,18 @@ export function LoginPage() {
 
         {/* Error */}
         {displayError && (
-          <div style={styles.errorBanner}>
+          <div role="alert" style={styles.errorBanner}>
             {displayError}
           </div>
         )}
 
         {/* Form */}
-        <form onSubmit={handleSubmit} style={styles.form}>
+        <form onSubmit={handleSubmit} style={styles.form} aria-label={mode === 'login' ? 'Sign in' : 'Create account'}>
           {mode === 'register' && (
             <div style={styles.fieldGroup}>
-              <label style={styles.label}>Full Name</label>
+              <label htmlFor="auth-name" style={styles.label}>Full Name</label>
               <input
+                id="auth-name"
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -118,8 +119,9 @@ export function LoginPage() {
           )}
 
           <div style={styles.fieldGroup}>
-            <label style={styles.label}>Email</label>
+            <label htmlFor="auth-email" style={styles.label}>Email</label>
             <input
+              id="auth-email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -131,8 +133,9 @@ export function LoginPage() {
           </div>
 
           <div style={styles.fieldGroup}>
-            <label style={styles.label}>Password</label>
+            <label htmlFor="auth-password" style={styles.label}>Password</label>
             <input
+              id="auth-password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -145,8 +148,9 @@ export function LoginPage() {
 
           {mode === 'register' && (
             <div style={styles.fieldGroup}>
-              <label style={styles.label}>Confirm Password</label>
+              <label htmlFor="auth-confirm-password" style={styles.label}>Confirm Password</label>
               <input
+                id="auth-confirm-password"
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
@@ -188,8 +192,9 @@ export function LoginPage() {
         {/* Quick Login — email only */}
         <div style={styles.form}>
           <div style={styles.fieldGroup}>
-            <label style={styles.label}>Email</label>
+            <label htmlFor="quick-login-email" style={styles.label}>Email</label>
             <input
+              id="quick-login-email"
               type="email"
               value={quickEmail}
               onChange={(e) => setQuickEmail(e.target.value)}
@@ -200,7 +205,11 @@ export function LoginPage() {
           <button
             type="button"
             disabled={!quickEmail.includes('@')}
-            onClick={() => { quickLogin(quickEmail); navigate('/'); }}
+            onClick={() => {
+              quickLogin(quickEmail);
+              // Navigate on the next microtask to ensure Zustand state has propagated
+              queueMicrotask(() => navigate('/'));
+            }}
             style={{
               ...styles.demoBtn,
               opacity: quickEmail.includes('@') ? 1 : 0.5,

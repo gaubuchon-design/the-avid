@@ -16,7 +16,12 @@ function optional(key: string, fallback: string): string {
 
 function optionalNumber(key: string, fallback: number): number {
   const val = process.env[key];
-  return val ? parseInt(val, 10) : fallback;
+  if (!val) return fallback;
+  const parsed = parseInt(val, 10);
+  if (Number.isNaN(parsed)) {
+    throw new Error(`Environment variable ${key} must be a valid number, got: "${val}"`);
+  }
+  return parsed;
 }
 
 // ─── Config ────────────────────────────────────────────────────────────────────
@@ -39,7 +44,12 @@ export const config = {
   },
 
   jwt: {
-    secret: optional('JWT_SECRET', 'dev-secret-change-in-production'),
+    secret: process.env.NODE_ENV === 'production'
+      ? required('JWT_SECRET')
+      : optional('JWT_SECRET', 'dev-secret-change-in-production'),
+    refreshSecret: process.env.NODE_ENV === 'production'
+      ? required('JWT_REFRESH_SECRET')
+      : optional('JWT_REFRESH_SECRET', 'dev-refresh-secret-change-in-production'),
     expiresIn: optional('JWT_EXPIRES_IN', '7d'),
     refreshExpiresIn: optional('JWT_REFRESH_EXPIRES_IN', '30d'),
   },

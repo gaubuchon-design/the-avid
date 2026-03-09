@@ -369,7 +369,11 @@ class PlatformCapabilities {
 
   /** Notify all subscribers that capabilities have changed. */
   private notify(): void {
-    this.listeners.forEach((fn) => fn());
+    this.listeners.forEach((fn) => {
+      try { fn(); } catch (err) {
+        console.error('[PlatformCapabilities] Listener error:', err);
+      }
+    });
   }
 
   // -- Internal ---------------------------------------------------------------

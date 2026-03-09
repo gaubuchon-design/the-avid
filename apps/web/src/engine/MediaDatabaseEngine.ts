@@ -267,7 +267,11 @@ class MediaDatabaseEngineClass {
   }
 
   private notify(): void {
-    this.listeners.forEach((fn) => fn());
+    this.listeners.forEach((fn) => {
+      try { fn(); } catch (err) {
+        console.error('[MediaDatabaseEngine] Listener error:', err);
+      }
+    });
   }
 
   /** Get entry count. */

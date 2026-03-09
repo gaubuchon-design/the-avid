@@ -4,7 +4,7 @@
 // =============================================================================
 
 import React, { useState, useMemo } from 'react';
-import { useEditorStore, type MediaAsset } from '../store/editor.store';
+import { useEditorStore, type MediaAsset, type Bin } from '../store/editor.store';
 import { usePlayerStore } from '../store/player.store';
 
 function formatDuration(sec: number): string {
@@ -26,9 +26,9 @@ function formatFileSize(bytes?: number): string {
 
 type SortKey = 'name' | 'duration' | 'fps' | 'width' | 'codec' | 'fileSize' | 'type';
 
-function collectAllMediaAssets(bins: { assets: MediaAsset[]; children: any[] }[]): MediaAsset[] {
+function collectAllMediaAssets(bins: Bin[]): MediaAsset[] {
   const result: MediaAsset[] = [];
-  const walk = (b: { assets: MediaAsset[]; children: any[] }) => {
+  const walk = (b: Bin) => {
     result.push(...b.assets);
     b.children.forEach(walk);
   };
@@ -99,7 +99,7 @@ export function MediaPage() {
               color: !activeBin ? 'var(--text-primary)' : 'var(--text-secondary)',
               background: !activeBin ? 'var(--bg-active)' : 'transparent',
             }}
-            onClick={() => selectBin(null as any)}
+            onClick={() => selectBin(null)}
           >
             All Media
           </div>
@@ -128,6 +128,7 @@ export function MediaPage() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search media..."
+            aria-label="Search media assets"
             style={{
               flex: 1, padding: '4px 8px', fontSize: 11,
               background: 'var(--bg-void)', border: '1px solid var(--border-default)',
@@ -141,7 +142,7 @@ export function MediaPage() {
         </div>
 
         {/* Table header */}
-        <div style={{
+        <div role="row" style={{
           display: 'grid',
           gridTemplateColumns: '2fr 100px 60px 120px 100px 80px 90px',
           padding: '4px 10px', fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
@@ -149,13 +150,13 @@ export function MediaPage() {
           borderBottom: '1px solid var(--border-default)', cursor: 'pointer',
           background: 'var(--bg-raised)',
         }}>
-          <div onClick={() => handleSort('name')}>Name{sortIndicator('name')}</div>
-          <div onClick={() => handleSort('duration')}>Duration{sortIndicator('duration')}</div>
-          <div onClick={() => handleSort('fps')}>FPS{sortIndicator('fps')}</div>
-          <div onClick={() => handleSort('width')}>Resolution{sortIndicator('width')}</div>
-          <div onClick={() => handleSort('codec')}>Codec{sortIndicator('codec')}</div>
-          <div onClick={() => handleSort('type')}>Type{sortIndicator('type')}</div>
-          <div onClick={() => handleSort('fileSize')}>Size{sortIndicator('fileSize')}</div>
+          <div role="columnheader" tabIndex={0} onClick={() => handleSort('name')} onKeyDown={(e) => { if (e.key === 'Enter') handleSort('name'); }} aria-sort={sortKey === 'name' ? (sortAsc ? 'ascending' : 'descending') : undefined}>Name{sortIndicator('name')}</div>
+          <div role="columnheader" tabIndex={0} onClick={() => handleSort('duration')} onKeyDown={(e) => { if (e.key === 'Enter') handleSort('duration'); }} aria-sort={sortKey === 'duration' ? (sortAsc ? 'ascending' : 'descending') : undefined}>Duration{sortIndicator('duration')}</div>
+          <div role="columnheader" tabIndex={0} onClick={() => handleSort('fps')} onKeyDown={(e) => { if (e.key === 'Enter') handleSort('fps'); }} aria-sort={sortKey === 'fps' ? (sortAsc ? 'ascending' : 'descending') : undefined}>FPS{sortIndicator('fps')}</div>
+          <div role="columnheader" tabIndex={0} onClick={() => handleSort('width')} onKeyDown={(e) => { if (e.key === 'Enter') handleSort('width'); }} aria-sort={sortKey === 'width' ? (sortAsc ? 'ascending' : 'descending') : undefined}>Resolution{sortIndicator('width')}</div>
+          <div role="columnheader" tabIndex={0} onClick={() => handleSort('codec')} onKeyDown={(e) => { if (e.key === 'Enter') handleSort('codec'); }} aria-sort={sortKey === 'codec' ? (sortAsc ? 'ascending' : 'descending') : undefined}>Codec{sortIndicator('codec')}</div>
+          <div role="columnheader" tabIndex={0} onClick={() => handleSort('type')} onKeyDown={(e) => { if (e.key === 'Enter') handleSort('type'); }} aria-sort={sortKey === 'type' ? (sortAsc ? 'ascending' : 'descending') : undefined}>Type{sortIndicator('type')}</div>
+          <div role="columnheader" tabIndex={0} onClick={() => handleSort('fileSize')} onKeyDown={(e) => { if (e.key === 'Enter') handleSort('fileSize'); }} aria-sort={sortKey === 'fileSize' ? (sortAsc ? 'ascending' : 'descending') : undefined}>Size{sortIndicator('fileSize')}</div>
         </div>
 
         {/* Table body */}

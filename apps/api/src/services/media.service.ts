@@ -133,7 +133,7 @@ class MediaService {
     });
 
     // Queue background processing (proxy + metadata extraction)
-    this.queueProcessing(asset.id).catch(logger.error);
+    this.queueProcessing(asset.id).catch((err) => logger.error('Failed to queue media processing', err));
 
     return asset;
   }
@@ -147,7 +147,7 @@ class MediaService {
       data: { status: 'PROCESSING' },
     });
 
-    this.queueProcessing(assetId).catch(logger.error);
+    this.queueProcessing(assetId).catch((err) => logger.error('Failed to queue media processing', err));
     return asset;
   }
 
@@ -166,7 +166,12 @@ class MediaService {
         });
         logger.info(`Asset ${assetId} processing complete`);
       } catch (e) {
-        await db.mediaAsset.update({ where: { id: assetId }, data: { status: 'ERROR' } });
+        logger.error(`Asset ${assetId} processing failed`, e);
+        try {
+          await db.mediaAsset.update({ where: { id: assetId }, data: { status: 'ERROR' } });
+        } catch (updateErr) {
+          logger.error(`Failed to update asset ${assetId} status to ERROR`, updateErr);
+        }
       }
     }, 2000);
   }

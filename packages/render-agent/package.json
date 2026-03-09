@@ -4,18 +4,23 @@
   "private": true,
   "type": "module",
   "main": "src/index.ts",
+  "types": "src/index.ts",
   "bin": {
     "avid-render-agent": "src/cli.ts"
   },
   "scripts": {
     "start": "tsx src/cli.ts",
     "dev": "tsx src/cli.ts",
-    "build": "tsc"
+    "build": "tsc --project tsconfig.json",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf dist"
   },
   "dependencies": {
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/ws": "^8.5.12",
+    "@types/node": "^20.14.0",
     "typescript": "^5.4.0",
     "tsx": "^4.0.0"
   }

@@ -551,8 +551,11 @@ class ExportEngine {
       this.timers.delete(jobId);
     }
     // Stop any active MediaRecorder associated with this job
-    for (const [recId, recorder] of this.activeRecorders) {
-      if (recorder.state === 'recording') {
+    // Collect IDs first to avoid modifying the map during iteration
+    const recorderIds = Array.from(this.activeRecorders.keys());
+    for (const recId of recorderIds) {
+      const recorder = this.activeRecorders.get(recId);
+      if (recorder && recorder.state === 'recording') {
         recorder.stop();
       }
       this.activeRecorders.delete(recId);
@@ -655,7 +658,11 @@ class ExportEngine {
 
   /** Notify all subscribers that state has changed. */
   private notify(): void {
-    this.listeners.forEach((fn) => fn());
+    this.listeners.forEach((fn) => {
+      try { fn(); } catch (err) {
+        console.error('[ExportEngine] Listener error:', err);
+      }
+    });
   }
 
   // -- Helpers ----------------------------------------------------------------

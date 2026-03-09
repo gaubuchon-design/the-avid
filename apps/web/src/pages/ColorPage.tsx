@@ -63,6 +63,7 @@ export function ColorPage() {
             <span>Gallery</span>
             <button
               onClick={() => saveLook(`Look ${looks.length + 1}`)}
+              aria-label="Save current look"
               style={{
                 padding: '1px 6px',
                 fontSize: 8,
@@ -116,7 +117,10 @@ export function ColorPage() {
                 looks.map((l) => (
                   <div
                     key={l.id}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => loadLook(l.id)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); loadLook(l.id); } }}
                     style={{
                       padding: '3px 6px',
                       fontSize: 9,

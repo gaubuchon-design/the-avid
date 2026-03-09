@@ -13,7 +13,7 @@ router.use(authenticate);
 // ─── Series / Channels ───────────────────────────────────────────────────────
 
 router.get('/series', async (req: Request, res: Response) => {
-  const userId = (req as any).user.id;
+  const userId = req.user!.id;
   const series = await db.series.findMany({
     where: { userId },
     include: {
@@ -36,7 +36,7 @@ router.get('/series/:id', async (req: Request, res: Response) => {
 });
 
 router.post('/series', async (req: Request, res: Response) => {
-  const userId = (req as any).user.id;
+  const userId = req.user!.id;
   const series = await db.series.create({
     data: {
       userId,
@@ -50,9 +50,13 @@ router.post('/series', async (req: Request, res: Response) => {
 });
 
 router.patch('/series/:id', async (req: Request, res: Response) => {
+  const allowed = ['name', 'description', 'brandColors', 'brandFonts', 'thumbnailUrl', 'introTemplateId', 'outroTemplateId'];
+  const data: any = {};
+  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+
   const series = await db.series.update({
     where: { id: req.params.id },
-    data: req.body,
+    data,
   });
   res.json({ series });
 });
@@ -84,9 +88,13 @@ router.post('/series/:seriesId/episodes', async (req: Request, res: Response) =>
 });
 
 router.patch('/series/:seriesId/episodes/:id', async (req: Request, res: Response) => {
+  const allowed = ['title', 'description', 'status', 'projectId', 'thumbnailUrl'];
+  const data: any = {};
+  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+
   const episode = await db.episode.update({
     where: { id: req.params.id },
-    data: req.body,
+    data,
   });
   res.json({ episode });
 });
@@ -105,7 +113,7 @@ router.post('/series/:seriesId/episodes/:id/publish', async (req: Request, res: 
 // ─── Agent Memory ────────────────────────────────────────────────────────────
 
 router.get('/agent-memory', async (req: Request, res: Response) => {
-  const userId = (req as any).user.id;
+  const userId = req.user!.id;
   const memories = await db.agentMemory.findMany({
     where: { userId },
     orderBy: { lastUsedAt: 'desc' },
@@ -114,7 +122,7 @@ router.get('/agent-memory', async (req: Request, res: Response) => {
 });
 
 router.put('/agent-memory/:key', async (req: Request, res: Response) => {
-  const userId = (req as any).user.id;
+  const userId = req.user!.id;
   const memory = await db.agentMemory.upsert({
     where: { userId_key: { userId, key: req.params.key } },
     create: {
@@ -134,7 +142,7 @@ router.put('/agent-memory/:key', async (req: Request, res: Response) => {
 });
 
 router.delete('/agent-memory/:key', async (req: Request, res: Response) => {
-  const userId = (req as any).user.id;
+  const userId = req.user!.id;
   await db.agentMemory.delete({
     where: { userId_key: { userId, key: req.params.key } },
   });
@@ -157,7 +165,7 @@ router.get('/playbooks', async (req: Request, res: Response) => {
 });
 
 router.get('/playbooks/mine', async (req: Request, res: Response) => {
-  const userId = (req as any).user.id;
+  const userId = req.user!.id;
   const playbooks = await db.agentPlaybook.findMany({
     where: { authorId: userId },
     orderBy: { updatedAt: 'desc' },
@@ -166,7 +174,7 @@ router.get('/playbooks/mine', async (req: Request, res: Response) => {
 });
 
 router.post('/playbooks', async (req: Request, res: Response) => {
-  const userId = (req as any).user.id;
+  const userId = req.user!.id;
   const playbook = await db.agentPlaybook.create({
     data: {
       authorId: userId,
@@ -182,9 +190,13 @@ router.post('/playbooks', async (req: Request, res: Response) => {
 });
 
 router.patch('/playbooks/:id', async (req: Request, res: Response) => {
+  const allowed = ['name', 'description', 'vertical', 'steps', 'variables', 'priceTokens', 'isPublished'];
+  const data: any = {};
+  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+
   const playbook = await db.agentPlaybook.update({
     where: { id: req.params.id },
-    data: req.body,
+    data,
   });
   res.json({ playbook });
 });

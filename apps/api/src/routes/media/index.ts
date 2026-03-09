@@ -43,15 +43,22 @@ router.post('/projects/:projectId/bins', requireProjectAccess('EDITOR'), validat
 
 // PATCH /projects/:projectId/bins/:binId
 router.patch('/projects/:projectId/bins/:binId', requireProjectAccess('EDITOR'), async (req: Request, res: Response) => {
+  const allowed = ['name', 'color', 'sortOrder', 'parentId'];
+  const data: any = {};
+  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+
   const bin = await db.bin.update({
     where: { id: req.params.binId, projectId: req.params.projectId },
-    data: req.body,
+    data,
   });
   res.json({ bin });
 });
 
 // DELETE /projects/:projectId/bins/:binId
 router.delete('/projects/:projectId/bins/:binId', requireProjectAccess('EDITOR'), async (req: Request, res: Response) => {
+  // Verify bin belongs to this project before deleting
+  const bin = await db.bin.findFirst({ where: { id: req.params.binId, projectId: req.params.projectId } });
+  if (!bin) throw new NotFoundError('Bin');
   await db.bin.delete({ where: { id: req.params.binId } });
   res.status(204).send();
 });
@@ -63,6 +70,10 @@ router.get('/projects/:projectId/media', requireProjectAccess('VIEWER'), validat
   const { page, limit, sortBy, sortOrder } = req.query as any;
   const { binId, type, search, isFavorite } = req.query as any;
   const skip = (page - 1) * limit;
+
+  // Allowlist sortable fields
+  const allowedSortFields = ['createdAt', 'name', 'type', 'duration', 'fileSize', 'updatedAt'];
+  const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
 
   const where: any = {
     bin: { projectId: req.params.projectId },
@@ -86,13 +97,13 @@ router.get('/projects/:projectId/media', requireProjectAccess('VIEWER'), validat
       where,
       skip,
       take: limit,
-      orderBy: { [sortBy ?? 'createdAt']: sortOrder },
+      orderBy: { [safeSortBy]: sortOrder },
     }),
     db.mediaAsset.count({ where }),
   ]);
 
-  // Enrich with signed URLs
-  const enriched = await Promise.all(assets.map(mediaService.enrichWithUrls));
+  // Enrich with signed URLs (bind to preserve context)
+  const enriched = await Promise.all(assets.map((a) => mediaService.enrichWithUrls(a)));
 
   res.json({ assets: enriched, pagination: paginate(total, page, limit) });
 });

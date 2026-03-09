@@ -1,5 +1,5 @@
 import React, { lazy, Suspense } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 import { DashboardPage } from './pages/DashboardPage';
 import { EditorPage } from './pages/EditorPage';
 import { LoginPage } from './pages/LoginPage';
@@ -36,16 +36,18 @@ const MultiCamPanel = lazy(() => import('./components/MultiCamPanel/MultiCamPane
 const AccessibilityPanel = lazy(() => import('./components/AccessibilityPanel/AccessibilityPanel').then(m => ({ default: m.AccessibilityPanel })));
 
 // Suspense + ErrorBoundary wrapper for lazy panels
-function LazyPanel(Component: React.LazyExoticComponent<React.ComponentType>) {
-  return function WrappedPanel() {
+function LazyPanel(LazyComponent: React.LazyExoticComponent<React.ComponentType>, displayName?: string): React.ComponentType {
+  function WrappedPanel() {
     return (
       <ErrorBoundary>
         <Suspense fallback={<LoadingSpinner />}>
-          <Component />
+          <LazyComponent />
         </Suspense>
       </ErrorBoundary>
     );
-  };
+  }
+  WrappedPanel.displayName = displayName ?? 'LazyPanel';
+  return WrappedPanel;
 }
 
 // ─── Panel Registry ──────────────────────────────────────────────────────────
@@ -67,20 +69,20 @@ export const panelRegistry: Record<string, React.ComponentType> = {
   admin: AdminDashboard,
 
   // Vertical workflow panels
-  rundown: LazyPanel(RundownPanel),
-  storyScript: LazyPanel(StoryScriptPanel),
-  sports: LazyPanel(SportsPanel),
-  creator: LazyPanel(CreatorPanel),
-  brand: LazyPanel(BrandPanel),
-  multicam: LazyPanel(MultiCamPanel),
-  accessibility: LazyPanel(AccessibilityPanel),
+  rundown: LazyPanel(RundownPanel, 'RundownPanel'),
+  storyScript: LazyPanel(StoryScriptPanel, 'StoryScriptPanel'),
+  sports: LazyPanel(SportsPanel, 'SportsPanel'),
+  creator: LazyPanel(CreatorPanel, 'CreatorPanel'),
+  brand: LazyPanel(BrandPanel, 'BrandPanel'),
+  multicam: LazyPanel(MultiCamPanel, 'MultiCamPanel'),
+  accessibility: LazyPanel(AccessibilityPanel, 'AccessibilityPanel'),
 
   // Sports production sub-panels (SP-11)
-  evsBrowser: LazyPanel(EVSBrowserPanel),
-  sportsHighlights: LazyPanel(SportsHighlightsPanel),
-  sportsCamViewer: LazyPanel(SportsCamViewerPanel),
-  packageBuilder: LazyPanel(PackageBuilderPanel),
-  statsOverlay: LazyPanel(StatsOverlayPanel),
+  evsBrowser: LazyPanel(EVSBrowserPanel, 'EVSBrowserPanel'),
+  sportsHighlights: LazyPanel(SportsHighlightsPanel, 'SportsHighlightsPanel'),
+  sportsCamViewer: LazyPanel(SportsCamViewerPanel, 'SportsCamViewerPanel'),
+  packageBuilder: LazyPanel(PackageBuilderPanel, 'PackageBuilderPanel'),
+  statsOverlay: LazyPanel(StatsOverlayPanel, 'StatsOverlayPanel'),
 };
 
 // ─── Workspace Presets ───────────────────────────────────────────────────────
@@ -138,7 +140,15 @@ export default function App() {
             </ErrorBoundary>
           }
         />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={
+          <ErrorBoundary>
+            <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-void, #0a0a0f)', color: 'var(--text-primary, #e8e8ed)' }}>
+              <h1 style={{ fontSize: 48, fontWeight: 800, marginBottom: 8, color: 'var(--text-muted, #6a6a7a)' }}>404</h1>
+              <p style={{ fontSize: 14, color: 'var(--text-secondary, #a0a0b0)', marginBottom: 24 }}>Page not found</p>
+              <a href="/" style={{ fontSize: 13, color: 'var(--brand-bright, #9b7dff)', textDecoration: 'none', fontWeight: 600 }}>Back to Dashboard</a>
+            </div>
+          </ErrorBoundary>
+        } />
       </Routes>
     </KeyboardProvider>
   );
