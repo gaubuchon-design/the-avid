@@ -1,5 +1,9 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
+import { mediaProbeEngine } from '../engine/MediaProbeEngine';
+import { mediaDatabaseEngine } from '../engine/MediaDatabaseEngine';
+import type { ProjectMediaSettings } from '../engine/MediaDatabaseEngine';
+export type { ProjectMediaSettings } from '../engine/MediaDatabaseEngine';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -104,14 +108,32 @@ export interface Marker {
 export interface MediaAsset {
   id: string;
   name: string;
-  type: 'VIDEO' | 'AUDIO' | 'IMAGE' | 'DOCUMENT';
+  type: 'VIDEO' | 'AUDIO' | 'IMAGE' | 'GRAPHIC' | 'DOCUMENT';
   duration?: number;
-  status: 'UPLOADING' | 'PROCESSING' | 'READY' | 'ERROR';
+  status: 'UPLOADING' | 'PROCESSING' | 'READY' | 'ERROR' | 'INGESTING' | 'OFFLINE';
   thumbnailUrl?: string;
   playbackUrl?: string;
   waveformData?: number[];
   tags: string[];
   isFavorite: boolean;
+  // Technical metadata (from MediaProbeEngine)
+  width?: number;
+  height?: number;
+  fps?: number;
+  codec?: string;
+  colorSpace?: string;
+  hasAlpha?: boolean;
+  audioChannels?: number;
+  sampleRate?: number;
+  fileSize?: number;
+  startTimecode?: string;
+  bitDepth?: number;
+  mimeType?: string;
+  colorLabel?: string;
+  rating?: number;
+  // File reference for re-probe or relink
+  fileHandle?: File;
+  mediaDbId?: string;
 }
 
 export interface Bin {
@@ -218,6 +240,9 @@ export interface SequenceSettings {
   width: number;
   height: number;
   sampleRate: number;
+  // Color management
+  colorSpace: 'rec709' | 'rec2020' | 'dci-p3' | 'aces-cct';
+  displayTransform: 'sdr-rec709' | 'hdr-pq' | 'hdr-hlg';
 }
 
 export interface SubtitleCue {
@@ -295,8 +320,10 @@ interface EditorState {
   projectId: string | null;
   projectName: string;
   projectSettings: ProjectSettings;
+  projectMediaSettings: ProjectMediaSettings;
   lastSavedAt: string | null;
   saveStatus: SaveStatus;
+  ingestProgress: Record<string, number>; // assetId → 0-1 progress
 
   // Timeline
   timelineId: string | null;
@@ -897,8 +924,10 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     projectId: null,
     projectName: 'Demo Feature Film',
     projectSettings: DEFAULT_PROJECT_SETTINGS,
+    projectMediaSettings: { organizationMode: 'keep-in-place', generateProxies: false, proxyResolution: '1/2' as const },
     lastSavedAt: null,
     saveStatus: 'idle' as SaveStatus,
+    ingestProgress: {},
     timelineId: null,
     tracks: DEMO_TRACKS,
     markers: [
@@ -925,6 +954,8 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       width: 1920,
       height: 1080,
       sampleRate: 48000,
+      colorSpace: 'rec709',
+      displayTransform: 'sdr-rec709',
     },
     subtitleTracks: [],
     titleClips: [],
@@ -1662,47 +1693,153 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       if (settings.fps !== undefined) s.projectSettings.frameRate = settings.fps;
     }),
 
-    // Media import
-    importMediaFiles: (files, binId) => set((s) => {
-      const targetBin = binId
-        ? (function findBin(bins: Bin[]): Bin | null {
-            for (const b of bins) {
-              if (b.id === binId) return b;
-              const child = findBin(b.children);
-              if (child) return child;
+    // Media import — real pipeline with metadata extraction
+    importMediaFiles: (files, binId) => {
+      // Phase 1: Create placeholder assets immediately for UI feedback
+      const assetIds: string[] = [];
+      set((s) => {
+        const targetBin = binId
+          ? (function findBin(bins: Bin[]): Bin | null {
+              for (const b of bins) {
+                if (b.id === binId) return b;
+                const child = findBin(b.children);
+                if (child) return child;
+              }
+              return null;
+            })(s.bins)
+          : s.bins[0] ?? null;
+        if (!targetBin) return;
+
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const mime = file.type || '';
+          const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+          const isVideo = mime.startsWith('video/') || ['mov', 'mxf', 'avi', 'mkv'].includes(ext);
+          const isAudio = mime.startsWith('audio/');
+          const isImage = mime.startsWith('image/') || ['exr', 'dpx', 'tga', 'psd'].includes(ext);
+          const isSvg = ext === 'svg' || mime === 'image/svg+xml';
+          const url = URL.createObjectURL(file);
+
+          const assetId = createId('asset');
+          assetIds.push(assetId);
+
+          const asset: MediaAsset = {
+            id: assetId,
+            name: file.name,
+            type: isSvg ? 'GRAPHIC' : isVideo ? 'VIDEO' : isAudio ? 'AUDIO' : isImage ? 'IMAGE' : 'DOCUMENT',
+            duration: 0,
+            status: 'INGESTING',
+            playbackUrl: url,
+            tags: [],
+            isFavorite: false,
+            fileSize: file.size,
+            mimeType: mime,
+            fileHandle: file,
+          };
+
+          targetBin.assets.push(asset);
+          s.ingestProgress[assetId] = 0;
+        }
+
+        if (s.selectedBinId === targetBin.id) {
+          s.activeBinAssets = [...targetBin.assets];
+        }
+      });
+
+      // Phase 2: Extract metadata asynchronously per file
+      const fileArray = Array.from(files);
+      fileArray.forEach(async (file, idx) => {
+        const assetId = assetIds[idx];
+        if (!assetId) return;
+
+        try {
+          const metadata = await mediaProbeEngine.extract(file, (progress) => {
+            set((s) => { s.ingestProgress[assetId] = progress; });
+          });
+
+          // Store in media database
+          await mediaDatabaseEngine.init();
+          await mediaDatabaseEngine.addEntry({
+            id: assetId,
+            fileName: file.name,
+            originalPath: file.name, // In browser, we don't have full path
+            objectUrl: URL.createObjectURL(file),
+            metadata,
+            status: 'online',
+            binId: binId ?? undefined,
+            addedAt: Date.now(),
+            lastVerified: Date.now(),
+          });
+
+          // Update the asset with real metadata
+          set((s) => {
+            function findAsset(bins: Bin[]): MediaAsset | null {
+              for (const b of bins) {
+                const a = b.assets.find((a) => a.id === assetId);
+                if (a) return a;
+                const child = findAsset(b.children);
+                if (child) return child;
+              }
+              return null;
             }
-            return null;
-          })(s.bins)
-        : s.bins[0] ?? null;
+            const asset = findAsset(s.bins);
+            if (asset) {
+              asset.status = 'READY';
+              asset.duration = metadata.duration;
+              asset.width = metadata.width;
+              asset.height = metadata.height;
+              asset.fps = metadata.fps;
+              asset.codec = metadata.codec;
+              asset.colorSpace = metadata.colorSpace;
+              asset.hasAlpha = metadata.hasAlpha;
+              asset.audioChannels = metadata.audioChannels;
+              asset.sampleRate = metadata.sampleRate;
+              asset.fileSize = metadata.fileSize;
+              asset.startTimecode = metadata.startTimecode;
+              asset.bitDepth = metadata.bitDepth;
+              asset.mimeType = metadata.mimeType;
+              asset.thumbnailUrl = metadata.thumbnailUrl;
+              if (metadata.waveformData) {
+                asset.waveformData = Array.from(metadata.waveformData);
+              }
+              asset.mediaDbId = assetId;
+            }
+            delete s.ingestProgress[assetId];
 
-      if (!targetBin) return;
-
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const isVideo = file.type.startsWith('video/');
-        const isAudio = file.type.startsWith('audio/');
-        const isImage = file.type.startsWith('image/');
-        const url = URL.createObjectURL(file);
-
-        const asset: MediaAsset = {
-          id: createId('asset'),
-          name: file.name,
-          type: isVideo ? 'VIDEO' : isAudio ? 'AUDIO' : isImage ? 'IMAGE' : 'DOCUMENT',
-          duration: 0, // will be updated when loaded
-          status: 'READY',
-          playbackUrl: url,
-          tags: [],
-          isFavorite: false,
-        };
-
-        targetBin.assets.push(asset);
-      }
-
-      // Update active bin assets if viewing this bin
-      if (s.selectedBinId === targetBin.id) {
-        s.activeBinAssets = [...targetBin.assets];
-      }
-    }),
+            // Refresh active bin assets
+            const selectedBin = s.selectedBinId
+              ? (function find(bins: Bin[]): Bin | null {
+                  for (const b of bins) {
+                    if (b.id === s.selectedBinId) return b;
+                    const c = find(b.children);
+                    if (c) return c;
+                  }
+                  return null;
+                })(s.bins)
+              : null;
+            if (selectedBin) {
+              s.activeBinAssets = [...selectedBin.assets];
+            }
+          });
+        } catch (err) {
+          console.error('Media ingest failed for', file.name, err);
+          set((s) => {
+            function findAsset(bins: Bin[]): MediaAsset | null {
+              for (const b of bins) {
+                const a = b.assets.find((a) => a.id === assetId);
+                if (a) return a;
+                const child = findAsset(b.children);
+                if (child) return child;
+              }
+              return null;
+            }
+            const asset = findAsset(s.bins);
+            if (asset) asset.status = 'ERROR';
+            delete s.ingestProgress[assetId];
+          });
+        }
+      });
+    },
 
     // Dialogs
     toggleNewProjectDialog: () => set((s) => { s.showNewProjectDialog = !s.showNewProjectDialog; }),

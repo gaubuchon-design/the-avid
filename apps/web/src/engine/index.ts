@@ -109,3 +109,18 @@ export { ofxBridge } from './OpenFXBridge';
 // Timeline Display
 export { timelineDisplayEngine } from './TimelineDisplayEngine';
 export { type DupeInfo, type WaveformCache, type ResolvedClipColor } from './TimelineDisplayEngine';
+
+// Nesting / Compound Clips
+export { nestingEngine } from './NestingEngine';
+export { type SequenceData } from './NestingEngine';
+
+// Through Edits
+export { throughEditEngine } from './ThroughEditEngine';
+export { type ThroughEdit } from './ThroughEditEngine';
+
+// Speed Effects
+export { speedEffectsEngine } from './SpeedEffectsEngine';
+
+// Attribute Clipboard
+export { attributeClipboard } from './AttributeClipboard';
+export { type ClipAttributes } from './AttributeClipboard';

@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useRef } from 'react';
 import { usePlayerStore, ScopeType } from '../../store/player.store';
+import { useEditorStore } from '../../store/editor.store';
 import { playbackEngine } from '../../engine/PlaybackEngine';
+import { videoSourceManager } from '../../engine/VideoSourceManager';
+import { frameCompositor } from '../../engine/FrameCompositor';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -48,8 +51,39 @@ export function SourceMonitor() {
   } = usePlayerStore();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const lastBitmapRef = useRef<ImageBitmap | null>(null);
 
-  // Draw placeholder canvas
+  // Get the source asset to load video from (look up through bins or use sourceAsset)
+  const sourceAsset = useEditorStore((s) => {
+    if (!sourceClipId) return s.sourceAsset;
+    // Search bins for the asset
+    const findInBins = (bins: typeof s.bins): typeof s.sourceAsset => {
+      for (const bin of bins) {
+        const found = bin.assets.find((a) => a.id === sourceClipId);
+        if (found) return found;
+        const childResult = findInBins(bin.children);
+        if (childResult) return childResult;
+      }
+      return null;
+    };
+    return findInBins(s.bins);
+  });
+
+  // Load video source when sourceClipId changes
+  useEffect(() => {
+    if (!sourceAsset?.fileHandle && !sourceAsset?.playbackUrl) return;
+    const assetId = sourceAsset.id;
+    const source = videoSourceManager.getSource(assetId);
+    if (source?.ready) return; // Already loaded
+
+    const urlOrFile = sourceAsset.fileHandle ?? sourceAsset.playbackUrl;
+    if (!urlOrFile) return;
+    videoSourceManager.loadSource(assetId, urlOrFile).catch((err) => {
+      console.warn('[SourceMonitor] Failed to load source:', err.message);
+    });
+  }, [sourceAsset]);
+
+  // Render video frame or placeholder
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -59,35 +93,57 @@ export function SourceMonitor() {
     const w = canvas.width;
     const h = canvas.height;
 
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, w, h);
-
-    // Label
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
-    ctx.font = '700 28px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('SOURCE', w / 2, h / 2 - 14);
-
-    // Timecode overlay
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-    ctx.font = '500 13px monospace';
-    ctx.fillText(frameToTimecode(currentFrame), w / 2, h / 2 + 16);
-
-    // In/out markers
-    if (inPoint !== null) {
-      ctx.fillStyle = 'rgba(59, 130, 246, 0.6)';
-      ctx.font = '500 10px monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText('IN: ' + frameToTimecode(inPoint), 10, h - 10);
+    // Try to render real video frame
+    if (sourceClipId) {
+      const timeSeconds = currentFrame / playbackEngine.fps;
+      frameCompositor.renderSourceFrame(sourceClipId, timeSeconds, w, h).then((bitmap) => {
+        if (bitmap) {
+          lastBitmapRef.current = bitmap;
+          ctx.clearRect(0, 0, w, h);
+          ctx.drawImage(bitmap, 0, 0, w, h);
+          // Overlay in/out markers
+          drawMarkers(ctx, w, h);
+        } else {
+          drawPlaceholder(ctx, w, h);
+        }
+      }).catch(() => {
+        drawPlaceholder(ctx, w, h);
+      });
+    } else {
+      drawPlaceholder(ctx, w, h);
     }
-    if (outPoint !== null) {
-      ctx.fillStyle = 'rgba(59, 130, 246, 0.6)';
-      ctx.font = '500 10px monospace';
-      ctx.textAlign = 'right';
-      ctx.fillText('OUT: ' + frameToTimecode(outPoint), w - 10, h - 10);
+
+    function drawMarkers(c: CanvasRenderingContext2D, cw: number, ch: number) {
+      if (inPoint !== null) {
+        c.fillStyle = 'rgba(59, 130, 246, 0.6)';
+        c.font = '500 10px monospace';
+        c.textAlign = 'left';
+        c.textBaseline = 'alphabetic';
+        c.fillText('IN: ' + frameToTimecode(inPoint), 10, ch - 10);
+      }
+      if (outPoint !== null) {
+        c.fillStyle = 'rgba(59, 130, 246, 0.6)';
+        c.font = '500 10px monospace';
+        c.textAlign = 'right';
+        c.textBaseline = 'alphabetic';
+        c.fillText('OUT: ' + frameToTimecode(outPoint), cw - 10, ch - 10);
+      }
     }
-  }, [currentFrame, inPoint, outPoint]);
+
+    function drawPlaceholder(c: CanvasRenderingContext2D, cw: number, ch: number) {
+      c.fillStyle = '#000000';
+      c.fillRect(0, 0, cw, ch);
+      c.fillStyle = 'rgba(255, 255, 255, 0.12)';
+      c.font = '700 28px system-ui, sans-serif';
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText('SOURCE', cw / 2, ch / 2 - 14);
+      c.fillStyle = 'rgba(255, 255, 255, 0.25)';
+      c.font = '500 13px monospace';
+      c.fillText(frameToTimecode(currentFrame), cw / 2, ch / 2 + 16);
+      drawMarkers(c, cw, ch);
+    }
+  }, [currentFrame, sourceClipId, inPoint, outPoint]);
 
   // Transport handlers
   const handlePlayPause = useCallback(() => {

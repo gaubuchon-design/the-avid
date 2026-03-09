@@ -137,9 +137,9 @@ export interface EditorMarker {
 export interface EditorMediaAsset {
   id: string;
   name: string;
-  type: 'VIDEO' | 'AUDIO' | 'IMAGE' | 'DOCUMENT';
+  type: 'VIDEO' | 'AUDIO' | 'IMAGE' | 'GRAPHIC' | 'DOCUMENT';
   duration?: number;
-  status: 'UPLOADING' | 'PROCESSING' | 'READY' | 'ERROR';
+  status: 'UPLOADING' | 'PROCESSING' | 'READY' | 'ERROR' | 'INGESTING' | 'OFFLINE';
   thumbnailUrl?: string;
   playbackUrl?: string;
   waveformData?: number[];

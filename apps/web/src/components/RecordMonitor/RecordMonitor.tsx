@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef } from 'react';
 import { useEditorStore } from '../../store/editor.store';
 import { usePlayerStore } from '../../store/player.store';
 import { playbackEngine } from '../../engine/PlaybackEngine';
+import { frameCompositor } from '../../engine/FrameCompositor';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -45,7 +46,11 @@ export function RecordMonitor() {
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Draw placeholder canvas
+  // Get timeline tracks and sequence settings for compositing
+  const tracks = useEditorStore((s) => s.tracks);
+  const sequenceSettings = useEditorStore((s) => s.sequenceSettings);
+
+  // Render composited timeline frame or placeholder
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -55,28 +60,54 @@ export function RecordMonitor() {
     const w = canvas.width;
     const h = canvas.height;
 
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, w, h);
+    // Check if there are any video tracks with clips
+    const hasVideoClips = tracks.some(
+      (t) => (t.type === 'VIDEO' || t.type === 'GRAPHIC') && t.clips.length > 0
+    );
 
-    // Label
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
-    ctx.font = '700 28px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('RECORD', w / 2, h / 2 - 14);
+    if (hasVideoClips) {
+      frameCompositor
+        .renderTimelineFrame(tracks, playheadTime, sequenceSettings, w, h)
+        .then((bitmap) => {
+          if (bitmap) {
+            ctx.clearRect(0, 0, w, h);
+            ctx.drawImage(bitmap, 0, 0, w, h);
+            bitmap.close();
+            // Draw progress bar overlay
+            drawProgressBar(ctx, w, h);
+          } else {
+            drawPlaceholder(ctx, w, h);
+          }
+        })
+        .catch(() => {
+          drawPlaceholder(ctx, w, h);
+        });
+    } else {
+      drawPlaceholder(ctx, w, h);
+    }
 
-    // Timecode overlay
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-    ctx.font = '500 13px monospace';
-    ctx.fillText(timeToTimecode(playheadTime), w / 2, h / 2 + 16);
+    function drawProgressBar(c: CanvasRenderingContext2D, cw: number, ch: number) {
+      const progress = duration > 0 ? playheadTime / duration : 0;
+      c.fillStyle = 'rgba(255, 255, 255, 0.05)';
+      c.fillRect(0, ch - 3, cw, 3);
+      c.fillStyle = '#7c5cfc';
+      c.fillRect(0, ch - 3, cw * progress, 3);
+    }
 
-    // Progress bar at bottom
-    const progress = duration > 0 ? playheadTime / duration : 0;
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-    ctx.fillRect(0, h - 3, w, 3);
-    ctx.fillStyle = 'var(--accent)';
-    ctx.fillRect(0, h - 3, w * progress, 3);
-  }, [playheadTime, duration]);
+    function drawPlaceholder(c: CanvasRenderingContext2D, cw: number, ch: number) {
+      c.fillStyle = '#000000';
+      c.fillRect(0, 0, cw, ch);
+      c.fillStyle = 'rgba(255, 255, 255, 0.12)';
+      c.font = '700 28px system-ui, sans-serif';
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText('RECORD', cw / 2, ch / 2 - 14);
+      c.fillStyle = 'rgba(255, 255, 255, 0.25)';
+      c.font = '500 13px monospace';
+      c.fillText(timeToTimecode(playheadTime), cw / 2, ch / 2 + 16);
+      drawProgressBar(c, cw, ch);
+    }
+  }, [playheadTime, duration, tracks, sequenceSettings]);
 
   // Transport handlers
   const handlePlayPause = useCallback(() => {

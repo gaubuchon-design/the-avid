@@ -191,3 +191,49 @@ a { text-decoration: none; color: inherit; }
 .ml-auto { margin-left: auto; }
 .gap-1 { gap: 4px; }
 .gap-2 { gap: 8px; }
+
+/* ─── Page Navigation (Resolve-Style Bottom Bar) ─────────────────────────── */
+.page-nav {
+  display: flex; align-items: center; justify-content: center; gap: 0;
+  height: 28px; background: var(--bg-void);
+  border-top: 1px solid rgba(255,255,255,0.06); flex-shrink: 0; z-index: 100;
+}
+.page-nav-tab {
+  padding: 4px 24px; font-size: 11px; font-weight: 400;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-muted); background: transparent;
+  border: none; border-bottom: 2px solid transparent;
+  cursor: pointer; transition: all 150ms ease;
+  font-family: var(--font-ui);
+}
+.page-nav-tab:hover { color: var(--text-secondary); }
+.page-nav-tab.active {
+  font-weight: 600; color: var(--text-primary);
+  background: rgba(255,255,255,0.06);
+  border-bottom-color: var(--brand);
+}
+
+/* ─── Tighter Panel Gaps (Resolve-Style) ─────────────────────────────────── */
+.workspace { gap: 1px; }
+.panel { border-radius: 0; }
+.panel-header { height: 30px; padding: 0 10px; }
+.panel-title { font-size: 9px; letter-spacing: 1.4px; }
+
+/* ─── Monospace Timecodes ─────────────────────────────────────────────────── */
+.timecode-display, .monitor-tc {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+/* ─── Monitor Enhancements ───────────────────────────────────────────────── */
+.monitor {
+  border: 1px solid rgba(255,255,255,0.04);
+}
+.monitor-header {
+  background: var(--bg-void);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.monitor-label.source { color: var(--info); }
+.monitor-label.record { color: var(--error); }

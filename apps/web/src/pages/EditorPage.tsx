@@ -18,6 +18,11 @@ import { TitleTool } from '../components/TitleTool/TitleTool';
 import { SubtitleEditor } from '../components/SubtitleEditor/SubtitleEditor';
 import { useEditorStore } from '../store/editor.store';
 import { type WorkspacePreset, workspacePresets } from '../App';
+import { PageNavigation, type EditorPage as PageId } from '../components/PageNavigation/PageNavigation';
+import { MediaPage } from './MediaPage';
+import { CutPage } from './CutPage';
+import { ColorPage } from './ColorPage';
+import { DeliverPage } from './DeliverPage';
 
 // Lazy-loaded vertical panels
 // NOTE: These lazy imports are intentionally separate from the ones in App.tsx.
@@ -130,6 +135,7 @@ export function EditorPage() {
     (searchParams.get('workspace') as WorkspacePreset) || 'filmtv'
   );
   const [showMultiCam, setShowMultiCam] = useState(false);
+  const [activePage, setActivePage] = useState<PageId>('edit');
   usePlaybackEngine();
 
   useEffect(() => {
@@ -148,6 +154,12 @@ export function EditorPage() {
         e.preventDefault();
         setShowMultiCam(prev => !prev);
       }
+      // Shift+1-5 to switch pages (Resolve-style)
+      if (e.shiftKey && !e.metaKey && !e.ctrlKey) {
+        const pageMap: Record<string, PageId> = { '!': 'media', '@': 'cut', '#': 'edit', '$': 'color', '%': 'deliver' };
+        const page = pageMap[e.key];
+        if (page) { e.preventDefault(); setActivePage(page); }
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -159,46 +171,57 @@ export function EditorPage() {
   return (
     <div className="editor-shell" onContextMenu={e => e.preventDefault()}>
       <Toolbar />
-      <WorkspaceSelector workspace={workspace} switchWorkspace={setWorkspace} presets={workspacePresets} />
-      {isSportsWorkspace ? (
-        /* Sports workspace uses its own full-screen layout with integrated
-           EVS Browser, Multi-Cam, Highlights, Package Builder, and Timeline */
-        <Suspense fallback={<LoadingSpinner />}>
-          <SportsWorkspace />
-        </Suspense>
-      ) : (
-        <>
-          <div className={`workspace${showInspector ? '' : ' no-inspector'}`}>
-            <div className="left-panels">
-              <BinPanel />
-              {showTranscriptPanel && <TranscriptPanel />}
-            </div>
-            <div className="canvas-area" style={{ position: 'relative' }}>
-              {showMultiCam ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <MultiCamPanel />
-                </Suspense>
-              ) : (
-                <ComposerPanel />
-              )}
-              {showAIPanel && <AIPanel />}
-            </div>
-            {hasVerticalPanel && (
-              <div className="vertical-panel" style={{
-                width: 340,
-                overflowY: 'auto',
-                borderLeft: '1px solid var(--border-subtle)',
-                display: 'flex',
-                flexDirection: 'column',
-              }}>
-                <VerticalSidePanel workspace={workspace} />
-              </div>
-            )}
-            {showInspector && <InspectorPanel />}
-          </div>
-          <TimelinePanel />
-        </>
+      {activePage === 'edit' && (
+        <WorkspaceSelector workspace={workspace} switchWorkspace={setWorkspace} presets={workspacePresets} />
       )}
+
+      {/* Page-specific content */}
+      {activePage === 'media' && <MediaPage />}
+      {activePage === 'cut' && <CutPage />}
+      {activePage === 'color' && <ColorPage />}
+      {activePage === 'deliver' && <DeliverPage />}
+
+      {activePage === 'edit' && (
+        isSportsWorkspace ? (
+          <Suspense fallback={<LoadingSpinner />}>
+            <SportsWorkspace />
+          </Suspense>
+        ) : (
+          <>
+            <div className={`workspace${showInspector ? '' : ' no-inspector'}`}>
+              <div className="left-panels">
+                <BinPanel />
+                {showTranscriptPanel && <TranscriptPanel />}
+              </div>
+              <div className="canvas-area" style={{ position: 'relative' }}>
+                {showMultiCam ? (
+                  <Suspense fallback={<LoadingSpinner />}>
+                    <MultiCamPanel />
+                  </Suspense>
+                ) : (
+                  <ComposerPanel />
+                )}
+                {showAIPanel && <AIPanel />}
+              </div>
+              {hasVerticalPanel && (
+                <div className="vertical-panel" style={{
+                  width: 340,
+                  overflowY: 'auto',
+                  borderLeft: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}>
+                  <VerticalSidePanel workspace={workspace} />
+                </div>
+              )}
+              {showInspector && <InspectorPanel />}
+            </div>
+            <TimelinePanel />
+          </>
+        )
+      )}
+
+      <PageNavigation activePage={activePage} onPageChange={setActivePage} />
       <StatusBar />
 
       {/* Command Palette (⌘K) */}
