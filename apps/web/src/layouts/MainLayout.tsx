@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 
 /**
@@ -8,10 +8,24 @@ import { Outlet, useLocation } from 'react-router-dom';
  */
 export function MainLayout() {
   const location = useLocation();
+  const [isTransitioning, setIsTransitioning] = useState(false);
+
+  useEffect(() => {
+    setIsTransitioning(true);
+    const timer = setTimeout(() => setIsTransitioning(false), 200);
+    return () => clearTimeout(timer);
+  }, [location.pathname]);
 
   return (
-    <div className="main-layout">
-      <div className="main-layout-content" key={location.pathname}>
+    <div className="main-layout" role="main" id="main-content">
+      <div
+        className="main-layout-content"
+        key={location.pathname}
+        style={{
+          opacity: isTransitioning ? 0.85 : 1,
+          transition: 'opacity 200ms ease-out',
+        }}
+      >
         <Outlet />
       </div>
     </div>

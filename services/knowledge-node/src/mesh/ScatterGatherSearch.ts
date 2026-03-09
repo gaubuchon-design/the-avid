@@ -213,7 +213,7 @@ export class ScatterGatherSearch {
           if (!query.modalities || query.modalities.includes('embedding')) {
             const embeddings = handle.db.getAllEmbeddings(manifest.shardId);
             if (embeddings.length > 0) {
-              const index = this.indexBuilder.buildIndex(handle.db);
+              const { index } = this.indexBuilder.buildIndex(handle.db);
               if (index.size() > 0) {
                 // Generate a simple bag-of-characters query vector for demo.
                 // In production this would call an embedding model.

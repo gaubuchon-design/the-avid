@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import type { ProjectSummary, ProjectTemplate } from '@mcua/core';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -57,6 +57,35 @@ function formatRelativeDate(isoDate: string): string {
   return `${Math.floor(diffDays / 7)}w ago`;
 }
 
+// Skeleton UI for loading state
+function ProjectCardSkeleton() {
+  return (
+    <div className="project-card" aria-hidden="true" style={{ pointerEvents: 'none' }}>
+      <div className="project-card-thumb" style={{ overflow: 'hidden' }}>
+        <div style={{
+          width: '100%', height: '100%',
+          background: 'linear-gradient(90deg, var(--bg-raised) 25%, var(--bg-elevated) 50%, var(--bg-raised) 75%)',
+          backgroundSize: '200% 100%',
+          animation: 'shimmer 1.5s ease-in-out infinite',
+        }} />
+      </div>
+      <div className="project-card-body">
+        <div style={{ width: '70%', height: 14, borderRadius: 4, background: 'var(--bg-elevated)', marginBottom: 8 }} />
+        <div style={{ width: '50%', height: 10, borderRadius: 3, background: 'var(--bg-elevated)' }} />
+      </div>
+    </div>
+  );
+}
+
+function StatsSkeleton() {
+  return (
+    <div style={{ textAlign: 'center', padding: '0 20px' }}>
+      <div style={{ width: 40, height: 22, borderRadius: 4, background: 'var(--bg-elevated)', margin: '0 auto 4px' }} />
+      <div style={{ width: 50, height: 8, borderRadius: 3, background: 'var(--bg-elevated)', margin: '0 auto' }} />
+    </div>
+  );
+}
+
 export function DashboardPage() {
   const navigate = useNavigate();
   const { showNewProjectDialog, toggleNewProjectDialog } = useEditorStore();
@@ -64,9 +93,19 @@ export function DashboardPage() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'recent' | 'shared'>('all');
   const [navItem, setNavItem] = useState('Projects');
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const refreshProjects = React.useCallback(async () => {
-    setProjects(await listProjectSummariesFromRepository());
+  const refreshProjects = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      setProjects(await listProjectSummariesFromRepository());
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to load projects');
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -116,22 +155,43 @@ export function DashboardPage() {
     <div className="dashboard">
       <div className="dashboard-header">
         <div className="dashboard-logo">The <em>Avid</em></div>
-        <nav className="dashboard-nav" style={{ marginLeft: 16 }}>
+        <nav className="dashboard-nav" style={{ marginLeft: 16 }} role="tablist" aria-label="Dashboard sections">
           {['Projects', 'Templates', 'Marketplace', 'Team'].map((item) => (
-            <div key={item}
+            <button key={item}
               className={`dashboard-nav-item${navItem === item ? ' active' : ''}`}
               onClick={() => setNavItem(item)}
-            >{item}</div>
+              role="tab"
+              aria-selected={navItem === item}
+              tabIndex={navItem === item ? 0 : -1}
+              onKeyDown={(e) => {
+                const items = ['Projects', 'Templates', 'Marketplace', 'Team'];
+                const idx = items.indexOf(item);
+                if (e.key === 'ArrowRight' && idx < items.length - 1) {
+                  e.preventDefault();
+                  setNavItem(items[idx + 1]!);
+                  (e.currentTarget.nextElementSibling as HTMLElement | null)?.focus();
+                } else if (e.key === 'ArrowLeft' && idx > 0) {
+                  e.preventDefault();
+                  setNavItem(items[idx - 1]!);
+                  (e.currentTarget.previousElementSibling as HTMLElement | null)?.focus();
+                }
+              }}
+              style={{
+                border: 'none', background: 'transparent', cursor: 'pointer',
+                font: 'inherit', color: 'inherit', padding: 'inherit',
+              }}
+            >{item}</button>
           ))}
         </nav>
         <div style={{ flex: 1 }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ position: 'relative' }}>
             <input
-              type="text"
-              placeholder="Search projects…"
+              type="search"
+              placeholder="Search projects... (Ctrl+/)"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
+              aria-label="Search projects"
               style={{
                 background: 'var(--bg-elevated)', border: '1px solid var(--border-default)',
                 borderRadius: 'var(--radius-md)', color: 'var(--text-primary)',
@@ -196,20 +256,29 @@ export function DashboardPage() {
             )}
           </div>
           <div style={{ width: 1, background: 'var(--border)', height: 36, margin: '0 24px' }} />
-          {[
-            [`${projects.length}`, 'Projects', 'var(--brand-bright)'],
-            [`${totalTokens}`, 'AI Tokens', 'var(--success)'],
-            [`${totalExportsPending}`, 'Pending Cuts', 'var(--warning)'],
-            [formatDuration(totalDuration), 'Timeline Time', 'var(--info)'],
-          ].map(([value, label, color], index, entries) => (
-            <React.Fragment key={label as string}>
-              <div style={{ textAlign: 'center', padding: '0 20px' }}>
-                <div style={{ fontSize: 20, fontWeight: 800, color: color as string, fontFamily: 'var(--font-display)', letterSpacing: '-0.5px' }}>{value}</div>
-                <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginTop: 2 }}>{label}</div>
-              </div>
-              {index < entries.length - 1 && <div style={{ width: 1, background: 'var(--border)', height: 36 }} />}
-            </React.Fragment>
-          ))}
+          {isLoading ? (
+            <>
+              <StatsSkeleton /><div style={{ width: 1, background: 'var(--border)', height: 36 }} />
+              <StatsSkeleton /><div style={{ width: 1, background: 'var(--border)', height: 36 }} />
+              <StatsSkeleton /><div style={{ width: 1, background: 'var(--border)', height: 36 }} />
+              <StatsSkeleton />
+            </>
+          ) : (
+            [
+              [`${projects.length}`, 'Projects', 'var(--brand-bright)'],
+              [`${totalTokens}`, 'AI Tokens', 'var(--success)'],
+              [`${totalExportsPending}`, 'Pending Cuts', 'var(--warning)'],
+              [formatDuration(totalDuration), 'Timeline Time', 'var(--info)'],
+            ].map(([value, label, color], index, entries) => (
+              <React.Fragment key={label as string}>
+                <div style={{ textAlign: 'center', padding: '0 20px' }}>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: color as string, fontFamily: 'var(--font-display)', letterSpacing: '-0.5px' }}>{value}</div>
+                  <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginTop: 2 }}>{label}</div>
+                </div>
+                {index < entries.length - 1 && <div style={{ width: 1, background: 'var(--border)', height: 36 }} />}
+              </React.Fragment>
+            ))
+          )}
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 260px', gap: 20, alignItems: 'start' }}>
@@ -228,17 +297,72 @@ export function DashboardPage() {
               </div>
             </div>
 
-            <div className="projects-grid">
+            <div className="projects-grid" role="list" aria-label="Projects">
               <div className="project-card" style={{ border: '1px dashed var(--border-strong)', background: 'transparent' }}
-                onClick={() => toggleNewProjectDialog()}>
+                role="listitem"
+                tabIndex={0}
+                onClick={() => toggleNewProjectDialog()}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleNewProjectDialog(); } }}>
                 <div style={{ height: 140, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-                  <div style={{ width: 38, height: 38, borderRadius: '50%', border: '2px dashed var(--border-strong)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, color: 'var(--text-muted)' }}>+</div>
+                  <div style={{ width: 38, height: 38, borderRadius: '50%', border: '2px dashed var(--border-strong)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, color: 'var(--text-muted)' }} aria-hidden="true">+</div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>New Project</div>
                 </div>
               </div>
 
+              {/* Loading skeleton */}
+              {isLoading && filteredProjects.length === 0 && (
+                <>
+                  <ProjectCardSkeleton />
+                  <ProjectCardSkeleton />
+                  <ProjectCardSkeleton />
+                </>
+              )}
+
+              {/* Error state */}
+              {loadError && !isLoading && (
+                <div role="alert" style={{
+                  gridColumn: '1 / -1', padding: 32, textAlign: 'center',
+                  background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)',
+                  borderRadius: 'var(--radius-lg)',
+                }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--error)', marginBottom: 8 }}>
+                    Failed to load projects
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 12 }}>
+                    {loadError}
+                  </div>
+                  <button className="btn btn-secondary btn-sm" onClick={() => void refreshProjects()}>
+                    Try Again
+                  </button>
+                </div>
+              )}
+
+              {/* Empty state */}
+              {!isLoading && !loadError && filteredProjects.length === 0 && projects.length > 0 && (
+                <div style={{
+                  gridColumn: '1 / -1', padding: 32, textAlign: 'center',
+                }}>
+                  <div style={{ fontSize: 28, marginBottom: 8, opacity: 0.4 }}>
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ display: 'inline' }}>
+                      <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                    No matching projects
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    Try adjusting your search or filter criteria
+                  </div>
+                </div>
+              )}
+
               {filteredProjects.map((project) => (
-                <div key={project.id} className="project-card" onClick={() => navigate(`/editor/${project.id}`)}>
+                <div key={project.id} className="project-card"
+                  role="listitem"
+                  tabIndex={0}
+                  aria-label={`${project.name}, ${formatRelativeDate(project.updatedAt)}, ${project.progress}% complete`}
+                  onClick={() => navigate(`/editor/${project.id}`)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/editor/${project.id}`); } }}>
                   <div className="project-card-thumb" style={{ overflow: 'hidden' }}>
                     <div className="project-card-thumb-bg"
                       style={{ background: `linear-gradient(135deg, ${project.color}28, ${project.color}55)` }} />
@@ -255,8 +379,14 @@ export function DashboardPage() {
                   <div className="project-card-body">
                     <div className="project-card-name">{project.name}</div>
                     <div className="project-card-meta">
-                      <span>🕐 {formatRelativeDate(project.updatedAt)}</span>
-                      <span>👥 {project.members}</span>
+                      <span>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: '-1px', marginRight: 3 }}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                        {formatRelativeDate(project.updatedAt)}
+                      </span>
+                      <span>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: '-1px', marginRight: 3 }}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+                        {project.members}
+                      </span>
                       <span style={{ marginLeft: 'auto', color: project.progress === 100 ? 'var(--success)' : 'var(--text-muted)' }}>
                         {project.progress}%
                       </span>

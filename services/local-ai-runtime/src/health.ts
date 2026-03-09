@@ -100,12 +100,23 @@ export async function getHealthInfo(
     })),
   );
 
-  const anyAvailable = backendStatuses.some((b) => b.available);
+  const availableCount = backendStatuses.filter((b) => b.available).length;
+  const totalCount = backendStatuses.length;
+
+  // Determine status: ok if all available, degraded if some, unavailable if none
+  let status: 'ok' | 'degraded' | 'unavailable';
+  if (availableCount === 0) {
+    status = 'unavailable';
+  } else if (availableCount < totalCount) {
+    status = 'degraded';
+  } else {
+    status = 'ok';
+  }
 
   const mem = process.memoryUsage();
 
   return {
-    status: anyAvailable ? 'ok' : 'unavailable',
+    status,
     service: serviceName,
     version,
     uptime: process.uptime(),

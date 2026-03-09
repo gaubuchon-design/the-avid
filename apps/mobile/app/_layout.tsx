@@ -59,6 +59,10 @@ export interface AppTheme {
     errorContainer: string;
     success: string;
     warning: string;
+    /** Tab bar tint color for active icon */
+    tabActive: string;
+    /** Tab bar tint color for inactive icon */
+    tabInactive: string;
   };
 }
 
@@ -78,6 +82,8 @@ const DARK_THEME: AppTheme = {
     errorContainer: '#7f1d1d',
     success: '#4ade80',
     warning: '#f59e0b',
+    tabActive: '#6366f1',
+    tabInactive: '#64748b',
   },
 };
 
@@ -97,6 +103,8 @@ const LIGHT_THEME: AppTheme = {
     errorContainer: '#fee2e2',
     success: '#16a34a',
     warning: '#d97706',
+    tabActive: '#6366f1',
+    tabInactive: '#94a3b8',
   },
 };
 
@@ -120,6 +128,16 @@ function ThemeProvider({ children }: { children: ReactNode }) {
       {children}
     </ThemeContext.Provider>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Reduce Motion context
+// ---------------------------------------------------------------------------
+
+const ReduceMotionContext = createContext<boolean>(false);
+
+export function useReduceMotion(): boolean {
+  return useContext(ReduceMotionContext);
 }
 
 // ---------------------------------------------------------------------------
@@ -216,11 +234,14 @@ function AuthGate() {
       style={[authStyles.container, { backgroundColor: theme.colors.background }]}
       accessibilityRole="header"
     >
+      <View style={[authStyles.logoCircle, { backgroundColor: theme.colors.primaryContainer }]}>
+        <Text style={[authStyles.logoText, { color: theme.colors.primary }]}>A</Text>
+      </View>
       <Text style={[authStyles.title, { color: theme.colors.text }]}>
         The Avid
       </Text>
       <Text style={[authStyles.subtitle, { color: theme.colors.textSecondary }]}>
-        Sign in to access your projects
+        AI-powered NLE companion for mobile review and rough-cut editing
       </Text>
       <Pressable
         onPress={signInDemo}
@@ -233,6 +254,9 @@ function AuthGate() {
       >
         <Text style={authStyles.signInBtnText}>Continue as Demo User</Text>
       </Pressable>
+      <Text style={[authStyles.footnote, { color: theme.colors.textMuted }]}>
+        Replace with SSO or OAuth for production
+      </Text>
     </View>
   );
 }
@@ -245,6 +269,18 @@ const authStyles = StyleSheet.create({
     padding: 32,
     gap: 12,
   },
+  logoCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  logoText: {
+    fontSize: 36,
+    fontWeight: '800',
+  },
   title: {
     fontSize: 28,
     fontWeight: '700',
@@ -252,6 +288,9 @@ const authStyles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 15,
+    textAlign: 'center',
+    lineHeight: 22,
+    maxWidth: 300,
     marginBottom: 24,
   },
   signInBtn: {
@@ -260,11 +299,17 @@ const authStyles = StyleSheet.create({
     borderRadius: 10,
     minWidth: 220,
     alignItems: 'center',
+    minHeight: 48,
+    justifyContent: 'center',
   },
   signInBtnText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  footnote: {
+    fontSize: 11,
+    marginTop: 16,
   },
 });
 
@@ -300,6 +345,9 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
     if (this.state.error) {
       return (
         <View style={errorStyles.container} accessibilityRole="alert">
+          <View style={errorStyles.iconCircle}>
+            <Text style={errorStyles.iconText}>!</Text>
+          </View>
           <Text style={errorStyles.title}>Something went wrong</Text>
           <Text
             style={errorStyles.message}
@@ -338,6 +386,20 @@ const errorStyles = StyleSheet.create({
     justifyContent: 'center',
     padding: 32,
   },
+  iconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#7f1d1d',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  iconText: {
+    color: '#f87171',
+    fontSize: 28,
+    fontWeight: '800',
+  },
   title: {
     color: '#f1f5f9',
     fontSize: 20,
@@ -365,6 +427,8 @@ const errorStyles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 8,
     backgroundColor: '#312e81',
+    minHeight: 44,
+    justifyContent: 'center',
   },
   retryText: {
     color: '#818cf8',
@@ -416,9 +480,11 @@ export default function RootLayout() {
   return (
     <ErrorBoundary>
       <ThemeProvider>
-        <AuthProvider>
-          <RootNavigator reduceMotion={reduceMotion} onLayoutReady={onLayoutReady} />
-        </AuthProvider>
+        <ReduceMotionContext.Provider value={reduceMotion}>
+          <AuthProvider>
+            <RootNavigator reduceMotion={reduceMotion} onLayoutReady={onLayoutReady} />
+          </AuthProvider>
+        </ReduceMotionContext.Provider>
       </ThemeProvider>
     </ErrorBoundary>
   );
@@ -474,11 +540,8 @@ function RootNavigator({ reduceMotion, onLayoutReady }: RootNavigatorProps) {
           }}
         >
           <Stack.Screen
-            name="index"
-            options={{
-              title: 'The Avid',
-              ...(Platform.OS === 'ios' ? { headerLargeTitle: true } : {}),
-            }}
+            name="(tabs)"
+            options={{ headerShown: false }}
           />
           <Stack.Screen
             name="editor/[projectId]"
@@ -486,6 +549,7 @@ function RootNavigator({ reduceMotion, onLayoutReady }: RootNavigatorProps) {
               title: 'Editor',
               headerBackTitle: 'Projects',
               gestureEnabled: true,
+              presentation: 'card',
             }}
           />
         </Stack>

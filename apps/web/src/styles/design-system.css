@@ -1694,3 +1694,31 @@ textarea:focus:not(:focus-visible),
     padding: var(--space-4) var(--space-5);
   }
 }
+
+/* ── Skeleton / Shimmer animation ──────────────────────────────────────── */
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── Fade-in animation for page transitions ────────────────────────────── */
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 250ms ease-out;
+}
+
+/* ── Focus visible ring (consistent across the app) ────────────────────── */
+
+.project-card:focus-visible,
+.dashboard-nav-item:focus-visible,
+.page-nav-tab:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--radius-md);
+}

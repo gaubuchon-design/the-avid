@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { playbackEngine } from '../engine/PlaybackEngine';
 
@@ -23,6 +24,7 @@ interface PlayerActions {
   play: () => void;
   pause: () => void;
   stop: () => void;
+  togglePlayPause: () => void;
   seekFrame: (frame: number) => void;
   setSpeed: (speed: number) => void;
   setInPoint: (frame: number | null) => void;
@@ -34,119 +36,166 @@ interface PlayerActions {
   toggleSafeZones: () => void;
   setActiveScope: (scope: ScopeType | null) => void;
   syncFromEngine: (frame: number) => void;
+  resetStore: () => void;
 }
+
+// ─── Initial State ─────────────────────────────────────────────────────────────
+
+const INITIAL_STATE: PlayerState = {
+  isPlaying: false,
+  speed: 1,
+  currentFrame: 0,
+  inPoint: null,
+  outPoint: null,
+  loopPlayback: false,
+  sourceClipId: null,
+  activeMonitor: 'source',
+  showSafeZones: false,
+  activeScope: null,
+};
 
 // ─── Store ─────────────────────────────────────────────────────────────────────
 
 export const usePlayerStore = create<PlayerState & PlayerActions>()(
-  immer((set) => ({
-    // Initial state
-    isPlaying: false,
-    speed: 1,
-    currentFrame: 0,
-    inPoint: null,
-    outPoint: null,
-    loopPlayback: false,
-    sourceClipId: null,
-    activeMonitor: 'source',
-    showSafeZones: false,
-    activeScope: null,
+  devtools(
+    immer((set) => ({
+      // Initial state
+      ...INITIAL_STATE,
 
-    // Actions
-    play: () => {
-      playbackEngine.play();
-      set((s) => {
-        s.isPlaying = true;
-      });
-    },
+      // Actions
+      play: () => {
+        playbackEngine.play();
+        set((s) => {
+          s.isPlaying = true;
+        }, false, 'player/play');
+      },
 
-    pause: () => {
-      playbackEngine.pause();
-      set((s) => {
-        s.isPlaying = false;
-      });
-    },
+      pause: () => {
+        playbackEngine.pause();
+        set((s) => {
+          s.isPlaying = false;
+        }, false, 'player/pause');
+      },
 
-    stop: () => {
-      playbackEngine.stop();
-      set((s) => {
-        s.isPlaying = false;
-        s.speed = 1;
-        s.currentFrame = playbackEngine.currentFrame;
-      });
-    },
+      stop: () => {
+        playbackEngine.stop();
+        set((s) => {
+          s.isPlaying = false;
+          s.speed = 1;
+          s.currentFrame = playbackEngine.currentFrame;
+        }, false, 'player/stop');
+      },
 
-    seekFrame: (frame) => {
-      playbackEngine.seekToFrame(frame);
-      set((s) => {
-        s.currentFrame = frame;
-      });
-    },
+      togglePlayPause: () => {
+        const isCurrentlyPlaying = usePlayerStore.getState().isPlaying;
+        if (isCurrentlyPlaying) {
+          playbackEngine.pause();
+          set((s) => { s.isPlaying = false; }, false, 'player/togglePlayPause');
+        } else {
+          playbackEngine.play();
+          set((s) => { s.isPlaying = true; }, false, 'player/togglePlayPause');
+        }
+      },
 
-    setSpeed: (speed) => {
-      playbackEngine.setSpeed(speed);
-      set((s) => {
-        s.speed = speed;
-      });
-    },
+      seekFrame: (frame) => {
+        playbackEngine.seekToFrame(frame);
+        set((s) => {
+          s.currentFrame = frame;
+        }, false, 'player/seekFrame');
+      },
 
-    setInPoint: (frame) => {
-      if (frame !== null) playbackEngine.setInPoint(frame);
-      set((s) => {
-        s.inPoint = frame;
-      });
-    },
+      setSpeed: (speed) => {
+        playbackEngine.setSpeed(speed);
+        set((s) => {
+          s.speed = speed;
+        }, false, 'player/setSpeed');
+      },
 
-    setOutPoint: (frame) => {
-      if (frame !== null) playbackEngine.setOutPoint(frame);
-      set((s) => {
-        s.outPoint = frame;
-      });
-    },
+      setInPoint: (frame) => {
+        if (frame !== null) playbackEngine.setInPoint(frame);
+        set((s) => {
+          s.inPoint = frame;
+        }, false, 'player/setInPoint');
+      },
 
-    clearInOut: () => {
-      playbackEngine.clearInOut();
-      set((s) => {
-        s.inPoint = null;
-        s.outPoint = null;
-      });
-    },
+      setOutPoint: (frame) => {
+        if (frame !== null) playbackEngine.setOutPoint(frame);
+        set((s) => {
+          s.outPoint = frame;
+        }, false, 'player/setOutPoint');
+      },
 
-    toggleLoop: () =>
-      set((s) => {
-        s.loopPlayback = !s.loopPlayback;
-      }),
+      clearInOut: () => {
+        playbackEngine.clearInOut();
+        set((s) => {
+          s.inPoint = null;
+          s.outPoint = null;
+        }, false, 'player/clearInOut');
+      },
 
-    setSourceClip: (clipId) =>
-      set((s) => {
-        s.sourceClipId = clipId;
-      }),
+      toggleLoop: () =>
+        set((s) => {
+          s.loopPlayback = !s.loopPlayback;
+        }, false, 'player/toggleLoop'),
 
-    setActiveMonitor: (monitor) =>
-      set((s) => {
-        s.activeMonitor = monitor;
-      }),
+      setSourceClip: (clipId) =>
+        set((s) => {
+          s.sourceClipId = clipId;
+        }, false, 'player/setSourceClip'),
 
-    toggleSafeZones: () =>
-      set((s) => {
-        s.showSafeZones = !s.showSafeZones;
-      }),
+      setActiveMonitor: (monitor) =>
+        set((s) => {
+          s.activeMonitor = monitor;
+        }, false, 'player/setActiveMonitor'),
 
-    setActiveScope: (scope) =>
-      set((s) => {
-        s.activeScope = scope;
-      }),
+      toggleSafeZones: () =>
+        set((s) => {
+          s.showSafeZones = !s.showSafeZones;
+        }, false, 'player/toggleSafeZones'),
 
-    syncFromEngine: (frame) =>
-      set((s) => {
-        s.currentFrame = frame;
-        s.isPlaying = playbackEngine.isPlaying;
-        s.speed = playbackEngine.speed;
-      }),
-  }))
+      setActiveScope: (scope) =>
+        set((s) => {
+          s.activeScope = scope;
+        }, false, 'player/setActiveScope'),
+
+      syncFromEngine: (frame) =>
+        set((s) => {
+          s.currentFrame = frame;
+          s.isPlaying = playbackEngine.isPlaying;
+          s.speed = playbackEngine.speed;
+        }, false, 'player/syncFromEngine'),
+
+      resetStore: () => {
+        playbackEngine.stop();
+        set(() => ({ ...INITIAL_STATE }), true, 'player/resetStore');
+      },
+    })),
+    { name: 'PlayerStore', enabled: process.env["NODE_ENV"] === 'development' },
+  )
 );
 
 // Wire up engine -> store sync
 playbackEngine.subscribe((frame) => {
   usePlayerStore.getState().syncFromEngine(frame);
 });
+
+// ─── Named Selectors ────────────────────────────────────────────────────────
+
+type PlayerStoreState = PlayerState & PlayerActions;
+
+export const selectIsPlaying = (state: PlayerStoreState) => state.isPlaying;
+export const selectPlaybackSpeed = (state: PlayerStoreState) => state.speed;
+export const selectCurrentFrame = (state: PlayerStoreState) => state.currentFrame;
+export const selectPlayerInPoint = (state: PlayerStoreState) => state.inPoint;
+export const selectPlayerOutPoint = (state: PlayerStoreState) => state.outPoint;
+export const selectLoopPlayback = (state: PlayerStoreState) => state.loopPlayback;
+export const selectSourceClipId = (state: PlayerStoreState) => state.sourceClipId;
+export const selectActiveMonitor = (state: PlayerStoreState) => state.activeMonitor;
+export const selectShowSafeZones = (state: PlayerStoreState) => state.showSafeZones;
+export const selectActiveScope = (state: PlayerStoreState) => state.activeScope;
+export const selectHasInOutRange = (state: PlayerStoreState) =>
+  state.inPoint !== null && state.outPoint !== null;
+export const selectInOutDuration = (state: PlayerStoreState) =>
+  state.inPoint !== null && state.outPoint !== null
+    ? state.outPoint - state.inPoint
+    : null;

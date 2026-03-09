@@ -306,7 +306,7 @@ describe('Indexing Benchmarks', () => {
     const builder = new IndexBuilder();
 
     const durationMs = timed(() => {
-      const index = builder.buildIndex(db);
+      const { index } = builder.buildIndex(db);
       expect(index.size()).toBe(count);
     });
 

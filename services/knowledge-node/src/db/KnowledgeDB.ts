@@ -206,6 +206,9 @@ export class KnowledgeDB {
   /** The underlying `better-sqlite3` database handle. */
   readonly db: Database.Database;
 
+  /** Whether the database connection has been closed. */
+  private _closed = false;
+
   // ── Prepared statement cache ────────────────────────────────────────────
 
   // Assets
@@ -273,10 +276,12 @@ export class KnowledgeDB {
   constructor(dbPath: string) {
     this.db = new Database(dbPath);
 
-    // Performance pragmas
+    // Performance and reliability pragmas
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.db.pragma('synchronous = NORMAL');
+    this.db.pragma('busy_timeout = 5000');
+    this.db.pragma('cache_size = -8000'); // 8 MB page cache
 
     // Run migrations
     migrate(this.db);
@@ -470,7 +475,24 @@ export class KnowledgeDB {
 
   /** Close the database connection and release all resources. */
   close(): void {
+    if (this._closed) return;
+    this._closed = true;
     this.db.close();
+  }
+
+  /** Whether the database connection has been closed. */
+  get isClosed(): boolean {
+    return this._closed;
+  }
+
+  /**
+   * Ensure the database is open before performing operations.
+   * @throws {Error} if the database has been closed.
+   */
+  private ensureOpen(): void {
+    if (this._closed) {
+      throw new Error('Database connection has been closed.');
+    }
   }
 
   // ── Assets ──────────────────────────────────────────────────────────────
@@ -482,6 +504,7 @@ export class KnowledgeDB {
    *   automatically converted to snake_case for SQL.
    */
   insertAsset(asset: AssetRow): void {
+    this.ensureOpen();
     const now = new Date().toISOString();
     this.stmtInsertAsset.run(
       camelToSnake({
@@ -499,6 +522,7 @@ export class KnowledgeDB {
    * @returns The asset row, or `undefined` if not found.
    */
   getAsset(id: string): AssetRow | undefined {
+    this.ensureOpen();
     const row = this.stmtGetAsset.get(id) as Record<string, unknown> | undefined;
     return row ? snakeToCamel<AssetRow>(row) : undefined;
   }
@@ -835,6 +859,7 @@ export class KnowledgeDB {
    * @returns An object with counts per table.
    */
   getStats(): DBStats {
+    this.ensureOpen();
     const getCount = (stmt: Database.Statement): number => {
       const row = stmt.get() as { cnt: number };
       return row.cnt;
@@ -856,6 +881,7 @@ export class KnowledgeDB {
    * Run SQLite VACUUM to reclaim unused space and compact the database.
    */
   vacuum(): void {
+    this.ensureOpen();
     this.db.exec('VACUUM');
   }
 }

@@ -32,10 +32,16 @@ function randFloat(min: number, max: number): number {
   return Math.random() * (max - min) + min;
 }
 
+/** Async sleep helper for simulated delays. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Build realistic-looking {@link ExecutionMetrics}. */
 function mockMetrics(
   backend: string,
   capability: ModelCapability,
+  modelLoadTimeMs?: number,
 ): ExecutionMetrics {
   const durationMs = randInt(15, 350);
   return {
@@ -43,7 +49,7 @@ function mockMetrics(
     tokensProcessed: capability === 'embedding' ? undefined : randInt(20, 512),
     backend,
     hardware: 'cpu',
-    modelLoadTimeMs: randInt(0, 5) === 0 ? randInt(200, 1500) : undefined,
+    modelLoadTimeMs,
   };
 }
 
@@ -51,10 +57,23 @@ function mockMetrics(
 // MockBackend
 // ---------------------------------------------------------------------------
 
+/** Maximum number of models to keep in mock memory (prevents unbounded growth). */
+const MAX_LOADED_MODELS = 50;
+
+/** Simulated warm-up delay range in milliseconds. */
+const WARMUP_MIN_MS = 50;
+const WARMUP_MAX_MS = 200;
+
 /**
  * A deterministic (enough) mock backend that supports all capabilities
  * and always reports itself as available.  Designed for unit / integration
  * tests and local development without GPUs.
+ *
+ * ## Warm-up behaviour
+ *
+ * The first execution for a given model simulates a cold-start delay to
+ * exercise downstream timeout and retry logic.  Subsequent executions
+ * for the same model return immediately.
  */
 export class MockBackend implements IModelBackend {
   readonly name = 'mock';
@@ -76,6 +95,8 @@ export class MockBackend implements IModelBackend {
 
   private initialized = false;
   private readonly loadedModels: string[] = [];
+  /** Tracks total execution count for observability. */
+  private executeCount = 0;
 
   /** Always returns `true`. */
   async isAvailable(): Promise<boolean> {
@@ -88,23 +109,41 @@ export class MockBackend implements IModelBackend {
 
   async shutdown(): Promise<void> {
     this.loadedModels.length = 0;
+    this.executeCount = 0;
     this.initialized = false;
   }
 
   /**
    * Return realistic mock results for the requested capability.
+   *
+   * On the first call for a given model ID a simulated warm-up delay
+   * is introduced. Subsequent calls for the same model skip the delay.
    */
   async execute(request: ModelRequest): Promise<ModelResult> {
     if (!this.initialized) {
       await this.initialize();
     }
 
+    let modelLoadTimeMs: number | undefined;
+
     if (!this.loadedModels.includes(request.modelId)) {
+      // Simulate cold-start warm-up
+      const warmupMs = randInt(WARMUP_MIN_MS, WARMUP_MAX_MS);
+      await sleep(warmupMs);
+      modelLoadTimeMs = warmupMs;
+
       this.loadedModels.push(request.modelId);
+
+      // Prevent unbounded growth of loaded model list
+      if (this.loadedModels.length > MAX_LOADED_MODELS) {
+        this.loadedModels.shift();
+      }
     }
 
+    this.executeCount++;
+
     const output = this.buildOutput(request);
-    const metrics = mockMetrics(this.name, request.capability);
+    const metrics = mockMetrics(this.name, request.capability, modelLoadTimeMs);
 
     return {
       modelId: request.modelId,
@@ -116,6 +155,46 @@ export class MockBackend implements IModelBackend {
 
   getLoadedModels(): string[] {
     return [...this.loadedModels];
+  }
+
+  /** Return total number of execute() calls since initialization. */
+  getExecuteCount(): number {
+    return this.executeCount;
+  }
+
+  /**
+   * Pre-warm a model so the first real `execute()` call does not incur
+   * the simulated cold-start delay.
+   *
+   * @param modelId - The model identifier to warm up.
+   */
+  async warmUp(modelId: string): Promise<void> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.loadedModels.includes(modelId)) {
+      const warmupMs = randInt(WARMUP_MIN_MS, WARMUP_MAX_MS);
+      await sleep(warmupMs);
+      this.loadedModels.push(modelId);
+
+      if (this.loadedModels.length > MAX_LOADED_MODELS) {
+        this.loadedModels.shift();
+      }
+    }
+  }
+
+  /**
+   * Unload a specific model from mock memory.
+   *
+   * @param modelId - The model to unload.
+   * @returns `true` if the model was found and removed.
+   */
+  unloadModel(modelId: string): boolean {
+    const idx = this.loadedModels.indexOf(modelId);
+    if (idx === -1) return false;
+    this.loadedModels.splice(idx, 1);
+    return true;
   }
 
   // -----------------------------------------------------------------------

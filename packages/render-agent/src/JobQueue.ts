@@ -115,7 +115,7 @@ export class JobQueue {
     const priority = job.priority ?? 0;
     let insertIdx = this.queue.length;
     for (let i = 0; i < this.queue.length; i++) {
-      const existing = this.queue[i];
+      const existing = this.queue[i]!;
       if (existing.status !== 'queued') continue;
       const existingPriority = existing.job.priority ?? 0;
       if (priority > existingPriority) {
@@ -136,7 +136,7 @@ export class JobQueue {
     const idx = this.queue.findIndex((q) => q.status === 'queued');
     if (idx < 0) return null;
 
-    const entry = this.queue[idx];
+    const entry = this.queue[idx]!;
     entry.status = 'running';
     entry.startedAt = isoNow();
     return entry;
@@ -185,7 +185,7 @@ export class JobQueue {
     );
     if (idx < 0) return false;
 
-    const entry = this.queue[idx];
+    const entry = this.queue[idx]!;
     entry.status = 'cancelled';
     entry.completedAt = isoNow();
     this.moveToHistory(jobId);
@@ -244,7 +244,7 @@ export class JobQueue {
   private moveToHistory(jobId: string): void {
     const idx = this.queue.findIndex((q) => q.job.id === jobId);
     if (idx >= 0) {
-      const [entry] = this.queue.splice(idx, 1);
+      const [entry] = this.queue.splice(idx, 1) as [QueuedJob];
       this.history.push(entry);
 
       // Keep history bounded

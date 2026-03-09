@@ -3,11 +3,12 @@
  * Handles sports productions, highlights, growing files, stats, packages
  */
 import { Router, Request, Response } from 'express';
-import { authenticate, requireProjectAccess } from '../../middleware/auth';
+import { authenticate } from '../../middleware/auth';
 import { db } from '../../db/client';
 import {
-  validate, validateAll, schemas, projectIdParam, uuidParam,
+  validate, validateAll, schemas, projectIdParam, paginationQuery, paginate,
 } from '../../utils/validation';
+import { NotFoundError } from '../../utils/errors';
 import { z } from 'zod';
 
 const router = Router();
@@ -26,6 +27,20 @@ const projectIdAndPackageIdParams = z.object({
   projectId: z.string().uuid(),
   id: z.string().uuid(),
 });
+
+const highlightQuery = z.object({
+  eventType: z.string().max(50).optional(),
+  minConfidence: z.coerce.number().min(0).max(1).optional(),
+});
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+async function findProductionByProjectId(projectId: string) {
+  const production = await db.sportsProduction.findUnique({
+    where: { projectId },
+  });
+  if (!production) throw new NotFoundError('Sports production');
+  return production;
+}
 
 // ─── Sports Productions ──────────────────────────────────────────────────────
 
@@ -49,6 +64,7 @@ router.get('/productions/:projectId', validate(projectIdParam, 'params'), async 
       packages: { orderBy: { createdAt: 'desc' } },
     },
   });
+  if (!production) throw new NotFoundError('Sports production');
   res.json({ production });
 });
 
@@ -56,8 +72,10 @@ router.patch(
   '/productions/:projectId',
   validateAll({ params: projectIdParam, body: schemas.updateSportsProduction }),
   async (req: Request, res: Response) => {
+    await findProductionByProjectId(req.params['projectId']!);
+
     const data: any = { ...req.body };
-    if (data.gameDate) data.gameDate = new Date(data.gameDate);
+    if (data['gameDate']) data['gameDate'] = new Date(data['gameDate']);
 
     const production = await db.sportsProduction.update({
       where: { projectId: req.params['projectId'] },
@@ -69,32 +87,34 @@ router.patch(
 
 // ─── Highlights ──────────────────────────────────────────────────────────────
 
-router.get('/productions/:projectId/highlights', validate(projectIdParam, 'params'), async (req: Request, res: Response) => {
-  const production = await db.sportsProduction.findUniqueOrThrow({
-    where: { projectId: req.params['projectId'] },
-  });
-  const { eventType, minConfidence } = req.query;
-  const where: any = { productionId: production.id };
-  if (eventType) where.eventType = eventType;
-  if (minConfidence) {
-    const parsed = parseFloat(minConfidence as string);
-    if (!Number.isNaN(parsed)) where.confidence = { gte: parsed };
-  }
+router.get(
+  '/productions/:projectId/highlights',
+  validate(projectIdParam, 'params'),
+  validate(highlightQuery, 'query'),
+  async (req: Request, res: Response) => {
+    const production = await findProductionByProjectId(req.params['projectId']!);
 
-  const highlights = await db.sportsHighlight.findMany({
-    where,
-    orderBy: { timestamp: 'asc' },
-  });
-  res.json({ highlights });
-});
+    const { eventType, minConfidence } = req.query as { eventType?: string; minConfidence?: string };
+    const where: any = { productionId: production.id };
+    if (eventType) where['eventType'] = eventType;
+    if (minConfidence) {
+      const parsed = parseFloat(minConfidence);
+      if (!Number.isNaN(parsed)) where['confidence'] = { gte: parsed };
+    }
+
+    const highlights = await db.sportsHighlight.findMany({
+      where,
+      orderBy: { timestamp: 'asc' },
+    });
+    res.json({ highlights });
+  }
+);
 
 router.post(
   '/productions/:projectId/highlights',
   validateAll({ params: projectIdParam, body: schemas.createSportsHighlight }),
   async (req: Request, res: Response) => {
-    const production = await db.sportsProduction.findUniqueOrThrow({
-      where: { projectId: req.params['projectId'] },
-    });
+    const production = await findProductionByProjectId(req.params['projectId']!);
     const highlight = await db.sportsHighlight.create({
       data: { ...req.body, productionId: production.id },
     });
@@ -106,6 +126,9 @@ router.patch(
   '/productions/:projectId/highlights/:id',
   validateAll({ params: projectIdAndHighlightIdParams, body: schemas.updateSportsHighlight }),
   async (req: Request, res: Response) => {
+    const existing = await db.sportsHighlight.findUnique({ where: { id: req.params['id'] } });
+    if (!existing) throw new NotFoundError('Sports highlight');
+
     const highlight = await db.sportsHighlight.update({
       where: { id: req.params['id'] },
       data: req.body,
@@ -117,9 +140,7 @@ router.patch(
 // ─── Growing Files ───────────────────────────────────────────────────────────
 
 router.get('/productions/:projectId/growing-files', validate(projectIdParam, 'params'), async (req: Request, res: Response) => {
-  const production = await db.sportsProduction.findUniqueOrThrow({
-    where: { projectId: req.params['projectId'] },
-  });
+  const production = await findProductionByProjectId(req.params['projectId']!);
   const files = await db.growingFile.findMany({
     where: { productionId: production.id },
     orderBy: { createdAt: 'desc' },
@@ -131,9 +152,7 @@ router.post(
   '/productions/:projectId/growing-files',
   validateAll({ params: projectIdParam, body: schemas.createGrowingFile }),
   async (req: Request, res: Response) => {
-    const production = await db.sportsProduction.findUniqueOrThrow({
-      where: { projectId: req.params['projectId'] },
-    });
+    const production = await findProductionByProjectId(req.params['projectId']!);
     const file = await db.growingFile.create({
       data: {
         productionId: production.id,
@@ -148,8 +167,11 @@ router.patch(
   '/productions/:projectId/growing-files/:id',
   validateAll({ params: projectIdAndFileIdParams, body: schemas.updateGrowingFile }),
   async (req: Request, res: Response) => {
+    const existing = await db.growingFile.findUnique({ where: { id: req.params['id'] } });
+    if (!existing) throw new NotFoundError('Growing file');
+
     const data: any = { ...req.body };
-    if (data.lastFrameAt) data.lastFrameAt = new Date(data.lastFrameAt);
+    if (data['lastFrameAt']) data['lastFrameAt'] = new Date(data['lastFrameAt']);
 
     const file = await db.growingFile.update({
       where: { id: req.params['id'] },
@@ -162,9 +184,7 @@ router.patch(
 // ─── Stats Snapshots ─────────────────────────────────────────────────────────
 
 router.get('/productions/:projectId/stats', validate(projectIdParam, 'params'), async (req: Request, res: Response) => {
-  const production = await db.sportsProduction.findUniqueOrThrow({
-    where: { projectId: req.params['projectId'] },
-  });
+  const production = await findProductionByProjectId(req.params['projectId']!);
   const stats = await db.statsSnapshot.findMany({
     where: { productionId: production.id },
     orderBy: { capturedAt: 'desc' },
@@ -174,9 +194,7 @@ router.get('/productions/:projectId/stats', validate(projectIdParam, 'params'), 
 });
 
 router.get('/productions/:projectId/stats/latest', validate(projectIdParam, 'params'), async (req: Request, res: Response) => {
-  const production = await db.sportsProduction.findUniqueOrThrow({
-    where: { projectId: req.params['projectId'] },
-  });
+  const production = await findProductionByProjectId(req.params['projectId']!);
   const latest = await db.statsSnapshot.findFirst({
     where: { productionId: production.id },
     orderBy: { capturedAt: 'desc' },
@@ -187,9 +205,7 @@ router.get('/productions/:projectId/stats/latest', validate(projectIdParam, 'par
 // ─── Sports Packages ─────────────────────────────────────────────────────────
 
 router.get('/productions/:projectId/packages', validate(projectIdParam, 'params'), async (req: Request, res: Response) => {
-  const production = await db.sportsProduction.findUniqueOrThrow({
-    where: { projectId: req.params['projectId'] },
-  });
+  const production = await findProductionByProjectId(req.params['projectId']!);
   const packages = await db.sportsPackage.findMany({
     where: { productionId: production.id },
     orderBy: { createdAt: 'desc' },
@@ -201,9 +217,7 @@ router.post(
   '/productions/:projectId/packages',
   validateAll({ params: projectIdParam, body: schemas.createSportsPackage }),
   async (req: Request, res: Response) => {
-    const production = await db.sportsProduction.findUniqueOrThrow({
-      where: { projectId: req.params['projectId'] },
-    });
+    const production = await findProductionByProjectId(req.params['projectId']!);
     const pkg = await db.sportsPackage.create({
       data: { ...req.body, productionId: production.id },
     });
@@ -215,6 +229,9 @@ router.patch(
   '/productions/:projectId/packages/:id',
   validateAll({ params: projectIdAndPackageIdParams, body: schemas.updateSportsPackage }),
   async (req: Request, res: Response) => {
+    const existing = await db.sportsPackage.findUnique({ where: { id: req.params['id'] } });
+    if (!existing) throw new NotFoundError('Sports package');
+
     const pkg = await db.sportsPackage.update({
       where: { id: req.params['id'] },
       data: req.body,

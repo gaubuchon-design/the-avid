@@ -113,10 +113,10 @@ router.put('/queue/reorder', validate(schemas.reorderRenderQueue), async (req: R
   if (clampedIndex <= 0) {
     job.createdAt = sorted[0] ? sorted[0].createdAt - 1 : Date.now();
   } else if (clampedIndex >= sorted.length - 1) {
-    job.createdAt = sorted[sorted.length - 1].createdAt + 1;
+    job.createdAt = sorted[sorted.length - 1]!.createdAt + 1;
   } else {
-    const before = sorted[clampedIndex - 1];
-    const after = sorted[clampedIndex];
+    const before = sorted[clampedIndex - 1]!;
+    const after = sorted[clampedIndex]!;
     job.createdAt = Math.floor((before.createdAt + after.createdAt) / 2);
   }
 

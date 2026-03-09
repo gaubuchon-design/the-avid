@@ -269,22 +269,41 @@ const allBackends: IModelBackend[] = [
   new MockBackend(),
 ];
 
+/** Cache resolved backends by capability to avoid repeated availability checks. */
+const backendCache = new Map<ModelCapability, { backend: IModelBackend; resolvedAt: number }>();
+
+/** How long a resolved backend is cached before re-checking (5 minutes). */
+const BACKEND_CACHE_TTL_MS = 5 * 60 * 1000;
+
 /**
  * Resolve the first available backend that supports the requested
  * capability, falling back to MockBackend.
+ *
+ * Results are cached per capability for up to 5 minutes to avoid
+ * repeated `isAvailable()` probes (which may be expensive for native
+ * backends).
  */
 async function resolveBackend(capability: ModelCapability): Promise<IModelBackend> {
+  const cached = backendCache.get(capability);
+  if (cached && Date.now() - cached.resolvedAt < BACKEND_CACHE_TTL_MS) {
+    return cached.backend;
+  }
+
   for (const backend of allBackends) {
     if (
       backend.supportedCapabilities.includes(capability) &&
       (await backend.isAvailable())
     ) {
+      backendCache.set(capability, { backend, resolvedAt: Date.now() });
       return backend;
     }
   }
   // MockBackend is always available and supports all capabilities
   const mock = allBackends.find((b) => b.name === 'mock');
-  if (mock) return mock;
+  if (mock) {
+    backendCache.set(capability, { backend: mock, resolvedAt: Date.now() });
+    return mock;
+  }
   throw new Error('No backend available (not even MockBackend).');
 }
 
@@ -406,12 +425,22 @@ app.post('/infer', async (req: Request, res: Response) => {
       return;
     }
 
+    // Track model loading state
+    registry.setLoadState(request.modelId, 'loading');
+
     const backend = await resolveBackend(request.capability);
+    const t0 = Date.now();
     const result = await withTimeout(
       backend.execute(request),
       envConfig.inferenceTimeoutMs,
       `Inference (${request.capability})`,
     );
+    const durationMs = Date.now() - t0;
+
+    // Update model lifecycle tracking
+    registry.setLoadState(request.modelId, 'loaded');
+    registry.recordInvocation(request.modelId, durationMs);
+
     res.json(result);
   } catch (err) {
     log('error', 'POST /infer error', { error: (err as Error).message });

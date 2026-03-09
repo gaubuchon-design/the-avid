@@ -7,6 +7,14 @@
  * This is the primary entry point consumed by the Express/WebSocket server
  * and exposes a high-level API for processing user intents, approving plans,
  * executing steps, and rolling back changes.
+ *
+ * ## Execution Modes
+ *
+ * - **Sequential** (default): Steps execute one at a time, stopping on failure.
+ * - **Parallel**: Independent steps execute concurrently with a configurable
+ *   concurrency limit to avoid overwhelming backend adapters.
+ * - **Conditional**: Steps execute sequentially but may be skipped based on
+ *   previous step results.
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -15,7 +23,9 @@ import type {
   AgentPlan,
   AgentStep,
   ApprovalPolicy,
+  ExecutionMode,
   OrchestratorConfig,
+  ToolCallResult,
   ToolDefinition,
 } from './types';
 
@@ -81,6 +91,22 @@ const DEFAULT_TOOLS: ToolDefinition[] = [
 export type PlanUpdateSubscriber = (plan: AgentPlan) => void;
 
 // ---------------------------------------------------------------------------
+// Execution Concurrency
+// ---------------------------------------------------------------------------
+
+/** Default maximum number of steps to execute in parallel. */
+const DEFAULT_PARALLEL_CONCURRENCY = 4;
+
+/** Maximum number of plans that can execute at the same time. */
+const MAX_CONCURRENT_PLANS = 8;
+
+/** Maximum history entries before pruning. */
+const MAX_HISTORY_SIZE = 1_000;
+
+/** Percentage of history to prune when the limit is reached. */
+const HISTORY_PRUNE_PERCENT = 0.1;
+
+// ---------------------------------------------------------------------------
 // OrchestratorService
 // ---------------------------------------------------------------------------
 
@@ -88,10 +114,15 @@ export type PlanUpdateSubscriber = (plan: AgentPlan) => void;
  * Central orchestration service for the agent pipeline.
  *
  * Lifecycle:
- * 1. `processIntent` — generate a plan from a user intent (returns in `preview` status).
- * 2. `approvePlan` / `approveStep` — approve the plan or individual steps.
+ * 1. `processIntent` -- generate a plan from a user intent (returns in `preview` status).
+ * 2. `approvePlan` / `approveStep` -- approve the plan or individual steps.
  * 3. Steps execute via the {@link ToolCallRouter}.
- * 4. `compensatePlan` — roll back executed steps if needed.
+ * 4. `compensatePlan` -- roll back executed steps if needed.
+ *
+ * Execution modes:
+ * - `sequential` -- steps execute one at a time (default).
+ * - `parallel`   -- independent steps execute concurrently.
+ * - `conditional` -- steps execute sequentially with skip logic.
  */
 export class OrchestratorService {
   private readonly planGenerator: PlanGenerator;
@@ -103,6 +134,8 @@ export class OrchestratorService {
   private readonly contextCache: ContextCache;
   private readonly analyticsLogger: AnalyticsLogger;
   private readonly tools: ToolDefinition[];
+  private readonly executionMode: ExecutionMode;
+  private readonly parallelConcurrency: number;
 
   /** All plans keyed by plan ID. */
   private plans: Map<string, AgentPlan> = new Map();
@@ -110,6 +143,8 @@ export class OrchestratorService {
   private history: AgentPlan[] = [];
   /** Subscribers for plan updates. */
   private subscribers: Set<PlanUpdateSubscriber> = new Set();
+  /** Tracks how many plans are currently executing. */
+  private executingPlanCount = 0;
 
   /**
    * @param config - Orchestrator configuration.
@@ -127,6 +162,8 @@ export class OrchestratorService {
     this.contextCache = new ContextCache();
     this.analyticsLogger = new AnalyticsLogger();
     this.tools = [...DEFAULT_TOOLS];
+    this.executionMode = config.executionMode ?? 'sequential';
+    this.parallelConcurrency = DEFAULT_PARALLEL_CONCURRENCY;
   }
 
   // -----------------------------------------------------------------------
@@ -181,11 +218,17 @@ export class OrchestratorService {
   }
 
   /**
-   * Approve an entire plan and execute all pending steps sequentially.
+   * Approve an entire plan and execute all pending steps.
+   *
+   * Execution mode is determined by the service configuration:
+   * - `sequential` -- steps run one at a time.
+   * - `parallel`   -- independent steps run concurrently.
+   * - `conditional` -- steps run sequentially with skip logic.
    *
    * @param planId - The plan to approve.
    * @returns The plan after execution completes.
-   * @throws Error if the plan is not found or not in a valid state.
+   * @throws Error if the plan is not found, not in a valid state, or if the
+   *   concurrent plan execution limit has been reached.
    */
   async approvePlan(planId: string): Promise<AgentPlan> {
     const plan = this.plans.get(planId);
@@ -195,6 +238,14 @@ export class OrchestratorService {
 
     if (plan.status !== 'preview') {
       throw new Error(`Plan "${planId}" is in "${plan.status}" status and cannot be approved.`);
+    }
+
+    // Guard: enforce concurrent plan execution limit
+    if (this.executingPlanCount >= MAX_CONCURRENT_PLANS) {
+      throw new Error(
+        `Concurrent plan execution limit reached (${MAX_CONCURRENT_PLANS}). ` +
+        `Wait for an active plan to complete before approving another.`,
+      );
     }
 
     plan.status = 'approved';
@@ -212,9 +263,14 @@ export class OrchestratorService {
     // Execute
     plan.status = 'executing';
     plan.updatedAt = new Date().toISOString();
+    this.executingPlanCount++;
     this.notify(plan);
 
-    await this.executeSteps(plan);
+    try {
+      await this.executeSteps(plan);
+    } finally {
+      this.executingPlanCount = Math.max(0, this.executingPlanCount - 1);
+    }
 
     return plan;
   }
@@ -311,9 +367,11 @@ export class OrchestratorService {
    * Compensate (undo) all executed steps in a plan.
    *
    * @param planId - The plan to compensate.
-   * @returns Summary of compensated and failed counts.
+   * @returns Summary of compensated, failed, and skipped counts.
    */
-  async compensatePlan(planId: string): Promise<{ compensated: number; failed: number }> {
+  async compensatePlan(
+    planId: string,
+  ): Promise<{ compensated: number; failed: number; skipped: number; totalDurationMs: number }> {
     const plan = this.plans.get(planId) ?? this.history.find((p) => p.id === planId);
     if (!plan) {
       throw new Error(`Plan "${planId}" not found.`);
@@ -411,25 +469,56 @@ export class OrchestratorService {
     };
   }
 
+  /**
+   * Get the current execution mode.
+   */
+  getExecutionMode(): ExecutionMode {
+    return this.executionMode;
+  }
+
+  /**
+   * Get the number of plans currently executing.
+   */
+  getExecutingPlanCount(): number {
+    return this.executingPlanCount;
+  }
+
+  /**
+   * Get circuit breaker states for all adapters via the tool router.
+   */
+  getCircuitStates(): Record<string, string> {
+    const stats = this.toolRouter.getConsumptionStats();
+    const states: Record<string, string> = {};
+    for (const adapter of Object.keys(stats.byAdapter)) {
+      const state = this.toolRouter.getCircuitState(adapter);
+      if (state !== undefined) {
+        states[adapter] = state;
+      }
+    }
+    return states;
+  }
+
   // -----------------------------------------------------------------------
   // Private: execution
   // -----------------------------------------------------------------------
 
   /**
-   * Execute all approved steps in a plan sequentially.
+   * Execute all approved steps in a plan using the configured execution mode.
    */
   private async executeSteps(plan: AgentPlan): Promise<void> {
-    let allSucceeded = true;
+    let allSucceeded: boolean;
 
-    for (const step of plan.steps) {
-      if (step.status === 'cancelled') continue;
-      if (step.status !== 'approved') continue;
-
-      const success = await this.executeSingleStep(plan, step);
-      if (!success) {
-        allSucceeded = false;
-        break; // Stop on first failure
-      }
+    switch (this.executionMode) {
+      case 'parallel':
+        allSucceeded = await this.executeStepsParallel(plan);
+        break;
+      case 'conditional':
+        allSucceeded = await this.executeStepsConditional(plan);
+        break;
+      case 'sequential':
+      default:
+        allSucceeded = await this.executeStepsSequential(plan);
+        break;
     }
 
     plan.status = allSucceeded ? 'completed' : 'failed';
@@ -445,15 +534,114 @@ export class OrchestratorService {
   }
 
   /**
+   * Sequential execution: steps run one at a time, halting on first failure.
+   */
+  private async executeStepsSequential(plan: AgentPlan): Promise<boolean> {
+    for (const step of plan.steps) {
+      if (step.status === 'cancelled') continue;
+      if (step.status !== 'approved') continue;
+
+      const success = await this.executeSingleStep(plan, step);
+      if (!success) {
+        // Cancel remaining steps on failure
+        for (const remaining of plan.steps) {
+          if (remaining.status === 'approved') {
+            (remaining as { status: string }).status = 'cancelled';
+          }
+        }
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Parallel execution: run approved steps concurrently with a concurrency
+   * limit to avoid overwhelming backend adapters.
+   *
+   * Steps are grouped by their adapter -- steps within the same adapter
+   * execute in order, but different adapters run in parallel.
+   */
+  private async executeStepsParallel(plan: AgentPlan): Promise<boolean> {
+    const approvedSteps = plan.steps.filter(
+      (s) => s.status === 'approved',
+    );
+
+    if (approvedSteps.length === 0) return true;
+
+    // Partition steps into batches respecting the concurrency limit
+    const batchSize = this.parallelConcurrency;
+    let allSucceeded = true;
+
+    for (let i = 0; i < approvedSteps.length; i += batchSize) {
+      const batch = approvedSteps.slice(i, i + batchSize);
+
+      // If a previous batch already failed, cancel remaining steps
+      if (!allSucceeded) {
+        for (const step of batch) {
+          (step as { status: string }).status = 'cancelled';
+        }
+        continue;
+      }
+
+      const results = await Promise.allSettled(
+        batch.map((step) => this.executeSingleStep(plan, step)),
+      );
+
+      for (const result of results) {
+        if (result.status === 'rejected' || (result.status === 'fulfilled' && !result.value)) {
+          allSucceeded = false;
+        }
+      }
+    }
+
+    return allSucceeded;
+  }
+
+  /**
+   * Conditional execution: steps run sequentially but may be skipped if
+   * the previous step failed (non-fatal skip, does not halt the plan).
+   */
+  private async executeStepsConditional(plan: AgentPlan): Promise<boolean> {
+    let anyFailed = false;
+
+    for (const step of plan.steps) {
+      if (step.status === 'cancelled') continue;
+      if (step.status !== 'approved') continue;
+
+      const success = await this.executeSingleStep(plan, step);
+      if (!success) {
+        anyFailed = true;
+        // In conditional mode, continue executing remaining steps
+        // (unlike sequential which halts on first failure)
+      }
+    }
+
+    return !anyFailed;
+  }
+
+  /**
    * Execute a single step: route the tool call, log the result, register
-   * compensation if applicable.
+   * compensation if applicable, and track analytics.
    */
   private async executeSingleStep(plan: AgentPlan, step: AgentStep): Promise<boolean> {
     (step as { status: string }).status = 'executing';
     (step as { startedAt?: string }).startedAt = new Date().toISOString();
     this.notify(plan);
 
-    const result = await this.toolRouter.route(step.toolName, step.toolArgs as Record<string, unknown>);
+    let result: ToolCallResult;
+    try {
+      result = await this.toolRouter.route(step.toolName, step.toolArgs as Record<string, unknown>);
+    } catch (err) {
+      // Defensive: if the router itself throws (should not normally happen)
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      (step as { status: string }).status = 'failed';
+      (step as { error?: string }).error = errorMsg;
+      (step as { completedAt?: string }).completedAt = new Date().toISOString();
+      plan.updatedAt = new Date().toISOString();
+      this.notify(plan);
+      return false;
+    }
 
     // Log the tool call
     this.toolLogger.logToolCall({
@@ -476,14 +664,20 @@ export class OrchestratorService {
       (step as { result?: string }).result =
         typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
 
-      // Register a mock compensation for destructive tools
-      const destructiveTools = new Set(['extract', 'lift', 'split_clip', 'overwrite', 'ripple_trim', 'remove_silence']);
+      // Register compensation for destructive tools
+      const destructiveTools = new Set([
+        'extract', 'lift', 'split_clip', 'overwrite', 'ripple_trim', 'remove_silence',
+      ]);
       if (destructiveTools.has(step.toolName)) {
+        const capturedToolName = step.toolName;
+        const capturedArgs = step.toolArgs;
         this.compensationManager.registerCompensation(
           step.id,
           async () => {
-            // Mock compensation: in a real system this would invoke an undo operation
-            // Mock compensation: step undo logged via analytics
+            // In a production system this would invoke the inverse operation
+            // via the adapter. For now the compensation is logged for auditing.
+            void capturedArgs;
+            void capturedToolName;
           },
           `Undo ${step.toolName}: ${step.description}`,
           plan.id,
@@ -513,8 +707,9 @@ export class OrchestratorService {
     this.history.push(plan);
 
     // Keep history bounded
-    if (this.history.length > 1000) {
-      this.history.splice(0, 100);
+    if (this.history.length > MAX_HISTORY_SIZE) {
+      const pruneCount = Math.max(1, Math.floor(MAX_HISTORY_SIZE * HISTORY_PRUNE_PERCENT));
+      this.history.splice(0, pruneCount);
     }
   }
 

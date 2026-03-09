@@ -3,11 +3,12 @@
  * Handles NRCS connections, rundowns, stories, playout destinations
  */
 import { Router, Request, Response } from 'express';
-import { authenticate, requireProjectAccess } from '../../middleware/auth';
+import { authenticate } from '../../middleware/auth';
 import { db } from '../../db/client';
 import {
-  validate, validateAll, schemas, uuidParam,
+  validate, validateAll, schemas, uuidParam, paginationQuery, paginate,
 } from '../../utils/validation';
+import { NotFoundError } from '../../utils/errors';
 import { z } from 'zod';
 
 const router = Router();
@@ -16,12 +17,18 @@ router.use(authenticate);
 // ─── Param schemas ───────────────────────────────────────────────────────────
 const storyIdParam = z.object({ id: z.string().uuid() });
 
+const rundownQuery = paginationQuery.extend({
+  connectionId: z.string().uuid().optional(),
+  date: z.string().optional(),
+});
+
 // ─── NRCS Connections ─────────────────────────────────────────────────────────
 
 router.get('/nrcs-connections', async (req: Request, res: Response) => {
   const connections = await db.nRCSConnection.findMany({
     where: { isActive: true },
     include: { rundowns: { take: 5, orderBy: { airDate: 'desc' } } },
+    orderBy: { createdAt: 'desc' },
   });
   res.json({ connections });
 });
@@ -32,6 +39,9 @@ router.post('/nrcs-connections', validate(schemas.createNRCSConnection), async (
 });
 
 router.patch('/nrcs-connections/:id', validateAll({ params: uuidParam, body: schemas.updateNRCSConnection }), async (req: Request, res: Response) => {
+  const existing = await db.nRCSConnection.findUnique({ where: { id: req.params['id'] } });
+  if (!existing) throw new NotFoundError('NRCS connection');
+
   const connection = await db.nRCSConnection.update({
     where: { id: req.params['id'] },
     data: req.body,
@@ -40,60 +50,76 @@ router.patch('/nrcs-connections/:id', validateAll({ params: uuidParam, body: sch
 });
 
 router.delete('/nrcs-connections/:id', validate(uuidParam, 'params'), async (req: Request, res: Response) => {
+  const existing = await db.nRCSConnection.findUnique({ where: { id: req.params['id'] } });
+  if (!existing) throw new NotFoundError('NRCS connection');
+
   await db.nRCSConnection.update({
     where: { id: req.params['id'] },
     data: { isActive: false },
   });
-  res.json({ success: true });
+  res.status(204).send();
 });
 
 // ─── Rundowns ─────────────────────────────────────────────────────────────────
 
-router.get('/rundowns', async (req: Request, res: Response) => {
-  const { connectionId, date } = req.query;
+router.get('/', validate(rundownQuery, 'query'), async (req: Request, res: Response) => {
+  const { page, limit, sortOrder } = req.query as any;
+  const { connectionId, date } = req.query as Record<string, string | undefined>;
+  const skip = (page - 1) * limit;
+
   const where: any = {};
-  if (connectionId) where.nrcsConnectionId = connectionId;
+  if (connectionId) where['nrcsConnectionId'] = connectionId;
   if (date) {
-    const d = new Date(date as string);
+    const d = new Date(date);
     if (!Number.isNaN(d.getTime())) {
       const dayStart = new Date(d);
       dayStart.setHours(0, 0, 0, 0);
       const dayEnd = new Date(d);
       dayEnd.setHours(23, 59, 59, 999);
-      where.airDate = { gte: dayStart, lt: dayEnd };
+      where['airDate'] = { gte: dayStart, lt: dayEnd };
     }
   }
-  const rundowns = await db.rundown.findMany({
-    where,
-    include: { stories: { orderBy: { sortOrder: 'asc' } } },
-    orderBy: { airDate: 'desc' },
-    take: 20,
-  });
-  res.json({ rundowns });
+
+  const [rundowns, total] = await Promise.all([
+    db.rundown.findMany({
+      where,
+      include: { stories: { orderBy: { sortOrder: 'asc' } } },
+      orderBy: { airDate: sortOrder },
+      skip,
+      take: limit,
+    }),
+    db.rundown.count({ where }),
+  ]);
+  res.json({ rundowns, pagination: paginate(total, page, limit) });
 });
 
 router.get('/rundowns/:id', validate(uuidParam, 'params'), async (req: Request, res: Response) => {
-  const rundown = await db.rundown.findUniqueOrThrow({
+  const rundown = await db.rundown.findUnique({
     where: { id: req.params['id'] },
     include: {
       stories: { orderBy: { sortOrder: 'asc' } },
       nrcsConnection: true,
     },
   });
+  if (!rundown) throw new NotFoundError('Rundown');
   res.json({ rundown });
 });
 
 // ─── Stories ──────────────────────────────────────────────────────────────────
 
 router.get('/stories/:id', validate(storyIdParam, 'params'), async (req: Request, res: Response) => {
-  const story = await db.newsStory.findUniqueOrThrow({
+  const story = await db.newsStory.findUnique({
     where: { id: req.params['id'] },
     include: { rundown: true },
   });
+  if (!story) throw new NotFoundError('News story');
   res.json({ story });
 });
 
 router.patch('/stories/:id', validateAll({ params: storyIdParam, body: schemas.updateStory }), async (req: Request, res: Response) => {
+  const existing = await db.newsStory.findUnique({ where: { id: req.params['id'] } });
+  if (!existing) throw new NotFoundError('News story');
+
   const story = await db.newsStory.update({
     where: { id: req.params['id'] },
     data: req.body,
@@ -102,6 +128,9 @@ router.patch('/stories/:id', validateAll({ params: storyIdParam, body: schemas.u
 });
 
 router.post('/stories/:id/assign', validate(storyIdParam, 'params'), async (req: Request, res: Response) => {
+  const existing = await db.newsStory.findUnique({ where: { id: req.params['id'] } });
+  if (!existing) throw new NotFoundError('News story');
+
   const userId = req.user!.id;
   const story = await db.newsStory.update({
     where: { id: req.params['id'] },
@@ -111,6 +140,9 @@ router.post('/stories/:id/assign', validate(storyIdParam, 'params'), async (req:
 });
 
 router.post('/stories/:id/mark-ready', validate(storyIdParam, 'params'), async (req: Request, res: Response) => {
+  const existing = await db.newsStory.findUnique({ where: { id: req.params['id'] } });
+  if (!existing) throw new NotFoundError('News story');
+
   const story = await db.newsStory.update({
     where: { id: req.params['id'] },
     data: { status: 'READY' },
@@ -123,14 +155,11 @@ router.post(
   validateAll({ params: storyIdParam, body: schemas.sendToAir }),
   async (req: Request, res: Response) => {
     const { destinationId } = req.body;
-    const story = await db.newsStory.findUniqueOrThrow({
-      where: { id: req.params['id'] },
-    });
+    const story = await db.newsStory.findUnique({ where: { id: req.params['id'] } });
+    if (!story) throw new NotFoundError('News story');
 
-    // Get playout destination
-    const destination = await db.playoutDestination.findUniqueOrThrow({
-      where: { id: destinationId },
-    });
+    const destination = await db.playoutDestination.findUnique({ where: { id: destinationId } });
+    if (!destination) throw new NotFoundError('Playout destination');
 
     // In production: export MXF and FTP to playout server
     const updated = await db.newsStory.update({
@@ -151,9 +180,10 @@ router.post(
 
 // ─── Playout Destinations ─────────────────────────────────────────────────────
 
-router.get('/playout-destinations', async (req: Request, res: Response) => {
+router.get('/playout-destinations', async (_req: Request, res: Response) => {
   const destinations = await db.playoutDestination.findMany({
     where: { isActive: true },
+    orderBy: { name: 'asc' },
   });
   res.json({ destinations });
 });
@@ -164,11 +194,14 @@ router.post('/playout-destinations', validate(schemas.createPlayoutDestination),
 });
 
 router.delete('/playout-destinations/:id', validate(uuidParam, 'params'), async (req: Request, res: Response) => {
+  const existing = await db.playoutDestination.findUnique({ where: { id: req.params['id'] } });
+  if (!existing) throw new NotFoundError('Playout destination');
+
   await db.playoutDestination.update({
     where: { id: req.params['id'] },
     data: { isActive: false },
   });
-  res.json({ success: true });
+  res.status(204).send();
 });
 
 export default router;

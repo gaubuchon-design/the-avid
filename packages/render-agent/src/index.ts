@@ -342,7 +342,7 @@ export class RenderAgent extends EventEmitter {
       };
 
       const onError = (event: Event) => {
-        const errorMsg = `WebSocket error: ${(event as ErrorEvent).message ?? 'connection failed'}`;
+        const errorMsg = `WebSocket error: ${'message' in event ? (event as { message: string }).message : 'connection failed'}`;
         console.error(`[RenderAgent] ${errorMsg}`);
 
         // Only reject the initial connection promise, not reconnects
@@ -361,10 +361,12 @@ export class RenderAgent extends EventEmitter {
         }
       };
 
-      this.ws.addEventListener('open', onOpen);
-      this.ws.addEventListener('message', onMessage);
-      this.ws.addEventListener('error', onError);
-      this.ws.addEventListener('close', onClose);
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      this.ws.addEventListener('open', onOpen as any);
+      this.ws.addEventListener('message', onMessage as any);
+      this.ws.addEventListener('error', onError as any);
+      this.ws.addEventListener('close', onClose as any);
+      /* eslint-enable @typescript-eslint/no-explicit-any */
     });
   }
 
@@ -427,7 +429,7 @@ export class RenderAgent extends EventEmitter {
         break;
 
       case 'job:cancel': {
-        const cancelId = msg.jobId as string | undefined;
+        const cancelId = (msg as Record<string, unknown>)['jobId'] as string | undefined;
         if (cancelId && this.currentJob?.id !== cancelId) {
           // Cancel a queued (not-yet-running) job
           this.jobQueue.cancel(cancelId);

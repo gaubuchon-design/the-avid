@@ -138,8 +138,8 @@ export class MetadataWorker {
 
     // Step 2: Scene detection (optional, controlled by params)
     let scenes: SceneChange[] = [];
-    const sceneThreshold = (job.params.sceneThreshold as number | undefined) ?? 0.3;
-    const skipScenes = job.params.skipSceneDetection === true;
+    const sceneThreshold = ((job.params as Record<string, unknown>)['sceneThreshold'] as number | undefined) ?? 0.3;
+    const skipScenes = (job.params as Record<string, unknown>)['skipSceneDetection'] === true;
 
     if (!skipScenes) {
       onProgress?.({ stage: 'scenes', percent: 35, message: 'Detecting scene changes...' });
@@ -246,13 +246,13 @@ export class MetadataWorker {
           // showinfo output: [Parsed_showinfo_1 ...] n: 42 pts: 123456 pts_time:5.1234 ...
           const ptsMatch = line.match(/pts_time:\s*([\d.]+)/);
           if (ptsMatch) {
-            const timestamp = parseFloat(ptsMatch[1]);
+            const timestamp = parseFloat(ptsMatch[1]!);
             const nMatch = line.match(/n:\s*(\d+)/);
-            const frame = nMatch ? parseInt(nMatch[1], 10) : frameIndex;
+            const frame = nMatch ? parseInt(nMatch[1]!, 10) : frameIndex;
 
             // Extract scene score from the select filter metadata if available
             const scoreMatch = line.match(/scene_score=\s*([\d.]+)/);
-            const score = scoreMatch ? parseFloat(scoreMatch[1]) : threshold;
+            const score = scoreMatch ? parseFloat(scoreMatch[1]!) : threshold;
 
             scenes.push({ timestamp, frame, score });
             frameIndex++;
@@ -284,7 +284,9 @@ export class MetadataWorker {
     // Parse FPS from r_frame_rate (e.g. "24000/1001")
     let fps = 0;
     if (videoStream?.r_frame_rate) {
-      const [num, den] = videoStream.r_frame_rate.split('/').map(Number);
+      const fpsParts = videoStream.r_frame_rate.split('/').map(Number);
+      const num = fpsParts[0] ?? 0;
+      const den = fpsParts[1];
       fps = den ? num / den : num;
     }
 

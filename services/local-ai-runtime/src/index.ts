@@ -42,7 +42,7 @@ export type {
 // ---------------------------------------------------------------------------
 
 export { ModelRegistry } from './ModelRegistry';
-export type { ModelRegistryEntry } from './ModelRegistry';
+export type { ModelRegistryEntry, ModelLoadState } from './ModelRegistry';
 
 // ---------------------------------------------------------------------------
 // Registry seed

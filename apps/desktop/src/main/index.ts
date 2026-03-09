@@ -1,4 +1,20 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, Menu, screen, crashReporter, protocol } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  dialog,
+  shell,
+  Menu,
+  Tray,
+  Notification,
+  nativeTheme,
+  screen,
+  crashReporter,
+  protocol,
+  powerMonitor,
+  systemPreferences,
+  nativeImage,
+} from 'electron';
 import { autoUpdater } from 'electron-updater';
 import { watch as watchFs } from 'node:fs';
 import { mkdir, readdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
@@ -161,6 +177,8 @@ async function saveWindowState(win: BrowserWindow): Promise<void> {
 // ─── Window Management ─────────────────────────────────────────────────────────
 
 let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+let isQuitting = false;
 const secondaryWindows = new Set<BrowserWindow>();
 const videoIOManager = new VideoIOManager();
 const streamManager = new StreamManager();
@@ -168,9 +186,198 @@ const deckControlManager = new DeckControlManager();
 const PROJECT_STORE_DIR = 'projects';
 const PROJECT_FILE_EXTENSION = '.avidproj.json';
 const PROJECT_MANIFEST_FILE = 'project.avid.json';
+const RECENT_PROJECTS_FILE = 'recent-projects.json';
+const MAX_RECENT_PROJECTS = 10;
+const HW_ACCEL_SETTINGS_FILE = 'hw-accel-settings.json';
 const desktopJobs = new Map<string, DesktopJob>();
 const projectWatchers = new Map<string, Map<string, ReturnType<typeof watchFs>>>();
 const watchFolderScansInFlight = new Set<string>();
+
+// ─── Hardware Acceleration Settings ──────────────────────────────────────────
+
+interface HWAccelSettings {
+  enabled: boolean;
+  preferHardwareDecode: boolean;
+  preferHardwareEncode: boolean;
+  forceGPU: 'auto' | 'nvidia' | 'amd' | 'intel' | 'apple' | 'software';
+}
+
+const defaultHWAccelSettings: HWAccelSettings = {
+  enabled: true,
+  preferHardwareDecode: true,
+  preferHardwareEncode: true,
+  forceGPU: 'auto',
+};
+
+async function loadHWAccelSettings(): Promise<HWAccelSettings> {
+  try {
+    const raw = await readFile(
+      path.join(app.getPath('userData'), HW_ACCEL_SETTINGS_FILE),
+      'utf8',
+    );
+    return { ...defaultHWAccelSettings, ...JSON.parse(raw) };
+  } catch {
+    return { ...defaultHWAccelSettings };
+  }
+}
+
+async function saveHWAccelSettings(settings: HWAccelSettings): Promise<void> {
+  await writeFile(
+    path.join(app.getPath('userData'), HW_ACCEL_SETTINGS_FILE),
+    JSON.stringify(settings, null, 2),
+    'utf8',
+  );
+}
+
+// ─── Recent Projects ─────────────────────────────────────────────────────────
+
+interface RecentProject {
+  id: string;
+  name: string;
+  filePath: string;
+  openedAt: string;
+}
+
+async function loadRecentProjects(): Promise<RecentProject[]> {
+  try {
+    const raw = await readFile(
+      path.join(app.getPath('userData'), RECENT_PROJECTS_FILE),
+      'utf8',
+    );
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveRecentProjects(recents: RecentProject[]): Promise<void> {
+  await writeFile(
+    path.join(app.getPath('userData'), RECENT_PROJECTS_FILE),
+    JSON.stringify(recents, null, 2),
+    'utf8',
+  );
+}
+
+async function addRecentProject(project: EditorProject): Promise<void> {
+  const recents = await loadRecentProjects();
+  const entry: RecentProject = {
+    id: project.id,
+    name: project.name,
+    filePath: getProjectManifestPath(project.id),
+    openedAt: new Date().toISOString(),
+  };
+
+  // Remove existing entry for same project if present
+  const filtered = recents.filter((r) => r.id !== project.id);
+  filtered.unshift(entry);
+
+  const trimmed = filtered.slice(0, MAX_RECENT_PROJECTS);
+  await saveRecentProjects(trimmed);
+
+  // Update the native "Recent Documents" on macOS/Windows
+  if (process.platform === 'darwin' || process.platform === 'win32') {
+    app.addRecentDocument(entry.filePath);
+  }
+}
+
+async function clearRecentProjects(): Promise<void> {
+  await saveRecentProjects([]);
+  app.clearRecentDocuments();
+}
+
+// ─── Native Notifications ────────────────────────────────────────────────────
+
+function showNativeNotification(
+  title: string,
+  body: string,
+  options?: { silent?: boolean; urgency?: 'normal' | 'critical' | 'low' },
+): void {
+  if (!Notification.isSupported()) return;
+
+  const notification = new Notification({
+    title,
+    body,
+    silent: options?.silent ?? false,
+    urgency: options?.urgency ?? 'normal',
+    icon: app.isPackaged
+      ? path.join(process.resourcesPath, 'icon.png')
+      : undefined,
+  });
+
+  notification.on('click', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+
+  notification.show();
+}
+
+// ─── System Tray ─────────────────────────────────────────────────────────────
+
+function createSystemTray(): void {
+  // On macOS, use a 16x16 template image for the menu bar
+  const trayIconPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'tray-icon.png')
+    : path.join(__dirname, '../../resources/tray-icon.png');
+
+  let trayIcon: Electron.NativeImage;
+  try {
+    trayIcon = nativeImage.createFromPath(trayIconPath);
+    if (process.platform === 'darwin') {
+      trayIcon = trayIcon.resize({ width: 16, height: 16 });
+      trayIcon.setTemplateImage(true);
+    }
+  } catch {
+    // If no tray icon file exists, create a minimal one
+    trayIcon = nativeImage.createEmpty();
+  }
+
+  tray = new Tray(trayIcon);
+  tray.setToolTip('The Avid');
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Show The Avid',
+      click: () => {
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'New Project',
+      click: () => sendMenuCommand('menu:new-project'),
+    },
+    {
+      label: 'Open Project...',
+      click: () => openProject(),
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit',
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      },
+    },
+  ]);
+
+  tray.setContextMenu(contextMenu);
+
+  tray.on('double-click', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
 
 interface DesktopJob {
   id: string;
@@ -274,6 +481,7 @@ async function savePersistedProject(project: EditorProject): Promise<EditorProje
     // Ignore missing legacy files after migrating to package storage.
   }
   await syncProjectWatchers(nextProject);
+  void addRecentProject(nextProject);
   return nextProject;
 }
 
@@ -481,6 +689,12 @@ async function startExportJob(project: EditorProject): Promise<DesktopJob> {
         progress: 100,
         outputPath: exportPath,
       });
+
+      // Notify user that export completed (useful when app is in background)
+      showNativeNotification(
+        'Export Complete',
+        `"${project.name}" has been exported successfully.`,
+      );
     } catch (error) {
       upsertDesktopJob({
         ...desktopJobs.get(jobId)!,
@@ -488,6 +702,12 @@ async function startExportJob(project: EditorProject): Promise<DesktopJob> {
         progress: desktopJobs.get(jobId)?.progress ?? 0,
         error: error instanceof Error ? error.message : 'Export failed',
       });
+
+      showNativeNotification(
+        'Export Failed',
+        `Failed to export "${project.name}": ${error instanceof Error ? error.message : 'Unknown error'}`,
+        { urgency: 'critical' },
+      );
     }
   })();
 
@@ -628,6 +848,20 @@ async function createMainWindow(): Promise<BrowserWindow> {
   win.on('move', debouncedSaveState);
   win.on('maximize', debouncedSaveState);
   win.on('unmaximize', debouncedSaveState);
+
+  // Prompt for unsaved changes before closing (unless force-quitting)
+  win.on('close', (event) => {
+    if (!isQuitting) {
+      // On macOS, hide the window instead of closing it (standard behavior)
+      if (process.platform === 'darwin') {
+        event.preventDefault();
+        win.hide();
+        return;
+      }
+    }
+    // Save window state one final time before actually closing
+    void saveWindowState(win);
+  });
 
   win.on('closed', () => {
     if (saveStateTimer) clearTimeout(saveStateTimer);
@@ -863,6 +1097,9 @@ if (!gotTheLock) {
       }
     });
 
+    // Create system tray
+    createSystemTray();
+
     // Initialize professional I/O subsystems (non-blocking — missing modules are OK)
     videoIOManager.registerIPCHandlers();
     streamManager.registerIPCHandlers();
@@ -874,13 +1111,39 @@ if (!gotTheLock) {
       deckControlManager.init(mainWindow),
     ]);
     log('info', 'IO', 'Professional I/O subsystems initialized', {
-      videoIO: ioResults[0].status,
-      streaming: ioResults[1].status,
-      deckControl: ioResults[2].status,
+      videoIO: ioResults[0]!.status,
+      streaming: ioResults[1]!.status,
+      deckControl: ioResults[2]!.status,
+    });
+
+    // Power monitor — pause background work when system sleeps
+    powerMonitor.on('suspend', () => {
+      log('info', 'Power', 'System entering sleep — pausing background tasks');
+    });
+    powerMonitor.on('resume', () => {
+      log('info', 'Power', 'System resumed — resuming background tasks');
+      // Re-sync watch folders after wake (files may have changed while sleeping)
+      void syncAllProjectWatchers();
+    });
+    powerMonitor.on('shutdown', () => {
+      log('info', 'Power', 'System shutting down');
+      isQuitting = true;
+    });
+
+    // Dark mode change notification to renderer
+    nativeTheme.on('updated', () => {
+      mainWindow?.webContents.send('app:theme-changed', {
+        shouldUseDarkColors: nativeTheme.shouldUseDarkColors,
+        themeSource: nativeTheme.themeSource,
+      });
     });
 
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
+      // On macOS, re-show the hidden window on dock click
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.show();
+        mainWindow.focus();
+      } else if (BrowserWindow.getAllWindows().length === 0) {
         void createMainWindow().then((win) => { mainWindow = win; });
       }
     });
@@ -932,11 +1195,18 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  isQuitting = true;
   projectWatchers.forEach((_watchers, projectId) => disposeProjectWatchers(projectId));
   void videoIOManager.dispose();
   void streamManager.dispose();
   void deckControlManager.dispose();
   void logger.dispose();
+
+  // Clean up system tray
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
 });
 
 // ─── App Menu ──────────────────────────────────────────────────────────────────
@@ -967,6 +1237,17 @@ function createAppMenu() {
       submenu: [
         { label: 'New Project', accelerator: 'CmdOrCtrl+N', click: () => sendMenuCommand('menu:new-project') },
         { label: 'Open Project…', accelerator: 'CmdOrCtrl+O', click: openProject },
+        {
+          label: 'Open Recent',
+          role: 'recentDocuments' as const,
+          submenu: [
+            {
+              label: 'Clear Recent',
+              role: 'clearRecentDocuments' as const,
+              click: () => void clearRecentProjects(),
+            },
+          ],
+        },
         { label: 'Import Media…', accelerator: 'CmdOrCtrl+I', click: () => sendMenuCommand('menu:import-media') },
         { type: 'separator' },
         { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => sendMenuCommand('menu:save') },
@@ -1239,3 +1520,156 @@ ipcMain.handle('app:install-update', () => {
 });
 
 ipcMain.handle('gpu:info', async () => detectGPU());
+
+// ─── Recent Projects Handlers ──────────────────────────────────────────────
+
+ipcMain.handle('projects:recent', async () => {
+  return loadRecentProjects();
+});
+
+ipcMain.handle('projects:add-recent', async (_event, project: unknown) => {
+  assertObject(project, 'project');
+  if (!('id' in project) || typeof project['id'] !== 'string') {
+    throw new Error('Project must have a valid string "id" field');
+  }
+  await addRecentProject(project as unknown as EditorProject);
+  return true;
+});
+
+ipcMain.handle('projects:clear-recent', async () => {
+  await clearRecentProjects();
+  return true;
+});
+
+// ─── Hardware Acceleration Settings Handlers ───────────────────────────────
+
+ipcMain.handle('hw-accel:get-settings', async () => {
+  return loadHWAccelSettings();
+});
+
+ipcMain.handle('hw-accel:save-settings', async (_event, settings: unknown) => {
+  assertObject(settings, 'settings');
+  const validated: HWAccelSettings = {
+    enabled: typeof settings['enabled'] === 'boolean' ? settings['enabled'] : defaultHWAccelSettings.enabled,
+    preferHardwareDecode: typeof settings['preferHardwareDecode'] === 'boolean' ? settings['preferHardwareDecode'] : defaultHWAccelSettings.preferHardwareDecode,
+    preferHardwareEncode: typeof settings['preferHardwareEncode'] === 'boolean' ? settings['preferHardwareEncode'] : defaultHWAccelSettings.preferHardwareEncode,
+    forceGPU: typeof settings['forceGPU'] === 'string'
+      && ['auto', 'nvidia', 'amd', 'intel', 'apple', 'software'].includes(settings['forceGPU'])
+      ? settings['forceGPU'] as HWAccelSettings['forceGPU']
+      : defaultHWAccelSettings.forceGPU,
+  };
+  await saveHWAccelSettings(validated);
+  return validated;
+});
+
+// ─── Native Notification Handler ───────────────────────────────────────────
+
+ipcMain.handle('app:notify', async (_event, opts: unknown) => {
+  assertObject(opts, 'opts');
+  const title = typeof opts['title'] === 'string' ? opts['title'] : 'The Avid';
+  const body = typeof opts['body'] === 'string' ? opts['body'] : '';
+  showNativeNotification(title, body);
+  return true;
+});
+
+// ─── Theme / Dark Mode Handlers ────────────────────────────────────────────
+
+ipcMain.handle('app:get-theme', () => ({
+  shouldUseDarkColors: nativeTheme.shouldUseDarkColors,
+  themeSource: nativeTheme.themeSource,
+}));
+
+ipcMain.handle('app:set-theme', (_event, themeSource: unknown) => {
+  if (themeSource === 'dark' || themeSource === 'light' || themeSource === 'system') {
+    nativeTheme.themeSource = themeSource;
+    return true;
+  }
+  return false;
+});
+
+// ─── Window Control Handlers ───────────────────────────────────────────────
+
+ipcMain.handle('window:minimize', () => {
+  mainWindow?.minimize();
+  return true;
+});
+
+ipcMain.handle('window:maximize', () => {
+  if (mainWindow?.isMaximized()) {
+    mainWindow.unmaximize();
+  } else {
+    mainWindow?.maximize();
+  }
+  return mainWindow?.isMaximized() ?? false;
+});
+
+ipcMain.handle('window:close', () => {
+  mainWindow?.close();
+  return true;
+});
+
+ipcMain.handle('window:is-maximized', () => {
+  return mainWindow?.isMaximized() ?? false;
+});
+
+ipcMain.handle('window:is-fullscreen', () => {
+  return mainWindow?.isFullScreen() ?? false;
+});
+
+ipcMain.handle('window:set-title', (_event, title: unknown) => {
+  if (typeof title === 'string' && mainWindow) {
+    mainWindow.setTitle(title);
+    return true;
+  }
+  return false;
+});
+
+// ─── Unsaved Changes Confirmation ──────────────────────────────────────────
+
+ipcMain.handle('app:confirm-discard', async (_event, projectName: unknown) => {
+  if (!mainWindow) return 'discard';
+  const name = typeof projectName === 'string' ? projectName : 'Untitled';
+  const result = dialog.showMessageBoxSync(mainWindow, {
+    type: 'warning',
+    title: 'Unsaved Changes',
+    message: `"${name}" has unsaved changes. Do you want to save before closing?`,
+    buttons: ['Save', 'Discard', 'Cancel'],
+    defaultId: 0,
+    cancelId: 2,
+  });
+  return result === 0 ? 'save' : result === 1 ? 'discard' : 'cancel';
+});
+
+// ─── Drag & Drop File Import ───────────────────────────────────────────────
+
+ipcMain.handle('app:get-dropped-file-info', async (_event, filePaths: unknown) => {
+  assertStringArray(filePaths, 'filePaths');
+  const results: Array<{ path: string; name: string; size: number; isDirectory: boolean }> = [];
+  const { stat: statFn } = await import('node:fs/promises');
+  for (const filePath of filePaths) {
+    try {
+      const info = await statFn(filePath);
+      results.push({
+        path: filePath,
+        name: path.basename(filePath),
+        size: info.size,
+        isDirectory: info.isDirectory(),
+      });
+    } catch {
+      // Skip inaccessible files
+    }
+  }
+  return results;
+});
+
+// ─── System Info ───────────────────────────────────────────────────────────
+
+ipcMain.handle('app:system-info', () => ({
+  platform: process.platform,
+  arch: process.arch,
+  electronVersion: process.versions['electron'],
+  chromeVersion: process.versions['chrome'],
+  nodeVersion: process.versions['node'],
+  appVersion: app.getVersion(),
+  isPackaged: app.isPackaged,
+}));

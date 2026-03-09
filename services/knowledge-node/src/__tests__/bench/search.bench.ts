@@ -224,7 +224,7 @@ describe('Search Benchmarks', () => {
     // Build the index first
     const builder = new IndexBuilder();
     const buildStart = performance.now();
-    const index = builder.buildIndex(db);
+    const { index } = builder.buildIndex(db);
     const buildMs = performance.now() - buildStart;
 
     console.log(
@@ -264,7 +264,7 @@ describe('Search Benchmarks', () => {
 
   it('should combine text + vector search — measure latency', () => {
     const builder = new IndexBuilder();
-    const index = builder.buildIndex(db);
+    const { index } = builder.buildIndex(db);
 
     const queryCount = 20;
     const topK = 10;

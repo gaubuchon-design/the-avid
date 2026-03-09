@@ -6,6 +6,7 @@ import { authenticate, generateTokens } from '../../middleware/auth';
 import { validate, schemas, uuidParam } from '../../utils/validation';
 import { UnauthorizedError, ConflictError, NotFoundError, BadRequestError } from '../../utils/errors';
 import { config } from '../../config';
+import { logger } from '../../utils/logger';
 
 const router = Router();
 
@@ -16,7 +17,7 @@ router.post('/register', validate(schemas.register), async (req: Request, res: R
   const existing = await db.user.findUnique({ where: { email } });
   if (existing) throw new ConflictError('Email already registered');
 
-  const passwordHash = await bcrypt.hash(password, 12);
+  const passwordHash = await bcrypt.hash(password, config.security.bcryptRounds);
 
   const user = await db.user.create({
     data: {
@@ -183,7 +184,7 @@ router.post('/change-password', authenticate, validate(schemas.changePassword), 
   const valid = await bcrypt.compare(currentPassword, user.passwordHash);
   if (!valid) throw new UnauthorizedError('Current password incorrect');
 
-  const newHash = await bcrypt.hash(newPassword, 12);
+  const newHash = await bcrypt.hash(newPassword, config.security.bcryptRounds);
   await db.user.update({ where: { id: req.user!.id }, data: { passwordHash: newHash } });
 
   // Revoke all refresh tokens

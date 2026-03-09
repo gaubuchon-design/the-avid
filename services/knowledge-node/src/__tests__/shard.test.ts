@@ -426,7 +426,7 @@ describe('ANN Index integration', () => {
     // Build index.
     const { IndexBuilder } = await import('../index/IndexBuilder.js');
     const builder = new IndexBuilder();
-    const index = builder.buildIndex(db);
+    const { index } = builder.buildIndex(db);
 
     expect(index.size()).toBe(2);
 

@@ -17,6 +17,9 @@ import type {
 // Registry entry
 // ---------------------------------------------------------------------------
 
+/** Model loading state for lifecycle tracking. */
+export type ModelLoadState = 'unloaded' | 'loading' | 'loaded' | 'unloading' | 'error';
+
 /** Metadata describing a single registered model. */
 export interface ModelRegistryEntry {
   /** Unique identifier (e.g. "whisper-large-v3"). */
@@ -43,6 +46,20 @@ export interface ModelRegistryEntry {
   readonly version: string;
   /** SPDX license identifier. */
   readonly license: string;
+}
+
+/** Runtime state tracked for each model. */
+interface ModelRuntimeState {
+  /** Current loading state. */
+  loadState: ModelLoadState;
+  /** Number of times this model has been invoked. */
+  invokeCount: number;
+  /** Timestamp of the last invocation (ms since epoch). */
+  lastInvokedAt: number;
+  /** Timestamp when the model was loaded (ms since epoch). */
+  loadedAt: number;
+  /** Cumulative inference time in milliseconds. */
+  totalInferenceMs: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,6 +89,9 @@ export class ModelRegistry {
   /** Internal map keyed by model ID. */
   private readonly models = new Map<string, ModelRegistryEntry>();
 
+  /** Runtime state keyed by model ID. */
+  private readonly runtimeState = new Map<string, ModelRuntimeState>();
+
   // -----------------------------------------------------------------------
   // Mutation
   // -----------------------------------------------------------------------
@@ -86,6 +106,13 @@ export class ModelRegistry {
       throw new Error(`Model "${entry.id}" is already registered`);
     }
     this.models.set(entry.id, entry);
+    this.runtimeState.set(entry.id, {
+      loadState: 'unloaded',
+      invokeCount: 0,
+      lastInvokedAt: 0,
+      loadedAt: 0,
+      totalInferenceMs: 0,
+    });
   }
 
   /**
@@ -94,6 +121,7 @@ export class ModelRegistry {
    * @returns `true` if the model was found and removed.
    */
   unregister(modelId: string): boolean {
+    this.runtimeState.delete(modelId);
     return this.models.delete(modelId);
   }
 
@@ -177,5 +205,119 @@ export class ModelRegistry {
   /** Return a snapshot of all registered models. */
   listAll(): ModelRegistryEntry[] {
     return [...this.models.values()];
+  }
+
+  // -----------------------------------------------------------------------
+  // Lifecycle tracking
+  // -----------------------------------------------------------------------
+
+  /**
+   * Update the load state of a model.
+   *
+   * @param modelId - The model identifier.
+   * @param state   - The new load state.
+   */
+  setLoadState(modelId: string, state: ModelLoadState): void {
+    const runtime = this.runtimeState.get(modelId);
+    if (!runtime) return;
+
+    runtime.loadState = state;
+    if (state === 'loaded') {
+      runtime.loadedAt = Date.now();
+    }
+  }
+
+  /**
+   * Record a model invocation for usage tracking.
+   *
+   * @param modelId   - The model identifier.
+   * @param durationMs - Wall-clock inference duration in milliseconds.
+   */
+  recordInvocation(modelId: string, durationMs: number): void {
+    const runtime = this.runtimeState.get(modelId);
+    if (!runtime) return;
+
+    runtime.invokeCount++;
+    runtime.lastInvokedAt = Date.now();
+    runtime.totalInferenceMs += durationMs;
+  }
+
+  /**
+   * Get the load state of a model.
+   *
+   * @param modelId - The model identifier.
+   * @returns The load state, or `undefined` if the model is not registered.
+   */
+  getLoadState(modelId: string): ModelLoadState | undefined {
+    return this.runtimeState.get(modelId)?.loadState;
+  }
+
+  /**
+   * Find models that have been idle (not invoked) for longer than the
+   * given threshold. Useful for implementing model cool-down / eviction.
+   *
+   * @param idleThresholdMs - Maximum idle time in milliseconds.
+   * @returns Array of model IDs that exceed the idle threshold.
+   */
+  findIdleModels(idleThresholdMs: number): string[] {
+    const now = Date.now();
+    const idle: string[] = [];
+
+    for (const [modelId, state] of this.runtimeState) {
+      if (
+        state.loadState === 'loaded' &&
+        state.lastInvokedAt > 0 &&
+        now - state.lastInvokedAt > idleThresholdMs
+      ) {
+        idle.push(modelId);
+      }
+    }
+
+    return idle;
+  }
+
+  /**
+   * Get usage statistics for a model.
+   *
+   * @param modelId - The model identifier.
+   * @returns Usage statistics, or `undefined` if the model is not registered.
+   */
+  getModelStats(modelId: string): {
+    loadState: ModelLoadState;
+    invokeCount: number;
+    lastInvokedAt: number;
+    totalInferenceMs: number;
+    avgInferenceMs: number;
+  } | undefined {
+    const state = this.runtimeState.get(modelId);
+    if (!state) return undefined;
+
+    return {
+      loadState: state.loadState,
+      invokeCount: state.invokeCount,
+      lastInvokedAt: state.lastInvokedAt,
+      totalInferenceMs: state.totalInferenceMs,
+      avgInferenceMs: state.invokeCount > 0
+        ? Math.round(state.totalInferenceMs / state.invokeCount)
+        : 0,
+    };
+  }
+
+  /**
+   * Get the total estimated memory footprint of all loaded models.
+   *
+   * @returns Total size in bytes of models currently in the `loaded` state.
+   */
+  getLoadedMemoryEstimate(): number {
+    let total = 0;
+    for (const [modelId, state] of this.runtimeState) {
+      if (state.loadState === 'loaded') {
+        const entry = this.models.get(modelId);
+        if (entry) {
+          total += entry.sizeBytes;
+        }
+      }
+    }
+    return total;
   }
 }
