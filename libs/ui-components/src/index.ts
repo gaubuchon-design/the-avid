@@ -16,15 +16,12 @@ export type {
   PlanPreviewProps,
   PlanSummary,
   PlanStepSummary,
-  PlanStatus,
-  PlanStepStatus,
 } from './PlanPreview/PlanPreview';
 
 export { ResultsPanel } from './ResultsPanel/ResultsPanel';
 export type {
   ResultsPanelProps,
   ResultItem,
-  ResultSourceType,
 } from './ResultsPanel/ResultsPanel';
 
 export { PlaybookBuilder } from './PlaybookBuilder/PlaybookBuilder';
@@ -37,5 +34,4 @@ export { ExecutionHistory } from './ExecutionHistory/ExecutionHistory';
 export type {
   ExecutionHistoryProps,
   HistoryEntry,
-  HistoryEntryStatus,
 } from './ExecutionHistory/ExecutionHistory';

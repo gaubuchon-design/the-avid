@@ -133,8 +133,7 @@ export async function searchAssets(
   for (const conn of connectedProviders) {
     const count = Math.min(limit, 3 + Math.floor(Math.random() * 5));
     for (let i = 0; i < count; i++) {
-      const typeOptions = ['VIDEO', 'IMAGE', 'AUDIO', 'VIDEO'] as const;
-      const assetType = params.type ?? typeOptions[i % 4] ?? 'VIDEO';
+      const assetType = params.type ?? (['VIDEO', 'IMAGE', 'AUDIO', 'VIDEO'] as const)[i % 4] ?? 'VIDEO';
       results.push({
         id: generateId(),
         externalId: `${conn.provider.toLowerCase()}-${generateId().slice(0, 8)}`,

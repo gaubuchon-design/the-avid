@@ -95,16 +95,18 @@ const DEFAULT_TC_TOLERANCE_FRAMES = 2;
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 function timecodeToSeconds(tc: string, frameRate: number): number {
-  const parts = tc.split(':').map(Number);
+  const parts = tc.split(/[:;]/).map(Number);
   if (parts.length !== 4) return 0;
-  const [hours, minutes, seconds, frames] = parts;
-  return hours! * 3600 + minutes! * 60 + seconds! + frames! / frameRate;
+  const [hours = 0, minutes = 0, seconds = 0, frames = 0] = parts;
+  if (!Number.isFinite(frameRate) || frameRate <= 0) return 0;
+  return hours * 3600 + minutes * 60 + seconds + frames / frameRate;
 }
 
 function secondsToTimecode(seconds: number, frameRate: number): string {
-  const totalFrames = Math.round(seconds * frameRate);
-  const frames = totalFrames % frameRate;
-  const totalSecs = Math.floor(totalFrames / frameRate);
+  const totalFrames = Math.floor(seconds * frameRate);
+  const nominalRate = Math.round(frameRate);
+  const frames = totalFrames % nominalRate;
+  const totalSecs = Math.floor(totalFrames / nominalRate);
   const secs = totalSecs % 60;
   const mins = Math.floor(totalSecs / 60) % 60;
   const hours = Math.floor(totalSecs / 3600);
@@ -118,28 +120,38 @@ function secondsToTimecode(seconds: number, frameRate: number): string {
 
 function crossCorrelate(signalA: number[], signalB: number[]): { offset: number; peak: number } {
   const len = Math.min(signalA.length, signalB.length);
+  if (len === 0) return { offset: 0, peak: 0 };
+
+  // Compute auto-correlation energies for normalization
+  let energyA = 0;
+  let energyB = 0;
+  for (let i = 0; i < len; i++) {
+    energyA += (signalA[i] ?? 0) * (signalA[i] ?? 0);
+    energyB += (signalB[i] ?? 0) * (signalB[i] ?? 0);
+  }
+  const normFactor = Math.sqrt(energyA * energyB);
+
   const maxLag = Math.min(len, 1000);
   let bestOffset = 0;
   let bestPeak = -Infinity;
 
   for (let lag = -maxLag; lag <= maxLag; lag++) {
     let sum = 0;
-    let count = 0;
     for (let i = 0; i < len; i++) {
       const j = i + lag;
       if (j >= 0 && j < len) {
-        sum += signalA[i]! * signalB[j]!;
-        count++;
+        sum += (signalA[i] ?? 0) * (signalB[j] ?? 0);
       }
     }
-    const normalized = count > 0 ? sum / count : 0;
+    // Normalize cross-correlation to 0..1 range
+    const normalized = normFactor > 0 ? sum / normFactor : 0;
     if (normalized > bestPeak) {
       bestPeak = normalized;
       bestOffset = lag;
     }
   }
 
-  return { offset: bestOffset, peak: bestPeak };
+  return { offset: bestOffset, peak: Math.max(0, Math.min(1, bestPeak)) };
 }
 
 // ─── Multi-Cam Sync Engine ─────────────────────────────────────────────────
@@ -228,7 +240,8 @@ export class MultiCamSyncEngine {
     group.syncStatus = 'syncing';
     this.emit('sync:start', { groupId, method });
 
-    const referenceAngle = group.angles.find((a) => a.id === group.referenceAngleId)!;
+    const referenceAngle = group.angles.find((a) => a.id === group.referenceAngleId);
+    if (!referenceAngle) throw new Error(`Reference angle not found in group: ${groupId}`);
     const refStartSeconds = referenceAngle.timecodeStartSeconds;
     const toleranceSeconds = this.config.timecodeToleranceFrames / group.frameRate;
 
@@ -270,7 +283,8 @@ export class MultiCamSyncEngine {
     group.syncStatus = 'analyzing';
     this.emit('sync:start', { groupId, method: 'audio-waveform' });
 
-    const referenceAngle = group.angles.find((a) => a.id === group.referenceAngleId)!;
+    const referenceAngle = group.angles.find((a) => a.id === group.referenceAngleId);
+    if (!referenceAngle) throw new Error(`Reference angle not found in group: ${groupId}`);
     const refPeaks = referenceAngle.waveformPeaks ?? [];
 
     const results: SyncResult[] = group.angles.map((angle) => {
@@ -296,7 +310,12 @@ export class MultiCamSyncEngine {
       }
 
       const correlation = crossCorrelate(refPeaks, anglePeaks);
-      const offsetSeconds = correlation.offset / this.config.sampleRate;
+      // The offset is in peak-sample units. Convert to seconds using the
+      // reference angle duration and the number of peaks.
+      const secondsPerPeak = refPeaks.length > 0
+        ? referenceAngle.durationSeconds / refPeaks.length
+        : 1 / this.config.sampleRate;
+      const offsetSeconds = correlation.offset * secondsPerPeak;
 
       return {
         angleId: angle.id,
@@ -431,8 +450,8 @@ export class MultiCamSyncEngine {
       const nextAngleIndex = (currentAngleIndex + 1) % group.angles.length;
       suggestions.push({
         id: `ai-switch-${suggestions.length}`,
-        fromAngleId: group!.angles[currentAngleIndex]!.id,
-        toAngleId: group!.angles[nextAngleIndex]!.id,
+        fromAngleId: group.angles[currentAngleIndex]!.id,
+        toAngleId: group.angles[nextAngleIndex]!.id,
         switchTimeSeconds: t,
         switchType: 'ai-suggestion',
       });

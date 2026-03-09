@@ -81,11 +81,14 @@ export function parseVersion(version: string): ApiVersion {
   if (parts.length !== 3) {
     throw new Error(`Invalid version string: "${version}" (expected "major.minor.patch")`);
   }
-  const [major, minor, patch] = parts.map(Number);
-  if ([major, minor, patch].some((n) => !Number.isInteger(n!) || n! < 0)) {
+  const nums = parts.map(Number);
+  const major = nums[0]!;
+  const minor = nums[1]!;
+  const patch = nums[2]!;
+  if ([major, minor, patch].some((n) => !Number.isInteger(n) || n < 0)) {
     throw new Error(`Invalid version components in "${version}"`);
   }
-  return { major: major!, minor: minor!, patch: patch! };
+  return { major, minor, patch };
 }
 
 // -- Envelope ----------------------------------------------------------------

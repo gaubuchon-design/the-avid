@@ -252,14 +252,12 @@ export class ThumbnailDesignerEngine {
     const index = this.designs.findIndex((d) => d.id === id);
     if (index === -1) return null;
 
-    const existing = this.designs[index]!;
-    const updated: ThumbnailDesign = {
-      ...existing,
+    this.designs[index]! = {
+      ...this.designs[index]!,
       ...updates,
       updatedAt: new Date().toISOString(),
     };
-    this.designs[index] = updated;
-    return updated;
+    return this.designs[index]!;
   }
 
   /**

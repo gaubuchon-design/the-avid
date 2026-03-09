@@ -8,9 +8,7 @@
 // =============================================================================
 
 import type {
-  EditorMediaAsset,
   EditorClip,
-  EditorTrack,
 } from '../project-library';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -375,11 +373,10 @@ export class MultiCamEngine {
     if (angleIndex < 0 || angleIndex >= group.angles.length) {
       throw new MultiCamError(`Invalid angle index: ${angleIndex}`, 'INVALID_ANGLE');
     }
-    if (!group!.angles[angleIndex]!.enabled) {
+    if (!group.angles[angleIndex]!.enabled) {
       throw new MultiCamError(`Angle ${angleIndex} is disabled`, 'INVALID_ANGLE');
     }
 
-    const prevIndex = group.activeAngleIndex;
     group.activeAngleIndex = angleIndex;
 
     // Record switch event during live switching
@@ -394,7 +391,7 @@ export class MultiCamEngine {
       history.push({
         timeSeconds: group.playheadSeconds,
         angleIndex,
-        angleLabel: group!.angles[angleIndex]!.label,
+        angleLabel: group.angles[angleIndex]!.label,
         durationSeconds: 0, // Will be calculated on next switch or stop
       });
 
@@ -414,6 +411,9 @@ export class MultiCamEngine {
   startLiveSwitch(groupId: string): void {
     const group = this.groups.get(groupId);
     if (!group) throw new MultiCamError('Group not found', 'NOT_READY');
+    if (group.angles.length === 0) {
+      throw new MultiCamError('Group has no angles', 'NO_ANGLES');
+    }
     if (group.status !== 'ready' && group.status !== 'editing') {
       throw new MultiCamError('Group is not ready for live switching', 'NOT_READY');
     }
@@ -421,12 +421,16 @@ export class MultiCamEngine {
       throw new MultiCamError('Already in live-switch mode', 'ALREADY_SWITCHING');
     }
 
+    // Ensure activeAngleIndex is in bounds
+    const activeIdx = Math.min(group.activeAngleIndex, group.angles.length - 1);
+    group.activeAngleIndex = activeIdx;
+
     group.isLiveSwitching = true;
     group.status = 'editing';
     this.switchHistory.set(groupId, [{
       timeSeconds: group.playheadSeconds,
-      angleIndex: group.activeAngleIndex,
-      angleLabel: group!.angles[group.activeAngleIndex]!.label,
+      angleIndex: activeIdx,
+      angleLabel: group.angles[activeIdx]!.label,
       durationSeconds: 0,
     }]);
     this.switchStartTime.set(groupId, group.playheadSeconds);
@@ -447,12 +451,12 @@ export class MultiCamEngine {
 
     // Close the last event's duration
     if (history.length > 0) {
-      const last = history[history.length - 1];
-      last!.durationSeconds = group.playheadSeconds - last!.timeSeconds;
+      const last = history[history.length - 1]!;
+      last.durationSeconds = group.playheadSeconds - last.timeSeconds;
     }
 
-    // Remove zero-duration events at the end
-    const cleanedHistory = history.filter((e) => e.durationSeconds > 0 || history.indexOf(e) === 0);
+    // Remove zero-duration events, but keep the first event (it anchors the timeline)
+    const cleanedHistory = history.filter((e, idx) => e.durationSeconds > 0 || idx === 0);
 
     const totalDuration = cleanedHistory.reduce((sum, e) => sum + e.durationSeconds, 0);
 
@@ -541,8 +545,8 @@ export class MultiCamEngine {
       }
     }
 
-    edit.committed = true;
-    this.edits.set(edit.groupId, edit);
+    const committedEdit = { ...edit, committed: true };
+    this.edits.set(edit.groupId, committedEdit);
     this.notify();
 
     return {
@@ -593,9 +597,9 @@ export class MultiCamEngine {
   // ── Private sync helpers ────────────────────────────────────────────────
 
   private calculateSyncOffset(
-    asset: { timecodeStart?: string; waveformPeaks?: number[] },
+    asset: { timecodeStart?: string; waveformPeaks?: number[]; durationSeconds?: number },
     method: MultiCamSyncMethod,
-    index: number,
+    _index: number,
   ): number {
     if (method === 'timecode' && asset.timecodeStart) {
       return this.parseTimecodeToSeconds(asset.timecodeStart);
@@ -611,10 +615,11 @@ export class MultiCamEngine {
     return 0;
   }
 
-  private parseTimecodeToSeconds(tc: string): number {
+  private parseTimecodeToSeconds(tc: string, frameRate = 30): number {
     const match = tc.match(/^(\d{2}):(\d{2}):(\d{2})[:;](\d{2})$/);
     if (!match) return 0;
-    const [, h, m, s, f] = match.map(Number);
-    return h! * 3600 + m! * 60 + s! + f! / 30;
+    const [, h = 0, m = 0, s = 0, f = 0] = match.map(Number);
+    const effectiveRate = frameRate > 0 ? frameRate : 30;
+    return h * 3600 + m * 60 + s + f / effectiveRate;
   }
 }

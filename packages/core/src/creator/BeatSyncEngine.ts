@@ -186,29 +186,29 @@ function generateSpeedRamps(
   const filteredBeats = beats.filter((b) => b.strength >= threshold);
 
   for (let i = 0; i < filteredBeats.length; i++) {
-    const beat = filteredBeats[i];
-    const isDownbeat = beat!.type === 'downbeat';
+    const beat = filteredBeats[i]!;
+    const isDownbeat = beat.type === 'downbeat';
 
     // On downbeats, ramp up speed; between beats, slow down
     if (isDownbeat) {
       // Impact moment: accelerate
       keyframes.push({
-        time: beat!.time,
+        time: beat.time,
         speed: 1 + intensity * 0.8,
       });
       // Return to normal shortly after
       keyframes.push({
-        time: beat!.time + 0.15,
+        time: beat.time + 0.15,
         speed: 1.0,
       });
-    } else if (beat!.strength > 0.6) {
+    } else if (beat.strength > 0.6) {
       // Strong off-beat: slight slow-down for dramatic effect
       keyframes.push({
-        time: beat!.time - 0.1,
+        time: beat.time - 0.1,
         speed: 1 - intensity * 0.3,
       });
       keyframes.push({
-        time: beat!.time + 0.1,
+        time: beat.time + 0.1,
         speed: 1.0,
       });
     }

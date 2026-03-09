@@ -16,26 +16,18 @@ export interface ContextPillProps {
   onClick?: () => void;
   /** Called when the remove/dismiss button is clicked. */
   onRemove?: () => void;
-  /** Additional CSS class names for the root element. */
+  /** Additional CSS class(es) to apply to the root element. */
   className?: string;
-  /** Unique identifier for the root element. */
-  id?: string;
-  /** Whether this pill is the currently active/selected context. */
-  isActive?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Icon name mapping for screen readers (non-visual context). */
-const TYPE_LABELS: Record<ContextPillType, string> = {
-  project: 'Project',
-  bin: 'Bin',
-  selection: 'Selection',
-  sequence: 'Sequence',
-  clip: 'Clip',
-};
+/** Merge base and optional extra class names. */
+function cx(base: string, extra?: string): string {
+  return extra ? `${base} ${extra}` : base;
+}
 
 /** Returns an SVG icon element matching the context type. */
 function ContextIcon({ type }: { type: ContextPillType }) {
@@ -99,60 +91,45 @@ function ContextIcon({ type }: { type: ContextPillType }) {
 /**
  * Compact pill/badge that communicates the editing context the agent is
  * operating on. Provides optional click-to-inspect and remove affordances.
- *
- * Keyboard: Enter/Space to inspect (when onClick provided).
  */
-export const ContextPill = forwardRef<HTMLSpanElement, ContextPillProps>(function ContextPill(
-  { type, label, onClick, onRemove, className, id, isActive },
-  ref,
-) {
-  const typeLabel = TYPE_LABELS[type];
-
-  return (
-    <span
-      ref={ref}
-      id={id}
-      className={`context-pill context-pill--${type}${isActive ? ' context-pill--active' : ''}${className ? ` ${className}` : ''}`}
-      role="status"
-      aria-label={`${typeLabel} context: ${label}`}
-      aria-current={isActive ? 'true' : undefined}
-      data-testid="context-pill"
-      data-context-type={type}
-    >
+export const ContextPill = forwardRef<HTMLSpanElement, ContextPillProps>(
+  function ContextPill({ type, label, onClick, onRemove, className }, ref) {
+    return (
       <span
-        className="context-pill-body"
-        onClick={onClick}
-        onKeyDown={onClick ? (e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            onClick();
-          }
-        } : undefined}
-        role={onClick ? 'button' : undefined}
-        tabIndex={onClick ? 0 : undefined}
-        aria-label={onClick ? `Inspect ${typeLabel.toLowerCase()} context: ${label}` : undefined}
+        ref={ref}
+        className={cx(`context-pill context-pill--${type}`, className)}
+        role="status"
+        aria-label={`${type} context: ${label}`}
       >
-        <ContextIcon type={type} />
-        <span className="context-pill-label">{label}</span>
-      </span>
-
-      {onRemove && (
-        <button
-          type="button"
-          className="context-pill-remove"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-          aria-label={`Remove ${typeLabel.toLowerCase()} context: ${label}`}
-          title="Remove context"
+        <span
+          className="context-pill-body"
+          onClick={onClick}
+          onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') onClick(); } : undefined}
+          role={onClick ? 'button' : undefined}
+          tabIndex={onClick ? 0 : undefined}
         >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
-      )}
-    </span>
-  );
-});
+          <ContextIcon type={type} />
+          <span className="context-pill-label">{label}</span>
+        </span>
+
+        {onRemove && (
+          <button
+            type="button"
+            className="context-pill-remove"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
+            aria-label={`Remove ${type} context`}
+            title="Remove context"
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        )}
+      </span>
+    );
+  },
+);

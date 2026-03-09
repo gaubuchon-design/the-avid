@@ -111,19 +111,19 @@ export function evaluateSpeedRamp(config: SpeedRampConfig, time: number): number
 
   // Find surrounding keyframes
   for (let i = 0; i < keyframes.length - 1; i++) {
-    const current = keyframes[i];
-    const next = keyframes[i + 1];
+    const current = keyframes[i]!;
+    const next = keyframes[i + 1]!;
 
-    if (time >= current!.time && time <= next!.time) {
-      const segmentDuration = next!.time - current!.time;
-      const t = segmentDuration > 0 ? (time - current!.time) / segmentDuration : 0;
+    if (time >= current.time && time <= next.time) {
+      const segmentDuration = next.time - current.time;
+      const t = segmentDuration > 0 ? (time - current.time) / segmentDuration : 0;
       return interpolateSpeed(
-        current!.speed,
-        next!.speed,
+        current.speed,
+        next.speed,
         t,
-        current!.interpolation,
-        next!.bezierHandleIn,
-        current!.bezierHandleOut,
+        current.interpolation,
+        next.bezierHandleIn,
+        current.bezierHandleOut,
       );
     }
   }

@@ -110,32 +110,37 @@ export class EDLExportError extends Error {
 // ─── Timecode helpers ───────────────────────────────────────────────────────
 
 function secondsToTimecode(seconds: number, frameRate: number, dropFrame: boolean): string {
-  const totalFrames = Math.round(seconds * frameRate);
+  if (!Number.isFinite(seconds) || seconds < 0) return '00:00:00:00';
+  const totalFrames = Math.floor(seconds * frameRate);
   return framesToTimecode(totalFrames, frameRate, dropFrame);
 }
 
 function framesToTimecode(inputFrames: number, frameRate: number, dropFrame: boolean): string {
+  const nominalRate = Math.round(frameRate);
   let frames = Math.max(0, inputFrames);
 
-  if (dropFrame && (Math.abs(frameRate - 29.97) < 0.01 || frameRate === 30)) {
+  if (dropFrame && (Math.abs(frameRate - 29.97) < 0.05 || nominalRate === 30)) {
+    // Standard SMPTE drop-frame: frame numbers 0 and 1 are skipped at the
+    // start of each minute except every 10th minute.
     const dropFrames = 2;
-    const framesPerHour = Math.round(frameRate * 3600);
-    const framesPer24Hours = framesPerHour * 24;
-    const framesPer10Min = Math.round(frameRate * 600);
-    const framesPerMin = Math.round(frameRate * 60) - dropFrames;
+    const framesPerMinNominal = nominalRate * 60;                            // 1800
+    const framesPerMinActual = framesPerMinNominal - dropFrames;             // 1798
+    const framesPer10Min = framesPerMinNominal * 10 - dropFrames * 9;        // 17982
 
+    // Wrap at 24 hours
+    const framesPer24Hours = framesPer10Min * 6 * 24;
     frames = frames % framesPer24Hours;
+
     const d = Math.floor(frames / framesPer10Min);
     const m = frames % framesPer10Min;
 
-    if (m > dropFrames) {
-      frames += dropFrames * (9 * d + Math.floor((m - dropFrames) / framesPerMin));
+    if (m >= dropFrames) {
+      frames += dropFrames * (d * 9 + Math.floor((m - dropFrames) / framesPerMinActual));
     } else {
-      frames += dropFrames * 9 * d;
+      frames += dropFrames * d * 9;
     }
   }
 
-  const nominalRate = Math.round(frameRate);
   const f = frames % nominalRate;
   const totalSec = Math.floor(frames / nominalRate);
   const s = totalSec % 60;
@@ -393,8 +398,8 @@ export class EDLExporter {
       let transition: EDLTransition = 'C';
       let transitionDuration = 0;
       if (events.length > 0) {
-        const prevEvent = events[events.length - 1];
-        const prevOutFrames = Math.round(parseTimecodeToSeconds(prevEvent!.recordOut, frameRate, dropFrame) * frameRate);
+        const prevEvent = events[events.length - 1]!;
+        const prevOutFrames = Math.round(parseTimecodeToSeconds(prevEvent.recordOut, frameRate, dropFrame) * frameRate);
         const thisInFrames = Math.round(clip.startTime * frameRate);
         if (thisInFrames < prevOutFrames) {
           transition = 'D';
@@ -432,12 +437,25 @@ export class EDLExporter {
 
 // ─── Helper to parse timecode back to seconds ───────────────────────────────
 
-function parseTimecodeToSeconds(tc: string, frameRate: number, _dropFrame: boolean): number {
+function parseTimecodeToSeconds(tc: string, frameRate: number, dropFrame: boolean): number {
   const parts = tc.split(/[:;]/);
   if (parts.length !== 4) return 0;
-  const [h, m, s, f] = parts.map(Number);
-  const rate = Math.round(frameRate);
-  return h! * 3600 + m! * 60 + s! + f! / rate;
+  const [h = 0, m = 0, s = 0, f = 0] = parts.map(Number);
+  const nominalRate = Math.round(frameRate);
+
+  // Convert display timecode to a raw frame count
+  let totalFrames = h * 3600 * nominalRate + m * 60 * nominalRate + s * nominalRate + f;
+
+  if (dropFrame && (Math.abs(frameRate - 29.97) < 0.05 || nominalRate === 30)) {
+    // Reverse the drop-frame adjustment: subtract the frames that were
+    // added during display timecode generation.
+    const dropFrames = 2;
+    const totalMinutes = h * 60 + m;
+    // Frames 0 and 1 are dropped every minute except every 10th minute
+    totalFrames -= dropFrames * (totalMinutes - Math.floor(totalMinutes / 10));
+  }
+
+  return totalFrames / frameRate;
 }
 
 // ─── Re-exports ─────────────────────────────────────────────────────────────

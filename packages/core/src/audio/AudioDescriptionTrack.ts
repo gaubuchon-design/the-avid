@@ -195,13 +195,18 @@ export class AudioDescriptionTrack {
     totalDurationSeconds: number,
   ): SilenceGap[] {
     const gaps: SilenceGap[] = [];
+    if (totalDurationSeconds <= 0 || programAudioPeaks.length === 0) {
+      this.silenceGaps = gaps;
+      this.emit('silence:detected', { count: 0, usable: 0 });
+      return gaps;
+    }
     const samplesPerSecond = programAudioPeaks.length / totalDurationSeconds;
     const thresholdLinear = Math.pow(10, this.config.silenceThresholdDb / 20);
 
     let gapStart: number | null = null;
 
     for (let i = 0; i < programAudioPeaks.length; i++) {
-      const level = Math.abs(programAudioPeaks[i] ?? 0);
+      const level = Math.abs(programAudioPeaks[i]!);
       const timeSeconds = i / samplesPerSecond;
 
       if (level < thresholdLinear) {
@@ -367,7 +372,7 @@ export class AudioDescriptionTrack {
     let sum = 0;
     let count = 0;
     for (let i = startIndex; i < endIndex && i < peaks.length; i++) {
-      sum += Math.abs(peaks[i] ?? 0);
+      sum += Math.abs(peaks[i]!);
       count++;
     }
     const avgLinear = count > 0 ? sum / count : 0;

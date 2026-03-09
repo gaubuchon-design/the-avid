@@ -14,34 +14,74 @@ export class ApiClient {
   private config: ApiConfig;
 
   constructor(config: ApiConfig) {
+    if (!config.baseUrl || typeof config.baseUrl !== 'string') {
+      throw new Error('ApiClient requires a non-empty baseUrl');
+    }
     this.config = config;
   }
 
   private async request<T>(
     path: string,
-    options: RequestInit = {}
+    options: RequestInit & { skipContentType?: boolean } = {}
   ): Promise<T> {
     const url = `${this.config.baseUrl}${path}`;
+    const { skipContentType, ...fetchOptions } = options;
+
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
+      ...(skipContentType ? {} : { 'Content-Type': 'application/json' }),
       ...(this.config.token ? { Authorization: `Bearer ${this.config.token}` } : {}),
+      ...(fetchOptions.headers as Record<string, string> ?? {}),
     };
 
-    const response = await fetch(url, {
-      ...options,
-      headers: { ...headers, ...(options.headers as Record<string, string>) },
-    });
+    // Build the fetch init with timeout support via AbortSignal
+    const fetchInit: RequestInit = {
+      ...fetchOptions,
+      headers,
+    };
 
-    if (!response.ok) {
-      throw new Error(`API Error ${response.status}: ${response.statusText}`);
+    const timeoutMs = this.config.timeout;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    if (timeoutMs && timeoutMs > 0) {
+      const controller = new AbortController();
+      fetchInit.signal = controller.signal;
+      timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     }
 
-    return response.json() as Promise<T>;
+    try {
+      const response = await fetch(url, fetchInit);
+
+      if (!response.ok) {
+        let errorBody = '';
+        try {
+          errorBody = await response.text();
+        } catch {
+          // Could not read error body
+        }
+        throw new Error(
+          `API Error ${response.status}: ${response.statusText}${errorBody ? ` — ${errorBody}` : ''}`
+        );
+      }
+
+      return response.json() as Promise<T>;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw new Error(`API request to ${path} timed out after ${timeoutMs}ms`);
+      }
+      throw error;
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+    }
   }
 
   // ─── Auth ──────────────────────────────────────────────────────────────────
 
   async login(email: string, password: string): Promise<{ user: User; token: string }> {
+    if (!email || !password) {
+      throw new Error('login() requires non-empty email and password');
+    }
     return this.request('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
@@ -64,7 +104,8 @@ export class ApiClient {
   }
 
   async getProject(id: string): Promise<Project> {
-    return this.request(`/projects/${id}`);
+    if (!id) throw new Error('getProject() requires a non-empty id');
+    return this.request(`/projects/${encodeURIComponent(id)}`);
   }
 
   async createProject(data: Partial<Project>): Promise<Project> {
@@ -75,34 +116,39 @@ export class ApiClient {
   }
 
   async updateProject(id: string, data: Partial<Project>): Promise<Project> {
-    return this.request(`/projects/${id}`, {
+    if (!id) throw new Error('updateProject() requires a non-empty id');
+    return this.request(`/projects/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
   }
 
   async deleteProject(id: string): Promise<void> {
-    await this.request(`/projects/${id}`, { method: 'DELETE' });
+    if (!id) throw new Error('deleteProject() requires a non-empty id');
+    await this.request(`/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
   // ─── Assets ───────────────────────────────────────────────────────────────
 
   async getAssets(projectId: string): Promise<MediaAsset[]> {
-    return this.request(`/projects/${projectId}/assets`);
+    if (!projectId) throw new Error('getAssets() requires a non-empty projectId');
+    return this.request(`/projects/${encodeURIComponent(projectId)}/assets`);
   }
 
   async uploadAsset(projectId: string, file: File): Promise<MediaAsset> {
+    if (!projectId) throw new Error('uploadAsset() requires a non-empty projectId');
     const formData = new FormData();
     formData.append('file', file);
-    return this.request(`/projects/${projectId}/assets`, {
+    return this.request(`/projects/${encodeURIComponent(projectId)}/assets`, {
       method: 'POST',
       body: formData,
-      headers: {},
+      skipContentType: true,
     });
   }
 
   async deleteAsset(projectId: string, assetId: string): Promise<void> {
-    await this.request(`/projects/${projectId}/assets/${assetId}`, {
+    if (!projectId || !assetId) throw new Error('deleteAsset() requires non-empty projectId and assetId');
+    await this.request(`/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`, {
       method: 'DELETE',
     });
   }

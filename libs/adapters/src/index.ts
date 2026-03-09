@@ -13,6 +13,19 @@
  */
 
 // ---------------------------------------------------------------------------
+// Adapter errors (consistent error handling across all adapters)
+// ---------------------------------------------------------------------------
+export {
+  AdapterError,
+  ConflictError,
+  InvalidArgumentError,
+  NotFoundError,
+  TimeoutError,
+  UnavailableError,
+} from './AdapterError';
+export type { AdapterErrorCode } from './AdapterError';
+
+// ---------------------------------------------------------------------------
 // Contract type mirrors (will become re-exports from @mcua/contracts)
 // ---------------------------------------------------------------------------
 export type {

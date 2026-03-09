@@ -1,8 +1,12 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../../db/client';
 import { authenticate, requireProjectAccess } from '../../middleware/auth';
-import { validate, schemas } from '../../utils/validation';
-import { NotFoundError, BadRequestError, assertFound } from '../../utils/errors';
+import {
+  validate, validateAll, schemas,
+  projectIdAndTimelineIdParams, timelineAndTrackParams,
+  timelineAndClipParams, timelineClipAndEffectParams, timelineAndMarkerParams,
+} from '../../utils/validation';
+import { NotFoundError, BadRequestError } from '../../utils/errors';
 
 const router = Router({ mergeParams: true });
 router.use(authenticate);
@@ -34,16 +38,15 @@ router.post('/', requireProjectAccess('EDITOR'), validate(schemas.createTimeline
     where: { id: req.params['projectId'] },
     select: { frameRate: true, width: true, height: true, sampleRate: true },
   });
-  assertFound(project, 'Project');
 
   const timeline = await db.timeline.create({
     data: {
       projectId: req.params['projectId'],
       name,
-      frameRate: frameRate ?? project.frameRate,
-      width: width ?? project.width,
-      height: height ?? project.height,
-      sampleRate: project.sampleRate,
+      frameRate: frameRate ?? project?.frameRate ?? 23.976,
+      width: width ?? project?.width ?? 1920,
+      height: height ?? project?.height ?? 1080,
+      sampleRate: project?.sampleRate ?? 48000,
       tracks: {
         create: [
           { name: 'V1', type: 'VIDEO', sortOrder: 0, color: '#6366f1' },
@@ -58,7 +61,7 @@ router.post('/', requireProjectAccess('EDITOR'), validate(schemas.createTimeline
 });
 
 // GET /projects/:projectId/timelines/:timelineId
-router.get('/:timelineId', requireProjectAccess('VIEWER'), async (req: Request, res: Response) => {
+router.get('/:timelineId', requireProjectAccess('VIEWER'), validate(projectIdAndTimelineIdParams, 'params'), async (req: Request, res: Response) => {
   const timeline = await db.timeline.findFirst({
     where: { id: req.params['timelineId'], projectId: req.params['projectId'] },
     include: {
@@ -67,7 +70,7 @@ router.get('/:timelineId', requireProjectAccess('VIEWER'), async (req: Request, 
         include: {
           clips: {
             orderBy: { startTime: 'asc' },
-            include: { effects: { orderBy: { sortOrder: 'asc' } } },
+            include: { effects: true },
           },
           keyframes: true,
         },
@@ -75,7 +78,7 @@ router.get('/:timelineId', requireProjectAccess('VIEWER'), async (req: Request, 
       markers: { orderBy: { time: 'asc' } },
     },
   });
-  assertFound(timeline, 'Timeline');
+  if (!timeline) throw new NotFoundError('Timeline');
   res.json({ timeline });
 });
 
@@ -83,16 +86,8 @@ router.get('/:timelineId', requireProjectAccess('VIEWER'), async (req: Request, 
 router.patch(
   '/:timelineId',
   requireProjectAccess('EDITOR'),
-  validate(schemas.updateTimeline),
+  validateAll({ params: projectIdAndTimelineIdParams, body: schemas.updateTimeline }),
   async (req: Request, res: Response) => {
-    // If setting isPrimary, unset others
-    if (req.body.isPrimary === true) {
-      await db.timeline.updateMany({
-        where: { projectId: req.params['projectId'], isPrimary: true },
-        data: { isPrimary: false },
-      });
-    }
-
     const timeline = await db.timeline.update({
       where: { id: req.params['timelineId'] },
       data: req.body,
@@ -102,14 +97,10 @@ router.patch(
 );
 
 // DELETE /projects/:projectId/timelines/:timelineId
-router.delete('/:timelineId', requireProjectAccess('ADMIN'), async (req: Request, res: Response) => {
+router.delete('/:timelineId', requireProjectAccess('ADMIN'), validate(projectIdAndTimelineIdParams, 'params'), async (req: Request, res: Response) => {
+  // Can't delete the primary timeline
   const timeline = await db.timeline.findUnique({ where: { id: req.params['timelineId'] } });
-  assertFound(timeline, 'Timeline');
-
-  if (timeline.isPrimary) {
-    throw new BadRequestError('Cannot delete the primary timeline');
-  }
-
+  if (timeline?.isPrimary) throw new BadRequestError('Cannot delete the primary timeline');
   await db.timeline.delete({ where: { id: req.params['timelineId'] } });
   res.status(204).send();
 });
@@ -120,14 +111,8 @@ router.delete('/:timelineId', requireProjectAccess('ADMIN'), async (req: Request
 router.post(
   '/:timelineId/tracks',
   requireProjectAccess('EDITOR'),
-  validate(schemas.createTrack),
+  validateAll({ params: projectIdAndTimelineIdParams, body: schemas.createTrack }),
   async (req: Request, res: Response) => {
-    // Verify timeline belongs to project
-    const tl = await db.timeline.findFirst({
-      where: { id: req.params['timelineId'], projectId: req.params['projectId'] },
-    });
-    if (!tl) throw new NotFoundError('Timeline');
-
     const track = await db.track.create({
       data: { ...req.body, timelineId: req.params['timelineId'] },
       include: { clips: true },
@@ -140,52 +125,32 @@ router.post(
 router.patch(
   '/:timelineId/tracks/:trackId',
   requireProjectAccess('EDITOR'),
-  validate(schemas.updateTrack),
+  validateAll({ params: timelineAndTrackParams, body: schemas.updateTrack }),
   async (req: Request, res: Response) => {
-    // Verify track belongs to this timeline
-    const existing = await db.track.findFirst({
-      where: { id: req.params['trackId'], timelineId: req.params['timelineId'] },
-    });
-    if (!existing) throw new NotFoundError('Track');
-
-    const track = await db.track.update({
-      where: { id: req.params['trackId'] },
-      data: req.body,
-    });
+    const track = await db.track.update({ where: { id: req.params['trackId'] }, data: req.body });
     res.json({ track });
   }
 );
 
 // DELETE /projects/:projectId/timelines/:timelineId/tracks/:trackId
-router.delete(
-  '/:timelineId/tracks/:trackId',
-  requireProjectAccess('EDITOR'),
-  async (req: Request, res: Response) => {
-    const existing = await db.track.findFirst({
-      where: { id: req.params['trackId'], timelineId: req.params['timelineId'] },
-    });
-    if (!existing) throw new NotFoundError('Track');
-
-    await db.track.delete({ where: { id: req.params['trackId'] } });
-    res.status(204).send();
-  }
-);
+router.delete('/:timelineId/tracks/:trackId', requireProjectAccess('EDITOR'), validate(timelineAndTrackParams, 'params'), async (req: Request, res: Response) => {
+  await db.track.delete({ where: { id: req.params['trackId'] } });
+  res.status(204).send();
+});
 
 // POST reorder tracks
 router.post(
   '/:timelineId/tracks/reorder',
   requireProjectAccess('EDITOR'),
-  validate(schemas.reorderTracks),
+  validateAll({ params: projectIdAndTimelineIdParams, body: schemas.reorderTracks }),
   async (req: Request, res: Response) => {
     const { order } = req.body;
-
     await db.$transaction(
       order.map(({ id, sortOrder }: { id: string; sortOrder: number }) =>
         db.track.update({ where: { id }, data: { sortOrder } })
       )
     );
-
-    res.json({ message: 'Tracks reordered', count: order.length });
+    res.json({ message: 'Tracks reordered' });
   }
 );
 
@@ -195,7 +160,7 @@ router.post(
 router.post(
   '/:timelineId/clips',
   requireProjectAccess('EDITOR'),
-  validate(schemas.createClip),
+  validateAll({ params: projectIdAndTimelineIdParams, body: schemas.createClip }),
   async (req: Request, res: Response) => {
     const { trackId, ...clipData } = req.body;
 
@@ -205,18 +170,9 @@ router.post(
     });
     if (!track) throw new NotFoundError('Track');
 
-    // Verify media asset exists if provided
-    if (clipData.mediaAssetId) {
-      const asset = await db.mediaAsset.findUnique({ where: { id: clipData.mediaAssetId } });
-      if (!asset) throw new NotFoundError('Media asset');
-    }
-
     const clip = await db.clip.create({
       data: { ...clipData, trackId },
-      include: {
-        effects: true,
-        mediaAsset: { select: { id: true, name: true, type: true, duration: true } },
-      },
+      include: { effects: true, mediaAsset: { select: { id: true, name: true, type: true, duration: true } } },
     });
 
     // Update timeline duration if needed
@@ -238,14 +194,8 @@ router.post(
 router.patch(
   '/:timelineId/clips/:clipId',
   requireProjectAccess('EDITOR'),
-  validate(schemas.trimClip),
+  validateAll({ params: timelineAndClipParams, body: schemas.trimClip }),
   async (req: Request, res: Response) => {
-    // Verify clip exists in this timeline
-    const existing = await db.clip.findFirst({
-      where: { id: req.params['clipId'], track: { timelineId: req.params['timelineId'] } },
-    });
-    if (!existing) throw new NotFoundError('Clip');
-
     const clip = await db.clip.update({
       where: { id: req.params['clipId'] },
       data: req.body,
@@ -256,33 +206,21 @@ router.patch(
 );
 
 // DELETE /projects/:projectId/timelines/:timelineId/clips/:clipId
-router.delete(
-  '/:timelineId/clips/:clipId',
-  requireProjectAccess('EDITOR'),
-  async (req: Request, res: Response) => {
-    const existing = await db.clip.findFirst({
-      where: { id: req.params['clipId'], track: { timelineId: req.params['timelineId'] } },
-    });
-    if (!existing) throw new NotFoundError('Clip');
-
-    await db.clip.delete({ where: { id: req.params['clipId'] } });
-    res.status(204).send();
-  }
-);
+router.delete('/:timelineId/clips/:clipId', requireProjectAccess('EDITOR'), validate(timelineAndClipParams, 'params'), async (req: Request, res: Response) => {
+  await db.clip.delete({ where: { id: req.params['clipId'] } });
+  res.status(204).send();
+});
 
 // POST split clip at timecode
 router.post(
   '/:timelineId/clips/:clipId/split',
   requireProjectAccess('EDITOR'),
-  validate(schemas.splitClip),
+  validateAll({ params: timelineAndClipParams, body: schemas.splitClip }),
   async (req: Request, res: Response) => {
     const { splitTime } = req.body;
 
-    const clip = await db.clip.findFirst({
-      where: { id: req.params['clipId'], track: { timelineId: req.params['timelineId'] } },
-    });
-    assertFound(clip, 'Clip');
-
+    const clip = await db.clip.findUnique({ where: { id: req.params['clipId'] } });
+    if (!clip) throw new NotFoundError('Clip');
     if (splitTime <= clip.startTime || splitTime >= clip.endTime) {
       throw new BadRequestError('splitTime must be within clip range');
     }
@@ -291,12 +229,8 @@ router.post(
     const splitRatio = (splitTime - clip.startTime) / duration;
     const midTrimPoint = clip.trimStart + splitRatio * (clip.endTime - clip.startTime - clip.trimEnd - clip.trimStart);
 
-    // Update original, create new -- in a transaction for consistency
     const [updatedClip, newClip] = await db.$transaction([
-      db.clip.update({
-        where: { id: clip.id },
-        data: { endTime: splitTime, trimEnd: midTrimPoint },
-      }),
+      db.clip.update({ where: { id: clip.id }, data: { endTime: splitTime, trimEnd: midTrimPoint } }),
       db.clip.create({
         data: {
           trackId: clip.trackId,
@@ -322,16 +256,11 @@ router.post(
 router.post(
   '/:timelineId/clips/:clipId/effects',
   requireProjectAccess('EDITOR'),
-  validate(schemas.createEffect),
+  validateAll({ params: timelineAndClipParams, body: schemas.createEffect }),
   async (req: Request, res: Response) => {
-    // Verify clip exists in this timeline
-    const clipExists = await db.clip.findFirst({
-      where: { id: req.params['clipId'], track: { timelineId: req.params['timelineId'] } },
-    });
-    if (!clipExists) throw new NotFoundError('Clip');
-
+    const { type, params, sortOrder } = req.body;
     const effect = await db.clipEffect.create({
-      data: { clipId: req.params['clipId'], ...req.body },
+      data: { clipId: req.params['clipId'], type, params: params ?? {}, sortOrder: sortOrder ?? 0 },
     });
     res.status(201).json({ effect });
   }
@@ -341,7 +270,7 @@ router.post(
 router.patch(
   '/:timelineId/clips/:clipId/effects/:effectId',
   requireProjectAccess('EDITOR'),
-  validate(schemas.updateEffect),
+  validateAll({ params: timelineClipAndEffectParams, body: schemas.updateEffect }),
   async (req: Request, res: Response) => {
     const effect = await db.clipEffect.update({
       where: { id: req.params['effectId'] },
@@ -355,6 +284,7 @@ router.patch(
 router.delete(
   '/:timelineId/clips/:clipId/effects/:effectId',
   requireProjectAccess('EDITOR'),
+  validate(timelineClipAndEffectParams, 'params'),
   async (req: Request, res: Response) => {
     await db.clipEffect.delete({ where: { id: req.params['effectId'] } });
     res.status(204).send();
@@ -367,16 +297,11 @@ router.delete(
 router.post(
   '/:timelineId/markers',
   requireProjectAccess('EDITOR'),
-  validate(schemas.createMarker),
+  validateAll({ params: projectIdAndTimelineIdParams, body: schemas.createMarker }),
   async (req: Request, res: Response) => {
-    // Verify timeline belongs to project
-    const tl = await db.timeline.findFirst({
-      where: { id: req.params['timelineId'], projectId: req.params['projectId'] },
-    });
-    if (!tl) throw new NotFoundError('Timeline');
-
+    const { time, label, color, type, notes } = req.body;
     const marker = await db.timelineMarker.create({
-      data: { ...req.body, timelineId: req.params['timelineId'], createdById: req.user!.id },
+      data: { time, label, color, type, notes, timelineId: req.params['timelineId'], createdById: req.user!.id },
     });
     res.status(201).json({ marker });
   }
@@ -386,29 +311,20 @@ router.post(
 router.patch(
   '/:timelineId/markers/:markerId',
   requireProjectAccess('EDITOR'),
+  validateAll({ params: timelineAndMarkerParams, body: schemas.updateMarker }),
   async (req: Request, res: Response) => {
-    const { name, color, notes, time } = req.body;
     const marker = await db.timelineMarker.update({
       where: { id: req.params['markerId'] },
-      data: {
-        ...(name !== undefined ? { name } : {}),
-        ...(color !== undefined ? { color } : {}),
-        ...(notes !== undefined ? { notes } : {}),
-        ...(time !== undefined ? { time } : {}),
-      },
+      data: req.body,
     });
     res.json({ marker });
   }
 );
 
 // DELETE /projects/:projectId/timelines/:timelineId/markers/:markerId
-router.delete(
-  '/:timelineId/markers/:markerId',
-  requireProjectAccess('EDITOR'),
-  async (req: Request, res: Response) => {
-    await db.timelineMarker.delete({ where: { id: req.params['markerId'] } });
-    res.status(204).send();
-  }
-);
+router.delete('/:timelineId/markers/:markerId', requireProjectAccess('EDITOR'), validate(timelineAndMarkerParams, 'params'), async (req: Request, res: Response) => {
+  await db.timelineMarker.delete({ where: { id: req.params['markerId'] } });
+  res.status(204).send();
+});
 
 export default router;

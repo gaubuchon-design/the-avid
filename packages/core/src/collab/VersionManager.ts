@@ -521,7 +521,7 @@ export class VersionManager {
     if (bundle.latestSnapshot) {
       this.latestSnapshotId = bundle.latestSnapshot.id;
     } else if (this.snapshotOrder.length > 0) {
-      this.latestSnapshotId = this.snapshotOrder[this.snapshotOrder.length - 1] ?? null;
+      this.latestSnapshotId = this.snapshotOrder[this.snapshotOrder.length - 1]!;
     }
   }
 

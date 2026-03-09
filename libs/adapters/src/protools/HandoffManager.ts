@@ -50,6 +50,8 @@ export interface HandoffResult {
   readonly entry: HandoffHistoryEntry;
 }
 
+import { InvalidArgumentError } from '../AdapterError';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -94,7 +96,7 @@ export class HandoffManager {
     tracks: string[],
   ): Promise<HandoffResult> {
     if (tracks.length === 0) {
-      throw new Error('At least one track is required for handoff.');
+      throw new InvalidArgumentError('pro-tools', 'tracks', 'At least one track is required for handoff.');
     }
 
     const id = nextHandoffId();

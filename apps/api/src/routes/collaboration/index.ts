@@ -1,8 +1,13 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../../db/client';
 import { authenticate, requireProjectAccess } from '../../middleware/auth';
-import { validate, schemas, paginationQuery, paginate } from '../../utils/validation';
-import { NotFoundError, ForbiddenError, assertFound } from '../../utils/errors';
+import {
+  validate, validateAll, schemas,
+  projectIdParam, projectIdAndCommentIdParams, projectIdAndJobIdParams, resourceLockParams,
+  uuidParam,
+} from '../../utils/validation';
+import { NotFoundError, BadRequestError, ConflictError } from '../../utils/errors';
+import { z } from 'zod';
 
 // ─── COLLABORATION ROUTER ──────────────────────────────────────────────────────
 const collabRouter = Router({ mergeParams: true });
@@ -10,19 +15,8 @@ collabRouter.use(authenticate);
 
 // GET /projects/:projectId/comments
 collabRouter.get('/comments', requireProjectAccess('VIEWER'), async (req: Request, res: Response) => {
-  const { timelineId, resolved } = req.query as Record<string, string>;
-
-  const where: any = {
-    projectId: req.params['projectId'],
-    deletedAt: null,
-    parentId: null,
-    ...(timelineId ? { timelineId } : {}),
-    ...(resolved === 'true' ? { isResolved: true } : {}),
-    ...(resolved === 'false' ? { isResolved: false } : {}),
-  };
-
   const comments = await db.comment.findMany({
-    where,
+    where: { projectId: req.params['projectId'], deletedAt: null, parentId: null },
     include: {
       user: { select: { id: true, displayName: true, avatarUrl: true } },
       replies: {
@@ -40,16 +34,8 @@ collabRouter.get('/comments', requireProjectAccess('VIEWER'), async (req: Reques
 collabRouter.post(
   '/comments',
   requireProjectAccess('REVIEWER'),
-  validate(schemas.createComment),
+  validateAll({ params: projectIdParam, body: schemas.createComment }),
   async (req: Request, res: Response) => {
-    // If parentId is provided, verify it belongs to the same project
-    if (req.body.parentId) {
-      const parent = await db.comment.findFirst({
-        where: { id: req.body.parentId, projectId: req.params['projectId'], deletedAt: null },
-      });
-      if (!parent) throw new NotFoundError('Parent comment');
-    }
-
     const comment = await db.comment.create({
       data: { ...req.body, projectId: req.params['projectId'], userId: req.user!.id },
       include: { user: { select: { id: true, displayName: true, avatarUrl: true } } },
@@ -62,24 +48,13 @@ collabRouter.post(
 collabRouter.patch(
   '/comments/:commentId',
   requireProjectAccess('REVIEWER'),
-  validate(schemas.updateComment),
+  validateAll({ params: projectIdAndCommentIdParams, body: schemas.updateComment }),
   async (req: Request, res: Response) => {
-    const comment = await db.comment.findFirst({
-      where: { id: req.params['commentId'], projectId: req.params['projectId'], deletedAt: null },
-    });
-    assertFound(comment, 'Comment');
-
-    // Only the author can edit text; anyone with reviewer+ can resolve
-    if (req.body.text !== undefined && comment.userId !== req.user!.id) {
-      throw new ForbiddenError('Only the comment author can edit the text');
-    }
-
+    const comment = await db.comment.findUnique({ where: { id: req.params['commentId'] } });
+    if (!comment || comment.userId !== req.user!.id) throw new NotFoundError('Comment');
     const updated = await db.comment.update({
       where: { id: req.params['commentId'] },
-      data: {
-        ...(req.body.text !== undefined ? { text: req.body.text } : {}),
-        ...(req.body.isResolved !== undefined ? { isResolved: req.body.isResolved } : {}),
-      },
+      data: req.body,
     });
     res.json({ comment: updated });
   }
@@ -89,33 +64,11 @@ collabRouter.patch(
 collabRouter.delete(
   '/comments/:commentId',
   requireProjectAccess('REVIEWER'),
+  validate(projectIdAndCommentIdParams, 'params'),
   async (req: Request, res: Response) => {
-    const comment = await db.comment.findFirst({
-      where: { id: req.params['commentId'], projectId: req.params['projectId'], deletedAt: null },
-    });
-    assertFound(comment, 'Comment');
-
-    // Only the author or admin can delete
-    if (comment.userId !== req.user!.id) {
-      // Check if user is admin
-      const member = await db.projectMember.findUnique({
-        where: { projectId_userId: { projectId: req.params['projectId'], userId: req.user!.id } },
-      });
-      if (!member || !['ADMIN', 'OWNER'].includes(member.role)) {
-        throw new ForbiddenError('Only the comment author or project admin can delete comments');
-      }
-    }
-
-    // Soft delete the comment and its replies
-    await db.comment.updateMany({
-      where: {
-        OR: [
-          { id: req.params['commentId'] },
-          { parentId: req.params['commentId'] },
-        ],
-      },
-      data: { deletedAt: new Date() },
-    });
+    const comment = await db.comment.findUnique({ where: { id: req.params['commentId'] } });
+    if (!comment || comment.userId !== req.user!.id) throw new NotFoundError('Comment');
+    await db.comment.update({ where: { id: req.params['commentId'] }, data: { deletedAt: new Date() } });
     res.status(204).send();
   }
 );
@@ -134,22 +87,29 @@ collabRouter.get('/approvals', requireProjectAccess('REVIEWER'), async (req: Req
 collabRouter.post(
   '/approvals',
   requireProjectAccess('REVIEWER'),
-  validate(schemas.createApproval),
+  validateAll({ params: projectIdParam, body: schemas.createApproval }),
   async (req: Request, res: Response) => {
     const { status, version, notes } = req.body;
 
-    // Find existing approval for this user+version combination
+    // Check for existing approval by this user for this version
     const existing = await db.approval.findFirst({
       where: { projectId: req.params['projectId'], userId: req.user!.id, version },
       select: { id: true },
     });
 
-    const approval = await db.approval.upsert({
-      where: { id: existing?.id ?? 'nonexistent' },
-      create: { projectId: req.params['projectId'], userId: req.user!.id, status, version, notes },
-      update: { status, notes },
-      include: { user: { select: { id: true, displayName: true, avatarUrl: true } } },
-    });
+    let approval;
+    if (existing) {
+      approval = await db.approval.update({
+        where: { id: existing.id },
+        data: { status, notes },
+        include: { user: { select: { id: true, displayName: true, avatarUrl: true } } },
+      });
+    } else {
+      approval = await db.approval.create({
+        data: { projectId: req.params['projectId'], userId: req.user!.id, status, version, notes },
+        include: { user: { select: { id: true, displayName: true, avatarUrl: true } } },
+      });
+    }
     res.status(201).json({ approval });
   }
 );
@@ -158,27 +118,18 @@ collabRouter.post(
 collabRouter.post(
   '/locks',
   requireProjectAccess('EDITOR'),
-  validate(schemas.createLock),
+  validateAll({ params: projectIdParam, body: schemas.createLock }),
   async (req: Request, res: Response) => {
     const { resourceType, resourceId, sessionId } = req.body;
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 min
 
-    // Check if already locked by another user
+    // Check for existing unexpired lock held by another user
     const existingLock = await db.resourceLock.findUnique({
       where: { resourceType_resourceId: { resourceType, resourceId } },
     });
 
     if (existingLock && existingLock.lockedById !== req.user!.id && existingLock.expiresAt > new Date()) {
-      return res.status(409).json({
-        error: {
-          message: 'Resource is locked by another user',
-          code: 'RESOURCE_LOCKED',
-          details: {
-            lockedBy: existingLock.lockedById,
-            expiresAt: existingLock.expiresAt,
-          },
-        },
-      });
+      throw new ConflictError(`Resource is locked by another user until ${existingLock.expiresAt.toISOString()}`);
     }
 
     const lock = await db.resourceLock.upsert({
@@ -197,24 +148,11 @@ collabRouter.post(
   }
 );
 
-// GET /projects/:projectId/locks
-collabRouter.get('/locks', requireProjectAccess('VIEWER'), async (req: Request, res: Response) => {
-  const locks = await db.resourceLock.findMany({
-    where: {
-      projectId: req.params['projectId'],
-      expiresAt: { gt: new Date() },
-    },
-    include: {
-      lockedBy: { select: { id: true, displayName: true, avatarUrl: true } },
-    },
-  });
-  res.json({ locks });
-});
-
 // DELETE /projects/:projectId/locks/:resourceType/:resourceId
 collabRouter.delete(
   '/locks/:resourceType/:resourceId',
   requireProjectAccess('EDITOR'),
+  validate(resourceLockParams, 'params'),
   async (req: Request, res: Response) => {
     await db.resourceLock.deleteMany({
       where: {
@@ -238,7 +176,6 @@ publishRouter.get('/', requireProjectAccess('VIEWER'), async (req: Request, res:
   const jobs = await db.publishJob.findMany({
     where: { projectId: req.params['projectId'] },
     orderBy: { createdAt: 'desc' },
-    take: 50,
   });
   res.json({ jobs });
 });
@@ -247,7 +184,7 @@ publishRouter.get('/', requireProjectAccess('VIEWER'), async (req: Request, res:
 publishRouter.post(
   '/',
   requireProjectAccess('EDITOR'),
-  validate(schemas.createPublishJob),
+  validateAll({ params: projectIdParam, body: schemas.createPublishJob }),
   async (req: Request, res: Response) => {
     const job = await db.publishJob.create({
       data: {
@@ -261,101 +198,58 @@ publishRouter.post(
   }
 );
 
-// GET /projects/:projectId/publish/:jobId
-publishRouter.get('/:jobId', requireProjectAccess('VIEWER'), async (req: Request, res: Response) => {
-  const job = await db.publishJob.findFirst({
-    where: { id: req.params['jobId'], projectId: req.params['projectId'] },
-  });
-  assertFound(job, 'Publish job');
-  res.json({ job });
-});
-
 // PATCH /projects/:projectId/publish/:jobId
-publishRouter.patch('/:jobId', requireProjectAccess('EDITOR'), async (req: Request, res: Response) => {
-  const job = await db.publishJob.findFirst({
-    where: { id: req.params['jobId'], projectId: req.params['projectId'] },
-  });
-  assertFound(job, 'Publish job');
-
-  if (!['DRAFT', 'FAILED'].includes(job.status)) {
-    return res.status(400).json({
-      error: { message: `Cannot edit a publish job in "${job.status}" state`, code: 'BAD_REQUEST' },
+publishRouter.patch(
+  '/:jobId',
+  requireProjectAccess('EDITOR'),
+  validateAll({ params: projectIdAndJobIdParams, body: schemas.updatePublishJob }),
+  async (req: Request, res: Response) => {
+    const job = await db.publishJob.update({
+      where: { id: req.params['jobId'], projectId: req.params['projectId'] },
+      data: req.body,
     });
+    res.json({ job });
   }
-
-  const updated = await db.publishJob.update({
-    where: { id: req.params['jobId'] },
-    data: req.body,
-  });
-  res.json({ job: updated });
-});
+);
 
 // POST /projects/:projectId/publish/:jobId/submit -- kick off export + publish
-publishRouter.post('/:jobId/submit', requireProjectAccess('EDITOR'), async (req: Request, res: Response) => {
-  const { publishService } = await import('../../services/publish.service');
+publishRouter.post(
+  '/:jobId/submit',
+  requireProjectAccess('EDITOR'),
+  validate(projectIdAndJobIdParams, 'params'),
+  async (req: Request, res: Response) => {
+    const { publishService } = await import('../../services/publish.service');
 
-  const job = await db.publishJob.findFirst({
-    where: { id: req.params['jobId'], projectId: req.params['projectId'] },
-  });
-  assertFound(job, 'Publish job');
-
-  if (!['DRAFT', 'FAILED'].includes(job.status)) {
-    return res.status(400).json({
-      error: { message: `Cannot submit a publish job in "${job.status}" state`, code: 'BAD_REQUEST' },
+    const job = await db.publishJob.update({
+      where: { id: req.params['jobId'] },
+      data: { status: 'PENDING' },
     });
+
+    publishService.enqueue(job);
+
+    res.json({ job, message: 'Publish job queued' });
   }
+);
 
-  const updated = await db.publishJob.update({
-    where: { id: req.params['jobId'] },
-    data: { status: 'PENDING' },
-  });
-
-  publishService.enqueue(updated);
-
-  res.json({ job: updated, message: 'Publish job queued' });
-});
-
-// DELETE /projects/:projectId/publish/:jobId -- cancel job
-publishRouter.delete('/:jobId', requireProjectAccess('EDITOR'), async (req: Request, res: Response) => {
-  const job = await db.publishJob.findFirst({
-    where: { id: req.params['jobId'], projectId: req.params['projectId'] },
-  });
-  assertFound(job, 'Publish job');
-
-  if (!['DRAFT', 'PENDING', 'FAILED'].includes(job.status)) {
-    return res.status(400).json({
-      error: { message: `Cannot cancel a publish job in "${job.status}" state`, code: 'BAD_REQUEST' },
-    });
-  }
-
-  await db.publishJob.delete({ where: { id: req.params['jobId'] } });
-  res.status(204).send();
-});
-
-export { publishRouter };
-
-// ─── SOCIAL CONNECTIONS ROUTER ────────────────────────────────────────────────
+// GET /users/me/social-connections
 const socialRouter = Router();
 socialRouter.use(authenticate);
 
-// GET /social-connections
 socialRouter.get('/', async (req: Request, res: Response) => {
   const connections = await db.socialConnection.findMany({
     where: { userId: req.user!.id, isActive: true },
     select: { id: true, platform: true, accountName: true, isActive: true, createdAt: true },
-    orderBy: { createdAt: 'desc' },
   });
   res.json({ connections });
 });
 
-// DELETE /social-connections/:connectionId
-socialRouter.delete('/:connectionId', async (req: Request, res: Response) => {
-  const result = await db.socialConnection.updateMany({
+const connectionIdParam = z.object({ connectionId: z.string().uuid() });
+socialRouter.delete('/:connectionId', validate(connectionIdParam, 'params'), async (req: Request, res: Response) => {
+  await db.socialConnection.updateMany({
     where: { id: req.params['connectionId'], userId: req.user!.id },
     data: { isActive: false },
   });
-  if (result.count === 0) throw new NotFoundError('Social connection');
   res.status(204).send();
 });
 
-export { socialRouter };
+export { publishRouter, socialRouter };

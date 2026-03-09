@@ -217,13 +217,13 @@ export class RelinkEngine {
     const proposals: RelinkProposal[] = [];
 
     for (let i = 0; i < offlineAssets.length; i++) {
-      const asset = offlineAssets[i];
+      const asset = offlineAssets[i]!;
       this.events.onScanProgress?.(i + 1, offlineAssets.length);
 
       const candidates: RelinkCandidate[] = [];
 
       for (const file of scannedFiles) {
-        const { confidence, reason } = this.scoreMatch(asset!, file);
+        const { confidence, reason } = this.scoreMatch(asset, file);
         if (confidence > 0) {
           candidates.push({
             filePath: file.filePath,
@@ -261,8 +261,8 @@ export class RelinkEngine {
         : 'offline';
 
       proposals.push({
-        assetId: asset!.id,
-        assetName: asset!.name,
+        assetId: asset.id,
+        assetName: asset.name,
         currentStatus: status,
         candidates: limited,
         selectedCandidateIndex: selectedIndex,
@@ -270,7 +270,7 @@ export class RelinkEngine {
       });
 
       if (limited.length > 0) {
-        this.events.onMatchFound?.(asset!.id, limited[0]!);
+        this.events.onMatchFound?.(asset.id, limited[0]!);
       }
     }
 
@@ -280,8 +280,11 @@ export class RelinkEngine {
   // ── Apply relink ────────────────────────────────────────────────────────
 
   /**
-   * Apply confirmed relink proposals to the project, returning an updated
-   * copy of the bins with new file locations.
+   * Apply confirmed relink proposals to the project, updating bins in-place
+   * with new file locations.
+   *
+   * **Note:** This mutates `project.bins` directly. Callers should clone the
+   * project first if immutability is required.
    *
    * This preserves all edit decisions (clip positions, trim points, effects)
    * and only updates the media location references.
@@ -290,7 +293,10 @@ export class RelinkEngine {
     project: EditorProject,
     proposals: RelinkProposal[],
   ): RelinkResult {
-    const confirmed = proposals.filter((p) => p.confirmed && p.selectedCandidateIndex !== null);
+    const confirmed = proposals.filter(
+      (p): p is RelinkProposal & { selectedCandidateIndex: number } =>
+        p.confirmed && p.selectedCandidateIndex !== null,
+    );
 
     if (confirmed.length === 0) {
       throw new RelinkError('No confirmed proposals to apply', 'INVALID_PROPOSAL');
@@ -307,7 +313,7 @@ export class RelinkEngine {
     // Build a lookup from assetId to selected candidate
     const relinkMap = new Map<string, RelinkCandidate>();
     for (const proposal of confirmed) {
-      const candidate = proposal.candidates[proposal.selectedCandidateIndex!];
+      const candidate = proposal.candidates[proposal.selectedCandidateIndex];
       if (candidate) {
         relinkMap.set(proposal.assetId, candidate);
       }
@@ -317,22 +323,22 @@ export class RelinkEngine {
     const updateAssetInBins = (bins: EditorBin[]): void => {
       for (const bin of bins) {
         for (let i = 0; i < bin.assets.length; i++) {
-          const asset = bin.assets[i];
-          const candidate = relinkMap.get(asset!.id);
+          const asset = bin.assets[i]!;
+          const candidate = relinkMap.get(asset.id);
 
           if (candidate) {
             // Update locations
-            const pathHistory = [...(asset!.locations?.pathHistory ?? [])];
-            if (this.config.updatePathHistory && asset!.locations?.originalPath) {
-              pathHistory.push(asset!.locations.originalPath);
+            const pathHistory = [...(asset.locations?.pathHistory ?? [])];
+            if (this.config.updatePathHistory && asset.locations?.originalPath) {
+              pathHistory.push(asset.locations.originalPath);
             }
 
-            bin.assets[i] = {
-              ...asset!,
+            bin.assets[i]! = {
+              ...asset,
               status: 'READY',
               indexStatus: 'READY',
               locations: {
-                ...asset!.locations,
+                ...asset.locations,
                 originalPath: candidate.filePath,
                 managedPath: candidate.filePath,
                 pathHistory,
@@ -344,34 +350,34 @@ export class RelinkEngine {
                     sizeBytes: candidate.fileSizeBytes,
                     modifiedAt: new Date().toISOString(),
                   }
-                : asset!.fingerprint,
-              technicalMetadata: candidate.technicalMetadata ?? asset!.technicalMetadata,
+                : asset.fingerprint,
+              technicalMetadata: candidate.technicalMetadata ?? asset.technicalMetadata,
             };
 
             result.relinked++;
             result.details.push({
-              assetId: asset!.id,
-              assetName: asset!.name,
+              assetId: asset.id,
+              assetName: asset.name,
               status: 'relinked',
               newPath: candidate.filePath,
             });
           } else {
             // Check if this is an offline asset that wasn't relinked
-            const proposal = proposals.find((p) => p.assetId === asset!.id);
+            const proposal = proposals.find((p) => p.assetId === asset.id);
             if (proposal) {
               if (proposal.currentStatus === 'conflict') {
                 result.conflicts++;
                 result.details.push({
-                  assetId: asset!.id,
-                  assetName: asset!.name,
+                  assetId: asset.id,
+                  assetName: asset.name,
                   status: 'conflict',
                   error: 'Multiple ambiguous matches found',
                 });
               } else {
                 result.stillOffline++;
                 result.details.push({
-                  assetId: asset!.id,
-                  assetName: asset!.name,
+                  assetId: asset.id,
+                  assetName: asset.name,
                   status: 'offline',
                   error: proposal.candidates.length === 0 ? 'No matches found' : 'Not confirmed',
                 });

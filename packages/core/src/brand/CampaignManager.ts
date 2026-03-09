@@ -37,12 +37,12 @@ const STATUS_ORDER: DeliverableStatus[] = [
 
 export function getNextStatus(current: DeliverableStatus): DeliverableStatus | null {
   const idx = STATUS_ORDER.indexOf(current);
-  return idx >= 0 && idx < STATUS_ORDER.length - 1 ? STATUS_ORDER[idx + 1] ?? null : null;
+  return idx >= 0 && idx < STATUS_ORDER.length - 1 ? STATUS_ORDER[idx + 1]! : null;
 }
 
 export function getPreviousStatus(current: DeliverableStatus): DeliverableStatus | null {
   const idx = STATUS_ORDER.indexOf(current);
-  return idx > 0 ? STATUS_ORDER[idx - 1] ?? null : null;
+  return idx > 0 ? STATUS_ORDER[idx - 1]! : null;
 }
 
 export function getStatusLabel(status: DeliverableStatus): string {

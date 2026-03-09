@@ -22,6 +22,7 @@ import type {
   TrackKind,
   TrackSnapshot,
 } from './IMediaComposerAdapter';
+import { InvalidArgumentError, NotFoundError } from './AdapterError';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -117,11 +118,11 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
     ];
 
     for (let i = 0; i < trackDefs.length; i++) {
-      const def = trackDefs[i];
+      const def = trackDefs[i]!;
       const track: MutableTrack = {
-        id: `track_${def!.name.toLowerCase()}`,
-        name: def!.name,
-        kind: def!.kind,
+        id: `track_${def.name.toLowerCase()}`,
+        name: def.name,
+        kind: def.kind,
         index: i,
         clips: [],
         isMuted: false,
@@ -312,7 +313,7 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
 
   async getTimeline(sequenceId: string): Promise<TimelineSnapshot> {
     if (sequenceId !== this.sequenceId) {
-      throw new Error(`Sequence not found: ${sequenceId}`);
+      throw new NotFoundError('media-composer', 'Sequence', sequenceId);
     }
     return {
       sequenceId: this.sequenceId,
@@ -338,7 +339,7 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
     duration: number,
   ): Promise<ClipResult> {
     const track = this.tracks.get(trackId);
-    if (!track) throw new Error(`Track not found: ${trackId}`);
+    if (!track) throw new NotFoundError('media-composer', 'Track', trackId);
 
     const clip: MutableClip = {
       clipId: nextId('clip'),
@@ -358,7 +359,7 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
 
   async removeClip(clipId: string): Promise<void> {
     const clip = this.clips.get(clipId);
-    if (!clip) throw new Error(`Clip not found: ${clipId}`);
+    if (!clip) throw new NotFoundError('media-composer', 'Clip', clipId);
 
     const track = this.tracks.get(clip.trackId);
     if (track) {
@@ -373,10 +374,10 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
     targetPosition: number,
   ): Promise<ClipResult> {
     const clip = this.clips.get(clipId);
-    if (!clip) throw new Error(`Clip not found: ${clipId}`);
+    if (!clip) throw new NotFoundError('media-composer', 'Clip', clipId);
 
     const targetTrack = this.tracks.get(targetTrackId);
-    if (!targetTrack) throw new Error(`Track not found: ${targetTrackId}`);
+    if (!targetTrack) throw new NotFoundError('media-composer', 'Track', targetTrackId);
 
     // Remove from source track
     const sourceTrack = this.tracks.get(clip.trackId);
@@ -400,7 +401,7 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
     delta: number,
   ): Promise<ClipResult> {
     const clip = this.clips.get(clipId);
-    if (!clip) throw new Error(`Clip not found: ${clipId}`);
+    if (!clip) throw new NotFoundError('media-composer', 'Clip', clipId);
 
     if (side === 'start') {
       clip.position += delta;
@@ -423,13 +424,14 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
     position: number,
   ): Promise<[ClipResult, ClipResult]> {
     const clip = this.clips.get(clipId);
-    if (!clip) throw new Error(`Clip not found: ${clipId}`);
+    if (!clip) throw new NotFoundError('media-composer', 'Clip', clipId);
 
     const splitOffset = position - clip.position;
     if (splitOffset <= 0 || splitOffset >= clip.duration) {
-      throw new Error(
-        `Split position ${position} is outside clip range ` +
-          `[${clip.position}, ${clip.position + clip.duration})`,
+      throw new InvalidArgumentError(
+        'media-composer',
+        'position',
+        `Split position ${position} is outside clip range [${clip.position}, ${clip.position + clip.duration})`,
       );
     }
 
@@ -490,7 +492,7 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
 
   async createBin(name: string, parentId?: string): Promise<BinSnapshot> {
     if (parentId && !this.bins.has(parentId)) {
-      throw new Error(`Parent bin not found: ${parentId}`);
+      throw new NotFoundError('media-composer', 'Bin', parentId);
     }
 
     const bin: MutableBin = {
@@ -523,7 +525,7 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
 
   async moveToBin(assetIds: string[], binId: string): Promise<void> {
     const target = this.bins.get(binId);
-    if (!target) throw new Error(`Bin not found: ${binId}`);
+    if (!target) throw new NotFoundError('media-composer', 'Bin', binId);
 
     // Remove from current bins
     for (const bin of this.bins.values()) {
@@ -542,7 +544,7 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
   async getSelection(): Promise<SelectionSnapshot> {
     // Return a plausible default selection
     return {
-      clipIds: this.clips.size! > 0 ? [Array.from(this.clips.keys())[0]!] : [],
+      clipIds: this.clips.size > 0 ? [Array.from(this.clips.keys())[0]!] : [],
       trackIds: ['track_v1'],
       markIn: undefined,
       markOut: undefined,
@@ -560,7 +562,7 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
     _params: Record<string, unknown>,
   ): Promise<void> {
     const clip = this.clips.get(clipId);
-    if (!clip) throw new Error(`Clip not found: ${clipId}`);
+    if (!clip) throw new NotFoundError('media-composer', 'Clip', clipId);
 
     const effectId = nextId(`fx_${effectType}`);
     clip.effectIds.push(effectId);
@@ -568,11 +570,11 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
 
   async removeEffect(clipId: string, effectId: string): Promise<void> {
     const clip = this.clips.get(clipId);
-    if (!clip) throw new Error(`Clip not found: ${clipId}`);
+    if (!clip) throw new NotFoundError('media-composer', 'Clip', clipId);
 
     const idx = clip.effectIds.indexOf(effectId);
     if (idx === -1) {
-      throw new Error(`Effect ${effectId} not found on clip ${clipId}`);
+      throw new NotFoundError('media-composer', 'Effect', effectId);
     }
     clip.effectIds.splice(idx, 1);
   }
@@ -586,7 +588,7 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
     spec: DeliverySpec,
   ): Promise<ExportJob> {
     if (sequenceId !== this.sequenceId) {
-      throw new Error(`Sequence not found: ${sequenceId}`);
+      throw new NotFoundError('media-composer', 'Sequence', sequenceId);
     }
 
     const job: ExportJob = {

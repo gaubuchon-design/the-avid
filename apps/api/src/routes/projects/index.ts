@@ -1,16 +1,18 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../../db/client';
 import { authenticate, requireProjectAccess } from '../../middleware/auth';
-import { validate, schemas, paginationQuery, paginate } from '../../utils/validation';
-import { NotFoundError, ForbiddenError, BadRequestError, assertFound } from '../../utils/errors';
+import {
+  validate, validateAll, schemas, paginationQuery, paginate,
+  uuidParam, projectIdParam, projectAndUserParams,
+} from '../../utils/validation';
+import { NotFoundError, ForbiddenError, BadRequestError } from '../../utils/errors';
 
 const router = Router();
 router.use(authenticate);
 
 // ─── GET /projects ─────────────────────────────────────────────────────────────
-router.get('/', validate(paginationQuery, 'query'), async (req: Request, res: Response) => {
-  const { page, limit, sortBy, sortOrder } = req.query as any;
-  const { search, status } = req.query as Record<string, string>;
+router.get('/', validate(schemas.projectQuery, 'query'), async (req: Request, res: Response) => {
+  const { page, limit, sortBy, sortOrder, search, status } = req.query as any;
   const userId = req.user!.id;
   const skip = (page - 1) * limit;
 
@@ -27,22 +29,20 @@ router.get('/', validate(paginationQuery, 'query'), async (req: Request, res: Re
     } : {}),
   };
 
+  // Allowlist sortable fields to prevent invalid field injection
   const allowedSortFields = ['updatedAt', 'createdAt', 'name', 'lastEditedAt'];
-  const orderField = allowedSortFields.includes(sortBy) ? sortBy : 'updatedAt';
+  const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'updatedAt';
 
   const [projects, total] = await Promise.all([
     db.project.findMany({
       where,
       include: {
-        members: {
-          select: { userId: true, role: true },
-          take: 10,
-        },
-        _count: { select: { bins: true, timelines: true, comments: true } },
+        members: { select: { userId: true, role: true } },
+        _count: { select: { bins: true, timelines: true } },
       },
       skip,
       take: limit,
-      orderBy: { [orderField]: sortOrder },
+      orderBy: { [safeSortBy]: sortOrder },
     }),
     db.project.count({ where }),
   ]);
@@ -53,21 +53,19 @@ router.get('/', validate(paginationQuery, 'query'), async (req: Request, res: Re
 // ─── POST /projects ────────────────────────────────────────────────────────────
 router.post('/', validate(schemas.createProject), async (req: Request, res: Response) => {
   const userId = req.user!.id;
-  const { tags, ...projectData } = req.body;
 
   const project = await db.project.create({
     data: {
-      ...projectData,
-      tags: tags ?? [],
+      ...req.body,
       members: { create: { userId, role: 'OWNER' } },
       // Create default primary timeline
       timelines: {
         create: {
           name: 'Timeline 1',
           isPrimary: true,
-          frameRate: projectData.frameRate ?? 23.976,
-          width: projectData.width ?? 1920,
-          height: projectData.height ?? 1080,
+          frameRate: req.body.frameRate ?? 23.976,
+          width: req.body.width ?? 1920,
+          height: req.body.height ?? 1080,
           tracks: {
             create: [
               { name: 'V1', type: 'VIDEO', sortOrder: 0, color: '#6366f1' },
@@ -101,29 +99,19 @@ router.post('/', validate(schemas.createProject), async (req: Request, res: Resp
 });
 
 // ─── GET /projects/:id ─────────────────────────────────────────────────────────
-router.get('/:id', requireProjectAccess('VIEWER'), async (req: Request, res: Response) => {
+router.get('/:id', requireProjectAccess('VIEWER'), validate(uuidParam, 'params'), async (req: Request, res: Response) => {
   const project = await db.project.findUnique({
     where: { id: req.params['id'], deletedAt: null },
     include: {
-      bins: {
-        where: { parentId: null },
-        include: { children: true, _count: { select: { mediaAssets: true } } },
-        orderBy: { sortOrder: 'asc' },
-      },
-      timelines: {
-        include: {
-          tracks: { include: { clips: true }, orderBy: { sortOrder: 'asc' } },
-          markers: { orderBy: { time: 'asc' } },
-        },
-        orderBy: { createdAt: 'asc' },
-      },
+      bins: { include: { children: true, _count: { select: { mediaAssets: true } } } },
+      timelines: { include: { tracks: { include: { clips: true } }, markers: true } },
       members: {
         include: { user: { select: { id: true, displayName: true, avatarUrl: true, email: true } } },
       },
       _count: { select: { aiJobs: true, publishJobs: true, comments: true } },
     },
   });
-  assertFound(project, 'Project');
+  if (!project) throw new NotFoundError('Project');
   res.json({ project });
 });
 
@@ -131,7 +119,7 @@ router.get('/:id', requireProjectAccess('VIEWER'), async (req: Request, res: Res
 router.patch(
   '/:id',
   requireProjectAccess('EDITOR'),
-  validate(schemas.updateProject),
+  validateAll({ params: uuidParam, body: schemas.updateProject }),
   async (req: Request, res: Response) => {
     const project = await db.project.update({
       where: { id: req.params['id'] },
@@ -142,8 +130,7 @@ router.patch(
 );
 
 // ─── DELETE /projects/:id ──────────────────────────────────────────────────────
-router.delete('/:id', requireProjectAccess('OWNER'), async (req: Request, res: Response) => {
-  // Soft delete
+router.delete('/:id', requireProjectAccess('OWNER'), validate(uuidParam, 'params'), async (req: Request, res: Response) => {
   await db.project.update({
     where: { id: req.params['id'] },
     data: { deletedAt: new Date(), status: 'DELETED' },
@@ -152,43 +139,43 @@ router.delete('/:id', requireProjectAccess('OWNER'), async (req: Request, res: R
 });
 
 // ─── POST /projects/:id/duplicate ──────────────────────────────────────────────
-router.post('/:id/duplicate', requireProjectAccess('EDITOR'), async (req: Request, res: Response) => {
-  const source = await db.project.findUnique({
-    where: { id: req.params['id'] },
-    include: { bins: true, timelines: { include: { tracks: true } } },
-  });
-  assertFound(source, 'Project');
+router.post(
+  '/:id/duplicate',
+  requireProjectAccess('EDITOR'),
+  validateAll({ params: uuidParam, body: schemas.duplicateProject }),
+  async (req: Request, res: Response) => {
+    const source = await db.project.findUnique({
+      where: { id: req.params['id'] },
+      include: { bins: true, timelines: { include: { tracks: true } } },
+    });
+    if (!source) throw new NotFoundError('Project');
 
-  const newName = req.body.name || `${source.name} (Copy)`;
+    const newName = req.body.name || `${source.name} (Copy)`;
 
-  const project = await db.project.create({
-    data: {
-      name: newName,
-      description: source.description,
-      orgId: source.orgId,
-      frameRate: source.frameRate,
-      width: source.width,
-      height: source.height,
-      sampleRate: source.sampleRate,
-      colorSpace: source.colorSpace,
-      tags: source.tags,
-      members: { create: { userId: req.user!.id, role: 'OWNER' } },
-    },
-  });
+    const project = await db.project.create({
+      data: {
+        name: newName,
+        description: source.description,
+        orgId: source.orgId,
+        frameRate: source.frameRate,
+        width: source.width,
+        height: source.height,
+        sampleRate: source.sampleRate,
+        colorSpace: source.colorSpace,
+        tags: source.tags,
+        members: { create: { userId: req.user!.id, role: 'OWNER' } },
+      },
+    });
 
-  res.status(201).json({ project });
-});
+    res.status(201).json({ project });
+  }
+);
 
 // ─── GET /projects/:projectId/members ──────────────────────────────────────────
-router.get('/:projectId/members', requireProjectAccess('VIEWER'), async (req: Request, res: Response) => {
+router.get('/:projectId/members', requireProjectAccess('VIEWER'), validate(projectIdParam, 'params'), async (req: Request, res: Response) => {
   const members = await db.projectMember.findMany({
     where: { projectId: req.params['projectId'] },
-    include: {
-      user: {
-        select: { id: true, displayName: true, email: true, avatarUrl: true, lastActiveAt: true },
-      },
-    },
-    orderBy: { joinedAt: 'asc' },
+    include: { user: { select: { id: true, displayName: true, email: true, avatarUrl: true, lastActiveAt: true } } },
   });
   res.json({ members });
 });
@@ -197,7 +184,7 @@ router.get('/:projectId/members', requireProjectAccess('VIEWER'), async (req: Re
 router.post(
   '/:projectId/members',
   requireProjectAccess('ADMIN'),
-  validate(schemas.addProjectMember),
+  validateAll({ params: projectIdParam, body: schemas.addProjectMember }),
   async (req: Request, res: Response) => {
     const { email, role } = req.body;
     const user = await db.user.findUnique({ where: { email: email.toLowerCase().trim() } });
@@ -214,28 +201,33 @@ router.post(
 );
 
 // ─── DELETE /projects/:projectId/members/:userId ────────────────────────────────
-router.delete('/:projectId/members/:userId', requireProjectAccess('ADMIN'), async (req: Request, res: Response) => {
-  // Cannot remove yourself
-  if (req.params['userId'] === req.user!.id) {
-    throw new ForbiddenError('Cannot remove yourself from the project');
-  }
+router.delete(
+  '/:projectId/members/:userId',
+  requireProjectAccess('ADMIN'),
+  validate(projectAndUserParams, 'params'),
+  async (req: Request, res: Response) => {
+    // Cannot remove yourself
+    if (req.params['userId'] === req.user!.id) {
+      throw new ForbiddenError('Cannot remove yourself from the project');
+    }
 
-  // Cannot remove the owner
-  const targetMember = await db.projectMember.findUnique({
-    where: { projectId_userId: { projectId: req.params['projectId'], userId: req.params['userId'] } },
-  });
-  if (targetMember?.role === 'OWNER') {
-    throw new ForbiddenError('Cannot remove the project owner');
-  }
+    // Cannot remove the owner
+    const targetMember = await db.projectMember.findUnique({
+      where: { projectId_userId: { projectId: req.params['projectId'], userId: req.params['userId'] } },
+    });
+    if (targetMember?.role === 'OWNER') {
+      throw new ForbiddenError('Cannot remove the project owner');
+    }
 
-  await db.projectMember.delete({
-    where: { projectId_userId: { projectId: req.params['projectId'], userId: req.params['userId'] } },
-  });
-  res.status(204).send();
-});
+    await db.projectMember.delete({
+      where: { projectId_userId: { projectId: req.params['projectId'], userId: req.params['userId'] } },
+    });
+    res.status(204).send();
+  }
+);
 
 // ─── GET /projects/:projectId/versions ─────────────────────────────────────────
-router.get('/:projectId/versions', requireProjectAccess('VIEWER'), async (req: Request, res: Response) => {
+router.get('/:projectId/versions', requireProjectAccess('VIEWER'), validate(projectIdParam, 'params'), async (req: Request, res: Response) => {
   const versions = await db.projectVersion.findMany({
     where: { projectId: req.params['projectId'] },
     orderBy: { createdAt: 'desc' },
@@ -248,7 +240,7 @@ router.get('/:projectId/versions', requireProjectAccess('VIEWER'), async (req: R
 router.post(
   '/:projectId/versions',
   requireProjectAccess('EDITOR'),
-  validate(schemas.createVersion),
+  validateAll({ params: projectIdParam, body: schemas.createVersion }),
   async (req: Request, res: Response) => {
     const { version, notes } = req.body;
     const snap = await db.projectVersion.create({

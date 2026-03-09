@@ -16,6 +16,7 @@ import type {
   UsageRecord,
 } from './contracts-types';
 import type { IContentCoreAdapter } from './IContentCoreAdapter';
+import { NotFoundError } from './AdapterError';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -391,7 +392,7 @@ export class MockContentCoreAdapter implements IContentCoreAdapter {
   ): Promise<ArchiveResult> {
     const asset = this.assets.get(assetId);
     if (!asset) {
-      throw new Error(`Asset not found: ${assetId}`);
+      throw new NotFoundError('content-core', 'Asset', assetId);
     }
     return { ...asset };
   }
@@ -399,7 +400,7 @@ export class MockContentCoreAdapter implements IContentCoreAdapter {
   async getRightsStatus(assetId: string): Promise<RightsStatus> {
     const asset = this.assets.get(assetId);
     if (!asset) {
-      throw new Error(`Asset not found: ${assetId}`);
+      throw new NotFoundError('content-core', 'Asset', assetId);
     }
     return asset.rightsStatus;
   }
@@ -407,7 +408,7 @@ export class MockContentCoreAdapter implements IContentCoreAdapter {
   async getUsageHistory(assetId: string): Promise<UsageRecord[]> {
     const asset = this.assets.get(assetId);
     if (!asset) {
-      throw new Error(`Asset not found: ${assetId}`);
+      throw new NotFoundError('content-core', 'Asset', assetId);
     }
     const records = this.usageRecords.get(assetId) ?? [];
     return records.map((r) => ({ ...r }));

@@ -182,28 +182,36 @@ const DEFAULT_EXPORT_OPTIONS: AAFExportOptions = {
 // ─── Helper: seconds to frames ──────────────────────────────────────────────
 
 function secondsToFrames(seconds: number, frameRate: number): number {
-  return Math.round(seconds * frameRate);
+  return Math.floor(seconds * frameRate);
 }
 
 function framesToTimecode(totalFrames: number, frameRate: number, dropFrame: boolean): AAFTimecode {
-  let frames = totalFrames;
+  const nominalRate = Math.round(frameRate);
+  let frames = Math.max(0, totalFrames);
 
-  if (dropFrame && (frameRate === 29.97 || frameRate === 30)) {
-    // Drop-frame calculation for 29.97 / 30fps
-    const dropFramesPerMinute = 2;
-    const framesPerMinute = Math.round(frameRate * 60) - dropFramesPerMinute;
-    const framesPerTenMinutes = Math.round(frameRate * 60 * 10);
+  if (dropFrame && (Math.abs(frameRate - 29.97) < 0.05 || nominalRate === 30)) {
+    // Standard SMPTE drop-frame algorithm:
+    // At 29.97 DF, frame numbers 0 and 1 are skipped at the start of each
+    // minute EXCEPT every 10th minute. This means 17,982 frames per 10 min
+    // instead of 18,000.
+    const dropFrames = 2;
+    const framesPerMinNominal = nominalRate * 60;            // 1800
+    const framesPerMinActual = framesPerMinNominal - dropFrames; // 1798
+    const framesPer10Min = framesPerMinNominal * 10 - dropFrames * 9; // 17982
 
-    const tenMinuteBlocks = Math.floor(frames / framesPerTenMinutes);
-    const remainingFrames = frames % framesPerTenMinutes;
+    const d = Math.floor(frames / framesPer10Min);
+    const m = frames % framesPer10Min;
 
-    // Adjust for dropped frames
-    frames += dropFramesPerMinute * (tenMinuteBlocks * 9 + Math.max(0, Math.floor((remainingFrames - dropFramesPerMinute) / framesPerMinute)));
+    // Add back the dropped frame numbers
+    if (m >= dropFrames) {
+      frames += dropFrames * (d * 9 + Math.floor((m - dropFrames) / framesPerMinActual));
+    } else {
+      frames += dropFrames * d * 9;
+    }
   }
 
-  const effectiveRate = Math.round(frameRate);
-  const f = frames % effectiveRate;
-  const totalSeconds = Math.floor(frames / effectiveRate);
+  const f = frames % nominalRate;
+  const totalSeconds = Math.floor(frames / nominalRate);
   const s = totalSeconds % 60;
   const totalMinutes = Math.floor(totalSeconds / 60);
   const m = totalMinutes % 60;
@@ -223,7 +231,16 @@ function timecodeToString(tc: AAFTimecode): string {
 
 function timecodeToFrames(tc: AAFTimecode): number {
   const rate = Math.round(tc.frameRate);
-  return tc.hours * 3600 * rate + tc.minutes * 60 * rate + tc.seconds * rate + tc.frames;
+  let totalFrames = tc.hours * 3600 * rate + tc.minutes * 60 * rate + tc.seconds * rate + tc.frames;
+
+  if (tc.dropFrame && (Math.abs(tc.frameRate - 29.97) < 0.05 || rate === 30)) {
+    // Reverse drop-frame: subtract dropped frame numbers to get actual frame count
+    const dropFrames = 2;
+    const totalMinutes = tc.hours * 60 + tc.minutes;
+    totalFrames -= dropFrames * (totalMinutes - Math.floor(totalMinutes / 10));
+  }
+
+  return totalFrames;
 }
 
 // ─── AAFExporter class ──────────────────────────────────────────────────────
@@ -417,10 +434,10 @@ export class AAFExporter {
     const descriptors: AAFClipDescriptor[] = [];
 
     for (let trackIdx = 0; trackIdx < tracks.length; trackIdx++) {
-      const track = tracks[trackIdx];
-      const isAudio = track!.type === 'AUDIO';
+      const track = tracks[trackIdx]!;
+      const isAudio = track.type === 'AUDIO';
 
-      for (const clip of track!.clips) {
+      for (const clip of track.clips) {
         const asset = clip.assetId ? this.assetMap.get(clip.assetId) : undefined;
         const reelName = asset?.technicalMetadata?.reelName ?? asset?.relinkIdentity?.reelName ?? 'AX';
         const sourceTC = asset?.technicalMetadata?.timecodeStart;
@@ -432,7 +449,7 @@ export class AAFExporter {
           if (isAudio) {
             effects.push({
               name: 'AudioClipGain',
-              value: track!.volume,
+              value: track.volume,
               interpolation: 'constant',
             });
           }
@@ -451,7 +468,7 @@ export class AAFExporter {
           uid: clip.id,
           clipName: clip.name,
           trackIndex: trackIdx,
-          trackName: track!.name,
+          trackName: track.name,
           trackType: isAudio ? 'audio' : 'video',
           timelineStartFrame: secondsToFrames(clip.startTime, frameRate),
           timelineEndFrame: secondsToFrames(clip.endTime, frameRate),
@@ -460,7 +477,7 @@ export class AAFExporter {
           reelName,
           sourceMediaRef: clip.assetId ?? '',
           speedRatio: 1.0,
-          audioClipGainDb: isAudio ? this.volumeToDb(track!.volume) : undefined,
+          audioClipGainDb: isAudio ? this.volumeToDb(track.volume) : undefined,
           audioPan: isAudio ? 0 : undefined,
           effects,
           sourceTimecode: sourceTC
@@ -476,7 +493,7 @@ export class AAFExporter {
     return descriptors;
   }
 
-  private buildMarkerDescriptors(frameRate: number, dropFrame: boolean): AAFMarkerDescriptor[] {
+  private buildMarkerDescriptors(frameRate: number, _dropFrame: boolean): AAFMarkerDescriptor[] {
     return this.project.markers.map((marker) => ({
       uid: marker.id,
       label: marker.label,

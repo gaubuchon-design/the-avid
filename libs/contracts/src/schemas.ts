@@ -296,13 +296,17 @@ export const RenderJobStatusSchema = z.enum([
   'queued', 'assigned', 'rendering', 'completed', 'failed', 'cancelled',
 ]);
 
+export const RenderJobTypeSchema = z.enum([
+  'encode', 'transcode', 'effects', 'composite',
+]);
+
 export const RenderJobSchema = z.object({
   id: nonEmpty,
   sequenceId: nonEmpty,
-  type: z.enum(['encode', 'transcode', 'effects', 'composite']),
+  type: RenderJobTypeSchema,
   priority: z.number().int().min(0).max(100),
   status: RenderJobStatusSchema,
-  deliverySpec: DeliverySpecSchema.optional(),
+  deliverySpec: DeliverySpecSchema.nullable(),
   startFrame: z.number().int().nonnegative(),
   endFrame: z.number().int().nonnegative(),
   assignedNodeId: z.string().nullable(),
@@ -316,6 +320,28 @@ export const RenderJobSchema = z.object({
   maxRetries: z.number().int().nonnegative(),
 }).readonly();
 
+export const RenderProgressSchema = z.object({
+  jobId: nonEmpty,
+  nodeId: nonEmpty,
+  progress: z.number().min(0).max(100),
+  currentFrame: z.number().int().nonnegative(),
+  totalFrames: z.number().int().nonnegative(),
+  fps: z.number().nonnegative(),
+  eta: z.string().nullable(),
+  timestamp: isoTimestamp,
+}).readonly();
+
+export const RenderQueueStatsSchema = z.object({
+  queued: z.number().int().nonnegative(),
+  rendering: z.number().int().nonnegative(),
+  completed: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  nodesOnline: z.number().int().nonnegative(),
+  nodesBusy: z.number().int().nonnegative(),
+  avgFps: z.number().nonnegative(),
+  estimatedDrainTimeSec: z.number().nonnegative().nullable(),
+}).readonly();
+
 // -- API version -------------------------------------------------------------
 
 export const ApiVersionSchema = z.object({
@@ -323,3 +349,94 @@ export const ApiVersionSchema = z.object({
   minor: z.number().int().nonnegative(),
   patch: z.number().int().nonnegative(),
 }).readonly();
+
+// -- Event schemas -----------------------------------------------------------
+
+const EventEnvelopeBase = z.object({
+  id: nonEmpty,
+  timestamp: isoTimestamp,
+  correlationId: nonEmpty,
+  source: nonEmpty,
+});
+
+export const EventEnvelopeSchema = EventEnvelopeBase.readonly();
+
+export const PlatformEventSchema = z.discriminatedUnion('kind', [
+  EventEnvelopeBase.extend({
+    kind: z.literal('agent.plan.created'),
+    payload: z.object({
+      planId: nonEmpty,
+      intent: nonEmpty,
+      stepCount: z.number().int().nonnegative(),
+      tokensEstimated: z.number().nonnegative(),
+    }),
+  }),
+  EventEnvelopeBase.extend({
+    kind: z.literal('agent.plan.approved'),
+    payload: z.object({ planId: nonEmpty, approvedBy: nonEmpty }),
+  }),
+  EventEnvelopeBase.extend({
+    kind: z.literal('agent.plan.rejected'),
+    payload: z.object({ planId: nonEmpty, rejectedBy: nonEmpty, reason: z.string().optional() }),
+  }),
+  EventEnvelopeBase.extend({
+    kind: z.literal('agent.step.started'),
+    payload: z.object({ planId: nonEmpty, stepId: nonEmpty, stepIndex: z.number().int(), toolName: nonEmpty }),
+  }),
+  EventEnvelopeBase.extend({
+    kind: z.literal('agent.step.completed'),
+    payload: z.object({ planId: nonEmpty, stepId: nonEmpty, stepIndex: z.number().int(), toolName: nonEmpty, durationMs: z.number(), tokensCost: z.number() }),
+  }),
+  EventEnvelopeBase.extend({
+    kind: z.literal('agent.step.failed'),
+    payload: z.object({ planId: nonEmpty, stepId: nonEmpty, stepIndex: z.number().int(), toolName: nonEmpty, error: z.string(), recoverable: z.boolean() }),
+  }),
+  EventEnvelopeBase.extend({
+    kind: z.literal('render.job.queued'),
+    payload: z.object({ jobId: nonEmpty, sequenceId: nonEmpty, priority: z.number(), estimatedFrames: z.number() }),
+  }),
+  EventEnvelopeBase.extend({
+    kind: z.literal('render.job.progress'),
+    payload: z.object({ jobId: nonEmpty, progress: z.number(), currentFrame: z.number(), totalFrames: z.number(), fps: z.number(), eta: z.string().nullable() }),
+  }),
+  EventEnvelopeBase.extend({
+    kind: z.literal('render.job.completed'),
+    payload: z.object({ jobId: nonEmpty, outputUri: nonEmpty, durationMs: z.number(), fileSizeBytes: z.number() }),
+  }),
+  EventEnvelopeBase.extend({
+    kind: z.literal('render.job.failed'),
+    payload: z.object({ jobId: nonEmpty, error: z.string(), retryable: z.boolean(), attemptNumber: z.number() }),
+  }),
+  EventEnvelopeBase.extend({
+    kind: z.literal('mesh.peer.joined'),
+    payload: z.object({ nodeId: nonEmpty, hostname: z.string(), capabilities: z.array(z.string()) }),
+  }),
+  EventEnvelopeBase.extend({
+    kind: z.literal('mesh.peer.left'),
+    payload: z.object({ nodeId: nonEmpty, reason: z.enum(['graceful', 'timeout', 'error']) }),
+  }),
+  EventEnvelopeBase.extend({
+    kind: z.literal('mesh.shard.replicated'),
+    payload: z.object({ shardId: nonEmpty, sourceNodeId: nonEmpty, targetNodeId: nonEmpty, vectorCount: z.number() }),
+  }),
+  EventEnvelopeBase.extend({
+    kind: z.literal('publish.started'),
+    payload: z.object({ jobId: nonEmpty, platform: z.string(), sequenceId: nonEmpty }),
+  }),
+  EventEnvelopeBase.extend({
+    kind: z.literal('publish.completed'),
+    payload: z.object({ jobId: nonEmpty, platform: z.string(), publicUrl: z.string() }),
+  }),
+  EventEnvelopeBase.extend({
+    kind: z.literal('publish.failed'),
+    payload: z.object({ jobId: nonEmpty, platform: z.string(), error: z.string() }),
+  }),
+  EventEnvelopeBase.extend({
+    kind: z.literal('tokens.consumed'),
+    payload: z.object({ walletId: nonEmpty, jobId: nonEmpty, category: z.string(), amount: z.number(), remainingBalance: z.number() }),
+  }),
+  EventEnvelopeBase.extend({
+    kind: z.literal('tokens.insufficient'),
+    payload: z.object({ walletId: nonEmpty, requiredAmount: z.number(), currentBalance: z.number(), category: z.string() }),
+  }),
+]);

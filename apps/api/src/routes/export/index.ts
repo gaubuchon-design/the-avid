@@ -1,7 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { authenticate, requireProjectAccess } from '../../middleware/auth';
-import { validate, schemas } from '../../utils/validation';
-import { BadRequestError, assertValid } from '../../utils/errors';
+import {
+  validate, validateAll, schemas,
+  projectIdParam, projectIdAndBinIdParams,
+} from '../../utils/validation';
+import { NotFoundError, BadRequestError } from '../../utils/errors';
 
 const router = Router();
 router.use(authenticate);
@@ -19,19 +22,24 @@ router.use(authenticate);
 router.post(
   '/projects/:projectId/export/aaf',
   requireProjectAccess('EDITOR'),
-  validate(schemas.exportAAF),
+  validateAll({ params: projectIdParam, body: schemas.exportAAF }),
   async (req: Request, res: Response) => {
     const { projectId } = req.params;
-    const options = req.body;
+    const {
+      format, embedMedia, includeMarkers, includeEffects,
+      includeMetadata, frameRate, dropFrame, trackFilter,
+    } = req.body;
 
-    // In production: load project, instantiate AAFExporter, generate composition
     const exportJob = {
       id: `aaf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       projectId,
-      format: options.format,
-      status: 'pending' as const,
+      format,
+      status: 'pending',
       createdAt: new Date().toISOString(),
-      options,
+      options: {
+        embedMedia, includeMarkers, includeEffects,
+        includeMetadata, frameRate, dropFrame, trackFilter,
+      },
     };
 
     res.status(201).json({ exportJob });
@@ -45,17 +53,15 @@ router.post(
 router.post(
   '/projects/:projectId/import/aaf',
   requireProjectAccess('EDITOR'),
+  validateAll({ params: projectIdParam, body: schemas.importAAFComposition }),
   async (req: Request, res: Response) => {
     const { projectId } = req.params;
-    const { composition } = req.body;
-
-    assertValid(!!composition, 'composition data is required');
 
     const importResult = {
       projectId,
       tracksImported: 0,
       markersImported: 0,
-      status: 'pending' as const,
+      status: 'pending',
       createdAt: new Date().toISOString(),
     };
 
@@ -72,19 +78,25 @@ router.post(
 router.post(
   '/projects/:projectId/export/edl',
   requireProjectAccess('VIEWER'),
-  validate(schemas.exportEDL),
+  validateAll({ params: projectIdParam, body: schemas.exportEDL }),
   async (req: Request, res: Response) => {
     const { projectId } = req.params;
-    const options = req.body;
+    const {
+      format, title, frameRate, timecodeMode,
+      includeComments, includeSpeedChanges, trackTypes,
+    } = req.body;
 
     const exportResult = {
       id: `edl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       projectId,
-      format: options.format,
-      status: 'completed' as const,
+      format,
+      status: 'completed',
       content: '', // Would contain the actual EDL/ALE/CSV text
       createdAt: new Date().toISOString(),
-      options,
+      options: {
+        title, frameRate, timecodeMode,
+        includeComments, includeSpeedChanges, trackTypes,
+      },
     };
 
     res.status(200).json({ exportResult });
@@ -99,10 +111,10 @@ router.post(
 router.get(
   '/projects/:projectId/relink/status',
   requireProjectAccess('VIEWER'),
+  validate(projectIdParam, 'params'),
   async (req: Request, res: Response) => {
     const { projectId } = req.params;
 
-    // In production: scan project's media assets using RelinkEngine
     res.json({
       projectId,
       offlineCount: 0,
@@ -118,19 +130,14 @@ router.get(
 router.post(
   '/projects/:projectId/relink/scan',
   requireProjectAccess('EDITOR'),
+  validateAll({ params: projectIdParam, body: schemas.relinkScan }),
   async (req: Request, res: Response) => {
     const { projectId } = req.params;
-    const { scanPaths } = req.body;
-
-    assertValid(
-      Array.isArray(scanPaths) && scanPaths.length > 0,
-      'scanPaths must be a non-empty array'
-    );
 
     const scanResult = {
       id: `scan_${Date.now()}`,
       projectId,
-      status: 'pending' as const,
+      status: 'pending',
       filesScanned: 0,
       proposalsGenerated: 0,
       createdAt: new Date().toISOString(),
@@ -146,11 +153,10 @@ router.post(
 router.post(
   '/projects/:projectId/relink/apply',
   requireProjectAccess('EDITOR'),
+  validateAll({ params: projectIdParam, body: schemas.relinkApply }),
   async (req: Request, res: Response) => {
     const { projectId } = req.params;
     const { proposals } = req.body;
-
-    assertValid(Array.isArray(proposals), 'proposals must be an array');
 
     const relinkResult = {
       projectId,
@@ -158,7 +164,7 @@ router.post(
       relinked: 0,
       stillOffline: 0,
       conflicts: 0,
-      status: 'pending' as const,
+      status: 'pending',
     };
 
     res.status(200).json({ relinkResult });
@@ -173,23 +179,22 @@ router.post(
 router.post(
   '/projects/:projectId/export/stems',
   requireProjectAccess('EDITOR'),
-  validate(schemas.exportStems as any),
+  validateAll({ params: projectIdParam, body: schemas.exportStems }),
   async (req: Request, res: Response) => {
     const { projectId } = req.params;
-    const options = req.body;
+    const {
+      preset, format, bitDepth, sampleRate,
+      embedTimecode, normalize, includeFullMix,
+    } = req.body;
 
     const exportResult = {
       id: `stems_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       projectId,
-      preset: options.preset,
-      status: 'pending' as const,
+      preset,
+      status: 'pending',
       config: {
-        format: options.format,
-        bitDepth: options.bitDepth,
-        sampleRate: options.sampleRate,
-        embedTimecode: options.embedTimecode,
-        normalize: options.normalize,
-        includeFullMix: options.includeFullMix,
+        format, bitDepth, sampleRate,
+        embedTimecode, normalize, includeFullMix,
       },
       createdAt: new Date().toISOString(),
     };
@@ -204,12 +209,13 @@ router.post(
 router.get(
   '/projects/:projectId/export/stems/presets',
   requireProjectAccess('VIEWER'),
+  validate(projectIdParam, 'params'),
   async (_req: Request, res: Response) => {
     const presets = [
-      { id: 'film-tv', name: 'Film/TV Standard', stems: ['DX', 'MX', 'SFX', 'BG', 'Full Mix'] },
-      { id: 'broadcast', name: 'Broadcast DE/ME', stems: ['DE', 'ME', 'Full Mix'] },
-      { id: 'podcast', name: 'Podcast Simple', stems: ['Dialogue', 'Music', 'Full Mix'] },
-      { id: 'music-video', name: 'Music Video', stems: ['Vocal', 'Instrumental', 'Full Mix'] },
+      'Film/TV Standard',
+      'Broadcast DE/ME',
+      'Podcast Simple',
+      'Music Video',
     ];
 
     res.json({ presets });
@@ -224,14 +230,10 @@ router.get(
 router.post(
   '/projects/:projectId/multicam',
   requireProjectAccess('EDITOR'),
+  validateAll({ params: projectIdParam, body: schemas.createMulticam }),
   async (req: Request, res: Response) => {
     const { projectId } = req.params;
     const { name, syncMethod, assetIds } = req.body;
-
-    assertValid(!!name, 'name is required');
-    assertValid(!!syncMethod, 'syncMethod is required');
-    assertValid(Array.isArray(assetIds) && assetIds.length >= 2, 'At least 2 angles (assetIds) are required');
-    assertValid(assetIds.length <= 16, 'Maximum 16 angles allowed');
 
     const multiCamGroup = {
       id: `mcg_${Date.now()}`,
@@ -239,7 +241,7 @@ router.post(
       name,
       syncMethod,
       angleCount: assetIds.length,
-      status: 'syncing' as const,
+      status: 'syncing',
       createdAt: new Date().toISOString(),
     };
 
@@ -255,8 +257,9 @@ router.post(
 router.post(
   '/projects/:projectId/bins/:binId/lock',
   requireProjectAccess('EDITOR'),
+  validateAll({ params: projectIdAndBinIdParams, body: schemas.binLockMessage }),
   async (req: Request, res: Response) => {
-    const { binId } = req.params;
+    const { projectId, binId } = req.params;
     const { message } = req.body;
     const userId = req.user!.id;
     const displayName = req.user!.displayName;
@@ -282,8 +285,10 @@ router.post(
 router.delete(
   '/projects/:projectId/bins/:binId/lock',
   requireProjectAccess('EDITOR'),
+  validate(projectIdAndBinIdParams, 'params'),
   async (req: Request, res: Response) => {
     const { binId } = req.params;
+
     res.status(200).json({
       released: true,
       binId,
@@ -298,7 +303,8 @@ router.delete(
 router.get(
   '/projects/:projectId/bins/locks',
   requireProjectAccess('VIEWER'),
-  async (_req: Request, res: Response) => {
+  validate(projectIdParam, 'params'),
+  async (req: Request, res: Response) => {
     res.json({ locks: [] });
   },
 );
@@ -311,11 +317,9 @@ router.get(
 router.post(
   '/projects/:projectId/sequences/compare',
   requireProjectAccess('VIEWER'),
+  validateAll({ params: projectIdParam, body: schemas.sequenceCompare }),
   async (req: Request, res: Response) => {
     const { sequenceA, sequenceB } = req.body;
-
-    assertValid(!!sequenceA, 'sequenceA is required');
-    assertValid(!!sequenceB, 'sequenceB is required');
 
     const diffResult = {
       nameA: sequenceA.name ?? 'Sequence A',

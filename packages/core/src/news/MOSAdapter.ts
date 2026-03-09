@@ -399,14 +399,15 @@ export class MOSAdapter {
     if (idx < 0) return;
 
     const [story] = ro.stories.splice(idx, 1);
+    if (!story) return;
     if (!afterStoryId) {
-      ro.stories.unshift(story!);
+      ro.stories.unshift(story);
     } else {
       const targetIdx = ro.stories.findIndex((s) => s.storyId === afterStoryId);
       if (targetIdx >= 0) {
-        ro.stories.splice(targetIdx + 1, 0, story!);
+        ro.stories.splice(targetIdx + 1, 0, story);
       } else {
-        ro.stories.push(story!);
+        ro.stories.push(story);
       }
     }
   }
@@ -418,7 +419,7 @@ export class MOSAdapter {
     const idxA = ro.stories.findIndex((s) => s.storyId === idA);
     const idxB = ro.stories.findIndex((s) => s.storyId === idB);
     if (idxA >= 0 && idxB >= 0) {
-      [ro.stories[idxA], ro.stories[idxB]] = [ro.stories[idxB]!, ro.stories[idxA]!];
+      [ro.stories[idxA]!, ro.stories[idxB]!] = [ro.stories[idxB]!, ro.stories[idxA]!];
     }
   }
 

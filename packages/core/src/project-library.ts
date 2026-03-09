@@ -1031,7 +1031,7 @@ export function buildProject(options: CreateProjectOptions = {}): EditorProject 
   const tracks = seedTracksFromBins(createTemplateTracks(template), bins);
   const transcript = createTranscriptCues(bins, template);
   const now = new Date().toISOString();
-  const name = options.name ?? `Untitled ${template[0]!.toUpperCase()}${template.slice(1)}`;
+  const name = options.name ?? `Untitled ${(template[0] ?? '').toUpperCase()}${template.slice(1)}`;
 
   return normalizeProject({
     schemaVersion: PROJECT_SCHEMA_VERSION,

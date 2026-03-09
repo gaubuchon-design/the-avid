@@ -145,7 +145,7 @@ export class CaptionValidator {
    * Validates captions against the specified standard(s).
    */
   validate(cues: CaptionCue[], standard?: CaptionStandard): CaptionValidationResult {
-    const targetStandard = standard ?? this.config.standards[0] ?? 'fcc';
+    const targetStandard: CaptionStandard = standard ?? this.config.standards[0] ?? 'fcc';
     const rules = STANDARD_RULES[targetStandard];
     const violations: CaptionViolation[] = [];
 
@@ -345,7 +345,7 @@ export class CaptionValidator {
    * Auto-fixes common caption violations.
    */
   autoFix(cues: CaptionCue[], standard?: CaptionStandard): CaptionAutoFixResult {
-    const targetStandard = standard ?? this.config.standards[0] ?? 'fcc';
+    const targetStandard: CaptionStandard = standard ?? this.config.standards[0] ?? 'fcc';
     const rules = STANDARD_RULES[targetStandard];
     const fixedCues: CaptionCue[] = cues.map((cue) => ({ ...cue }));
     let fixesApplied = 0;

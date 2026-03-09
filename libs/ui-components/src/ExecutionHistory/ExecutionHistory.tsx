@@ -1,17 +1,8 @@
-import React, { forwardRef, useMemo } from 'react';
+import React, { forwardRef } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-/** Valid lifecycle statuses for a history entry. */
-export type HistoryEntryStatus =
-  | 'completed'
-  | 'failed'
-  | 'executing'
-  | 'planning'
-  | 'cancelled'
-  | 'compensated';
 
 export interface HistoryEntry {
   /** Unique entry identifier. */
@@ -21,7 +12,7 @@ export interface HistoryEntry {
   /** The original user intent. */
   intent: string;
   /** Lifecycle status of the plan. */
-  status: HistoryEntryStatus;
+  status: string;
   /** Number of steps that completed successfully. */
   stepsCompleted: number;
   /** Total number of steps in the plan. */
@@ -43,15 +34,18 @@ export interface ExecutionHistoryProps {
   onViewPlan?: (planId: string) => void;
   /** Called when the user clears the history. */
   onClearHistory?: () => void;
-  /** Additional CSS class names for the root element. */
+  /** Additional CSS class(es) to apply to the root element. */
   className?: string;
-  /** Unique identifier for the root element. */
-  id?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Merge base and optional extra class names. */
+function cx(base: string, extra?: string): string {
+  return extra ? `${base} ${extra}` : base;
+}
 
 /** Maps a status string to a display variant. */
 function statusVariant(status: string): 'success' | 'error' | 'active' | 'muted' {
@@ -66,11 +60,6 @@ function statusVariant(status: string): 'success' | 'error' | 'active' | 'muted'
     default:
       return 'muted';
   }
-}
-
-/** Human-readable status label. */
-function statusLabel(status: string): string {
-  return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
 /** Status icon SVG based on variant. */
@@ -133,13 +122,6 @@ function formatTimestamp(iso: string): string {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-/** Format token count in compact form. */
-function formatTokens(count: number): string {
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
-  if (count >= 10_000) return `${(count / 1_000).toFixed(1)}K`;
-  return count.toLocaleString();
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -147,144 +129,106 @@ function formatTokens(count: number): string {
 /**
  * Scrollable history of past agent executions. Shows status, progress,
  * token usage, and provides undo and inspect affordances.
- *
- * Uses `aria-live` to announce new entries and status changes.
- * All action buttons are keyboard accessible.
  */
-export const ExecutionHistory = forwardRef<HTMLDivElement, ExecutionHistoryProps>(function ExecutionHistory(
-  {
-    entries,
-    onUndo,
-    onViewPlan,
-    onClearHistory,
-    className,
-    id,
-  },
-  ref,
-) {
-  // Compute summary for screen readers
-  const summary = useMemo(() => {
-    const completed = entries.filter((e) => e.status === 'completed').length;
-    const failed = entries.filter((e) => e.status === 'failed').length;
-    const active = entries.filter((e) => e.status === 'executing' || e.status === 'planning').length;
-    return `${entries.length} executions: ${completed} completed, ${failed} failed, ${active} in progress`;
-  }, [entries]);
+export const ExecutionHistory = forwardRef<HTMLDivElement, ExecutionHistoryProps>(
+  function ExecutionHistory(
+    {
+      entries,
+      onUndo,
+      onViewPlan,
+      onClearHistory,
+      className,
+    },
+    ref,
+  ) {
+    return (
+      <div ref={ref} className={cx('execution-history', className)} role="region" aria-label="Execution history">
+        {/* -- Header --------------------------------------------------- */}
+        <div className="execution-history-header">
+          <span className="execution-history-title">History</span>
+          {onClearHistory && entries.length > 0 && (
+            <button
+              type="button"
+              className="execution-history-clear"
+              onClick={onClearHistory}
+              aria-label="Clear execution history"
+              title="Clear history"
+            >
+              Clear
+            </button>
+          )}
+        </div>
 
-  return (
-    <div
-      ref={ref}
-      id={id}
-      className={`execution-history${className ? ` ${className}` : ''}`}
-      role="region"
-      aria-label="Execution history"
-      data-testid="execution-history"
-    >
-      {/* -- Header -------------------------------------------------------- */}
-      <div className="execution-history-header">
-        <span className="execution-history-title" id={id ? `${id}-title` : 'execution-history-title'}>
-          History
-        </span>
-        {onClearHistory && entries.length > 0 && (
-          <button
-            type="button"
-            className="execution-history-clear"
-            onClick={onClearHistory}
-            aria-label="Clear execution history"
-            title="Clear history"
-          >
-            Clear
-          </button>
+        {/* -- Empty state ----------------------------------------------- */}
+        {entries.length === 0 && (
+          <div className="execution-history-empty" role="status">
+            No executions yet.
+          </div>
+        )}
+
+        {/* -- Entry list ------------------------------------------------ */}
+        {entries.length > 0 && (
+          <ul className="execution-history-list" aria-label="Past executions">
+            {entries.map((entry) => {
+              const variant = statusVariant(entry.status);
+              return (
+                <li key={entry.id} className="history-entry" aria-label={`${entry.intent} - ${entry.status}`}>
+                  <span className={`history-entry-status history-entry-status--${variant}`}>
+                    <StatusIcon status={entry.status} />
+                  </span>
+
+                  <div className="history-entry-body">
+                    <span className="history-entry-intent">{entry.intent}</span>
+
+                    <div className="history-entry-meta">
+                      <span className="history-entry-progress">
+                        {entry.stepsCompleted}/{entry.totalSteps} steps
+                      </span>
+                      <span className="history-entry-tokens">
+                        {entry.tokensUsed.toLocaleString()} tokens
+                      </span>
+                      <span className="history-entry-time">
+                        {formatTimestamp(entry.createdAt)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="history-entry-actions">
+                    {onViewPlan && (
+                      <button
+                        type="button"
+                        className="history-view-btn"
+                        onClick={() => onViewPlan(entry.planId)}
+                        aria-label={`View plan: ${entry.intent}`}
+                        title="View plan details"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <circle cx="11" cy="11" r="8" />
+                          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                        </svg>
+                      </button>
+                    )}
+                    {onUndo && entry.canUndo && (
+                      <button
+                        type="button"
+                        className="history-undo-btn"
+                        onClick={() => onUndo(entry.planId)}
+                        aria-label={`Undo: ${entry.intent}`}
+                        title="Undo this execution"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <polyline points="1 4 1 10 7 10" />
+                          <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </div>
-
-      {/* -- Screen reader summary ----------------------------------------- */}
-      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        {summary}
-      </div>
-
-      {/* -- Empty state --------------------------------------------------- */}
-      {entries.length === 0 && (
-        <div className="execution-history-empty" role="status">
-          No executions yet.
-        </div>
-      )}
-
-      {/* -- Entry list ---------------------------------------------------- */}
-      {entries.length > 0 && (
-        <ul
-          className="execution-history-list"
-          aria-label="Past executions"
-          aria-describedby={id ? `${id}-title` : 'execution-history-title'}
-        >
-          {entries.map((entry) => {
-            const variant = statusVariant(entry.status);
-            return (
-              <li
-                key={entry.id}
-                className="history-entry"
-                aria-label={`${entry.intent} - ${statusLabel(entry.status)}: ${entry.stepsCompleted} of ${entry.totalSteps} steps, ${formatTokens(entry.tokensUsed)} tokens`}
-                data-testid="history-entry"
-                data-entry-status={entry.status}
-              >
-                <span
-                  className={`history-entry-status history-entry-status--${variant}`}
-                  role="img"
-                  aria-label={statusLabel(entry.status)}
-                >
-                  <StatusIcon status={entry.status} />
-                </span>
-
-                <div className="history-entry-body">
-                  <span className="history-entry-intent">{entry.intent}</span>
-
-                  <div className="history-entry-meta">
-                    <span className="history-entry-progress">
-                      {entry.stepsCompleted}/{entry.totalSteps} steps
-                    </span>
-                    <span className="history-entry-tokens">
-                      {formatTokens(entry.tokensUsed)} tokens
-                    </span>
-                    <span className="history-entry-time" title={new Date(entry.createdAt).toLocaleString()}>
-                      {formatTimestamp(entry.createdAt)}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="history-entry-actions" role="group" aria-label={`Actions for: ${entry.intent}`}>
-                  {onViewPlan && (
-                    <button
-                      type="button"
-                      className="history-view-btn"
-                      onClick={() => onViewPlan(entry.planId)}
-                      aria-label={`View plan: ${entry.intent}`}
-                      title="View plan details"
-                    >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <circle cx="11" cy="11" r="8" />
-                        <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                      </svg>
-                    </button>
-                  )}
-                  {onUndo && entry.canUndo && (
-                    <button
-                      type="button"
-                      className="history-undo-btn"
-                      onClick={() => onUndo(entry.planId)}
-                      aria-label={`Undo: ${entry.intent}`}
-                      title="Undo this execution"
-                    >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <polyline points="1 4 1 10 7 10" />
-                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
-  );
-});
+    );
+  },
+);

@@ -284,7 +284,7 @@ export class SupersGenerator {
     const system = options?.cgSystem ?? this.defaultSystem;
     const adapter = this.cgAdapters.get(system) ?? this.cgAdapters.get('GENERIC')!;
     const templateId = options?.templateId ?? this.selectTemplate(extracted);
-    const template = this.getTemplate(templateId) ?? DEFAULT_CG_TEMPLATES[0];
+    const template = this.getTemplate(templateId) ?? DEFAULT_CG_TEMPLATES[0]!;
     const trackTarget = options?.trackTarget ?? this.defaultTrackTarget;
 
     return extracted.map((ext, index) => {
@@ -294,7 +294,7 @@ export class SupersGenerator {
         personName: ext.personName,
         title: ext.title,
         location: ext.location,
-        graphicTemplateId: template!.id,
+        graphicTemplateId: template.id,
         cgSystem: system,
         line1: ext.personName,
         line2: ext.title,
@@ -306,8 +306,8 @@ export class SupersGenerator {
 
       return {
         supers: supersData,
-        cgPayload: adapter.buildPayload(supersData, template!),
-        cgCommand: adapter.formatCommand(supersData, template!),
+        cgPayload: adapter.buildPayload(supersData, template),
+        cgCommand: adapter.formatCommand(supersData, template),
       };
     });
   }
@@ -332,7 +332,7 @@ export class SupersGenerator {
     const system = options?.cgSystem ?? this.defaultSystem;
     const adapter = this.cgAdapters.get(system) ?? this.cgAdapters.get('GENERIC')!;
     const templateId = options?.templateId ?? 'lt-standard';
-    const template = this.getTemplate(templateId) ?? DEFAULT_CG_TEMPLATES[0];
+    const template = this.getTemplate(templateId) ?? DEFAULT_CG_TEMPLATES[0]!;
     const trackTarget = options?.trackTarget ?? this.defaultTrackTarget;
 
     const supersData: SupersData = {
@@ -341,7 +341,7 @@ export class SupersGenerator {
       personName: data.personName,
       title: data.title,
       location: data.location,
-      graphicTemplateId: template!.id,
+      graphicTemplateId: template.id,
       cgSystem: system,
       line1: data.personName,
       line2: data.title,
@@ -353,8 +353,8 @@ export class SupersGenerator {
 
     return {
       supers: supersData,
-      cgPayload: adapter.buildPayload(supersData, template!),
-      cgCommand: adapter.formatCommand(supersData, template!),
+      cgPayload: adapter.buildPayload(supersData, template),
+      cgCommand: adapter.formatCommand(supersData, template),
     };
   }
 
@@ -363,9 +363,9 @@ export class SupersGenerator {
   private selectTemplate(extracted: ExtractedSuper[]): string {
     if (extracted.length === 0) return 'lt-standard';
 
-    const first = extracted[0];
-    if (first!.location && first!.title) return 'lt-location';
-    if (first!.title) return 'lt-standard';
+    const first = extracted[0]!;
+    if (first.location && first.title) return 'lt-location';
+    if (first.title) return 'lt-standard';
     return 'fn-name-only';
   }
 
