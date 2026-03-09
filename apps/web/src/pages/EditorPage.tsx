@@ -17,6 +17,7 @@ import { SequenceDialog } from '../components/SequenceDialog/SequenceDialog';
 import { TitleTool } from '../components/TitleTool/TitleTool';
 import { SubtitleEditor } from '../components/SubtitleEditor/SubtitleEditor';
 import { useEditorStore } from '../store/editor.store';
+import { useGlobalKeyboard } from '../hooks/useGlobalKeyboard';
 import { UserSettingsPanel } from '../components/UserSettings/UserSettingsPanel';
 import { useKeyboardAction } from '../hooks/useKeyboardAction';
 import { editEngine } from '../engine/EditEngine';
@@ -45,40 +46,8 @@ const MultiCamPanel = lazy(() => import('../components/MultiCamPanel/MultiCamPan
 const AccessibilityPanel = lazy(() => import('../components/AccessibilityPanel/AccessibilityPanel').then(m => ({ default: m.AccessibilityPanel })));
 const SportsWorkspace = lazy(() => import('../components/SportsWorkspace/SportsWorkspace').then(m => ({ default: m.SportsWorkspace })));
 
-function usePlaybackEngine() {
-  const isPlaying = useEditorStore((s) => s.isPlaying);
-  const rafRef = useRef<number>();
-  const lastTimeRef = useRef<number>();
-
-  useEffect(() => {
-    if (!isPlaying) {
-      if (rafRef.current !== undefined) cancelAnimationFrame(rafRef.current);
-      rafRef.current = undefined;
-      lastTimeRef.current = undefined;
-      return;
-    }
-    const tick = (ts: number) => {
-      if (lastTimeRef.current === undefined) lastTimeRef.current = ts;
-      const dt = (ts - lastTimeRef.current) / 1000;
-      lastTimeRef.current = ts;
-      // Read current values directly from the store to avoid stale closures
-      const state = useEditorStore.getState();
-      const next = state.playheadTime + dt;
-      if (next >= state.duration) {
-        state.setPlayhead(state.duration);
-        state.togglePlay();
-        return;
-      }
-      state.setPlayhead(next);
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      if (rafRef.current !== undefined) cancelAnimationFrame(rafRef.current);
-      rafRef.current = undefined;
-    };
-  }, [isPlaying]);
-}
+// Playback is driven by PlaybackEngine (RAF-based) via editor.store.ts togglePlay().
+// Keyboard dispatch is centralized in useGlobalKeyboard() — called once from EditorPage.
 
 // ─── Workspace Preset Selector ──────────────────────────────────────────────
 
@@ -169,7 +138,8 @@ export function EditorPage() {
   });
   const [showMultiCam, setShowMultiCam] = useState(false);
   const [activePage, setActivePage] = useState<PageId>('edit');
-  usePlaybackEngine();
+  // Centralized keyboard dispatch — routes keys based on active monitor
+  useGlobalKeyboard();
 
   // ─── Register core keyboard actions with the KeyboardEngine ──────────
   const togglePlay = useEditorStore((s) => s.togglePlay);

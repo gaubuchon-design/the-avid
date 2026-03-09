@@ -27,6 +27,7 @@ import protoolsRoutes from './routes/protools';
 import nexisRoutes from './routes/nexis';
 import creatorRoutes from './routes/creator';
 import exportRoutes from './routes/export';
+import renderRoutes from './routes/render';
 
 // ─── App Setup ─────────────────────────────────────────────────────────────────
 const app = express();
@@ -123,6 +124,7 @@ api.use('/protools', protoolsRoutes);
 api.use('/nexis', nexisRoutes);
 api.use('/creator', creatorRoutes);
 api.use('/', exportRoutes);
+api.use('/render', renderRoutes);
 
 app.use('/api/v1', api);
 

@@ -12,11 +12,14 @@ function formatTC(sec: number) {
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}:${String(f).padStart(2,'0')}`;
 }
 
-/** Hook to resolve the first selected clip from the store. */
+/** Hook to resolve the inspected or selected clip from the store.
+ *  Priority: inspectedClipId (set by match-frame / auto-playhead) > selectedClipIds[0].
+ */
 function useSelectedClip(): Clip | null {
-  const { tracks, selectedClipIds } = useEditorStore();
-  if (selectedClipIds.length === 0) return null;
-  return tracks.flatMap(t => t.clips).find(c => c.id === selectedClipIds[0]) ?? null;
+  const { tracks, selectedClipIds, inspectedClipId } = useEditorStore();
+  const targetId = inspectedClipId ?? selectedClipIds[0] ?? null;
+  if (!targetId) return null;
+  return tracks.flatMap(t => t.clips).find(c => c.id === targetId) ?? null;
 }
 
 /* ─── Shared widgets ─────────────────────────────────────────────────────── */

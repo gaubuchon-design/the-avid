@@ -21,6 +21,8 @@ export default function Toolbar() {
     projectName,
     duration,
   } = useEditorStore();
+  const fps = useEditorStore((s) => s.sequenceSettings?.fps || 24);
+  const frameDuration = 1 / fps;
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -71,7 +73,7 @@ export default function Toolbar() {
         <button
           className="toolbar-btn"
           title="Step Back"
-          onClick={() => setPlayhead(Math.max(0, playheadTime - 1/24))}
+          onClick={() => setPlayhead(Math.max(0, playheadTime - frameDuration))}
         >&#9665;</button>
         <button
           className={`toolbar-btn ${isPlaying ? 'accent-active' : ''}`}
@@ -82,7 +84,7 @@ export default function Toolbar() {
         <button
           className="toolbar-btn"
           title="Step Forward"
-          onClick={() => setPlayhead(playheadTime + 1/24)}
+          onClick={() => setPlayhead(playheadTime + frameDuration)}
         >&#9655;</button>
         <button
           className="toolbar-btn"
