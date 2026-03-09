@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useEditorStore } from '../../store/editor.store';
+import {
+  useEditorStore,
+  DEFAULT_INTRINSIC_VIDEO,
+  DEFAULT_INTRINSIC_AUDIO,
+  DEFAULT_TIME_REMAP,
+} from '../../store/editor.store';
 
 // Capture the initial state once at module load (before any test mutates it).
 const initialState = useEditorStore.getState();
@@ -98,6 +103,9 @@ describe('useEditorStore', () => {
       trimStart: 0,
       trimEnd: 0,
       type: 'video',
+      intrinsicVideo: DEFAULT_INTRINSIC_VIDEO,
+      intrinsicAudio: DEFAULT_INTRINSIC_AUDIO,
+      timeRemap: DEFAULT_TIME_REMAP,
     });
     expect(useEditorStore.getState().tracks[0].clips.length).toBe(initialClipCount + 1);
 

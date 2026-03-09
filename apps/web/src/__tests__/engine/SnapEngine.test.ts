@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SnapEngine } from '../../engine/SnapEngine';
+import {
+  DEFAULT_INTRINSIC_VIDEO,
+  DEFAULT_INTRINSIC_AUDIO,
+  DEFAULT_TIME_REMAP,
+} from '../../store/editor.store';
 
 describe('SnapEngine', () => {
   let engine: SnapEngine;
@@ -78,8 +83,8 @@ describe('SnapEngine', () => {
         volume: 1,
         color: '#fff',
         clips: [
-          { id: 'c1', trackId: 't1', name: 'Clip 1', startTime: 0, endTime: 5, trimStart: 0, trimEnd: 0, type: 'video' as const },
-          { id: 'c2', trackId: 't1', name: 'Clip 2', startTime: 7, endTime: 12, trimStart: 0, trimEnd: 0, type: 'video' as const },
+          { id: 'c1', trackId: 't1', name: 'Clip 1', startTime: 0, endTime: 5, trimStart: 0, trimEnd: 0, type: 'video' as const, intrinsicVideo: DEFAULT_INTRINSIC_VIDEO, intrinsicAudio: DEFAULT_INTRINSIC_AUDIO, timeRemap: DEFAULT_TIME_REMAP },
+          { id: 'c2', trackId: 't1', name: 'Clip 2', startTime: 7, endTime: 12, trimStart: 0, trimEnd: 0, type: 'video' as const, intrinsicVideo: DEFAULT_INTRINSIC_VIDEO, intrinsicAudio: DEFAULT_INTRINSIC_AUDIO, timeRemap: DEFAULT_TIME_REMAP },
         ],
       },
     ];
@@ -109,8 +114,8 @@ describe('SnapEngine', () => {
         volume: 1,
         color: '#fff',
         clips: [
-          { id: 'c1', trackId: 't1', name: 'Clip 1', startTime: 0, endTime: 5, trimStart: 0, trimEnd: 0, type: 'video' as const },
-          { id: 'c2', trackId: 't1', name: 'Clip 2', startTime: 7, endTime: 12, trimStart: 0, trimEnd: 0, type: 'video' as const },
+          { id: 'c1', trackId: 't1', name: 'Clip 1', startTime: 0, endTime: 5, trimStart: 0, trimEnd: 0, type: 'video' as const, intrinsicVideo: DEFAULT_INTRINSIC_VIDEO, intrinsicAudio: DEFAULT_INTRINSIC_AUDIO, timeRemap: DEFAULT_TIME_REMAP },
+          { id: 'c2', trackId: 't1', name: 'Clip 2', startTime: 7, endTime: 12, trimStart: 0, trimEnd: 0, type: 'video' as const, intrinsicVideo: DEFAULT_INTRINSIC_VIDEO, intrinsicAudio: DEFAULT_INTRINSIC_AUDIO, timeRemap: DEFAULT_TIME_REMAP },
         ],
       },
     ];
@@ -138,7 +143,7 @@ describe('SnapEngine', () => {
         volume: 1,
         color: '#fff',
         clips: [
-          { id: 'c1', trackId: 't1', name: 'Clip 1', startTime: 10, endTime: 20, trimStart: 0, trimEnd: 0, type: 'video' as const },
+          { id: 'c1', trackId: 't1', name: 'Clip 1', startTime: 10, endTime: 20, trimStart: 0, trimEnd: 0, type: 'video' as const, intrinsicVideo: DEFAULT_INTRINSIC_VIDEO, intrinsicAudio: DEFAULT_INTRINSIC_AUDIO, timeRemap: DEFAULT_TIME_REMAP },
         ],
       },
     ];

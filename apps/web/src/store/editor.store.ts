@@ -11,6 +11,58 @@ export type TimelineViewMode = 'timeline' | 'list' | 'waveform';
 export type EditTool = 'select' | 'trim' | 'razor' | 'slip' | 'slide';
 export type SearchFilterType = 'semantic' | 'phonetic' | 'visual';
 
+/** Intrinsic video properties (always present on every video clip). */
+export interface IntrinsicVideoProps {
+  opacity: number;       // 0-100 %
+  scaleX: number;        // % (100 = normal)
+  scaleY: number;        // %
+  positionX: number;     // px offset from center
+  positionY: number;     // px offset from center
+  rotation: number;      // degrees
+  anchorX: number;       // px
+  anchorY: number;       // px
+}
+
+/** Intrinsic audio properties (always present on every audio/video clip). */
+export interface IntrinsicAudioProps {
+  volume: number;        // dB (-60 to +12)
+  pan: number;           // -100 (L) to 100 (R)
+}
+
+/** Time remap keyframe: maps a timeline position to a source time. */
+export interface TimeRemapKeyframe {
+  timelineTime: number;  // seconds on timeline
+  sourceTime: number;    // seconds in source media
+  interpolation: 'linear' | 'bezier' | 'hold';
+  bezierIn?: { x: number; y: number };
+  bezierOut?: { x: number; y: number };
+}
+
+/** Time remapping state for a clip. */
+export interface TimeRemapState {
+  enabled: boolean;
+  keyframes: TimeRemapKeyframe[];
+  frameBlending: 'none' | 'frame-mix' | 'optical-flow';
+  pitchCorrection: boolean; // maintain audio pitch when speed changes
+}
+
+export const DEFAULT_INTRINSIC_VIDEO: IntrinsicVideoProps = {
+  opacity: 100, scaleX: 100, scaleY: 100,
+  positionX: 0, positionY: 0, rotation: 0,
+  anchorX: 0, anchorY: 0,
+};
+
+export const DEFAULT_INTRINSIC_AUDIO: IntrinsicAudioProps = {
+  volume: 0, pan: 0,
+};
+
+export const DEFAULT_TIME_REMAP: TimeRemapState = {
+  enabled: false,
+  keyframes: [],
+  frameBlending: 'frame-mix',
+  pitchCorrection: true,
+};
+
 export interface Clip {
   id: string;
   trackId: string;
@@ -23,6 +75,10 @@ export interface Clip {
   color?: string;
   waveformData?: number[];
   assetId?: string;
+  // Intrinsic properties (always present)
+  intrinsicVideo: IntrinsicVideoProps;
+  intrinsicAudio: IntrinsicAudioProps;
+  timeRemap: TimeRemapState;
 }
 
 export interface Track {
@@ -249,6 +305,52 @@ interface EditorState {
   // AI search filter
   searchFilterType: SearchFilterType;
   isCommandPaletteOpen: boolean;
+
+  // Source/Record Monitor (Avid-style dual monitor)
+  sourceInPoint: number | null;
+  sourceOutPoint: number | null;
+  sourcePlayhead: number;
+  recordInPoint: number | null;
+  recordOutPoint: number | null;
+
+  // Track Patching State
+  enabledTrackIds: string[];
+  syncLockedTrackIds: string[];
+
+  // Trim Mode State
+  trimMode: 'off' | 'roll' | 'ripple' | 'slip' | 'slide' | 'asymmetric';
+  trimActive: boolean;
+
+  // Smart Tool State
+  smartToolLiftOverwrite: boolean;
+  smartToolExtractSplice: boolean;
+  smartToolOverwriteTrim: boolean;
+  smartToolRippleTrim: boolean;
+
+  // Multicam State
+  multicamActive: boolean;
+  multicamGroupId: string | null;
+  multicamDisplayMode: 'quad' | 'nine' | 'sixteen';
+
+  // Clip Colors (Avid-style)
+  clipLocalColors: Record<string, string>;
+  dupeDetectionEnabled: boolean;
+
+  // Timeline Display
+  clipTextDisplay: 'name' | 'source' | 'media' | 'comments';
+  trackHeights: Record<string, number>;
+
+  // Composer Display
+  composerLayout: 'source-record' | 'full-frame';
+  showTrackingInfo: boolean;
+  trackingInfoFields: string[];
+
+  // Audio (extended)
+  audioScrubEnabled: boolean;
+  soloSafeMode: boolean;
+
+  // Workspace
+  activeWorkspaceId: string;
 }
 
 interface EditorActions {
@@ -352,6 +454,76 @@ interface EditorActions {
   rippleDelete: (clipId: string) => void;
   slideClip: (clipId: string, delta: number) => void;
 
+  // Intrinsic property updates
+  updateIntrinsicVideo: (clipId: string, patch: Partial<IntrinsicVideoProps>) => void;
+  updateIntrinsicAudio: (clipId: string, patch: Partial<IntrinsicAudioProps>) => void;
+  updateTimeRemap: (clipId: string, patch: Partial<TimeRemapState>) => void;
+  addTimeRemapKeyframe: (clipId: string, keyframe: TimeRemapKeyframe) => void;
+  removeTimeRemapKeyframe: (clipId: string, timelineTime: number) => void;
+  resetIntrinsicVideo: (clipId: string) => void;
+  resetIntrinsicAudio: (clipId: string) => void;
+
+  // Source Monitor
+  setSourceInPoint: (t: number | null) => void;
+  setSourceOutPoint: (t: number | null) => void;
+  setSourcePlayhead: (t: number) => void;
+  setSourceInToPlayhead: () => void;
+  setSourceOutToPlayhead: () => void;
+  clearSourceInOut: () => void;
+
+  // Track Enable/Disable
+  enableTrack: (trackId: string) => void;
+  disableTrack: (trackId: string) => void;
+  toggleTrackEnabled: (trackId: string) => void;
+  isTrackEnabled: (trackId: string) => boolean;
+
+  // Sync Lock
+  toggleSyncLock: (trackId: string) => void;
+  isSyncLocked: (trackId: string) => boolean;
+
+  // Trim Mode
+  setTrimMode: (mode: EditorState['trimMode']) => void;
+  setTrimActive: (active: boolean) => void;
+
+  // Smart Tool
+  toggleSmartToolLiftOverwrite: () => void;
+  toggleSmartToolExtractSplice: () => void;
+  toggleSmartToolOverwriteTrim: () => void;
+  toggleSmartToolRippleTrim: () => void;
+
+  // Multicam
+  setMulticamActive: (active: boolean) => void;
+  setMulticamGroupId: (groupId: string | null) => void;
+  setMulticamDisplayMode: (mode: 'quad' | 'nine' | 'sixteen') => void;
+
+  // Clip Display
+  setClipLocalColor: (clipId: string, color: string) => void;
+  clearClipLocalColor: (clipId: string) => void;
+  toggleDupeDetection: () => void;
+  setClipTextDisplay: (mode: EditorState['clipTextDisplay']) => void;
+
+  // Track Heights
+  setTrackHeight: (trackId: string, height: number) => void;
+  enlargeTrack: (trackId: string) => void;
+  reduceTrack: (trackId: string) => void;
+
+  // Composer
+  setComposerLayout: (layout: EditorState['composerLayout']) => void;
+  toggleTrackingInfo: () => void;
+
+  // Audio (extended)
+  toggleAudioScrub: () => void;
+  toggleSoloSafe: () => void;
+
+  // Workspace
+  setActiveWorkspace: (id: string) => void;
+
+  // Navigation (Avid parity)
+  goToNextEditPoint: () => void;
+  goToPrevEditPoint: () => void;
+  goToStart: () => void;
+  goToEnd: () => void;
+
   // Init
   loadProject: (projectId: string) => void;
 }
@@ -364,68 +536,78 @@ function genWaveform(len = 100) {
 }
 
 // ─── Demo data ─────────────────────────────────────────────────────────────────
+/** Helper to create a clip with default intrinsic properties. */
+export function makeClip(base: Omit<Clip, 'intrinsicVideo' | 'intrinsicAudio' | 'timeRemap'>): Clip {
+  return {
+    ...base,
+    intrinsicVideo: { ...DEFAULT_INTRINSIC_VIDEO },
+    intrinsicAudio: { ...DEFAULT_INTRINSIC_AUDIO },
+    timeRemap: { ...DEFAULT_TIME_REMAP },
+  };
+}
+
 const DEMO_TRACKS: Track[] = [
   {
     id: 't-v3', name: 'V3', type: 'VIDEO', sortOrder: 0, muted: false, locked: true, solo: false, volume: 1,
     color: '#5bbfc7',
     clips: [
-      { id: 'c-v3-1', trackId: 't-v3', name: 'day 1 take 5', startTime: 2, endTime: 14, trimStart: 0, trimEnd: 0, type: 'video' },
+      makeClip({ id: 'c-v3-1', trackId: 't-v3', name: 'day 1 take 5', startTime: 2, endTime: 14, trimStart: 0, trimEnd: 0, type: 'video' }),
     ],
   },
   {
     id: 't-v4', name: 'V4', type: 'VIDEO', sortOrder: 1, muted: false, locked: false, solo: false, volume: 1,
     color: '#4ecdc4',
     clips: [
-      { id: 'c-v4-1', trackId: 't-v4', name: 'drone up', startTime: 14, endTime: 20, trimStart: 0, trimEnd: 0, type: 'video' },
-      { id: 'c-v4-2', trackId: 't-v4', name: 'timescope', startTime: 26, endTime: 32, trimStart: 0, trimEnd: 0, type: 'video' },
-      { id: 'c-v4-3', trackId: 't-v4', name: 'day 2 take 1', startTime: 32, endTime: 40, trimStart: 0, trimEnd: 0, type: 'video' },
+      makeClip({ id: 'c-v4-1', trackId: 't-v4', name: 'drone up', startTime: 14, endTime: 20, trimStart: 0, trimEnd: 0, type: 'video' }),
+      makeClip({ id: 'c-v4-2', trackId: 't-v4', name: 'timescope', startTime: 26, endTime: 32, trimStart: 0, trimEnd: 0, type: 'video' }),
+      makeClip({ id: 'c-v4-3', trackId: 't-v4', name: 'day 2 take 1', startTime: 32, endTime: 40, trimStart: 0, trimEnd: 0, type: 'video' }),
     ],
   },
   {
     id: 't-v2', name: 'V2', type: 'VIDEO', sortOrder: 2, muted: false, locked: false, solo: false, volume: 1,
     color: '#818cf8',
     clips: [
-      { id: 'c-v2-1', trackId: 't-v2', name: 'Clip name', startTime: 8, endTime: 16, trimStart: 0, trimEnd: 0, type: 'video' },
+      makeClip({ id: 'c-v2-1', trackId: 't-v2', name: 'Clip name', startTime: 8, endTime: 16, trimStart: 0, trimEnd: 0, type: 'video' }),
     ],
   },
   {
     id: 't-v1', name: 'V1', type: 'VIDEO', sortOrder: 3, muted: false, locked: false, solo: false, volume: 1,
     color: '#5b6af5',
     clips: [
-      { id: 'c-v1-1', trackId: 't-v1', name: 'b-roll', startTime: 12, endTime: 22, trimStart: 0, trimEnd: 0, type: 'video' },
-      { id: 'c-v1-2', trackId: 't-v1', name: 'b-roll', startTime: 24, endTime: 30, trimStart: 0, trimEnd: 0, type: 'video' },
-      { id: 'c-v1-3', trackId: 't-v1', name: 'Clip name', startTime: 30, endTime: 38, trimStart: 0, trimEnd: 0, type: 'video' },
+      makeClip({ id: 'c-v1-1', trackId: 't-v1', name: 'b-roll', startTime: 12, endTime: 22, trimStart: 0, trimEnd: 0, type: 'video' }),
+      makeClip({ id: 'c-v1-2', trackId: 't-v1', name: 'b-roll', startTime: 24, endTime: 30, trimStart: 0, trimEnd: 0, type: 'video' }),
+      makeClip({ id: 'c-v1-3', trackId: 't-v1', name: 'Clip name', startTime: 30, endTime: 38, trimStart: 0, trimEnd: 0, type: 'video' }),
     ],
   },
   {
     id: 't-a1', name: 'A1', type: 'AUDIO', sortOrder: 4, muted: false, locked: false, solo: false, volume: 0.85,
     color: '#e05b8e',
     clips: [
-      { id: 'c-a1-1', trackId: 't-a1', name: 'My clip', startTime: 4, endTime: 16, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) },
-      { id: 'c-a1-2', trackId: 't-a1', name: 'My clip', startTime: 20, endTime: 38, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) },
+      makeClip({ id: 'c-a1-1', trackId: 't-a1', name: 'My clip', startTime: 4, endTime: 16, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) }),
+      makeClip({ id: 'c-a1-2', trackId: 't-a1', name: 'My clip', startTime: 20, endTime: 38, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) }),
     ],
   },
   {
     id: 't-a2', name: 'A2', type: 'AUDIO', sortOrder: 5, muted: false, locked: false, solo: false, volume: 0.6,
     color: '#4ade80',
     clips: [
-      { id: 'c-a2-1', trackId: 't-a2', name: 'My clip', startTime: 0, endTime: 10, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) },
-      { id: 'c-a2-2', trackId: 't-a2', name: 'My clip', startTime: 16, endTime: 28, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) },
+      makeClip({ id: 'c-a2-1', trackId: 't-a2', name: 'My clip', startTime: 0, endTime: 10, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) }),
+      makeClip({ id: 'c-a2-2', trackId: 't-a2', name: 'My clip', startTime: 16, endTime: 28, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) }),
     ],
   },
   {
     id: 't-a3', name: 'A3', type: 'AUDIO', sortOrder: 6, muted: false, locked: false, solo: false, volume: 0.7,
     color: '#e8943a',
     clips: [
-      { id: 'c-a3-1', trackId: 't-a3', name: 'My clip', startTime: 6, endTime: 18, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) },
-      { id: 'c-a3-2', trackId: 't-a3', name: 'My clip', startTime: 22, endTime: 40, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) },
+      makeClip({ id: 'c-a3-1', trackId: 't-a3', name: 'My clip', startTime: 6, endTime: 18, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) }),
+      makeClip({ id: 'c-a3-2', trackId: 't-a3', name: 'My clip', startTime: 22, endTime: 40, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) }),
     ],
   },
   {
     id: 't-a4', name: 'A4', type: 'AUDIO', sortOrder: 7, muted: false, locked: false, solo: false, volume: 0.8,
     color: '#f59e0b',
     clips: [
-      { id: 'c-a4-1', trackId: 't-a4', name: 'Music Track', startTime: 0, endTime: 40, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) },
+      makeClip({ id: 'c-a4-1', trackId: 't-a4', name: 'Music Track', startTime: 0, endTime: 40, trimStart: 0, trimEnd: 0, type: 'audio', waveformData: genWaveform(200) }),
     ],
   },
 ];
@@ -671,6 +853,52 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     searchFilterType: 'semantic' as SearchFilterType,
     isCommandPaletteOpen: false,
 
+    // Source/Record Monitor (Avid-style dual monitor)
+    sourceInPoint: null,
+    sourceOutPoint: null,
+    sourcePlayhead: 0,
+    recordInPoint: null,
+    recordOutPoint: null,
+
+    // Track Patching State
+    enabledTrackIds: DEMO_TRACKS.map(t => t.id),
+    syncLockedTrackIds: [],
+
+    // Trim Mode State
+    trimMode: 'off' as EditorState['trimMode'],
+    trimActive: false,
+
+    // Smart Tool State
+    smartToolLiftOverwrite: true,
+    smartToolExtractSplice: true,
+    smartToolOverwriteTrim: true,
+    smartToolRippleTrim: true,
+
+    // Multicam State
+    multicamActive: false,
+    multicamGroupId: null,
+    multicamDisplayMode: 'quad' as EditorState['multicamDisplayMode'],
+
+    // Clip Colors (Avid-style)
+    clipLocalColors: {} as Record<string, string>,
+    dupeDetectionEnabled: false,
+
+    // Timeline Display
+    clipTextDisplay: 'name' as EditorState['clipTextDisplay'],
+    trackHeights: {} as Record<string, number>,
+
+    // Composer Display
+    composerLayout: 'source-record' as EditorState['composerLayout'],
+    showTrackingInfo: true,
+    trackingInfoFields: ['master-tc', 'duration'],
+
+    // Audio (extended)
+    audioScrubEnabled: false,
+    soloSafeMode: false,
+
+    // Workspace
+    activeWorkspaceId: 'source-record',
+
     // Actions
     setPlayhead: (t) => set((s) => { s.playheadTime = Math.max(0, Math.min(t, s.duration)); }),
     togglePlay: () => set((s) => { s.isPlaying = !s.isPlaying; }),
@@ -704,7 +932,13 @@ export const useEditorStore = create<EditorState & EditorActions>()(
 
     addClip: (clip) => set((s) => {
       const track = s.tracks.find(t => t.id === clip.trackId);
-      if (track) track.clips.push(clip);
+      if (track) {
+        // Ensure intrinsic props exist
+        if (!clip.intrinsicVideo) clip.intrinsicVideo = { ...DEFAULT_INTRINSIC_VIDEO };
+        if (!clip.intrinsicAudio) clip.intrinsicAudio = { ...DEFAULT_INTRINSIC_AUDIO };
+        if (!clip.timeRemap) clip.timeRemap = { ...DEFAULT_TIME_REMAP };
+        track.clips.push(clip);
+      }
     }),
     removeClip: (clipId) => set((s) => {
       s.tracks.forEach(t => { t.clips = t.clips.filter(c => c.id !== clipId); });
@@ -870,7 +1104,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         ...targetTrack.clips.map((clip) => clip.endTime),
       );
       const duration = asset.duration ?? (asset.type === 'AUDIO' ? 12 : 6);
-      const clip: Clip = {
+      const clip: Clip = makeClip({
         id: createId('clip'),
         trackId: targetTrack.id,
         name: asset.name,
@@ -882,7 +1116,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         assetId: asset.id,
         color: targetTrack.color,
         waveformData: asset.waveformData,
-      };
+      });
       targetTrack.clips.push(clip);
       s.selectedClipIds = [clip.id];
       s.sourceAsset = asset;
@@ -1120,6 +1354,187 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         }
       }
     }),
+
+    // Intrinsic property updates
+    updateIntrinsicVideo: (clipId, patch) => set((s) => {
+      for (const t of s.tracks) {
+        const c = t.clips.find(c => c.id === clipId);
+        if (c) { Object.assign(c.intrinsicVideo, patch); return; }
+      }
+    }),
+    updateIntrinsicAudio: (clipId, patch) => set((s) => {
+      for (const t of s.tracks) {
+        const c = t.clips.find(c => c.id === clipId);
+        if (c) { Object.assign(c.intrinsicAudio, patch); return; }
+      }
+    }),
+    updateTimeRemap: (clipId, patch) => set((s) => {
+      for (const t of s.tracks) {
+        const c = t.clips.find(c => c.id === clipId);
+        if (c) { Object.assign(c.timeRemap, patch); return; }
+      }
+    }),
+    addTimeRemapKeyframe: (clipId, keyframe) => set((s) => {
+      for (const t of s.tracks) {
+        const c = t.clips.find(c => c.id === clipId);
+        if (c) {
+          c.timeRemap.keyframes = c.timeRemap.keyframes
+            .filter(kf => Math.abs(kf.timelineTime - keyframe.timelineTime) > 0.001);
+          c.timeRemap.keyframes.push(keyframe);
+          c.timeRemap.keyframes.sort((a, b) => a.timelineTime - b.timelineTime);
+          return;
+        }
+      }
+    }),
+    removeTimeRemapKeyframe: (clipId, timelineTime) => set((s) => {
+      for (const t of s.tracks) {
+        const c = t.clips.find(c => c.id === clipId);
+        if (c) {
+          c.timeRemap.keyframes = c.timeRemap.keyframes
+            .filter(kf => Math.abs(kf.timelineTime - timelineTime) > 0.001);
+          return;
+        }
+      }
+    }),
+    resetIntrinsicVideo: (clipId) => set((s) => {
+      for (const t of s.tracks) {
+        const c = t.clips.find(c => c.id === clipId);
+        if (c) { c.intrinsicVideo = { ...DEFAULT_INTRINSIC_VIDEO }; return; }
+      }
+    }),
+    resetIntrinsicAudio: (clipId) => set((s) => {
+      for (const t of s.tracks) {
+        const c = t.clips.find(c => c.id === clipId);
+        if (c) { c.intrinsicAudio = { ...DEFAULT_INTRINSIC_AUDIO }; return; }
+      }
+    }),
+
+    // ─── Source Monitor ──────────────────────────────────────────────────────────
+    setSourceInPoint: (t) => set((s) => { s.sourceInPoint = t; }),
+    setSourceOutPoint: (t) => set((s) => { s.sourceOutPoint = t; }),
+    setSourcePlayhead: (t) => set((s) => { s.sourcePlayhead = Math.max(0, t); }),
+    setSourceInToPlayhead: () => set((s) => { s.sourceInPoint = s.sourcePlayhead; }),
+    setSourceOutToPlayhead: () => set((s) => { s.sourceOutPoint = s.sourcePlayhead; }),
+    clearSourceInOut: () => set((s) => { s.sourceInPoint = null; s.sourceOutPoint = null; }),
+
+    // ─── Track Enable/Disable ─────────────────────────────────────────────────
+    enableTrack: (trackId) => set((s) => {
+      if (!s.enabledTrackIds.includes(trackId)) {
+        s.enabledTrackIds.push(trackId);
+      }
+    }),
+    disableTrack: (trackId) => set((s) => {
+      s.enabledTrackIds = s.enabledTrackIds.filter(id => id !== trackId);
+    }),
+    toggleTrackEnabled: (trackId) => set((s) => {
+      const idx = s.enabledTrackIds.indexOf(trackId);
+      if (idx >= 0) {
+        s.enabledTrackIds.splice(idx, 1);
+      } else {
+        s.enabledTrackIds.push(trackId);
+      }
+    }),
+    isTrackEnabled: (trackId) => {
+      return get().enabledTrackIds.includes(trackId);
+    },
+
+    // ─── Sync Lock ────────────────────────────────────────────────────────────
+    toggleSyncLock: (trackId) => set((s) => {
+      const idx = s.syncLockedTrackIds.indexOf(trackId);
+      if (idx >= 0) {
+        s.syncLockedTrackIds.splice(idx, 1);
+      } else {
+        s.syncLockedTrackIds.push(trackId);
+      }
+    }),
+    isSyncLocked: (trackId) => {
+      return get().syncLockedTrackIds.includes(trackId);
+    },
+
+    // ─── Trim Mode ────────────────────────────────────────────────────────────
+    setTrimMode: (mode) => set((s) => { s.trimMode = mode; }),
+    setTrimActive: (active) => set((s) => { s.trimActive = active; }),
+
+    // ─── Smart Tool ───────────────────────────────────────────────────────────
+    toggleSmartToolLiftOverwrite: () => set((s) => { s.smartToolLiftOverwrite = !s.smartToolLiftOverwrite; }),
+    toggleSmartToolExtractSplice: () => set((s) => { s.smartToolExtractSplice = !s.smartToolExtractSplice; }),
+    toggleSmartToolOverwriteTrim: () => set((s) => { s.smartToolOverwriteTrim = !s.smartToolOverwriteTrim; }),
+    toggleSmartToolRippleTrim: () => set((s) => { s.smartToolRippleTrim = !s.smartToolRippleTrim; }),
+
+    // ─── Multicam ─────────────────────────────────────────────────────────────
+    setMulticamActive: (active) => set((s) => { s.multicamActive = active; }),
+    setMulticamGroupId: (groupId) => set((s) => { s.multicamGroupId = groupId; }),
+    setMulticamDisplayMode: (mode) => set((s) => { s.multicamDisplayMode = mode; }),
+
+    // ─── Clip Display ─────────────────────────────────────────────────────────
+    setClipLocalColor: (clipId, color) => set((s) => { s.clipLocalColors[clipId] = color; }),
+    clearClipLocalColor: (clipId) => set((s) => { delete s.clipLocalColors[clipId]; }),
+    toggleDupeDetection: () => set((s) => { s.dupeDetectionEnabled = !s.dupeDetectionEnabled; }),
+    setClipTextDisplay: (mode) => set((s) => { s.clipTextDisplay = mode; }),
+
+    // ─── Track Heights ────────────────────────────────────────────────────────
+    setTrackHeight: (trackId, height) => set((s) => {
+      s.trackHeights[trackId] = Math.max(30, Math.min(300, height));
+    }),
+    enlargeTrack: (trackId) => set((s) => {
+      const current = s.trackHeights[trackId] ?? 60;
+      s.trackHeights[trackId] = Math.min(300, current + 20);
+    }),
+    reduceTrack: (trackId) => set((s) => {
+      const current = s.trackHeights[trackId] ?? 60;
+      s.trackHeights[trackId] = Math.max(30, current - 20);
+    }),
+
+    // ─── Composer ─────────────────────────────────────────────────────────────
+    setComposerLayout: (layout) => set((s) => { s.composerLayout = layout; }),
+    toggleTrackingInfo: () => set((s) => { s.showTrackingInfo = !s.showTrackingInfo; }),
+
+    // ─── Audio (extended) ─────────────────────────────────────────────────────
+    toggleAudioScrub: () => set((s) => { s.audioScrubEnabled = !s.audioScrubEnabled; }),
+    toggleSoloSafe: () => set((s) => { s.soloSafeMode = !s.soloSafeMode; }),
+
+    // ─── Workspace ────────────────────────────────────────────────────────────
+    setActiveWorkspace: (id) => set((s) => { s.activeWorkspaceId = id; }),
+
+    // ─── Navigation (Avid parity) ─────────────────────────────────────────────
+    goToNextEditPoint: () => set((s) => {
+      const current = s.playheadTime;
+      let nearest = Infinity;
+      for (const track of s.tracks) {
+        if (!s.enabledTrackIds.includes(track.id)) continue;
+        for (const clip of track.clips) {
+          if (clip.startTime > current + 0.001 && clip.startTime < nearest) {
+            nearest = clip.startTime;
+          }
+          if (clip.endTime > current + 0.001 && clip.endTime < nearest) {
+            nearest = clip.endTime;
+          }
+        }
+      }
+      if (nearest < Infinity) {
+        s.playheadTime = nearest;
+      }
+    }),
+    goToPrevEditPoint: () => set((s) => {
+      const current = s.playheadTime;
+      let nearest = -Infinity;
+      for (const track of s.tracks) {
+        if (!s.enabledTrackIds.includes(track.id)) continue;
+        for (const clip of track.clips) {
+          if (clip.startTime < current - 0.001 && clip.startTime > nearest) {
+            nearest = clip.startTime;
+          }
+          if (clip.endTime < current - 0.001 && clip.endTime > nearest) {
+            nearest = clip.endTime;
+          }
+        }
+      }
+      if (nearest > -Infinity) {
+        s.playheadTime = nearest;
+      }
+    }),
+    goToStart: () => set((s) => { s.playheadTime = 0; }),
+    goToEnd: () => set((s) => { s.playheadTime = s.duration; }),
 
     loadProject: (id) => set((s) => { s.projectId = id; }),
   }))
