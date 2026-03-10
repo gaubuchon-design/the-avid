@@ -307,6 +307,9 @@ export interface EditorProjectCollaborationPanelPreferences {
   versionCompareBaselineMode: 'previous' | 'latest' | 'custom';
   versionCompareCustomBaselineId: string;
   selectedCommentId: string | null;
+  commentsComposerVisible: boolean;
+  commentsComposerDraft: string;
+  commentsActiveReplyCommentId: string | null;
 }
 
 export interface EditorProjectSettings {
@@ -1261,6 +1264,9 @@ function normalizeProject(project: EditorProject): EditorProject {
       versionCompareBaselineMode: 'previous',
       versionCompareCustomBaselineId: '',
       selectedCommentId: null,
+      commentsComposerVisible: false,
+      commentsComposerDraft: '',
+      commentsActiveReplyCommentId: null,
     }),
     tokenBalance,
     editorialState: {

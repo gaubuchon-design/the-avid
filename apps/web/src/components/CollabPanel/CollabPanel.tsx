@@ -279,6 +279,10 @@ function CommentsTab() {
     setCommentFilter,
     selectedCommentId,
     selectComment,
+    commentsComposerVisible,
+    commentsComposerDraft,
+    commentsActiveReplyCommentId,
+    setCommentsComposerContext,
     resolveComment,
     reopenComment,
     replyToComment,
@@ -289,10 +293,7 @@ function CommentsTab() {
     identityProfiles,
   } = useCollabStore();
   const { setPlayhead, playheadTime } = useEditorStore();
-  const [newCommentText, setNewCommentText] = useState('');
   const [replyTexts, setReplyTexts] = useState<Record<string, string>>({});
-  const [showReplyFor, setShowReplyFor] = useState<string | null>(null);
-  const [showAddComment, setShowAddComment] = useState(false);
 
   const filteredComments = comments.filter((c) => {
     if (commentFilter === 'open') return !c.resolved;
@@ -303,20 +304,22 @@ function CommentsTab() {
   const hasActiveContext = commentFilter !== 'all';
 
   const handleAddComment = useCallback(() => {
-    if (!newCommentText.trim()) return;
+    if (!commentsComposerDraft.trim()) return;
     const frame = Math.round(playheadTime * 23.976);
-    addComment(frame, null, newCommentText.trim());
-    setNewCommentText('');
-    setShowAddComment(false);
-  }, [newCommentText, playheadTime, addComment]);
+    addComment(frame, null, commentsComposerDraft.trim());
+    setCommentsComposerContext({
+      commentsComposerDraft: '',
+      commentsComposerVisible: false,
+    });
+  }, [addComment, commentsComposerDraft, playheadTime, setCommentsComposerContext]);
 
   const handleReply = useCallback((commentId: string) => {
     const text = replyTexts[commentId]?.trim();
     if (!text) return;
     replyToComment(commentId, text);
     setReplyTexts((prev) => ({ ...prev, [commentId]: '' }));
-    setShowReplyFor(null);
-  }, [replyTexts, replyToComment]);
+    setCommentsComposerContext({ commentsActiveReplyCommentId: null });
+  }, [replyTexts, replyToComment, setCommentsComposerContext]);
 
   return (
     <div>
@@ -425,9 +428,9 @@ function CommentsTab() {
       )}
 
       {/* Add comment button */}
-      {!showAddComment && (
+      {!commentsComposerVisible && (
         <button
-          onClick={() => setShowAddComment(true)}
+          onClick={() => setCommentsComposerContext({ commentsComposerVisible: true })}
           style={{
             width: '100%',
             padding: '7px 0',
@@ -445,14 +448,14 @@ function CommentsTab() {
       )}
 
       {/* Add comment form */}
-      {showAddComment && (
+      {commentsComposerVisible && (
         <div style={{ padding: 8, background: 'var(--bg-raised)', borderRadius: 'var(--radius-md)', marginBottom: 8 }}>
           <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4, fontFamily: 'var(--font-mono)' }}>
             Comment at {toTimecode(playheadTime)}
           </div>
           <textarea
-            value={newCommentText}
-            onChange={(e) => setNewCommentText(e.target.value)}
+            value={commentsComposerDraft}
+            onChange={(e) => setCommentsComposerContext({ commentsComposerDraft: e.target.value })}
             placeholder="Type your comment..."
             style={{
               width: '100%',
@@ -471,7 +474,12 @@ function CommentsTab() {
           />
           <div style={{ display: 'flex', gap: 6, marginTop: 6, justifyContent: 'flex-end' }}>
             <button
-              onClick={() => { setShowAddComment(false); setNewCommentText(''); }}
+              onClick={() => {
+                setCommentsComposerContext({
+                  commentsComposerVisible: false,
+                  commentsComposerDraft: '',
+                });
+              }}
               style={{
                 padding: '4px 10px',
                 borderRadius: 'var(--radius-sm)',
@@ -486,16 +494,16 @@ function CommentsTab() {
             </button>
             <button
               onClick={handleAddComment}
-              disabled={!newCommentText.trim()}
+              disabled={!commentsComposerDraft.trim()}
               style={{
                 padding: '4px 10px',
                 borderRadius: 'var(--radius-sm)',
                 border: 'none',
-                background: newCommentText.trim() ? 'var(--brand)' : 'var(--bg-elevated)',
-                color: newCommentText.trim() ? '#fff' : 'var(--text-muted)',
+                background: commentsComposerDraft.trim() ? 'var(--brand)' : 'var(--bg-elevated)',
+                color: commentsComposerDraft.trim() ? '#fff' : 'var(--text-muted)',
                 fontSize: 10,
                 fontWeight: 600,
-                cursor: newCommentText.trim() ? 'pointer' : 'default',
+                cursor: commentsComposerDraft.trim() ? 'pointer' : 'default',
               }}
             >
               Post
@@ -517,8 +525,10 @@ function CommentsTab() {
           onSeek={() => setPlayhead(comment.frame / 23.976)}
           onResolve={() => comment.resolved ? reopenComment(comment.id) : resolveComment(comment.id)}
           onReaction={(emoji) => addReaction(comment.id, emoji)}
-          showReply={showReplyFor === comment.id}
-          onToggleReply={() => setShowReplyFor(showReplyFor === comment.id ? null : comment.id)}
+          showReply={commentsActiveReplyCommentId === comment.id}
+          onToggleReply={() => setCommentsComposerContext({
+            commentsActiveReplyCommentId: commentsActiveReplyCommentId === comment.id ? null : comment.id,
+          })}
           replyText={replyTexts[comment.id] ?? ''}
           onReplyTextChange={(text) => setReplyTexts((prev) => ({ ...prev, [comment.id]: text }))}
           onSubmitReply={() => handleReply(comment.id)}

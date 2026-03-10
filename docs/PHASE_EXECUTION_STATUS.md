@@ -136,10 +136,13 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Wired `selectComment(...)` to persist panel preferences immediately, and added store coverage for selected-comment hydration validity checks plus selected-thread persistence round-trip behavior.
 - Surfaced restored selected-comment focus indicators in the Comments tab header with summary chips for selected thread id and focus timecode.
 - Added phase-1 UI coverage asserting hydrated selected-comment focus renders expected comments focus summary indicators.
+- Extended `collaborationPanelPreferences` with comments composer context (`commentsComposerVisible`, `commentsComposerDraft`, `commentsActiveReplyCommentId`) and hydrated this context on reconnect/reopen with active-reply validation.
+- Replaced local-only comments composer/reply visibility state with collab-store-backed context so open composer + draft + active reply thread survive reconnect/reopen.
+- Added store and phase-1 UI coverage asserting persisted composer draft and active reply focus round-trip through panel preference hydration/persistence.
 
 ## Next Execution Slices
 
-1. Persist and hydrate comments-panel composer context (`showAddComment`, draft new-comment text, active reply thread id) so in-progress review notes survive reconnect/reopen.
+1. Surface restored comments composer context indicators (draft + active reply chips) in Comments tab header so in-progress notes are visible immediately after reopen.
 
 ## Exit Signals For These Early Phases
 

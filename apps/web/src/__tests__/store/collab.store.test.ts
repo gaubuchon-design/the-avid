@@ -228,6 +228,9 @@ describe('useCollabStore', () => {
       versionCompareTargetVersionId: 'version-target',
       versionCompareBaselineMode: 'custom',
       versionCompareCustomBaselineId: 'version-baseline',
+      commentsComposerVisible: true,
+      commentsComposerDraft: 'Persisted draft',
+      commentsActiveReplyCommentId: 'persisted-comment-1',
     };
     repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
 
@@ -243,6 +246,9 @@ describe('useCollabStore', () => {
     expect(state.versionCompareTargetVersionId).toBe('version-target');
     expect(state.versionCompareBaselineMode).toBe('custom');
     expect(state.versionCompareCustomBaselineId).toBe('version-baseline');
+    expect(state.commentsComposerVisible).toBe(true);
+    expect(state.commentsComposerDraft).toBe('Persisted draft');
+    expect(state.commentsActiveReplyCommentId).toBe('persisted-comment-1');
     expect(useEditorStore.getState().versionHistoryRetentionPreference).toBe('session');
     expect(useEditorStore.getState().versionHistoryCompareMode).toBe('details');
   });
@@ -281,6 +287,9 @@ describe('useCollabStore', () => {
       versionCompareTargetVersionId: '',
       versionCompareBaselineMode: 'previous',
       versionCompareCustomBaselineId: '',
+      commentsComposerVisible: true,
+      commentsComposerDraft: 'Needs notes',
+      commentsActiveReplyCommentId: 'missing-comment',
     };
     project.collaborationComments = [
       {
@@ -301,6 +310,7 @@ describe('useCollabStore', () => {
     await flushAsyncTasks();
 
     expect(useCollabStore.getState().selectedCommentId).toBeNull();
+    expect(useCollabStore.getState().commentsActiveReplyCommentId).toBeNull();
   });
 
   it('addComment() adds a comment and updates activity feed', () => {
@@ -450,6 +460,11 @@ describe('useCollabStore', () => {
       versionCompareBaselineMode: 'latest',
       versionCompareCustomBaselineId: 'version-baseline',
     });
+    useCollabStore.getState().setCommentsComposerContext({
+      commentsComposerVisible: true,
+      commentsComposerDraft: 'Composer draft',
+      commentsActiveReplyCommentId: 'persisted-comment-1',
+    });
     await flushAsyncTasks();
 
     const savedProject = repositoryMocks.saveProjectToRepository.mock.calls.at(-1)?.[0] as EditorProject;
@@ -467,6 +482,9 @@ describe('useCollabStore', () => {
     expect(savedProject.collaborationPanelPreferences?.versionCompareTargetVersionId).toBe('version-target');
     expect(savedProject.collaborationPanelPreferences?.versionCompareBaselineMode).toBe('latest');
     expect(savedProject.collaborationPanelPreferences?.versionCompareCustomBaselineId).toBe('version-baseline');
+    expect(savedProject.collaborationPanelPreferences?.commentsComposerVisible).toBe(true);
+    expect(savedProject.collaborationPanelPreferences?.commentsComposerDraft).toBe('Composer draft');
+    expect(savedProject.collaborationPanelPreferences?.commentsActiveReplyCommentId).toBe('persisted-comment-1');
   });
 
   it('persistPanelPreferences() persists version history review controls', async () => {
@@ -519,6 +537,38 @@ describe('useCollabStore', () => {
 
     const savedProject = repositoryMocks.saveProjectToRepository.mock.calls.at(-1)?.[0] as EditorProject;
     expect(savedProject.collaborationPanelPreferences?.selectedCommentId).toBe(commentId);
+  });
+
+  it('setCommentsComposerContext() persists composer state in panel preferences', async () => {
+    const project = buildRepositoryProject('project_comments_composer_context_persist');
+    project.collaborationComments = [
+      {
+        id: 'composer-reply-comment',
+        userId: 'user-reviewer',
+        userName: 'Jordan Reviewer',
+        frame: 200,
+        text: 'Comment for reply focus',
+        timestamp: Date.now() - 500,
+        resolved: false,
+        replies: [],
+        reactions: [],
+      },
+    ];
+    repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
+    useCollabStore.getState().connect(project.id, 'user_1');
+    await flushAsyncTasks();
+
+    useCollabStore.getState().setCommentsComposerContext({
+      commentsComposerVisible: true,
+      commentsComposerDraft: 'Follow-up note',
+      commentsActiveReplyCommentId: 'composer-reply-comment',
+    });
+    await flushAsyncTasks();
+
+    const savedProject = repositoryMocks.saveProjectToRepository.mock.calls.at(-1)?.[0] as EditorProject;
+    expect(savedProject.collaborationPanelPreferences?.commentsComposerVisible).toBe(true);
+    expect(savedProject.collaborationPanelPreferences?.commentsComposerDraft).toBe('Follow-up note');
+    expect(savedProject.collaborationPanelPreferences?.commentsActiveReplyCommentId).toBe('composer-reply-comment');
   });
 
   it('setActivityRetentionPreferences() prunes feed and persists preference', () => {

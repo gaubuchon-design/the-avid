@@ -74,6 +74,9 @@ interface CollabState {
   versionCompareTargetVersionId: string;
   versionCompareBaselineMode: VersionCompareBaselineMode;
   versionCompareCustomBaselineId: string;
+  commentsComposerVisible: boolean;
+  commentsComposerDraft: string;
+  commentsActiveReplyCommentId: string | null;
   versionRetentionPreferences: VersionRetentionPreferences;
   activityRetentionPreferences: ActivityRetentionPreferences;
   activityFeed: ActivityEntry[];
@@ -91,6 +94,9 @@ interface CollabActions {
   setActivitySearchQuery: (query: string) => void;
   setVersionComparePanelState: (
     state: Partial<Pick<CollabState, 'versionCompareTargetVersionId' | 'versionCompareBaselineMode' | 'versionCompareCustomBaselineId'>>,
+  ) => void;
+  setCommentsComposerContext: (
+    state: Partial<Pick<CollabState, 'commentsComposerVisible' | 'commentsComposerDraft' | 'commentsActiveReplyCommentId'>>,
   ) => void;
   persistPanelPreferences: () => void;
   selectComment: (id: string | null) => void;
@@ -462,6 +468,9 @@ function toPersistedPanelPreferences(state: Pick<
   | 'versionCompareTargetVersionId'
   | 'versionCompareBaselineMode'
   | 'versionCompareCustomBaselineId'
+  | 'commentsComposerVisible'
+  | 'commentsComposerDraft'
+  | 'commentsActiveReplyCommentId'
 >): EditorProjectCollaborationPanelPreferences {
   const editorState = useEditorStore.getState();
   return {
@@ -475,6 +484,9 @@ function toPersistedPanelPreferences(state: Pick<
     versionCompareTargetVersionId: state.versionCompareTargetVersionId,
     versionCompareBaselineMode: state.versionCompareBaselineMode,
     versionCompareCustomBaselineId: state.versionCompareCustomBaselineId,
+    commentsComposerVisible: state.commentsComposerVisible,
+    commentsComposerDraft: state.commentsComposerDraft,
+    commentsActiveReplyCommentId: state.commentsActiveReplyCommentId,
   };
 }
 
@@ -490,6 +502,9 @@ function toPanelPreferencesFromPersistedEntry(
   | 'versionCompareTargetVersionId'
   | 'versionCompareBaselineMode'
   | 'versionCompareCustomBaselineId'
+  | 'commentsComposerVisible'
+  | 'commentsComposerDraft'
+  | 'commentsActiveReplyCommentId'
 > & {
   versionHistoryRetentionPreference: 'manual' | 'session';
   versionHistoryCompareMode: 'summary' | 'details';
@@ -515,6 +530,15 @@ function toPanelPreferencesFromPersistedEntry(
     versionCompareCustomBaselineId: typeof entry?.versionCompareCustomBaselineId === 'string'
       ? entry.versionCompareCustomBaselineId
       : '',
+    commentsComposerVisible: typeof entry?.commentsComposerVisible === 'boolean'
+      ? entry.commentsComposerVisible
+      : false,
+    commentsComposerDraft: typeof entry?.commentsComposerDraft === 'string'
+      ? entry.commentsComposerDraft
+      : '',
+    commentsActiveReplyCommentId: typeof entry?.commentsActiveReplyCommentId === 'string'
+      ? entry.commentsActiveReplyCommentId
+      : null,
   };
 }
 
@@ -653,6 +677,9 @@ async function persistCollaborationStateToRepository(
     | 'versionCompareTargetVersionId'
     | 'versionCompareBaselineMode'
     | 'versionCompareCustomBaselineId'
+    | 'commentsComposerVisible'
+    | 'commentsComposerDraft'
+    | 'commentsActiveReplyCommentId'
   >,
 ): Promise<void> {
   if (!projectId) return;
@@ -700,6 +727,9 @@ const INITIAL_STATE: CollabState = {
   versionCompareTargetVersionId: '',
   versionCompareBaselineMode: 'previous',
   versionCompareCustomBaselineId: '',
+  commentsComposerVisible: false,
+  commentsComposerDraft: '',
+  commentsActiveReplyCommentId: null,
   versionRetentionPreferences: initialVersionRetentionPreferences,
   activityRetentionPreferences: initialActivityRetentionPreferences,
   activityFeed: applyActivityRetention(DEMO_ACTIVITY, initialActivityRetentionPreferences),
@@ -791,6 +821,14 @@ export const useCollabStore = create<CollabState & CollabActions>()(
               s.versionCompareTargetVersionId = persistedPanelPreferences.versionCompareTargetVersionId;
               s.versionCompareBaselineMode = persistedPanelPreferences.versionCompareBaselineMode;
               s.versionCompareCustomBaselineId = persistedPanelPreferences.versionCompareCustomBaselineId;
+              s.commentsComposerVisible = persistedPanelPreferences.commentsComposerVisible;
+              s.commentsComposerDraft = persistedPanelPreferences.commentsComposerDraft;
+              s.commentsActiveReplyCommentId = (
+                persistedPanelPreferences.commentsActiveReplyCommentId
+                && comments.some((comment) => comment.id === persistedPanelPreferences.commentsActiveReplyCommentId)
+              )
+                ? persistedPanelPreferences.commentsActiveReplyCommentId
+                : null;
               s.activityRetentionPreferences = persistedActivityRetentionPreferences;
               s.activityFeed = applyActivityRetention(persistedActivityFeed, persistedActivityRetentionPreferences);
               s.identityProfiles = {
@@ -871,6 +909,29 @@ export const useCollabStore = create<CollabState & CollabActions>()(
             s.versionCompareCustomBaselineId = state.versionCompareCustomBaselineId;
           }
         }, false, 'collab/setVersionComparePanelState');
+        void persistCollaborationStateToRepository(
+          get().projectId,
+          get().activityFeed,
+          get().activityRetentionPreferences,
+          get(),
+        ).catch((error) => {
+          console.error('Failed to persist collaboration panel preferences', error);
+        });
+      },
+      setCommentsComposerContext: (state) => {
+        set((s) => {
+          if (typeof state.commentsComposerVisible === 'boolean') {
+            s.commentsComposerVisible = state.commentsComposerVisible;
+          }
+          if (typeof state.commentsComposerDraft === 'string') {
+            s.commentsComposerDraft = state.commentsComposerDraft;
+          }
+          if (state.commentsActiveReplyCommentId === null) {
+            s.commentsActiveReplyCommentId = null;
+          } else if (typeof state.commentsActiveReplyCommentId === 'string') {
+            s.commentsActiveReplyCommentId = state.commentsActiveReplyCommentId;
+          }
+        }, false, 'collab/setCommentsComposerContext');
         void persistCollaborationStateToRepository(
           get().projectId,
           get().activityFeed,

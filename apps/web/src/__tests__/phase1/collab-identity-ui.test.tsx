@@ -335,6 +335,46 @@ describe('phase 1 collab identity UI', () => {
     container.remove();
   });
 
+  it('renders restored comments composer draft and active reply context', async () => {
+    useCollabStore.setState({
+      activeTab: 'comments',
+      commentsComposerVisible: true,
+      commentsComposerDraft: 'Need alt b-roll after this line.',
+      commentsActiveReplyCommentId: 'comment-reply-target',
+      comments: [
+        {
+          id: 'comment-reply-target',
+          userId: 'user-jordan',
+          userName: 'Jordan Reviewer',
+          frame: 180,
+          text: 'Can we tighten this section?',
+          timestamp: Date.now(),
+          resolved: false,
+          reactions: [],
+          replies: [],
+        },
+      ],
+    });
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<CollabPanel />);
+    });
+
+    const composerTextarea = container.querySelector('textarea[placeholder="Type your comment..."]') as HTMLTextAreaElement | null;
+    const replyInput = container.querySelector('input[placeholder="Write a reply..."]') as HTMLInputElement | null;
+    expect(composerTextarea?.value).toBe('Need alt b-roll after this line.');
+    expect(replyInput).toBeTruthy();
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
   it('renders restored versions context summary chips', async () => {
     useCollabStore.setState({
       activeTab: 'versions',
