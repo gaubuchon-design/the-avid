@@ -298,7 +298,11 @@ export class TranscriptEngine {
   }
 
   private notify(): void {
-    this.subscribers.forEach(cb => cb());
+    this.subscribers.forEach(cb => {
+      try { cb(); } catch (err) {
+        console.error('[TranscriptEngine] Listener error:', err);
+      }
+    });
   }
 }
 

@@ -895,6 +895,7 @@ async function importMediaIntoProject(projectId: string, filePaths: string[]): P
 
   const assets: EditorMediaAsset[] = [];
 
+  const errors: string[] = [];
   for (let index = 0; index < filePaths.length; index += 1) {
     const sourcePath = filePaths[index]!;
 
@@ -904,21 +905,30 @@ async function importMediaIntoProject(projectId: string, filePaths: string[]): P
       progress: Math.round((index / Math.max(filePaths.length, 1)) * 100),
     });
 
-    const asset = await ingestMediaFile(sourcePath, mediaPaths, {
-      storageMode: 'COPY',
-      generateProxies: true,
-      extractWaveforms: true,
-    });
-    assets.push(asset);
+    try {
+      const asset = await ingestMediaFile(sourcePath, mediaPaths, {
+        storageMode: 'COPY',
+        generateProxies: true,
+        extractWaveforms: true,
+      });
+      assets.push(asset);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Ingest failed';
+      errors.push(`${path.basename(sourcePath)}: ${message}`);
+      logger.write({ level: 'error', event: 'ingest-file-error', sourcePath, error: message });
+    }
   }
 
-  await mergeIntoMediaIndex(projectId, assets, mediaPaths);
+  if (assets.length > 0) {
+    await mergeIntoMediaIndex(projectId, assets, mediaPaths);
+  }
 
   upsertDesktopJob({
     ...desktopJobs.get(jobId)!,
-    status: 'COMPLETED',
+    status: errors.length > 0 && assets.length === 0 ? 'FAILED' : 'COMPLETED',
     progress: 100,
     outputPath: mediaPaths.mediaPath,
+    error: errors.length > 0 ? `${errors.length} file(s) failed: ${errors.join('; ')}` : undefined,
   });
 
   return assets;
@@ -1485,10 +1495,15 @@ app.on('before-quit', () => {
   stopAutoSaveTimer();
   void autoSaveAllDirtyProjects();
 
-  projectWatchers.forEach((_watchers, projectId) => disposeProjectWatchers(projectId));
+  // Collect keys first to avoid mutating the map during iteration
+  const projectIds = [...projectWatchers.keys()];
+  for (const projectId of projectIds) {
+    disposeProjectWatchers(projectId);
+  }
   void videoIOManager.dispose();
   void streamManager.dispose();
   void deckControlManager.dispose();
+  log('info', 'App', 'Application quitting');
   void logger.dispose();
 
   // Clean up system tray

@@ -141,7 +141,7 @@ export const TrackerPanel: React.FC = () => {
 
   const activeSession = useMemo(() => {
     if (!activeRegionId) return null;
-    return sessions.get(activeRegionId) ?? null;
+    return sessions[activeRegionId] ?? null;
   }, [sessions, activeRegionId]);
 
   const trackingProgress = activeSession?.data?.progress ?? 0;
@@ -211,7 +211,7 @@ export const TrackerPanel: React.FC = () => {
         )}
 
         {/* List existing regions */}
-        {Array.from(sessions.entries()).map(([id, session]) => (
+        {Object.entries(sessions).map(([id, session]) => (
           <div key={id} style={regionChip}>
             <span>
               {session.region.type === 'rectangle' ? '▭' : '⬡'}{' '}

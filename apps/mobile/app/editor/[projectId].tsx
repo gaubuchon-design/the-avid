@@ -69,10 +69,12 @@ function EditorLoading({ theme }: { theme: AppTheme }) {
 function EditorError({
   message,
   onRetry,
+  onBack,
   theme,
 }: {
   message: string;
   onRetry: () => void;
+  onBack: () => void;
   theme: AppTheme;
 }) {
   return (
@@ -95,6 +97,9 @@ function EditorError({
       >
         <Text style={[styles.retryBtnText, { color: theme.colors.primary }]}>Retry</Text>
       </Pressable>
+      <TouchableOpacity style={styles.backButton} onPress={onBack} activeOpacity={0.7}>
+        <Text style={styles.backButtonText}>Back to Projects</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -294,6 +299,9 @@ function ReviewPanelContent({ approvals, theme }: { approvals: EditorApproval[];
       <Text style={[styles.sectionLabel, { color: theme.colors.textMuted }]}>
         Approvals ({approvals.length})
       </Text>
+      {approvals.length === 0 && (
+        <Text style={[styles.emptyHint, { color: theme.colors.textMuted }]}>No approvals yet</Text>
+      )}
       {approvals.map((approval) => (
         <View key={approval.id} style={styles.assetRow}>
           <Text style={[styles.assetItem, { color: theme.colors.textSecondary }]} numberOfLines={1}>
@@ -322,6 +330,9 @@ function ScriptPanelContent({ transcript, theme }: { transcript: EditorTranscrip
       <Text style={[styles.sectionLabel, { color: theme.colors.textMuted }]}>
         Transcript ({transcript.length} cues)
       </Text>
+      {transcript.length === 0 && (
+        <Text style={[styles.emptyHint, { color: theme.colors.textMuted }]}>No transcript cues</Text>
+      )}
       {transcript.slice(0, MAX_VISIBLE).map((cue) => (
         <View key={cue.id} style={styles.cueRow}>
           <Text style={[styles.cueSpeaker, { color: theme.colors.primary }]}>{cue.speaker}</Text>
@@ -345,6 +356,9 @@ function PublishPanelContent({ jobs, theme }: { jobs: EditorPublishJob[]; theme:
       <Text style={[styles.sectionLabel, { color: theme.colors.textMuted }]}>
         Deliverables ({jobs.length})
       </Text>
+      {jobs.length === 0 && (
+        <Text style={[styles.emptyHint, { color: theme.colors.textMuted }]}>No delivery jobs</Text>
+      )}
       {jobs.map((job) => (
         <View key={job.id} style={styles.assetRow}>
           <Text style={[styles.assetItem, { color: theme.colors.textSecondary }]} numberOfLines={1}>
@@ -757,6 +771,7 @@ export default function EditorScreen() {
       <EditorError
         message={error ?? 'Project not found'}
         onRetry={loadProject}
+        onBack={() => router.back()}
         theme={theme}
       />
     );
@@ -818,6 +833,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   retryBtnText: { fontSize: 16, fontWeight: '600' },
+  backButton: {
+    backgroundColor: '#334155',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  backButtonText: { color: '#f1f5f9', fontWeight: '600', fontSize: 14 },
 
   // Toolbar
   toolbar: {
@@ -831,6 +854,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 6,
+    minWidth: 40,
+    alignItems: 'center',
   },
   saveBtn: { backgroundColor: '#065f46' },
   toolBtnText: { color: '#f1f5f9', fontSize: 13, fontWeight: '500' },
@@ -865,6 +890,7 @@ const styles = StyleSheet.create({
   },
   assetItem: { fontSize: 12, flex: 1 },
   assetCount: { fontSize: 11, marginLeft: 8 },
+  emptyHint: { fontSize: 11, fontStyle: 'italic', marginBottom: 6 },
   statusBadge: {
     fontSize: 10,
     textTransform: 'capitalize',

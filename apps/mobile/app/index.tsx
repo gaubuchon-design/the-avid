@@ -382,6 +382,7 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
+    setLoading(true);
     void refreshProjects().finally(() => setLoading(false));
   }, [refreshProjects]);
 
@@ -539,6 +540,7 @@ export default function HomeScreen() {
             onPress={() => { void refreshProjects(); }}
             accessibilityRole="button"
             accessibilityLabel="Retry loading projects"
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
             <Text style={[styles.errorRetry, { color: theme.colors.error }]}>Retry</Text>
           </TouchableOpacity>

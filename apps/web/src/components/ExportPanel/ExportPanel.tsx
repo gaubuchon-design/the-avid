@@ -295,10 +295,10 @@ function StepFormat() {
 const PresetCard = memo(function PresetCard({ preset, selected, onSelect }: { preset: ExportPreset; selected: boolean; onSelect: () => void }) {
   return (
     <div
-      onClick={onSelect}
       role="option"
       aria-selected={selected}
       tabIndex={0}
+      onClick={onSelect}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(); } }}
       style={{
         padding: '10px 12px',
@@ -349,7 +349,11 @@ function StepDestination() {
         {DESTINATIONS.map((d) => (
           <div
             key={d.key}
+            role="option"
+            aria-selected={destination === d.key}
+            tabIndex={0}
             onClick={() => setDestination(d.key)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDestination(d.key); } }}
             style={{
               display: 'flex',
               flexDirection: 'column',

@@ -2,6 +2,50 @@ import type { EditorMediaAsset, EditorProject } from '@mcua/core';
 
 // ─── Dialog Types ─────────────────────────────────────────────────────────────
 
+/** File filter for open/save dialogs (mirrors Electron.FileFilter) */
+interface FileFilter {
+  name: string;
+  extensions: string[];
+}
+
+/** Options for opening file dialogs (mirrors Electron.OpenDialogOptions) */
+interface OpenDialogOptions {
+  title?: string;
+  defaultPath?: string;
+  buttonLabel?: string;
+  filters?: FileFilter[];
+  properties?: Array<
+    | 'openFile'
+    | 'openDirectory'
+    | 'multiSelections'
+    | 'showHiddenFiles'
+    | 'createDirectory'
+    | 'promptToCreate'
+    | 'noResolveAliases'
+    | 'treatPackageAsDirectory'
+    | 'dontAddToRecent'
+  >;
+  message?: string;
+}
+
+/** Options for save dialogs (mirrors Electron.SaveDialogOptions) */
+interface SaveDialogOptions {
+  title?: string;
+  defaultPath?: string;
+  buttonLabel?: string;
+  filters?: FileFilter[];
+  message?: string;
+  nameFieldLabel?: string;
+  showsTagField?: boolean;
+  properties?: Array<
+    | 'showHiddenFiles'
+    | 'createDirectory'
+    | 'treatPackageAsDirectory'
+    | 'showOverwriteConfirmation'
+    | 'dontAddToRecent'
+  >;
+}
+
 interface OpenDialogResult {
   canceled: boolean;
   filePaths: string[];
@@ -187,11 +231,11 @@ interface DesktopBridge {
   };
 
   // Dialogs
-  openFile: (options?: unknown) => Promise<OpenDialogResult>;
-  saveFile: (options?: unknown) => Promise<SaveDialogResult>;
+  openFile: (options?: OpenDialogOptions) => Promise<OpenDialogResult>;
+  saveFile: (options?: SaveDialogOptions) => Promise<SaveDialogResult>;
   dialog: {
-    openFile: (options: unknown) => Promise<OpenDialogResult>;
-    saveFile: (options: unknown) => Promise<SaveDialogResult>;
+    openFile: (options: OpenDialogOptions) => Promise<OpenDialogResult>;
+    saveFile: (options: SaveDialogOptions) => Promise<SaveDialogResult>;
   };
 
   // Project CRUD

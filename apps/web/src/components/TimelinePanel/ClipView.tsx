@@ -3,6 +3,7 @@ import { useEditorStore } from '../../store/editor.store';
 import type { Clip } from '../../store/editor.store';
 import { editEngine } from '../../engine/EditEngine';
 import { snapEngine } from '../../engine/SnapEngine';
+import { trimEngine, TrimSide } from '../../engine/TrimEngine';
 import {
   MoveClipCommand,
   TrimClipLeftCommand,
@@ -185,62 +186,138 @@ export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor
     window.addEventListener('mouseup', onUp);
   };
 
+  // Get the active tool for determining trim behavior
+  const activeTool = useEditorStore((s) => s.activeTool);
+
   // ── Left trim ──
   const handleTrimLeft = (e: React.MouseEvent) => {
     e.stopPropagation();
+    const isTrimTool = activeTool === 'trim';
+    const isRipple = e.ctrlKey || e.metaKey; // Modifier for ripple trim
     const startX = e.clientX;
-    const origStart = clip.startTime;
-    let lastTime = origStart;
 
-    const anchors = snapEngine.collectAnchors(tracks, playheadTime, markers, clip.id);
+    if (isTrimTool) {
+      // Delegate to TrimEngine — enter trim mode at the clip's start edge
+      const side = isRipple ? TrimSide.B_SIDE : TrimSide.BOTH;
+      trimEngine.enterTrimMode([trackId], clip.startTime, side);
 
-    const onMove = (ev: MouseEvent) => {
-      const dx = ev.clientX - startX;
-      let newTime = origStart + dx / zoom;
-      const sr = snapEngine.snap(newTime, zoom, anchors);
-      if (sr) newTime = sr.time;
-      useEditorStore.getState().trimClip(clip.id, 'left', newTime);
-      lastTime = newTime;
-    };
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      if (lastTime !== origStart) {
-        useEditorStore.getState().trimClip(clip.id, 'left', origStart);
-        editEngine.execute(new TrimClipLeftCommand(clip.id, origStart, lastTime));
-      }
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+      const onMove = (ev: MouseEvent) => {
+        const dx = ev.clientX - startX;
+        const timeDelta = dx / zoom;
+        const absPosition = clip.startTime + timeDelta;
+        trimEngine.trimToPosition(absPosition);
+      };
+
+      const onUp = () => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        window.removeEventListener('keydown', onKeyDown);
+        trimEngine.exitTrimMode();
+      };
+
+      // Escape to cancel
+      const onKeyDown = (ev: KeyboardEvent) => {
+        if (ev.key === 'Escape') {
+          trimEngine.cancelTrim();
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          window.removeEventListener('keydown', onKeyDown);
+        }
+      };
+
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+      window.addEventListener('keydown', onKeyDown);
+    } else {
+      // Default behavior — simple left trim with snap + undo
+      const origStart = clip.startTime;
+      let lastTime = origStart;
+      const anchors = snapEngine.collectAnchors(tracks, playheadTime, markers, clip.id);
+
+      const onMove = (ev: MouseEvent) => {
+        const dx = ev.clientX - startX;
+        let newTime = origStart + dx / zoom;
+        const sr = snapEngine.snap(newTime, zoom, anchors);
+        if (sr) newTime = sr.time;
+        useEditorStore.getState().trimClip(clip.id, 'left', newTime);
+        lastTime = newTime;
+      };
+      const onUp = () => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        if (lastTime !== origStart) {
+          useEditorStore.getState().trimClip(clip.id, 'left', origStart);
+          editEngine.execute(new TrimClipLeftCommand(clip.id, origStart, lastTime));
+        }
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    }
   };
 
   // ── Right trim ──
   const handleTrimRight = (e: React.MouseEvent) => {
     e.stopPropagation();
+    const isTrimTool = activeTool === 'trim';
+    const isRipple = e.ctrlKey || e.metaKey;
     const startX = e.clientX;
-    const origEnd = clip.endTime;
-    let lastTime = origEnd;
 
-    const anchors = snapEngine.collectAnchors(tracks, playheadTime, markers, clip.id);
+    if (isTrimTool) {
+      // Delegate to TrimEngine — enter trim mode at the clip's end edge
+      const side = isRipple ? TrimSide.A_SIDE : TrimSide.BOTH;
+      trimEngine.enterTrimMode([trackId], clip.endTime, side);
 
-    const onMove = (ev: MouseEvent) => {
-      const dx = ev.clientX - startX;
-      let newTime = origEnd + dx / zoom;
-      const sr = snapEngine.snap(newTime, zoom, anchors);
-      if (sr) newTime = sr.time;
-      useEditorStore.getState().trimClip(clip.id, 'right', newTime);
-      lastTime = newTime;
-    };
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      if (lastTime !== origEnd) {
-        useEditorStore.getState().trimClip(clip.id, 'right', origEnd);
-        editEngine.execute(new TrimClipRightCommand(clip.id, origEnd, lastTime));
-      }
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+      const onMove = (ev: MouseEvent) => {
+        const dx = ev.clientX - startX;
+        const timeDelta = dx / zoom;
+        const absPosition = clip.endTime + timeDelta;
+        trimEngine.trimToPosition(absPosition);
+      };
+
+      const onUp = () => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        window.removeEventListener('keydown', onKeyDown);
+        trimEngine.exitTrimMode();
+      };
+
+      const onKeyDown = (ev: KeyboardEvent) => {
+        if (ev.key === 'Escape') {
+          trimEngine.cancelTrim();
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          window.removeEventListener('keydown', onKeyDown);
+        }
+      };
+
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+      window.addEventListener('keydown', onKeyDown);
+    } else {
+      // Default behavior — simple right trim with snap + undo
+      const origEnd = clip.endTime;
+      let lastTime = origEnd;
+      const anchors = snapEngine.collectAnchors(tracks, playheadTime, markers, clip.id);
+
+      const onMove = (ev: MouseEvent) => {
+        const dx = ev.clientX - startX;
+        let newTime = origEnd + dx / zoom;
+        const sr = snapEngine.snap(newTime, zoom, anchors);
+        if (sr) newTime = sr.time;
+        useEditorStore.getState().trimClip(clip.id, 'right', newTime);
+        lastTime = newTime;
+      };
+      const onUp = () => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        if (lastTime !== origEnd) {
+          useEditorStore.getState().trimClip(clip.id, 'right', origEnd);
+          editEngine.execute(new TrimClipRightCommand(clip.id, origEnd, lastTime));
+        }
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    }
   };
 
   return (

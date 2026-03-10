@@ -389,14 +389,15 @@ function Toggle({
   return (
     <div style={S.row}>
       <span style={S.label}>{label}</span>
-      <div
-        style={S.checkToggle(value)}
+      <button
+        style={{ ...S.checkToggle(value), padding: 0 }}
         onClick={() => onChange(!value)}
         role="switch"
         aria-checked={value}
+        aria-label={label}
       >
         <div style={S.checkDot(value)} />
-      </div>
+      </button>
     </div>
   );
 }

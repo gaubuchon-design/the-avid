@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useCallback } from 'react';
 import { keyboardEngine } from '../engine/KeyboardEngine';
 
 /**
@@ -14,10 +14,14 @@ export function useKeyboardAction(
   handler: () => void,
   deps: React.DependencyList = [],
 ) {
+  // Memoize the handler to avoid unnecessary re-registrations.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const stableHandler = useCallback(handler, deps);
+
   useEffect(() => {
-    keyboardEngine.registerAction(actionId, handler);
+    keyboardEngine.registerAction(actionId, stableHandler);
     return () => {
       keyboardEngine.unregisterAction(actionId);
     };
-  }, deps);
+  }, [actionId, stableHandler]);
 }

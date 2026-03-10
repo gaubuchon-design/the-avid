@@ -1,34 +1,41 @@
-// @mcua/ui — Design tokens, hooks, and utilities for The Avid UI
-// v0.2.0
+// ═══════════════════════════════════════════════════════════════════════════
+//  @mcua/ui — UI Package Barrel Export
+//
+//  Re-exports theme tokens, utilities, and shared React hooks.
+// ═══════════════════════════════════════════════════════════════════════════
 
-// ── Theme Tokens ─────────────────────────────────────────────────────────────
+// ─── Theme System ─────────────────────────────────────────────────────────
 export {
-  colors,
+  // Token collections
+  brand,
+  palette,
+  surfaceDark,
+  surfaceLight,
+  textDark,
+  textLight,
+  borderDark,
+  borderLight,
+  shadowDark,
+  shadowLight,
   typography,
   spacing,
   borderRadius,
-  shadows,
+  layout,
   motion,
   zIndex,
-  layout,
-  breakpoints,
+  // Assembled theme object
   theme,
+  // Utility functions
+  cssVar,
+  getSurfaces,
+  getTextColors,
+  getBorders,
+  getShadows,
 } from './theme/tokens';
 
-export type {
-  Theme,
-  Colors,
-  Typography,
-  Spacing,
-  BorderRadius,
-  Shadows,
-  Motion,
-  ZIndex,
-  Layout,
-  Breakpoints,
-} from './theme/tokens';
+export type { Theme, ThemeMode } from './theme/tokens';
 
-// ── Hooks ────────────────────────────────────────────────────────────────────
+// ─── Hooks ────────────────────────────────────────────────────────────────
 export { useTimeline } from './hooks/useTimeline';
 export type { UseTimelineReturn, UseTimelineOptions } from './hooks/useTimeline';
 

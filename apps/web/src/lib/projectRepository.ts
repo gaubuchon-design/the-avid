@@ -1,6 +1,5 @@
 import {
   buildProject,
-  buildSeedProjectLibrary,
   cloneProject,
   hydrateProject,
   toProjectSummary,
@@ -110,34 +109,20 @@ async function deleteIndexedDbProject(projectId: string): Promise<void> {
   database.close();
 }
 
-async function ensureSeedData(): Promise<EditorProject[]> {
-  const existing = typeof window !== 'undefined' && hasElectronProjectStore(window)
-    ? (await window.electronAPI.listProjects()).map((project) => hydrateProject(project))
-    : hasIndexedDb()
-    ? await listIndexedDbProjects()
-    : [];
-
-  if (existing.length > 0) {
-    return existing.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-  }
-
-  const seeded = buildSeedProjectLibrary();
+async function listAllProjects(): Promise<EditorProject[]> {
   if (typeof window !== 'undefined' && hasElectronProjectStore(window)) {
-    const api = window.electronAPI;
-    await Promise.all(seeded.map((project) => api.saveProject(project)));
-    return (await api.listProjects()).map((project) => hydrateProject(project));
+    return (await window.electronAPI.listProjects()).map((project) => hydrateProject(project));
   }
 
   if (hasIndexedDb()) {
-    const saved = await Promise.all(seeded.map((project) => saveIndexedDbProject(project)));
-    return saved.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    return listIndexedDbProjects();
   }
 
-  return seeded;
+  return [];
 }
 
 export async function listProjectsFromRepository(): Promise<EditorProject[]> {
-  return ensureSeedData();
+  return listAllProjects();
 }
 
 export async function listProjectSummariesFromRepository(): Promise<ProjectSummary[]> {
@@ -146,7 +131,7 @@ export async function listProjectSummariesFromRepository(): Promise<ProjectSumma
 }
 
 export async function getProjectFromRepository(projectId: string): Promise<EditorProject | null> {
-  await ensureSeedData();
+  await listAllProjects();
 
   if (typeof window !== 'undefined' && hasElectronProjectStore(window)) {
     const project = await window.electronAPI.getProject(projectId);

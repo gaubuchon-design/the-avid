@@ -100,6 +100,7 @@ async function seedProjectStore(): Promise<EditorProject[]> {
 /**
  * List all projects from local storage.
  * Results are cached in memory and refreshed after CACHE_TTL_MS.
+ * Uses Promise.allSettled for resilience against individual file read failures.
  */
 export async function listProjectsFromRepository(): Promise<EditorProject[]> {
   // Return cached data if fresh
@@ -127,8 +128,16 @@ export async function listProjectsFromRepository(): Promise<EditorProject[]> {
     return seedProjectStore();
   }
 
-  const results = await Promise.all(projectFiles.map(readProjectFile));
-  const projects = results.filter((item): item is EditorProject => item !== null);
+  const results = await Promise.allSettled(projectFiles.map(readProjectFile));
+
+  const projects: EditorProject[] = [];
+  for (const result of results) {
+    if (result.status === 'fulfilled' && result.value !== null) {
+      projects.push(result.value);
+    } else if (result.status === 'rejected') {
+      console.warn('[ProjectRepository] Failed to read project file:', result.reason);
+    }
+  }
 
   // Populate cache
   projectCache = new Map(projects.map((p) => [p.id, p]));

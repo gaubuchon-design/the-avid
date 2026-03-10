@@ -543,7 +543,11 @@ export class ColorEngine {
 
   /** Notify all subscribers that state has changed. */
   private notify(): void {
-    this.subscribers.forEach((cb) => cb());
+    this.subscribers.forEach((cb) => {
+      try { cb(); } catch (err) {
+        console.error('[ColorEngine] Listener error:', err);
+      }
+    });
   }
 }
 

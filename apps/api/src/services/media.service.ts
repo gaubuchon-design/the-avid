@@ -222,7 +222,7 @@ class MediaService {
 
     // Queue background processing (proxy + metadata extraction)
     this.queueProcessing(asset.id).catch((err) =>
-      logger.error('Failed to queue processing', { assetId: asset.id, error: err.message })
+      logger.error('Failed to queue media processing', { assetId: asset.id, error: err.message })
     );
 
     logger.info('Direct upload complete', { assetId: asset.id, type, size: file.size });
@@ -245,7 +245,7 @@ class MediaService {
     });
 
     this.queueProcessing(assetId).catch((err) =>
-      logger.error('Failed to queue processing', { assetId, error: err.message })
+      logger.error('Failed to queue media processing', { assetId, error: err.message })
     );
 
     logger.info('Upload confirmed, processing queued', { assetId });

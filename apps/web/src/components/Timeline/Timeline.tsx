@@ -56,7 +56,7 @@ function Ruler({ zoom, scrollLeft, duration, onScrub }: {
         ctx.fillText(`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`, x, H - 5);
       }
     }
-  }, [zoom, scrollLeft, duration]);
+  }, [zoom, scrollLeft]);
 
   useEffect(() => {
     draw();

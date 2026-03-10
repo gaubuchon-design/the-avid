@@ -4,7 +4,7 @@
 // =============================================================================
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { useEditorStore, type MediaAsset } from '../store/editor.store';
+import { useEditorStore, type MediaAsset, type Bin } from '../store/editor.store';
 import { usePlayerStore } from '../store/player.store';
 import { useDebounce } from '../hooks/useDebounce';
 
@@ -28,9 +28,9 @@ function formatFileSize(bytes?: number): string {
 
 type SortKey = 'name' | 'duration' | 'fps' | 'width' | 'codec' | 'fileSize' | 'type';
 
-function collectAllMediaAssets(bins: { assets: MediaAsset[]; children: any[] }[]): MediaAsset[] {
+function collectAllMediaAssets(bins: Bin[]): MediaAsset[] {
   const result: MediaAsset[] = [];
-  const walk = (b: { assets: MediaAsset[]; children: any[] }) => {
+  const walk = (b: Bin) => {
     result.push(...b.assets);
     b.children.forEach(walk);
   };

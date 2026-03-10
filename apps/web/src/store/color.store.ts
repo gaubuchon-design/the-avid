@@ -208,26 +208,56 @@ export const useColorStore = create<ColorState & ColorActions>()(
 
       addNode: (type) => {
         colorEngine.addNode(type);
+        set((s) => {
+          s.nodes = colorEngine.getAllNodes();
+          s.connections = colorEngine.getConnections();
+        }, false, 'color/addNode');
       },
 
       removeNode: (id) => {
         colorEngine.removeNode(id);
+        set((s) => {
+          s.nodes = colorEngine.getAllNodes();
+          s.connections = colorEngine.getConnections();
+          if (s.selectedNodeId === id) s.selectedNodeId = null;
+        }, false, 'color/removeNode');
       },
 
       updateNodeParams: (id, params) => {
         colorEngine.updateNodeParams(id, params);
+        set((s) => {
+          s.nodes = colorEngine.getAllNodes();
+        }, false, 'color/updateNodeParams');
       },
 
       saveLook: (name) => {
         colorEngine.saveLook(name);
+        set((s) => {
+          s.looks = colorEngine.getLooks().map((l) => ({
+            id: l.id,
+            name: l.name,
+            thumbnail: l.thumbnail,
+          }));
+        }, false, 'color/saveLook');
       },
 
       loadLook: (id) => {
         colorEngine.loadLook(id);
+        set((s) => {
+          s.nodes = colorEngine.getAllNodes();
+          s.connections = colorEngine.getConnections();
+        }, false, 'color/loadLook');
       },
 
       saveStill: (name) => {
         colorEngine.saveStill(name, '');
+        set((s) => {
+          s.stills = colorEngine.getStills().map((st) => ({
+            id: st.id,
+            name: st.name,
+            frame: st.frame,
+          }));
+        }, false, 'color/saveStill');
       },
 
       addPowerWindow: (type) =>

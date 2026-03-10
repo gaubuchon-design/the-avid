@@ -160,6 +160,7 @@ services:
       # S3_BUCKET_MEDIA       - Bucket for raw media assets
       # S3_BUCKET_PROXIES     - Bucket for proxy/preview media
       # S3_BUCKET_EXPORTS     - Bucket for exported renders
+      # S3_FORCE_PATH_STYLE   - Force path-style S3 URLs (required for MinIO)
       # JWT_SECRET            - Secret key for JWT signing (CHANGE IN PRODUCTION)
       # ALLOWED_ORIGINS       - Comma-separated list of allowed CORS origins
       # LOG_LEVEL             - Logging verbosity (debug | info | warn | error)
@@ -174,6 +175,7 @@ services:
       S3_BUCKET_MEDIA: ${S3_BUCKET_MEDIA:-avid-media-assets}
       S3_BUCKET_PROXIES: ${S3_BUCKET_PROXIES:-avid-media-proxies}
       S3_BUCKET_EXPORTS: ${S3_BUCKET_EXPORTS:-avid-exports}
+      S3_FORCE_PATH_STYLE: "true"
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-in-production}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
       LOG_LEVEL: ${LOG_LEVEL:-debug}

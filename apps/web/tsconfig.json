@@ -1,10 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2020",
+    "target": "ES2022",
     "useDefineForClassFields": true,
     "lib": [
-      "ES2020",
+      "ES2022",
       "DOM",
       "DOM.Iterable"
     ],
@@ -15,12 +15,19 @@
     "jsx": "react-jsx",
     "noUnusedLocals": false,
     "noUnusedParameters": false,
+    "baseUrl": ".",
     "paths": {
       "@mcua/core": [
         "../../packages/core/src"
       ],
       "@mcua/core/*": [
         "../../packages/core/src/*"
+      ],
+      "@mcua/ui": [
+        "../../packages/ui/src"
+      ],
+      "@mcua/ui/*": [
+        "../../packages/ui/src/*"
       ]
     }
   },

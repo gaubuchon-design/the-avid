@@ -18,7 +18,7 @@ export function useSettingsEffects() {
     if (user) {
       initForUser(user.id, user.name);
     }
-  }, [user?.id]);
+  }, [user?.id, user?.name, initForUser]);
 
   // Apply theme to DOM
   useEffect(() => {

@@ -87,7 +87,7 @@ export function LoginPage() {
       )}
 
       {/* Form */}
-      <form onSubmit={handleSubmit} className="auth-form" noValidate>
+      <form onSubmit={handleSubmit} className="auth-form" noValidate aria-label="Sign in">
         <div className="auth-field">
           <label className="auth-label" htmlFor="login-email">Email</label>
           <input

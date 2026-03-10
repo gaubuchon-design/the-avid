@@ -13,7 +13,7 @@ import type { NDIConfig } from './types';
 
 interface GrandioseModule {
   find(opts?: { showLocalSources?: boolean; timeout?: number }): Promise<NDISource[]>;
-  receive(opts: { source: NDISource }): Promise<NDIReceiver>;
+  receive(opts: { source: NDISource }): Promise<NDIReceiverInterface>;
   send?(opts: { name: string; groups?: string; clockVideo?: boolean; clockAudio?: boolean }): NDISenderHandle;
 }
 
@@ -189,7 +189,7 @@ export class NDISender {
 /**
  * NDI Receiver for discovering and receiving NDI sources.
  */
-export class NDIReceiver {
+export class NDIDiscovery {
   private grandiose: GrandioseModule | null = null;
   private receiver: NDIReceiverInterface | null = null;
 

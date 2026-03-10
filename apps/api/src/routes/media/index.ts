@@ -157,7 +157,7 @@ router.get(
         : {}),
     };
 
-    const allowedSortFields = ['createdAt', 'name', 'type', 'fileSize', 'duration'];
+    const allowedSortFields = ['createdAt', 'name', 'type', 'fileSize', 'duration', 'updatedAt'];
     const orderField = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
 
     const [assets, total] = await Promise.all([
@@ -188,8 +188,8 @@ router.get(
       db.mediaAsset.count({ where }),
     ]);
 
-    // Enrich with signed URLs (batch to avoid N+1 URL generation)
-    const enriched = await Promise.all(assets.map(mediaService.enrichWithUrls));
+    // Enrich with signed URLs (bind to preserve context)
+    const enriched = await Promise.all(assets.map((a: typeof assets[number]) => mediaService.enrichWithUrls(a)));
 
     // Media list is dynamic but can tolerate 5 second staleness
     res.setHeader('Cache-Control', 'private, max-age=5, stale-while-revalidate=15');

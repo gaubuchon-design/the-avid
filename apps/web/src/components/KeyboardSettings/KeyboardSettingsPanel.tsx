@@ -121,7 +121,7 @@ export function KeyboardSettingsPanel() {
     persistBindings();
     setEditingBindingId(null);
     keyboardEngine.enable();
-  }, [capturedKey]);
+  }, [capturedKey, editingBindingId, layout.bindings, persistBindings]);
 
   // Handle reset individual binding
   const handleResetBinding = (binding: KeyBinding) => {

@@ -87,14 +87,16 @@ app.use(cors({
     if (!origin || config.cors.origins.includes(origin) || config.isDev) {
       callback(null, true);
     } else {
+      // Do not leak the origin value in the error message
       logger.warn(`CORS rejection: origin=${origin}`);
-      callback(new Error(`Origin ${origin} not allowed by CORS`));
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
   exposedHeaders: ['X-Request-ID', 'X-RateLimit-Remaining'],
+  maxAge: 86400, // Cache preflight for 24h
 }));
 
 // ─── Response Compression ────────────────────────────────────────────────────
@@ -340,9 +342,17 @@ const shutdown = async (signal: string) => {
 
   logger.info(`Received ${signal}, shutting down gracefully...`);
 
+  // Force shutdown after 15 seconds
+  const forceTimer = setTimeout(() => {
+    logger.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 15000);
+  forceTimer.unref();
+
   // Stop accepting new connections
   httpServer.close(async () => {
     try {
+      clearTimeout(forceTimer);
       // Close WebSocket connections
       ws.io.close();
       // Stop memory monitoring
@@ -356,12 +366,6 @@ const shutdown = async (signal: string) => {
       process.exit(1);
     }
   });
-
-  // Force shutdown after 15 seconds
-  setTimeout(() => {
-    logger.error('Forced shutdown after timeout');
-    process.exit(1);
-  }, 15000).unref();
 };
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));

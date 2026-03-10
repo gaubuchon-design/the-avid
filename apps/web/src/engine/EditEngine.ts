@@ -136,7 +136,11 @@ export class EditEngine {
 
   /** Notify all subscribers that the history state has changed. */
   private notify(): void {
-    this.listeners.forEach((fn) => fn());
+    this.listeners.forEach((fn) => {
+      try { fn(); } catch (err) {
+        console.error('[EditEngine] Listener error:', err);
+      }
+    });
   }
 
   /**

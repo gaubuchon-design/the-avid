@@ -639,7 +639,7 @@
 }
 
 .transcript-word:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--bg-hover);
   color: var(--text-primary);
 }
 
@@ -685,6 +685,14 @@
   background: var(--brand);
   border-radius: var(--radius-full);
   animation: loading-slide 1.5s ease-in-out infinite;
+}
+@keyframes loading-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
 }
 
 .transcript-empty {
@@ -1781,6 +1789,7 @@
    AI PANEL
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* ─── AI PANEL ─────────────────────────────────────────────────────────────── */
 .ai-panel {
   position: absolute;
   top: var(--space-2-5);

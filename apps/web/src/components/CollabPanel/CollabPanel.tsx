@@ -896,7 +896,7 @@ export function CollabPanel() {
       <div style={S.header}>
         <span style={{ fontSize: 14 }}>👥</span>
         <span style={S.title}>Collaboration</span>
-        <div style={{ display: 'flex', gap: -4 }}>
+        <div style={{ display: 'flex' }}>
           {onlineUsers.slice(0, 3).map((u) => (
             <div
               key={u.id}

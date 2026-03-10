@@ -21,6 +21,7 @@ import {
   LogBox,
   Platform,
   Pressable,
+  TouchableOpacity,
   useColorScheme,
   AccessibilityInfo,
 } from 'react-native';
@@ -543,6 +544,7 @@ function RootNavigator({ reduceMotion, onLayoutReady }: RootNavigatorProps) {
             name="(tabs)"
             options={{ headerShown: false }}
           />
+          <Stack.Screen name="index" options={{ title: 'The Avid' }} />
           <Stack.Screen
             name="editor/[projectId]"
             options={{

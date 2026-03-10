@@ -216,8 +216,11 @@ export class TranscribeWorker {
       try {
         const audioData = fs.readFileSync(wavPath);
         const formData = new FormData();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        formData.append('file', new Blob([audioData.buffer] as any) as unknown as string);
+        // Node.js Buffer → Blob requires type gymnastics across different Node versions
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Node FormData Blob interop
+        const audioBlob: Blob = new (Blob as any)([audioData], { type: 'audio/wav' });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Node FormData append with filename
+        (formData as any).append('file', audioBlob, 'audio.wav');
         formData.append('model', 'whisper-1');
         formData.append('language', language);
         formData.append('response_format', 'verbose_json');

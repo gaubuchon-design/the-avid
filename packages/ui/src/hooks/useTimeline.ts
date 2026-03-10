@@ -49,6 +49,8 @@ export interface UseTimelineReturn {
   removeClip: (trackId: string, clipId: string) => void;
   /** Move a clip to a new track and/or start time. */
   moveClip: (clipId: string, newTrackId: string, newStartTime: number) => void;
+  /** Update the timeline duration (clamps playhead if needed). */
+  setTimelineDuration: (duration: number) => void;
   /** Update the entire timeline state (e.g., after external modification). */
   setTimeline: React.Dispatch<React.SetStateAction<Timeline>>;
 }
@@ -76,17 +78,26 @@ export function useTimeline(
     onPlaybackEndRef.current = onPlaybackEnd;
   }, [onPlaybackEnd]);
 
+  // ── Internal helper to stop the interval ─────────────────────────────────
+  const stopInterval = useCallback(() => {
+    if (intervalRef.current !== null) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
+      stopInterval();
     };
-  }, []);
+  }, [stopInterval]);
 
+  // ── Transport ────────────────────────────────────────────────────────────
   const play = useCallback(() => {
-    if (intervalRef.current) return; // Already playing
+    // Guard: don't start a second interval if already playing
+    if (intervalRef.current !== null) return;
+
     setIsPlaying(true);
     const frameDuration = 1 / fps;
 
@@ -102,8 +113,7 @@ export function useTimeline(
           }
 
           // End of timeline
-          clearInterval(intervalRef.current!);
-          intervalRef.current = null;
+          stopInterval();
           setIsPlaying(false);
           onPlaybackEndRef.current?.();
           return { ...prev, playhead: prev.duration };
@@ -113,23 +123,21 @@ export function useTimeline(
         return { ...prev, playhead: next };
       });
     }, 1000 / fps);
-  }, [fps, loop]);
+  }, [fps, loop, stopInterval]);
 
   const pause = useCallback(() => {
     setIsPlaying(false);
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-  }, []);
+    stopInterval();
+  }, [stopInterval]);
 
   const togglePlayback = useCallback(() => {
-    if (isPlaying) {
+    // Use intervalRef to determine play state (avoids stale closure on isPlaying)
+    if (intervalRef.current !== null) {
       pause();
     } else {
       play();
     }
-  }, [isPlaying, play, pause]);
+  }, [play, pause]);
 
   const stop = useCallback(() => {
     pause();
@@ -138,7 +146,7 @@ export function useTimeline(
   }, [pause]);
 
   const seek = useCallback((seconds: number) => {
-    setTimeline((prev) => {
+    setTimeline((prev: Timeline) => {
       const clamped = clamp(seconds, 0, prev.duration);
       onPlayheadChangeRef.current?.(clamped);
       return { ...prev, playhead: clamped };
@@ -155,6 +163,7 @@ export function useTimeline(
     seek(timeline.playhead - frameDuration * frames);
   }, [fps, timeline.playhead, seek]);
 
+  // ── Track management ─────────────────────────────────────────────────────
   const addTrack = useCallback((type: Track['type'], name: string) => {
     const track: Track = {
       id: generateId(),
@@ -165,22 +174,23 @@ export function useTimeline(
       locked: false,
       volume: 1,
     };
-    setTimeline((prev) => ({ ...prev, tracks: [...prev.tracks, track] }));
+    setTimeline((prev: Timeline) => ({ ...prev, tracks: [...prev.tracks, track] }));
   }, []);
 
   const removeTrack = useCallback((trackId: string) => {
-    setTimeline((prev) => ({
+    setTimeline((prev: Timeline) => ({
       ...prev,
-      tracks: prev.tracks.filter((t) => t.id !== trackId),
+      tracks: prev.tracks.filter((t: Track) => t.id !== trackId),
     }));
   }, []);
 
+  // ── Clip management ──────────────────────────────────────────────────────
   const addClip = useCallback(
     (trackId: string, clip: Omit<Clip, 'id' | 'trackId'>) => {
       const newClip: Clip = { ...clip, id: generateId(), trackId };
-      setTimeline((prev) => ({
+      setTimeline((prev: Timeline) => ({
         ...prev,
-        tracks: prev.tracks.map((t) =>
+        tracks: prev.tracks.map((t: Track) =>
           t.id === trackId ? { ...t, clips: [...t.clips, newClip] } : t,
         ),
       }));
@@ -189,37 +199,60 @@ export function useTimeline(
   );
 
   const removeClip = useCallback((trackId: string, clipId: string) => {
-    setTimeline((prev) => ({
+    setTimeline((prev: Timeline) => ({
       ...prev,
-      tracks: prev.tracks.map((t) =>
-        t.id === trackId ? { ...t, clips: t.clips.filter((c) => c.id !== clipId) } : t,
+      tracks: prev.tracks.map((t: Track) =>
+        t.id === trackId
+          ? { ...t, clips: t.clips.filter((c: Clip) => c.id !== clipId) }
+          : t,
       ),
     }));
   }, []);
 
   const moveClip = useCallback(
     (clipId: string, newTrackId: string, newStartTime: number) => {
-      setTimeline((prev) => {
+      setTimeline((prev: Timeline) => {
         let movedClip: Clip | undefined;
-        const tracks = prev.tracks.map((t) => {
-          const clip = t.clips.find((c) => c.id === clipId);
+
+        // Remove from current track
+        const tracks = prev.tracks.map((t: Track) => {
+          const clip = t.clips.find((c: Clip) => c.id === clipId);
           if (clip) {
-            movedClip = { ...clip, trackId: newTrackId, startTime: newStartTime };
-            return { ...t, clips: t.clips.filter((c) => c.id !== clipId) };
+            const clipDuration = clip.endTime - clip.startTime;
+            movedClip = {
+              ...clip,
+              trackId: newTrackId,
+              startTime: newStartTime,
+              endTime: newStartTime + clipDuration,
+            };
+            return { ...t, clips: t.clips.filter((c: Clip) => c.id !== clipId) };
           }
           return t;
         });
+
         if (!movedClip) return prev;
+
+        // Insert into target track
         return {
           ...prev,
-          tracks: tracks.map((t) =>
-            t.id === newTrackId ? { ...t, clips: [...t.clips, movedClip!] } : t,
+          tracks: tracks.map((t: Track) =>
+            t.id === newTrackId
+              ? { ...t, clips: [...t.clips, movedClip!] }
+              : t,
           ),
         };
       });
     },
     [],
   );
+
+  const setTimelineDuration = useCallback((duration: number) => {
+    setTimeline((prev: Timeline) => ({
+      ...prev,
+      duration: Math.max(0, duration),
+      playhead: Math.min(prev.playhead, Math.max(0, duration)),
+    }));
+  }, []);
 
   return {
     timeline,
@@ -238,6 +271,7 @@ export function useTimeline(
     addClip,
     removeClip,
     moveClip,
+    setTimelineDuration,
     setTimeline,
   };
 }

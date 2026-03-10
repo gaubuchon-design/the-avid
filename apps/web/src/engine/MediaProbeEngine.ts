@@ -100,19 +100,37 @@ function generateVideoThumbnail(video: HTMLVideoElement, time: number): Promise<
     const ctx = canvas.getContext('2d');
     if (!ctx) { resolve(''); return; }
 
+    // Guard against non-finite time values (common with MediaRecorder WebM)
+    const safeTime = isFinite(time) && time > 0 ? time : 0;
+
     const seek = () => {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       resolve(canvas.toDataURL('image/jpeg', 0.7));
     };
 
-    if (video.readyState >= 2) {
-      video.currentTime = time;
-      video.addEventListener('seeked', seek, { once: true });
-    } else {
-      video.addEventListener('loadeddata', () => {
-        video.currentTime = time;
-        video.addEventListener('seeked', seek, { once: true });
+    // Timeout to prevent hanging forever
+    const timeout = setTimeout(() => {
+      // Still capture current frame even if seek didn't work
+      if (video.readyState >= 2) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      } else {
+        resolve('');
+      }
+    }, 3000);
+
+    const seekAndCapture = () => {
+      video.addEventListener('seeked', () => {
+        clearTimeout(timeout);
+        seek();
       }, { once: true });
+      video.currentTime = safeTime;
+    };
+
+    if (video.readyState >= 2) {
+      seekAndCapture();
+    } else {
+      video.addEventListener('loadeddata', seekAndCapture, { once: true });
     }
   });
 }
@@ -217,7 +235,11 @@ class MediaProbeEngineClass {
 
     const meta = await new Promise<{ duration: number; width: number; height: number }>((resolve, reject) => {
       video.addEventListener('loadedmetadata', () => {
-        resolve({ duration: video.duration, width: video.videoWidth, height: video.videoHeight });
+        resolve({
+          duration: isFinite(video.duration) ? video.duration : 0,
+          width: video.videoWidth,
+          height: video.videoHeight,
+        });
       }, { once: true });
       video.addEventListener('error', () => reject(new Error('Failed to load video')), { once: true });
     });

@@ -1,9 +1,13 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
-import { playbackEngine } from '../engine/PlaybackEngine';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
+//
+// Player store manages SOURCE MONITOR state only.
+// Timeline playback is managed by editor.store.ts via PlaybackEngine.
+// This store is decoupled — it just sets boolean flags. The SourceMonitor
+// component reacts to isPlaying by calling video.play()/pause() directly.
 
 export type ScopeType = 'waveform' | 'vectorscope' | 'histogram' | 'parade';
 
@@ -62,76 +66,58 @@ export const usePlayerStore = create<PlayerState & PlayerActions>()(
       // Initial state
       ...INITIAL_STATE,
 
-      // Actions
-      play: () => {
-        playbackEngine.play();
+      // Actions — pure state setters; SourceMonitor reacts via useEffect
+      play: () =>
         set((s) => {
           s.isPlaying = true;
-        }, false, 'player/play');
-      },
+        }, false, 'player/play'),
 
-      pause: () => {
-        playbackEngine.pause();
+      pause: () =>
         set((s) => {
           s.isPlaying = false;
-        }, false, 'player/pause');
-      },
+        }, false, 'player/pause'),
 
-      stop: () => {
-        playbackEngine.stop();
+      stop: () =>
         set((s) => {
           s.isPlaying = false;
           s.speed = 1;
-          s.currentFrame = playbackEngine.currentFrame;
-        }, false, 'player/stop');
-      },
+          s.currentFrame = 0;
+        }, false, 'player/stop'),
 
       togglePlayPause: () => {
         const isCurrentlyPlaying = usePlayerStore.getState().isPlaying;
         if (isCurrentlyPlaying) {
-          playbackEngine.pause();
           set((s) => { s.isPlaying = false; }, false, 'player/togglePlayPause');
         } else {
-          playbackEngine.play();
           set((s) => { s.isPlaying = true; }, false, 'player/togglePlayPause');
         }
       },
 
-      seekFrame: (frame) => {
-        playbackEngine.seekToFrame(frame);
+      seekFrame: (frame) =>
         set((s) => {
           s.currentFrame = frame;
-        }, false, 'player/seekFrame');
-      },
+        }, false, 'player/seekFrame'),
 
-      setSpeed: (speed) => {
-        playbackEngine.setSpeed(speed);
+      setSpeed: (speed) =>
         set((s) => {
-          s.speed = speed;
-        }, false, 'player/setSpeed');
-      },
+          s.speed = Math.max(-8, Math.min(8, speed));
+        }, false, 'player/setSpeed'),
 
-      setInPoint: (frame) => {
-        if (frame !== null) playbackEngine.setInPoint(frame);
+      setInPoint: (frame) =>
         set((s) => {
           s.inPoint = frame;
-        }, false, 'player/setInPoint');
-      },
+        }, false, 'player/setInPoint'),
 
-      setOutPoint: (frame) => {
-        if (frame !== null) playbackEngine.setOutPoint(frame);
+      setOutPoint: (frame) =>
         set((s) => {
           s.outPoint = frame;
-        }, false, 'player/setOutPoint');
-      },
+        }, false, 'player/setOutPoint'),
 
-      clearInOut: () => {
-        playbackEngine.clearInOut();
+      clearInOut: () =>
         set((s) => {
           s.inPoint = null;
           s.outPoint = null;
-        }, false, 'player/clearInOut');
-      },
+        }, false, 'player/clearInOut'),
 
       toggleLoop: () =>
         set((s) => {
@@ -161,23 +147,14 @@ export const usePlayerStore = create<PlayerState & PlayerActions>()(
       syncFromEngine: (frame) =>
         set((s) => {
           s.currentFrame = frame;
-          s.isPlaying = playbackEngine.isPlaying;
-          s.speed = playbackEngine.speed;
         }, false, 'player/syncFromEngine'),
 
-      resetStore: () => {
-        playbackEngine.stop();
-        set(() => ({ ...INITIAL_STATE }), true, 'player/resetStore');
-      },
+      resetStore: () =>
+        set(() => ({ ...INITIAL_STATE }), true, 'player/resetStore'),
     })),
     { name: 'PlayerStore', enabled: process.env["NODE_ENV"] === 'development' },
   )
 );
-
-// Wire up engine -> store sync
-playbackEngine.subscribe((frame) => {
-  usePlayerStore.getState().syncFromEngine(frame);
-});
 
 // ─── Named Selectors ────────────────────────────────────────────────────────
 

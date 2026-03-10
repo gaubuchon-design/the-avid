@@ -5,6 +5,7 @@ import { db } from '../db/client';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import type { JwtPayload } from '../middleware/auth';
+import { renderFarmService } from '../services/renderfarm.service';
 
 // ─── Event types ───────────────────────────────────────────────────────────────
 export interface ServerToClientEvents {
@@ -25,6 +26,18 @@ export interface ServerToClientEvents {
   'lock:released': (payload: { resourceType: string; resourceId: string }) => void;
   'cursor:update': (payload: { userId: string; x: number; y: number }) => void;
   error: (payload: { message: string; code: string }) => void;
+
+  // Render Farm events
+  'render:worker:registered': (payload: { node: any }) => void;
+  'render:worker:updated': (payload: { nodeId: string; patch: any }) => void;
+  'render:worker:disconnected': (payload: { nodeId: string }) => void;
+  'render:worker:heartbeat': (payload: { nodeId: string; metrics: any }) => void;
+  'render:job:queued': (payload: { job: any }) => void;
+  'render:job:progress': (payload: { jobId: string; progress: number; segmentId?: string }) => void;
+  'render:job:status': (payload: { jobId: string; status: string; error?: string }) => void;
+  'render:job:complete': (payload: { jobId: string; outputPath: string; outputSize?: number }) => void;
+  'render:job:failed': (payload: { jobId: string; error: string }) => void;
+  'render:farm:stats': (payload: any) => void;
 }
 
 export interface ClientToServerEvents {
@@ -33,6 +46,15 @@ export interface ClientToServerEvents {
   'timeline:operation': (payload: TimelineOperation) => void;
   'playhead:move': (payload: { timelineId: string; position: number }) => void;
   'cursor:move': (payload: { x: number; y: number }) => void;
+
+  // Render Farm client events
+  'render:join': (callback: (ok: boolean) => void) => void;
+  'render:worker:add': (payload: { hostname: string; port: number }) => void;
+  'render:worker:remove': (payload: { nodeId: string }) => void;
+  'render:job:submit': (payload: any) => void;
+  'render:job:cancel': (payload: { jobId: string }) => void;
+  'render:queue:start': () => void;
+  'render:queue:pause': () => void;
 }
 
 export interface TimelineOperation {
@@ -240,18 +262,63 @@ export function initWebSocket(httpServer: HttpServer) {
       });
     });
 
+    // ── Render Farm Events ─────────────────────────────────────────────────
+    socket.on('render:join', (callback) => {
+      socket.join('render');
+      logger.debug('User joined render farm room', { displayName: user.displayName });
+      callback(true);
+    });
+
+    socket.on('render:worker:add', (payload) => {
+      const node = renderFarmService.registerWorker({
+        hostname: payload.hostname,
+        ip: '0.0.0.0',
+        port: payload.port,
+        workerTypes: ['render'],
+      });
+      socket.emit('render:worker:registered', { node });
+    });
+
+    socket.on('render:worker:remove', (payload) => {
+      renderFarmService.removeWorker(payload.nodeId);
+    });
+
+    socket.on('render:job:submit', (payload) => {
+      const job = renderFarmService.submitJob(payload);
+      socket.emit('render:job:queued', { job });
+    });
+
+    socket.on('render:job:cancel', (payload) => {
+      renderFarmService.cancelJob(payload.jobId);
+    });
+
+    socket.on('render:queue:start', () => {
+      renderFarmService.scheduleNext();
+    });
+
+    socket.on('render:queue:pause', () => {
+      // Pause all queued jobs
+      const jobs = renderFarmService.getJobs();
+      for (const job of jobs) {
+        if (job.status === 'queued') {
+          renderFarmService.pauseJob(job.id);
+        }
+      }
+    });
+
     // Disconnect
     socket.on('disconnect', (reason) => {
-      socketUsers.delete(socket.id);
-      lastCursorUpdate.delete(socket.id);
-
-      // Leave all joined rooms
+      // Leave all joined rooms BEFORE deleting from socketUsers map
       socket.rooms.forEach((room) => {
         if (room.startsWith('project:')) {
           const projectId = room.slice('project:'.length);
           handleLeave(socket, projectId);
         }
       });
+
+      socketUsers.delete(socket.id);
+      lastCursorUpdate.delete(socket.id);
+
       logger.debug('WS disconnected', { userId: user.userId, reason });
     });
   });
@@ -281,6 +348,11 @@ export function initWebSocket(httpServer: HttpServer) {
     }).catch((err: Error) => logger.error('Failed to record leave event', { error: err.message }));
   }
 
+  // ─── Render Farm broadcast wiring ──────────────────────────────────────────
+  renderFarmService.onBroadcast = (event: string, payload: any) => {
+    io.to('render').emit(event as any, payload);
+  };
+
   // ─── Utility: broadcast to project ──────────────────────────────────────────
   return {
     io,
@@ -291,6 +363,13 @@ export function initWebSocket(httpServer: HttpServer) {
     broadcastToProject: (projectId: string, event: keyof ServerToClientEvents, payload: unknown) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic event dispatch
       io.to(`project:${projectId}`).emit(event as any, payload);
+    },
+
+    /**
+     * Broadcast an event to all clients in the render farm room.
+     */
+    broadcastToRender: (event: keyof ServerToClientEvents, payload: unknown) => {
+      io.to('render').emit(event as any, payload);
     },
 
     /**

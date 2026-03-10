@@ -1,10 +1,9 @@
-import React, { useEffect, useRef, useState, Suspense, lazy, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, Suspense, lazy } from 'react';
 import { LoadingSpinner } from '../components/LoadingSpinner';
-import { PanelErrorBoundary } from '../components/ErrorBoundary';
+import { ErrorBoundary, PanelErrorBoundary } from '../components/ErrorBoundary';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Toolbar } from '../components/Toolbar/Toolbar';
 import { BinPanel } from '../components/Bins/BinPanel';
-import { MonitorArea } from '../components/Monitor/MonitorArea';
 import { ComposerPanel } from '../components/ComposerPanel/ComposerPanel';
 import { TimelinePanel } from '../components/TimelinePanel/TimelinePanel';
 import { InspectorPanel } from '../components/Editor/InspectorPanel';
@@ -18,6 +17,7 @@ import { SequenceDialog } from '../components/SequenceDialog/SequenceDialog';
 import { TitleTool } from '../components/TitleTool/TitleTool';
 import { SubtitleEditor } from '../components/SubtitleEditor/SubtitleEditor';
 import { useEditorStore } from '../store/editor.store';
+import { useGlobalKeyboard } from '../hooks/useGlobalKeyboard';
 import { UserSettingsPanel } from '../components/UserSettings/UserSettingsPanel';
 import { useKeyboardAction } from '../hooks/useKeyboardAction';
 import { editEngine } from '../engine/EditEngine';
@@ -30,6 +30,8 @@ import { MediaPage } from './MediaPage';
 import { CutPage } from './CutPage';
 import { ColorPage } from './ColorPage';
 import { DeliverPage } from './DeliverPage';
+
+const VALID_WORKSPACES: ReadonlySet<string> = new Set<WorkspacePreset>(['filmtv', 'news', 'sports', 'creator', 'marketing']);
 
 // Lazy-loaded vertical panels
 // NOTE: These lazy imports are intentionally separate from the ones in App.tsx.
@@ -44,36 +46,8 @@ const MultiCamPanel = lazy(() => import('../components/MultiCamPanel/MultiCamPan
 const AccessibilityPanel = lazy(() => import('../components/AccessibilityPanel/AccessibilityPanel').then(m => ({ default: m.AccessibilityPanel })));
 const SportsWorkspace = lazy(() => import('../components/SportsWorkspace/SportsWorkspace').then(m => ({ default: m.SportsWorkspace })));
 
-function usePlaybackEngine() {
-  const { isPlaying, playheadTime, setPlayhead, duration, togglePlay } = useEditorStore();
-  const rafRef = useRef<number>();
-  const lastTimeRef = useRef<number>();
-
-  useEffect(() => {
-    if (!isPlaying) {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      lastTimeRef.current = undefined;
-      return;
-    }
-    const tick = (ts: number) => {
-      if (lastTimeRef.current === undefined) lastTimeRef.current = ts;
-      const dt = (ts - lastTimeRef.current) / 1000;
-      lastTimeRef.current = ts;
-      // Defensive: skip invalid delta times (NaN, Infinity, or negative)
-      if (!Number.isFinite(dt) || dt < 0) {
-        rafRef.current = requestAnimationFrame(tick);
-        return;
-      }
-      const next = playheadTime + dt;
-      const safeDuration = Number.isFinite(duration) ? duration : 0;
-      if (next >= safeDuration) { setPlayhead(safeDuration); togglePlay(); return; }
-      setPlayhead(next);
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [isPlaying]);
-}
+// Playback is driven by PlaybackEngine (RAF-based) via editor.store.ts togglePlay().
+// Keyboard dispatch is centralized in useGlobalKeyboard() — called once from EditorPage.
 
 // ─── Workspace Preset Selector ──────────────────────────────────────────────
 
@@ -158,34 +132,59 @@ function VerticalSidePanel({ workspace }: { workspace: WorkspacePreset }) {
 export function EditorPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams] = useSearchParams();
-  const { showAIPanel, showExportPanel, showSettingsPanel, showTranscriptPanel, toggleExportPanel, toggleSettingsPanel, loadProject, showInspector, showNewProjectDialog, showSequenceDialog, showTitleTool, showSubtitleEditor, showAlphaImportDialog } = useEditorStore();
+  const showAIPanel = useEditorStore((s) => s.showAIPanel);
+  const showExportPanel = useEditorStore((s) => s.showExportPanel);
+  const showSettingsPanel = useEditorStore((s) => s.showSettingsPanel);
+  const showTranscriptPanel = useEditorStore((s) => s.showTranscriptPanel);
+  const showInspector = useEditorStore((s) => s.showInspector);
+  const showNewProjectDialog = useEditorStore((s) => s.showNewProjectDialog);
+  const showSequenceDialog = useEditorStore((s) => s.showSequenceDialog);
+  const showTitleTool = useEditorStore((s) => s.showTitleTool);
+  const showSubtitleEditor = useEditorStore((s) => s.showSubtitleEditor);
+  const showAlphaImportDialog = useEditorStore((s) => s.showAlphaImportDialog);
+  const toggleExportPanel = useEditorStore((s) => s.toggleExportPanel);
+  const toggleSettingsPanel = useEditorStore((s) => s.toggleSettingsPanel);
+  const loadProject = useEditorStore((s) => s.loadProject);
+
   const [showTracker, setShowTracker] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
-  const [workspace, setWorkspace] = useState<WorkspacePreset>(
-    (searchParams.get('workspace') as WorkspacePreset) || 'filmtv'
-  );
+  const [workspace, setWorkspace] = useState<WorkspacePreset>(() => {
+    const param = searchParams.get('workspace');
+    return param && VALID_WORKSPACES.has(param) ? (param as WorkspacePreset) : 'filmtv';
+  });
   const [showMultiCam, setShowMultiCam] = useState(false);
   const [activePage, setActivePage] = useState<PageId>('edit');
-  usePlaybackEngine();
+  // Centralized keyboard dispatch — routes keys based on active monitor
+  useGlobalKeyboard();
 
   // ─── Register core keyboard actions with the KeyboardEngine ──────────
-  const { togglePlay, setInToPlayhead, setOutToPlayhead, clearInOut,
-    goToStart, goToEnd, deleteSelectedClips, setPlayhead, playheadTime, duration,
-  } = useEditorStore();
+  const togglePlay = useEditorStore((s) => s.togglePlay);
+  const setInToPlayhead = useEditorStore((s) => s.setInToPlayhead);
+  const setOutToPlayhead = useEditorStore((s) => s.setOutToPlayhead);
+  const clearInOut = useEditorStore((s) => s.clearInOut);
+  const goToStart = useEditorStore((s) => s.goToStart);
+  const goToEnd = useEditorStore((s) => s.goToEnd);
+  const deleteSelectedClips = useEditorStore((s) => s.deleteSelectedClips);
+
+  // Read from store directly to avoid stale closures in frame-stepping callbacks
+  const stepForward = useCallback(() => {
+    const { playheadTime, duration, setPlayhead } = useEditorStore.getState();
+    const safeDuration = Number.isFinite(duration) ? duration : 0;
+    const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
+    setPlayhead(Math.min(safeTime + 1 / 24, safeDuration));
+  }, []);
+  const stepBackward = useCallback(() => {
+    const { playheadTime, setPlayhead } = useEditorStore.getState();
+    const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
+    setPlayhead(Math.max(safeTime - 1 / 24, 0));
+  }, []);
 
   useKeyboardAction('transport.playForward', togglePlay, [togglePlay]);
   useKeyboardAction('transport.playReverse', togglePlay, [togglePlay]);
   useKeyboardAction('transport.stop', () => useEditorStore.getState().isPlaying && togglePlay(), [togglePlay]);
   useKeyboardAction('transport.playToggle', togglePlay, [togglePlay]);
-  useKeyboardAction('transport.stepForward', () => {
-    const safeDuration = Number.isFinite(duration) ? duration : 0;
-    const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
-    setPlayhead(Math.min(safeTime + 1 / 24, safeDuration));
-  }, [playheadTime, duration]);
-  useKeyboardAction('transport.stepBackward', () => {
-    const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
-    setPlayhead(Math.max(safeTime - 1 / 24, 0));
-  }, [playheadTime]);
+  useKeyboardAction('transport.stepForward', stepForward, [stepForward]);
+  useKeyboardAction('transport.stepBackward', stepBackward, [stepBackward]);
   useKeyboardAction('transport.goToStart', goToStart, [goToStart]);
   useKeyboardAction('transport.goToEnd', goToEnd, [goToEnd]);
   useKeyboardAction('mark.in', setInToPlayhead, [setInToPlayhead]);
@@ -195,13 +194,13 @@ export function EditorPage() {
   useKeyboardAction('edit.redo', () => editEngine.redo(), []);
   useKeyboardAction('edit.delete', deleteSelectedClips, [deleteSelectedClips]);
   useKeyboardAction('view.fullScreen', () => {
-    if (document.fullscreenElement) document.exitFullscreen();
-    else document.documentElement.requestFullscreen();
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void document.documentElement.requestFullscreen();
   }, []);
 
   useEffect(() => {
     if (projectId && projectId !== 'new') loadProject(projectId);
-  }, [projectId]);
+  }, [projectId, loadProject]);
 
   // ⌘K / Ctrl+K to open command palette
   useEffect(() => {
@@ -242,10 +241,26 @@ export function EditorPage() {
       )}
 
       {/* Page-specific content */}
-      {activePage === 'media' && <MediaPage />}
-      {activePage === 'cut' && <CutPage />}
-      {activePage === 'color' && <div style={{ gridRow: '2 / 5', overflow: 'hidden' }}><ColorPage /></div>}
-      {activePage === 'deliver' && <DeliverPage />}
+      {activePage === 'media' && (
+        <ErrorBoundary resetKeys={[activePage]}>
+          <MediaPage />
+        </ErrorBoundary>
+      )}
+      {activePage === 'cut' && (
+        <ErrorBoundary resetKeys={[activePage]}>
+          <CutPage />
+        </ErrorBoundary>
+      )}
+      {activePage === 'color' && (
+        <ErrorBoundary resetKeys={[activePage]}>
+          <div style={{ gridRow: '2 / 5', overflow: 'hidden' }}><ColorPage /></div>
+        </ErrorBoundary>
+      )}
+      {activePage === 'deliver' && (
+        <ErrorBoundary resetKeys={[activePage]}>
+          <DeliverPage />
+        </ErrorBoundary>
+      )}
 
       {activePage === 'edit' && (
         isSportsWorkspace ? (
@@ -347,6 +362,7 @@ export function EditorPage() {
           }}>
             <button
               onClick={toggleExportPanel}
+              aria-label="Close export panel"
               style={{
                 position: 'absolute', top: 10, right: 12, zIndex: 10,
                 background: 'transparent', border: 'none',
@@ -354,7 +370,7 @@ export function EditorPage() {
                 cursor: 'pointer', lineHeight: 1,
               }}
               title="Close (Esc)"
-            >✕</button>
+            >&#x2715;</button>
             <ExportPanel />
           </div>
         </div>

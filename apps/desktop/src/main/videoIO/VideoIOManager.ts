@@ -12,6 +12,7 @@ import { ipcMain, type BrowserWindow } from 'electron';
 import { DeckLinkDevice } from './DeckLinkDevice';
 import { AJADevice } from './AJADevice';
 import { FrameTransport, createFrameTransport } from './FrameTransport';
+import { BYTES_PER_PIXEL, calculateFrameSize } from './types';
 import type {
   CaptureConfig,
   CapturedFrame,
@@ -70,8 +71,10 @@ export class VideoIOManager {
     try {
       const device = this.getDeviceDriver(config.deviceId);
 
-      // Create frame transport for this device (1080p UYVY = ~4MB per frame)
-      const transport = createFrameTransport(1920, 1080, 2, 3);
+      // Create frame transport sized for the pixel format
+      // Default to UHD (3840x2160) to accommodate any resolution up to 4K
+      const bpp = BYTES_PER_PIXEL[config.pixelFormat] ?? 2;
+      const transport = createFrameTransport(3840, 2160, bpp, 3);
       this.frameTransports.set(config.deviceId, transport);
 
       // Wire frame callback to transport

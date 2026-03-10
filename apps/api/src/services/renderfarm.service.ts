@@ -1,238 +1,373 @@
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { logger } from '../utils/logger';
 import { BadRequestError, NotFoundError } from '../utils/errors';
 
-// ─── Types ─────────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-export interface RenderWorkerNode {
+export interface WorkerCapabilities {
+  gpuVendor: string;
+  gpuName: string;
+  vramMB: number;
+  cpuCores: number;
+  memoryGB: number;
+  availableCodecs: string[];
+  ffmpegVersion: string;
+  maxConcurrentJobs: number;
+  hwAccel: string[];
+}
+
+export interface WorkerMetrics {
+  jobsCompleted: number;
+  averageJobDurationMs: number;
+  failureRate: number;
+  cpuUtilization: number;
+  gpuUtilization: number;
+  diskFreeGB: number;
+  uptimeMs: number;
+}
+
+export interface WorkerNode {
   id: string;
   hostname: string;
   ip: string;
   port: number;
   workerTypes: string[];
-  capabilities: Record<string, unknown>;
-  status: 'idle' | 'busy' | 'offline';
+  status: 'idle' | 'busy' | 'offline' | 'error' | 'draining';
   currentJobId: string | null;
-  registeredAt: number;
+  progress: number;
+  capabilities: WorkerCapabilities;
   lastHeartbeat: number;
+  connectedAt: number;
+  metrics: WorkerMetrics;
+}
+
+export type RenderJobStatus =
+  | 'pending'
+  | 'queued'
+  | 'splitting'
+  | 'encoding'
+  | 'uploading'
+  | 'concatenating'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'paused';
+
+export type JobPriority = 'critical' | 'high' | 'normal' | 'low' | 'background';
+
+export interface RenderJobSegment {
+  id: string;
+  index: number;
+  startFrame: number;
+  endFrame: number;
+  status: 'pending' | 'encoding' | 'completed' | 'failed';
+  assignedNodeId?: string;
+  progress: number;
+  outputPath?: string;
 }
 
 export interface RenderJob {
   id: string;
   name: string;
+  templateId: string | null;
   presetId: string;
+  status: RenderJobStatus;
+  priority: JobPriority;
+  progress: number;
+  assignedNodeIds: string[];
+  segments: RenderJobSegment[];
+  createdAt: number;
+  startedAt?: number;
+  completedAt?: number;
+  estimatedTimeRemaining?: number;
   sourceTimelineId: string;
   totalFrames: number;
-  completedFrames: number;
-  priority: number;
-  status: 'queued' | 'rendering' | 'paused' | 'completed' | 'cancelled' | 'failed';
-  assignedWorkerIds: string[];
-  templateId?: string;
-  exportSettings: Record<string, unknown>;
-  segmentCount: number;
-  progress: number;
-  createdAt: number;
-  startedAt: number | null;
-  completedAt: number | null;
-  errorMessage: string | null;
-}
-
-export interface RenderHistoryEntry {
-  id: string;
-  name: string;
-  presetId: string;
-  totalFrames: number;
-  status: 'completed' | 'cancelled' | 'failed';
-  durationMs: number | null;
-  completedAt: number;
-  errorMessage: string | null;
+  outputPath?: string;
+  outputSize?: number;
+  error?: string;
+  exportSettings: any;
 }
 
 export interface FarmStats {
-  totalWorkers: number;
-  idleWorkers: number;
-  busyWorkers: number;
-  offlineWorkers: number;
-  queuedJobs: number;
+  nodesOnline: number;
+  nodesTotal: number;
+  nodesBusy: number;
+  queueDepth: number;
   activeJobs: number;
-  completedJobs: number;
-  failedJobs: number;
+  completedToday: number;
+  utilization: number;
   totalFramesRendered: number;
+  averageFps: number;
 }
 
-// ─── Service ────────────────────────────────────────────────────────────────────
+// Priority weight for sorting — lower value = higher priority
+const PRIORITY_WEIGHT: Record<JobPriority, number> = {
+  critical: 0,
+  high: 1,
+  normal: 2,
+  low: 3,
+  background: 4,
+};
+
+const HEARTBEAT_TIMEOUT_MS = 30_000;
+const STALE_CHECK_INTERVAL_MS = 10_000;
+
+// ─── Service ──────────────────────────────────────────────────────────────────
 
 class RenderFarmService {
-  private workers = new Map<string, RenderWorkerNode>();
+  private workers = new Map<string, WorkerNode>();
   private jobs = new Map<string, RenderJob>();
-  private history: RenderHistoryEntry[] = [];
-  private totalFramesRendered = 0;
+  private completedJobs: RenderJob[] = [];
+  private agentSockets = new Map<string, any>(); // nodeId -> socket
 
-  // ─── Workers ────────────────────────────────────────────────────────────────
+  /** Set by WebSocket layer to relay events to frontend clients */
+  public onBroadcast: ((event: string, payload: any) => void) | null = null;
 
-  registerWorker(opts: {
-    hostname: string;
-    ip: string;
-    port: number;
-    workerTypes: string[];
-    capabilities?: Record<string, unknown>;
-  }): RenderWorkerNode {
-    const id = uuidv4();
-    const node: RenderWorkerNode = {
+  private staleCheckTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor() {
+    this.staleCheckTimer = setInterval(() => this.checkStaleWorkers(), STALE_CHECK_INTERVAL_MS);
+  }
+
+  // ─── Worker Management ────────────────────────────────────────────────────
+
+  registerWorker(
+    nodeInfo: {
+      hostname: string;
+      ip: string;
+      port: number;
+      workerTypes?: string[];
+      capabilities?: Partial<WorkerCapabilities>;
+    },
+    socket?: any,
+  ): WorkerNode {
+    if (!nodeInfo.hostname) {
+      throw new BadRequestError('hostname is required');
+    }
+
+    const id = randomUUID();
+    const now = Date.now();
+
+    const node: WorkerNode = {
       id,
-      hostname: opts.hostname,
-      ip: opts.ip,
-      port: opts.port,
-      workerTypes: opts.workerTypes,
-      capabilities: opts.capabilities ?? {},
+      hostname: nodeInfo.hostname,
+      ip: nodeInfo.ip,
+      port: nodeInfo.port,
+      workerTypes: nodeInfo.workerTypes ?? ['render'],
       status: 'idle',
       currentJobId: null,
-      registeredAt: Date.now(),
-      lastHeartbeat: Date.now(),
+      progress: 0,
+      capabilities: {
+        gpuVendor: 'unknown',
+        gpuName: 'unknown',
+        vramMB: 0,
+        cpuCores: 0,
+        memoryGB: 0,
+        availableCodecs: [],
+        ffmpegVersion: 'unknown',
+        maxConcurrentJobs: 1,
+        hwAccel: [],
+        ...nodeInfo.capabilities,
+      },
+      lastHeartbeat: now,
+      connectedAt: now,
+      metrics: {
+        jobsCompleted: 0,
+        averageJobDurationMs: 0,
+        failureRate: 0,
+        cpuUtilization: 0,
+        gpuUtilization: 0,
+        diskFreeGB: 0,
+        uptimeMs: 0,
+      },
     };
 
     this.workers.set(id, node);
-    logger.info('Render worker registered', { nodeId: id, hostname: opts.hostname, ip: opts.ip });
+    if (socket) this.agentSockets.set(id, socket);
+
+    logger.info('Render worker registered', { nodeId: id, hostname: node.hostname, ip: node.ip });
+    this.broadcast('render:worker:registered', { node });
+    this.broadcastStats();
+
+    // Kick scheduler in case pending jobs are waiting
+    this.scheduleNext();
+
     return node;
   }
 
-  getWorker(id: string): RenderWorkerNode | undefined {
-    return this.workers.get(id);
-  }
-
-  removeWorker(id: string): void {
-    const worker = this.workers.get(id);
+  removeWorker(nodeId: string): void {
+    const worker = this.workers.get(nodeId);
     if (!worker) throw new NotFoundError('Worker node');
 
-    // If worker had an active job, re-queue it
+    // If the worker was busy, fail its job
     if (worker.currentJobId) {
-      const job = this.jobs.get(worker.currentJobId);
-      if (job && job.status === 'rendering') {
-        job.status = 'queued';
-        job.assignedWorkerIds = job.assignedWorkerIds.filter((wId) => wId !== id);
-        logger.info('Re-queued job from removed worker', { jobId: job.id, workerId: id });
-      }
+      this.handleJobFailed(worker.currentJobId, `Worker ${worker.hostname} disconnected`);
     }
 
-    this.workers.delete(id);
-    logger.info('Render worker removed', { nodeId: id, hostname: worker.hostname });
+    this.workers.delete(nodeId);
+    this.agentSockets.delete(nodeId);
+
+    logger.info('Render worker removed', { nodeId, hostname: worker.hostname });
+    this.broadcast('render:worker:disconnected', { nodeId });
+    this.broadcastStats();
   }
 
-  getWorkers(): RenderWorkerNode[] {
+  drainWorker(nodeId: string): void {
+    const worker = this.workers.get(nodeId);
+    if (!worker) return;
+
+    worker.status = 'draining';
+    logger.info('Render worker draining', { nodeId, hostname: worker.hostname });
+    this.broadcast('render:worker:updated', { nodeId, patch: { status: 'draining' } });
+  }
+
+  getWorkers(): WorkerNode[] {
     return Array.from(this.workers.values());
   }
 
-  // ─── Jobs ──────────────────────────────────────────────────────────────────
+  getWorker(nodeId: string): WorkerNode | undefined {
+    return this.workers.get(nodeId);
+  }
 
-  submitJob(opts: {
+  handleAgentHeartbeat(
+    nodeId: string,
+    status?: WorkerNode['status'],
+    progress?: number,
+    metrics?: Partial<WorkerMetrics>,
+  ): void {
+    const worker = this.workers.get(nodeId);
+    if (!worker) return;
+
+    worker.lastHeartbeat = Date.now();
+    if (status && worker.status !== 'draining') worker.status = status;
+    if (progress !== undefined) worker.progress = progress;
+    if (metrics) Object.assign(worker.metrics, metrics);
+
+    this.broadcast('render:worker:heartbeat', { nodeId, metrics: worker.metrics });
+  }
+
+  // ─── Job Management ───────────────────────────────────────────────────────
+
+  submitJob(jobData: {
     name: string;
     presetId: string;
+    priority?: JobPriority;
     sourceTimelineId: string;
     totalFrames: number;
-    priority?: number;
     templateId?: string;
-    exportSettings?: Record<string, unknown>;
+    exportSettings?: any;
     segmentCount?: number;
   }): RenderJob {
-    if (opts.totalFrames <= 0) {
+    if (!jobData.name) {
+      throw new BadRequestError('name is required');
+    }
+    if (!jobData.presetId) {
+      throw new BadRequestError('presetId is required');
+    }
+    if (!jobData.sourceTimelineId) {
+      throw new BadRequestError('sourceTimelineId is required');
+    }
+    if (!jobData.totalFrames || jobData.totalFrames <= 0) {
       throw new BadRequestError('totalFrames must be a positive number');
     }
 
-    const id = uuidv4();
+    const id = randomUUID();
+    const segmentCount = jobData.segmentCount ?? Math.max(1, Math.ceil(jobData.totalFrames / 1000));
+    const framesPerSegment = Math.ceil(jobData.totalFrames / segmentCount);
+
+    const segments: RenderJobSegment[] = [];
+    for (let i = 0; i < segmentCount; i++) {
+      const startFrame = i * framesPerSegment;
+      const endFrame = Math.min((i + 1) * framesPerSegment - 1, jobData.totalFrames - 1);
+      segments.push({
+        id: randomUUID(),
+        index: i,
+        startFrame,
+        endFrame,
+        status: 'pending',
+        progress: 0,
+      });
+    }
+
     const job: RenderJob = {
       id,
-      name: opts.name,
-      presetId: opts.presetId,
-      sourceTimelineId: opts.sourceTimelineId,
-      totalFrames: opts.totalFrames,
-      completedFrames: 0,
-      priority: opts.priority ?? 5,
+      name: jobData.name,
+      templateId: jobData.templateId ?? null,
+      presetId: jobData.presetId,
       status: 'queued',
-      assignedWorkerIds: [],
-      templateId: opts.templateId,
-      exportSettings: opts.exportSettings ?? {},
-      segmentCount: opts.segmentCount ?? 1,
+      priority: jobData.priority ?? 'normal',
       progress: 0,
+      assignedNodeIds: [],
+      segments,
       createdAt: Date.now(),
-      startedAt: null,
-      completedAt: null,
-      errorMessage: null,
+      sourceTimelineId: jobData.sourceTimelineId,
+      totalFrames: jobData.totalFrames,
+      exportSettings: jobData.exportSettings ?? {},
     };
 
     this.jobs.set(id, job);
-    logger.info('Render job submitted', { jobId: id, name: opts.name, frames: opts.totalFrames, priority: job.priority });
+    logger.info('Render job submitted', {
+      jobId: id,
+      name: job.name,
+      segments: segmentCount,
+      frames: jobData.totalFrames,
+    });
+    this.broadcast('render:job:queued', { job });
+    this.broadcastStats();
 
-    // Attempt to assign to an idle worker
-    this.tryAssignNextJob();
+    // Try to schedule immediately
+    this.scheduleNext();
+
     return job;
   }
 
-  getJob(id: string): RenderJob | undefined {
-    return this.jobs.get(id);
-  }
-
-  getJobs(): RenderJob[] {
-    return Array.from(this.jobs.values())
-      .sort((a, b) => {
-        // Sort by priority (higher first), then by creation time (earlier first)
-        if (a.priority !== b.priority) return b.priority - a.priority;
-        return a.createdAt - b.createdAt;
-      });
-  }
-
-  cancelJob(id: string): void {
-    const job = this.jobs.get(id);
+  cancelJob(jobId: string): void {
+    const job = this.jobs.get(jobId);
     if (!job) throw new NotFoundError('Render job');
 
     if (job.status === 'completed' || job.status === 'cancelled') {
       throw new BadRequestError(`Job is already ${job.status}`);
     }
 
-    // Release assigned workers
-    for (const workerId of job.assignedWorkerIds) {
-      const worker = this.workers.get(workerId);
-      if (worker && worker.currentJobId === id) {
-        worker.status = 'idle';
-        worker.currentJobId = null;
-      }
-    }
-
     job.status = 'cancelled';
     job.completedAt = Date.now();
 
-    this.moveToHistory(job);
-    this.jobs.delete(id);
-    logger.info('Render job cancelled', { jobId: id });
+    // Release assigned workers
+    for (const nodeId of job.assignedNodeIds) {
+      const worker = this.workers.get(nodeId);
+      if (worker && worker.currentJobId === jobId) {
+        worker.status = 'idle';
+        worker.currentJobId = null;
+        worker.progress = 0;
+        this.broadcast('render:worker:updated', { nodeId, patch: { status: 'idle', currentJobId: null } });
+      }
+    }
+    job.assignedNodeIds = [];
 
-    // Try to assign idle workers to queued jobs
-    this.tryAssignNextJob();
+    // Move to history
+    this.jobs.delete(jobId);
+    this.completedJobs.unshift(job);
+
+    logger.info('Render job cancelled', { jobId });
+    this.broadcast('render:job:status', { jobId, status: 'cancelled' });
+    this.broadcastStats();
   }
 
-  pauseJob(id: string): void {
-    const job = this.jobs.get(id);
+  pauseJob(jobId: string): void {
+    const job = this.jobs.get(jobId);
     if (!job) throw new NotFoundError('Render job');
 
-    if (job.status !== 'rendering' && job.status !== 'queued') {
+    if (job.status === 'completed' || job.status === 'failed') {
       throw new BadRequestError(`Cannot pause job in "${job.status}" state`);
     }
 
-    // Release assigned workers
-    for (const workerId of job.assignedWorkerIds) {
-      const worker = this.workers.get(workerId);
-      if (worker && worker.currentJobId === id) {
-        worker.status = 'idle';
-        worker.currentJobId = null;
-      }
-    }
-    job.assignedWorkerIds = [];
     job.status = 'paused';
-
-    logger.info('Render job paused', { jobId: id, progress: job.progress });
-    this.tryAssignNextJob();
+    logger.info('Render job paused', { jobId });
+    this.broadcast('render:job:status', { jobId, status: 'paused' });
   }
 
-  resumeJob(id: string): void {
-    const job = this.jobs.get(id);
+  resumeJob(jobId: string): void {
+    const job = this.jobs.get(jobId);
     if (!job) throw new NotFoundError('Render job');
 
     if (job.status !== 'paused') {
@@ -240,130 +375,354 @@ class RenderFarmService {
     }
 
     job.status = 'queued';
-    logger.info('Render job resumed', { jobId: id });
-    this.tryAssignNextJob();
+    logger.info('Render job resumed', { jobId });
+    this.broadcast('render:job:status', { jobId, status: 'queued' });
+    this.scheduleNext();
   }
 
-  // ─── Queue management ──────────────────────────────────────────────────────
+  getJobs(): RenderJob[] {
+    return Array.from(this.jobs.values()).sort(
+      (a, b) => PRIORITY_WEIGHT[a.priority] - PRIORITY_WEIGHT[b.priority] || a.createdAt - b.createdAt,
+    );
+  }
 
-  private tryAssignNextJob(): void {
-    const queuedJobs = this.getJobs().filter((j) => j.status === 'queued');
+  getJob(jobId: string): RenderJob | undefined {
+    return this.jobs.get(jobId);
+  }
+
+  getHistory(): RenderJob[] {
+    return this.completedJobs;
+  }
+
+  // ─── Scheduling ───────────────────────────────────────────────────────────
+
+  scheduleNext(): void {
     const idleWorkers = Array.from(this.workers.values()).filter((w) => w.status === 'idle');
+    if (idleWorkers.length === 0) return;
 
-    for (const job of queuedJobs) {
-      if (idleWorkers.length === 0) break;
+    const pendingJobs = this.getJobs().filter((j) => j.status === 'queued');
+    if (pendingJobs.length === 0) return;
 
-      const worker = idleWorkers.shift()!;
-      worker.status = 'busy';
-      worker.currentJobId = job.id;
-      job.status = 'rendering';
-      job.startedAt = job.startedAt ?? Date.now();
-      job.assignedWorkerIds.push(worker.id);
+    for (const worker of idleWorkers) {
+      const nextJob = pendingJobs.shift();
+      if (!nextJob) break;
 
-      logger.info('Job assigned to worker', { jobId: job.id, workerId: worker.id, workerHost: worker.hostname });
+      this.assignJobToAgent(nextJob, worker.id);
     }
   }
 
-  // ─── History ───────────────────────────────────────────────────────────────
+  assignJobToAgent(job: RenderJob, workerId: string): void {
+    const worker = this.workers.get(workerId);
+    if (!worker) return;
 
-  private moveToHistory(job: RenderJob): void {
-    if (job.status !== 'completed' && job.status !== 'cancelled' && job.status !== 'failed') return;
+    job.status = 'encoding';
+    job.startedAt = Date.now();
+    job.assignedNodeIds.push(workerId);
 
-    const entry: RenderHistoryEntry = {
-      id: job.id,
-      name: job.name,
-      presetId: job.presetId,
-      totalFrames: job.totalFrames,
-      status: job.status,
-      durationMs: job.startedAt && job.completedAt ? job.completedAt - job.startedAt : null,
-      completedAt: job.completedAt ?? Date.now(),
-      errorMessage: job.errorMessage,
-    };
+    worker.status = 'busy';
+    worker.currentJobId = job.id;
+    worker.progress = 0;
 
-    this.history.unshift(entry);
-    // Keep last 500 entries
-    if (this.history.length > 500) this.history.length = 500;
+    logger.info('Job assigned to worker', { jobId: job.id, workerId, hostname: worker.hostname });
+
+    this.broadcast('render:job:status', { jobId: job.id, status: 'encoding' });
+    this.broadcast('render:worker:updated', {
+      nodeId: workerId,
+      patch: { status: 'busy', currentJobId: job.id },
+    });
+
+    // Send job to the agent via its socket if available
+    const socket = this.agentSockets.get(workerId);
+    if (socket) {
+      socket.emit('render:agent:assign', { job });
+    }
   }
 
-  getHistory(): RenderHistoryEntry[] {
-    return this.history;
+  // ─── Progress Handling ────────────────────────────────────────────────────
+
+  handleJobProgress(
+    jobId: string,
+    segmentId: string | undefined,
+    progress: number,
+    frame?: number,
+    fps?: number,
+  ): void {
+    const job = this.jobs.get(jobId);
+    if (!job) return;
+
+    if (segmentId) {
+      const seg = job.segments.find((s) => s.id === segmentId);
+      if (seg) {
+        seg.progress = progress;
+        seg.status = 'encoding';
+      }
+    }
+
+    // Recalculate overall progress from segments
+    if (job.segments.length > 0) {
+      const totalSegProgress = job.segments.reduce((sum, s) => sum + s.progress, 0);
+      job.progress = totalSegProgress / job.segments.length;
+    } else {
+      job.progress = progress;
+    }
+
+    // Estimate time remaining
+    if (fps && fps > 0 && frame !== undefined) {
+      const remainingFrames = job.totalFrames - frame;
+      job.estimatedTimeRemaining = Math.round((remainingFrames / fps) * 1000);
+    }
+
+    this.broadcast('render:job:progress', { jobId, progress: job.progress, segmentId });
   }
 
-  // ─── Statistics ────────────────────────────────────────────────────────────
+  handleSegmentComplete(jobId: string, segmentId: string, outputPath: string): void {
+    const job = this.jobs.get(jobId);
+    if (!job) return;
+
+    const seg = job.segments.find((s) => s.id === segmentId);
+    if (seg) {
+      seg.status = 'completed';
+      seg.progress = 100;
+      seg.outputPath = outputPath;
+    }
+
+    // Check if all segments are done
+    const allDone = job.segments.every((s) => s.status === 'completed');
+    if (allDone) {
+      job.status = 'concatenating';
+      this.broadcast('render:job:status', { jobId, status: 'concatenating' });
+    }
+
+    // Update progress
+    const totalSegProgress = job.segments.reduce((sum, s) => sum + s.progress, 0);
+    job.progress = totalSegProgress / job.segments.length;
+    this.broadcast('render:job:progress', { jobId, progress: job.progress, segmentId });
+  }
+
+  handleJobComplete(jobId: string, outputPath: string, outputSize?: number): void {
+    const job = this.jobs.get(jobId);
+    if (!job) return;
+
+    job.status = 'completed';
+    job.progress = 100;
+    job.completedAt = Date.now();
+    job.outputPath = outputPath;
+    if (outputSize !== undefined) job.outputSize = outputSize;
+
+    // Release workers
+    for (const nodeId of job.assignedNodeIds) {
+      const worker = this.workers.get(nodeId);
+      if (worker && worker.currentJobId === jobId) {
+        worker.status = worker.status === 'draining' ? 'draining' : 'idle';
+        worker.currentJobId = null;
+        worker.progress = 0;
+        worker.metrics.jobsCompleted++;
+        if (job.startedAt) {
+          const dur = Date.now() - job.startedAt;
+          const prev = worker.metrics.averageJobDurationMs;
+          const count = worker.metrics.jobsCompleted;
+          worker.metrics.averageJobDurationMs = Math.round((prev * (count - 1) + dur) / count);
+        }
+        this.broadcast('render:worker:updated', {
+          nodeId,
+          patch: { status: worker.status, currentJobId: null },
+        });
+      }
+    }
+
+    // Move to history
+    this.jobs.delete(jobId);
+    this.completedJobs.unshift(job);
+    if (this.completedJobs.length > 500) this.completedJobs.pop();
+
+    logger.info('Render job complete', { jobId, name: job.name });
+    this.broadcast('render:job:complete', { jobId, outputPath, outputSize });
+    this.broadcastStats();
+
+    // Schedule next
+    this.scheduleNext();
+  }
+
+  handleJobFailed(jobId: string, error: string): void {
+    const job = this.jobs.get(jobId);
+    if (!job) return;
+
+    job.status = 'failed';
+    job.error = error;
+    job.completedAt = Date.now();
+
+    // Release workers
+    for (const nodeId of job.assignedNodeIds) {
+      const worker = this.workers.get(nodeId);
+      if (worker && worker.currentJobId === jobId) {
+        worker.status = worker.status === 'draining' ? 'draining' : 'idle';
+        worker.currentJobId = null;
+        worker.progress = 0;
+        const total = worker.metrics.jobsCompleted + 1;
+        worker.metrics.failureRate = ((worker.metrics.failureRate * worker.metrics.jobsCompleted) + 1) / total;
+        this.broadcast('render:worker:updated', {
+          nodeId,
+          patch: { status: worker.status, currentJobId: null },
+        });
+      }
+    }
+
+    // Move to history
+    this.jobs.delete(jobId);
+    this.completedJobs.unshift(job);
+    if (this.completedJobs.length > 500) this.completedJobs.pop();
+
+    logger.error('Render job failed', { jobId, name: job.name, error });
+    this.broadcast('render:job:failed', { jobId, error });
+    this.broadcastStats();
+
+    // Schedule next
+    this.scheduleNext();
+  }
+
+  // ─── Farm Stats ───────────────────────────────────────────────────────────
 
   getFarmStats(): FarmStats {
     const workers = Array.from(this.workers.values());
-    const jobs = Array.from(this.jobs.values());
+    const online = workers.filter((w) => w.status !== 'offline');
+    const busy = workers.filter((w) => w.status === 'busy');
+    const activeJobs = Array.from(this.jobs.values()).filter(
+      (j) => j.status === 'encoding' || j.status === 'splitting' || j.status === 'concatenating' || j.status === 'uploading',
+    );
+    const queuedJobs = Array.from(this.jobs.values()).filter((j) => j.status === 'queued');
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const completedToday = this.completedJobs.filter(
+      (j) => j.status === 'completed' && j.completedAt && j.completedAt >= todayStart.getTime(),
+    );
+
+    const totalFrames = this.completedJobs.reduce((sum, j) => sum + (j.status === 'completed' ? j.totalFrames : 0), 0);
+
+    // Average FPS: total frames / total encoding time
+    const totalDurationMs = this.completedJobs.reduce((sum, j) => {
+      if (j.status === 'completed' && j.startedAt && j.completedAt) {
+        return sum + (j.completedAt - j.startedAt);
+      }
+      return sum;
+    }, 0);
+    const avgFps = totalDurationMs > 0 ? Math.round((totalFrames / (totalDurationMs / 1000)) * 10) / 10 : 0;
 
     return {
-      totalWorkers: workers.length,
-      idleWorkers: workers.filter((w) => w.status === 'idle').length,
-      busyWorkers: workers.filter((w) => w.status === 'busy').length,
-      offlineWorkers: workers.filter((w) => w.status === 'offline').length,
-      queuedJobs: jobs.filter((j) => j.status === 'queued').length,
-      activeJobs: jobs.filter((j) => j.status === 'rendering').length,
-      completedJobs: this.history.filter((h) => h.status === 'completed').length,
-      failedJobs: this.history.filter((h) => h.status === 'failed').length,
-      totalFramesRendered: this.totalFramesRendered,
+      nodesOnline: online.length,
+      nodesTotal: workers.length,
+      nodesBusy: busy.length,
+      queueDepth: queuedJobs.length,
+      activeJobs: activeJobs.length,
+      completedToday: completedToday.length,
+      utilization: online.length > 0 ? Math.round((busy.length / online.length) * 100) : 0,
+      totalFramesRendered: totalFrames,
+      averageFps: avgFps,
     };
   }
 
-  // ─── Install script generation ─────────────────────────────────────────────
+  // ─── Install Script ───────────────────────────────────────────────────────
 
   generateInstallScript(host: string, workerTypes: string[]): string {
-    const typesStr = workerTypes.join(',');
-    return `#!/bin/bash
-# ─── Avid Render Agent Installer ─────────────────────────────────────────────
-# Auto-generated install script for The Avid render farm agent
-# Target: ${host}
-# Worker Types: ${typesStr}
+    const typesArg = workerTypes.join(',');
+    return `#!/usr/bin/env bash
+# ── The Avid Render Farm Agent Installer ──────────────────────────────────────
+# Run on each render node: curl -sSL http://${host}/api/v1/render/install-script | bash
 set -euo pipefail
 
-AVID_API_HOST="${host}"
-WORKER_TYPES="${typesStr}"
-AGENT_VERSION="0.1.0"
-INSTALL_DIR="/opt/avid-render-agent"
+FARM_HOST="${host}"
+WORKER_TYPES="${typesArg}"
+INSTALL_DIR="\$HOME/.avid-render-agent"
 
-echo "=== Avid Render Agent Installer v\${AGENT_VERSION} ==="
-echo "API Host: \${AVID_API_HOST}"
-echo "Worker Types: \${WORKER_TYPES}"
+echo "╔═══════════════════════════════════════════════════╗"
+echo "║      The Avid — Render Farm Agent Installer       ║"
+echo "╚═══════════════════════════════════════════════════╝"
+echo ""
+echo "Farm host : \$FARM_HOST"
+echo "Worker types: \$WORKER_TYPES"
+echo "Install dir : \$INSTALL_DIR"
 echo ""
 
-# Check prerequisites
-command -v ffmpeg >/dev/null 2>&1 || { echo "ERROR: ffmpeg is required but not installed."; exit 1; }
-command -v curl >/dev/null 2>&1 || { echo "ERROR: curl is required but not installed."; exit 1; }
+# Check deps
+command -v ffmpeg >/dev/null 2>&1 || { echo "Error: ffmpeg is required. Install it first."; exit 1; }
+command -v node >/dev/null 2>&1 || { echo "Error: Node.js >=18 is required. Install it first."; exit 1; }
 
-# Create install directory
-sudo mkdir -p "\${INSTALL_DIR}"
+FFMPEG_VERSION=\$(ffmpeg -version | head -1 | awk '{print \$3}')
+echo "ffmpeg version: \$FFMPEG_VERSION"
 
-# Register with the farm controller
-HOSTNAME=$(hostname -f 2>/dev/null || hostname)
-IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "0.0.0.0")
-
-echo "Registering worker \${HOSTNAME} (\${IP}) with farm controller..."
-RESPONSE=$(curl -s -X POST "https://\${AVID_API_HOST}/api/v1/render/workers" \\
-  -H "Content-Type: application/json" \\
-  -d "{
-    \\"hostname\\": \\"\${HOSTNAME}\\",
-    \\"ip\\": \\"\${IP}\\",
-    \\"workerTypes\\": [\\"$(echo \${WORKER_TYPES} | sed 's/,/\\",\\"/g')\\"]
-  }")
-
-NODE_ID=$(echo "\${RESPONSE}" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
-
-if [ -z "\${NODE_ID}" ]; then
-  echo "ERROR: Failed to register worker. Response: \${RESPONSE}"
-  exit 1
+# Detect GPU
+GPU_VENDOR="none"
+GPU_NAME="none"
+if command -v nvidia-smi >/dev/null 2>&1; then
+  GPU_VENDOR="nvidia"
+  GPU_NAME=\$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
+elif system_profiler SPDisplaysDataType 2>/dev/null | grep -q "Apple"; then
+  GPU_VENDOR="apple"
+  GPU_NAME="Apple Silicon"
 fi
 
-echo "Registered successfully. Node ID: \${NODE_ID}"
-echo "\${NODE_ID}" | sudo tee "\${INSTALL_DIR}/node-id" > /dev/null
+echo "GPU: \$GPU_VENDOR — \$GPU_NAME"
+
+# Create install directory
+mkdir -p "\$INSTALL_DIR"
+cat > "\$INSTALL_DIR/agent-config.json" <<AGENTEOF
+{
+  "farmHost": "\$FARM_HOST",
+  "workerTypes": "\$WORKER_TYPES",
+  "hostname": "\$(hostname)",
+  "ip": "\$(hostname -I 2>/dev/null | awk '{print \$1}' || ipconfig getifaddr en0 2>/dev/null || echo '0.0.0.0')",
+  "gpuVendor": "\$GPU_VENDOR",
+  "gpuName": "\$GPU_NAME",
+  "ffmpegVersion": "\$FFMPEG_VERSION",
+  "cpuCores": \$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1),
+  "memoryGB": \$(free -g 2>/dev/null | awk '/Mem:/{print \$2}' || echo \$(( \$(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 )))
+}
+AGENTEOF
 
 echo ""
-echo "=== Installation complete ==="
-echo "Agent installed to: \${INSTALL_DIR}"
-echo "Node ID: \${NODE_ID}"
+echo "Agent config written to \$INSTALL_DIR/agent-config.json"
+echo "Agent ready. Connect to farm at ws://\$FARM_HOST with the render agent client."
+echo "Done."
 `;
+  }
+
+  // ─── Internal Helpers ─────────────────────────────────────────────────────
+
+  private broadcast(event: string, payload: any): void {
+    if (this.onBroadcast) {
+      this.onBroadcast(event, payload);
+    }
+  }
+
+  private broadcastStats(): void {
+    this.broadcast('render:farm:stats', this.getFarmStats());
+  }
+
+  private checkStaleWorkers(): void {
+    const now = Date.now();
+    for (const [nodeId, worker] of this.workers) {
+      if (worker.status !== 'offline' && now - worker.lastHeartbeat > HEARTBEAT_TIMEOUT_MS) {
+        logger.warn('Render worker stale (no heartbeat)', { nodeId, hostname: worker.hostname });
+        worker.status = 'offline';
+        this.broadcast('render:worker:updated', { nodeId, patch: { status: 'offline' } });
+
+        // If the worker had a job, fail it
+        if (worker.currentJobId) {
+          this.handleJobFailed(worker.currentJobId, `Worker ${worker.hostname} timed out (no heartbeat)`);
+          worker.currentJobId = null;
+        }
+
+        this.broadcastStats();
+      }
+    }
+  }
+
+  /** Cleanup — stop the stale-check timer */
+  destroy(): void {
+    if (this.staleCheckTimer) {
+      clearInterval(this.staleCheckTimer);
+      this.staleCheckTimer = null;
+    }
   }
 }
 

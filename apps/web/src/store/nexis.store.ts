@@ -172,12 +172,11 @@ export const useNexisStore = create<NEXISState & NEXISActions>()(
     // ── Connection Actions ──────────────────────────────────────────────
 
     connectWorkspace: (hostname) => set((s) => {
-      s.connectionStatus = 'connecting';
       s.hostname = hostname;
       s.lastError = null;
-      // In a real implementation, the connection handshake would set
-      // the status to 'connected' asynchronously. For the store, we
-      // optimistically mark it connected.
+      // Optimistically mark as connected. In a real implementation,
+      // the connection handshake would transition through 'connecting'
+      // asynchronously via setConnectionStatus.
       s.connectionStatus = 'connected';
       s.isConnected = true;
     }),

@@ -7,10 +7,11 @@ export default defineConfig({
   resolve: {
     alias: {
       '@mcua/core': path.resolve(__dirname, '../../packages/core/src'),
+      '@mcua/ui': path.resolve(__dirname, '../../packages/ui/src'),
     },
   },
   server: {
-    port: 3000,
+    port: 3001,
     host: true,
     proxy: {
       '/api': { target: process.env.VITE_API_URL || 'http://localhost:4000', changeOrigin: true },

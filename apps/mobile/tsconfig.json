@@ -10,7 +10,8 @@
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": {
-      "@mcua/core": ["../../packages/core/src"]
+      "@mcua/core": ["../../packages/core/src"],
+      "@mcua/core/*": ["../../packages/core/src/*"]
     }
   },
   "include": ["app", "app.config.ts", "**/*.d.ts"]

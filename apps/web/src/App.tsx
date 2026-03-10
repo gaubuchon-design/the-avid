@@ -49,16 +49,18 @@ const AccessibilityPanel = lazy(() => import('./components/AccessibilityPanel/Ac
 
 // Suspense + PanelErrorBoundary wrapper for lazy panels
 // Each panel is isolated -- one failure does not cascade to the rest of the app.
-function LazyPanel(Component: React.LazyExoticComponent<React.ComponentType>) {
-  return function WrappedPanel() {
+function LazyPanel(LazyComponent: React.LazyExoticComponent<React.ComponentType>, displayName?: string): React.ComponentType {
+  function WrappedPanel() {
     return (
       <PanelErrorBoundary panelName="LazyPanel">
         <Suspense fallback={<LoadingSpinner />}>
-          <Component />
+          <LazyComponent />
         </Suspense>
       </PanelErrorBoundary>
     );
-  };
+  }
+  WrappedPanel.displayName = displayName ?? 'LazyPanel';
+  return WrappedPanel;
 }
 
 // ─── Panel Registry ──────────────────────────────────────────────────────────
@@ -80,20 +82,20 @@ export const panelRegistry: Record<string, React.ComponentType> = {
   admin: AdminDashboard,
 
   // Vertical workflow panels
-  rundown: LazyPanel(RundownPanel),
-  storyScript: LazyPanel(StoryScriptPanel),
-  sports: LazyPanel(SportsPanel),
-  creator: LazyPanel(CreatorPanel),
-  brand: LazyPanel(BrandPanel),
-  multicam: LazyPanel(MultiCamPanel),
-  accessibility: LazyPanel(AccessibilityPanel),
+  rundown: LazyPanel(RundownPanel, 'RundownPanel'),
+  storyScript: LazyPanel(StoryScriptPanel, 'StoryScriptPanel'),
+  sports: LazyPanel(SportsPanel, 'SportsPanel'),
+  creator: LazyPanel(CreatorPanel, 'CreatorPanel'),
+  brand: LazyPanel(BrandPanel, 'BrandPanel'),
+  multicam: LazyPanel(MultiCamPanel, 'MultiCamPanel'),
+  accessibility: LazyPanel(AccessibilityPanel, 'AccessibilityPanel'),
 
   // Sports production sub-panels (SP-11)
-  evsBrowser: LazyPanel(EVSBrowserPanel),
-  sportsHighlights: LazyPanel(SportsHighlightsPanel),
-  sportsCamViewer: LazyPanel(SportsCamViewerPanel),
-  packageBuilder: LazyPanel(PackageBuilderPanel),
-  statsOverlay: LazyPanel(StatsOverlayPanel),
+  evsBrowser: LazyPanel(EVSBrowserPanel, 'EVSBrowserPanel'),
+  sportsHighlights: LazyPanel(SportsHighlightsPanel, 'SportsHighlightsPanel'),
+  sportsCamViewer: LazyPanel(SportsCamViewerPanel, 'SportsCamViewerPanel'),
+  packageBuilder: LazyPanel(PackageBuilderPanel, 'PackageBuilderPanel'),
+  statsOverlay: LazyPanel(StatsOverlayPanel, 'StatsOverlayPanel'),
 };
 
 // ─── Workspace Presets ───────────────────────────────────────────────────────

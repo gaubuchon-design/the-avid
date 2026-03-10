@@ -3,7 +3,11 @@
    Professional NLE Dark Theme
    ═══════════════════════════════════════════════════════════════════════════ */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+/* Font imports are consolidated in globals.css (loaded first via main.tsx) */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DARK THEME (default)
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ═══════════════════════════════════════════════════════════════════════════
    1. COLOR TOKENS
@@ -108,12 +112,20 @@
   --shadow-xl:    0 16px 48px rgba(0, 0, 0, 0.70);
   --shadow-brand: 0 0 16px rgba(109, 76, 250, 0.25);
   --shadow-glow:  0 0 24px rgba(109, 76, 250, 0.35);
+  --shadow-accent: 0 0 0 1px rgba(124, 92, 252, 0.4);
   --shadow-inset: inset 0 1px 2px rgba(0, 0, 0, 0.35);
 
   /* ── AI Accent ─────────────────────────────────────────────────────── */
   --ai-accent:     #00d4aa;
   --ai-accent-dim: rgba(0, 212, 170, 0.14);
   --ai-accent-glow: rgba(0, 212, 170, 0.25);
+
+  /* ── Radii ──────────────────────────────────────────────────────────── */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
 
 /* ═══════════════════════════════════════════════════════════════════════════
    2. TYPOGRAPHY TOKENS
@@ -276,6 +288,9 @@
   --bg-input:         var(--bg-void);
   --bg-track-header:  var(--bg-base);
   --track-sub:        var(--track-subtitle);
+
+  /* Focus ring (a11y) */
+  --focus-ring: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--brand);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -296,6 +311,7 @@
   --bg-active:    rgba(0, 0, 0, 0.06);
   --bg-selected:  rgba(0, 0, 0, 0.08);
 
+  /* Text */
   --text-primary:   #1a1a2e;
   --text-secondary: #4a5568;
   --text-tertiary:  #718096;
@@ -315,10 +331,24 @@
   --shadow-md:    0 4px 12px rgba(0, 0, 0, 0.10);
   --shadow-lg:    0 8px 24px rgba(0, 0, 0, 0.14);
   --shadow-xl:    0 16px 48px rgba(0, 0, 0, 0.18);
+  --shadow-brand: 0 0 16px rgba(109, 76, 250, 0.15);
+  --shadow-accent: 0 0 0 1px rgba(124, 92, 252, 0.25);
 
   --bg-input:        #ffffff;
   --bg-track-header: #f0f0f6;
   --shadow-inset:    inset 0 1px 2px rgba(0, 0, 0, 0.06);
+  --text-on-brand:   #ffffff;
+
+  /* Brand-dim needs to be visible on light */
+  --brand-dim:     rgba(109, 76, 250, 0.10);
+  --accent-muted:  rgba(124, 92, 252, 0.10);
+
+  /* AI accent — darker for light BG readability */
+  --ai-accent:     #00a886;
+  --ai-accent-dim: rgba(0, 168, 134, 0.12);
+
+  /* Focus ring */
+  --focus-ring: 0 0 0 2px #ffffff, 0 0 0 4px var(--brand);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -461,6 +491,12 @@ img, svg, video, canvas {
 
 :focus:not(:focus-visible) {
   outline: none;
+}
+
+button:focus:not(:focus-visible),
+input:focus:not(:focus-visible) {
+  outline: none;
+  box-shadow: none;
 }
 
 /* Selection */
@@ -737,6 +773,16 @@ img, svg, video, canvas {
   transform: scale(1.25);
 }
 
+/* Firefox range thumb */
+.range-slider::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  background: var(--brand);
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+}
+
 /* Toggle switch */
 .toggle {
   position: relative;
@@ -850,6 +896,18 @@ img, svg, video, canvas {
 .gap-3   { gap: 12px; }
 .gap-4   { gap: 16px; }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    20. PAGE NAVIGATION (Resolve-Style Bottom Bar)
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -888,7 +946,7 @@ img, svg, video, canvas {
 .page-nav-tab.active {
   font-weight: var(--weight-semibold);
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-active);
   border-bottom-color: var(--brand);
 }
 
@@ -910,6 +968,10 @@ img, svg, video, canvas {
 
 .monitor {
   border: 1px solid var(--border-subtle);
+  transition: border-color var(--dur-normal) var(--ease-default);
+}
+.monitor.monitor-active {
+  border-color: rgba(124, 92, 252, 0.5);
 }
 
 .monitor-header {

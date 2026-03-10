@@ -50,6 +50,7 @@ class MCPClient {
       this.ws.close();
       this.ws = null;
     }
+    this.rejectAllPending('Server removed');
   }
 
   getServers(): MCPServerConfig[] {
@@ -98,6 +99,7 @@ class MCPClient {
       this.ws.close();
       this.ws = null;
     }
+    this.rejectAllPending('Disconnected from MCP server');
   }
 
   isConnected(): boolean {
@@ -150,9 +152,20 @@ class MCPClient {
     return () => this.listeners.delete(listener);
   }
 
+  private rejectAllPending(reason: string): void {
+    for (const [, pending] of this.pendingRequests) {
+      pending.reject(new Error(reason));
+    }
+    this.pendingRequests.clear();
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- event data is untyped
   private notify(event: string, data: any): void {
-    this.listeners.forEach((fn) => fn(event, data));
+    this.listeners.forEach((fn) => {
+      try { fn(event, data); } catch (err) {
+        console.error('[MCPClient] Listener error:', err);
+      }
+    });
   }
 }
 

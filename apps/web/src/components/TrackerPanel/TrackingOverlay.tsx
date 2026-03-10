@@ -101,7 +101,7 @@ export const TrackingOverlay: React.FC<TrackingOverlayProps> = ({
 
     // Handle control point dragging for existing regions
     if (isDragging && activeRegionId && dragIndex >= 0) {
-      const session = sessions.get(activeRegionId);
+      const session = sessions[activeRegionId];
       if (session) {
         const newPoints = [...session.region.points];
         newPoints[dragIndex] = pt;
@@ -155,7 +155,7 @@ export const TrackingOverlay: React.FC<TrackingOverlayProps> = ({
   // ── Get tracked region corners for current frame ──
   const getTrackedCorners = (regionId: string): Point2D[] | null => {
     if (currentFrame === undefined) return null;
-    const session = sessions.get(regionId);
+    const session = sessions[regionId];
     if (!session?.data) return null;
     const result = session.data.frames.get(currentFrame);
     if (!result) return null;
@@ -199,7 +199,7 @@ export const TrackingOverlay: React.FC<TrackingOverlayProps> = ({
         )}
 
         {/* Existing regions */}
-        {Array.from(sessions.entries()).map(([id, session]) => {
+        {Object.entries(sessions).map(([id, session]) => {
           const isActive = id === activeRegionId;
           const trackedCorners = getTrackedCorners(id);
           const displayPoints = trackedCorners || session.region.points;
@@ -212,7 +212,7 @@ export const TrackingOverlay: React.FC<TrackingOverlayProps> = ({
             <g key={id}>
               {/* Region polygon */}
               <polygon
-                points={displayPoints.map(p => `${p.x},${p.y}`).join(' ')}
+                points={displayPoints.map((p: Point2D) => `${p.x},${p.y}`).join(' ')}
                 fill={`rgba(137, 180, 250, ${isActive ? 0.1 : 0.05})`}
                 stroke={strokeColor}
                 strokeWidth={isActive ? 2 : 1}
@@ -221,8 +221,8 @@ export const TrackingOverlay: React.FC<TrackingOverlayProps> = ({
 
               {/* Crosshair at center */}
               {displayPoints.length >= 3 && (() => {
-                const cx = displayPoints.reduce((s, p) => s + p.x, 0) / displayPoints.length;
-                const cy = displayPoints.reduce((s, p) => s + p.y, 0) / displayPoints.length;
+                const cx = displayPoints.reduce((s: number, p: Point2D) => s + p.x, 0) / displayPoints.length;
+                const cy = displayPoints.reduce((s: number, p: Point2D) => s + p.y, 0) / displayPoints.length;
                 return (
                   <g opacity={0.6}>
                     <line x1={cx - 8} y1={cy} x2={cx + 8} y2={cy} stroke={strokeColor} strokeWidth={1} />
@@ -232,7 +232,7 @@ export const TrackingOverlay: React.FC<TrackingOverlayProps> = ({
               })()}
 
               {/* Control points (draggable when not tracking) */}
-              {isActive && mode !== 'tracking' && displayPoints.map((p, i) => (
+              {isActive && mode !== 'tracking' && displayPoints.map((p: Point2D, i: number) => (
                 <circle
                   key={i}
                   cx={p.x}

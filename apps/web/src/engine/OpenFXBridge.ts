@@ -1253,7 +1253,9 @@ export class OFXMessageSuiteImpl {
 
     // Notify listeners.
     for (const listener of this.listeners) {
-      listener(entry);
+      try { listener(entry); } catch (err) {
+        console.error('[OFXMessageSuite] Listener error:', err);
+      }
     }
 
     return OFXStatus.OK;

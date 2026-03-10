@@ -11,7 +11,7 @@
   },
   "scripts": {
     "dev": "tsc --watch",
-    "build": "tsc",
+    "build": "tsc --project tsconfig.json",
     "type-check": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
     "test": "vitest run",

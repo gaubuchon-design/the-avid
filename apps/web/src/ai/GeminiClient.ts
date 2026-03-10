@@ -320,8 +320,8 @@ class GeminiClient {
     const genericResponses = [
       `I can help with that! Let me analyze your timeline and suggest the best approach for "${lastUserText}".`,
       'Good idea. I\'ll review the current sequence and prepare an edit plan. You can approve each step before I execute.',
-      'Looking at your project "Demo Feature Film" - I see 6 tracks and 8 clips. What specifically would you like me to adjust?',
-      'I\'ve analyzed the timeline. The sequence is 34 seconds with 3 video clips on V1 and supporting audio. How should I proceed?',
+      'Looking at your project — I can see the tracks and clips on the timeline. What specifically would you like me to adjust?',
+      'I\'ve analyzed the timeline. How should I proceed with the edits?',
     ];
 
     return {

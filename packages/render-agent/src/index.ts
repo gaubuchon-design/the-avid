@@ -26,7 +26,7 @@ import { RenderWorker } from './workers/RenderWorker.js';
 import { JobQueue, type QueuedJob, type QueueStats, type JobQueueConfig } from './JobQueue.js';
 import { getAvailableDiskSpace } from './capabilities.js';
 
-// ── Types ───────────────────────────────────────────────────────────
+// ── Types ───────────────────────────────────────────────────────
 
 export type WorkerJobType =
   | 'ingest'
@@ -504,10 +504,6 @@ export class RenderAgent extends EventEmitter {
     return this.establishConnection();
   }
 
-  /**
-   * Gracefully disconnect from the coordinator.
-   * Drains the job queue and waits for in-flight jobs to finish.
-   */
   /**
    * Gracefully disconnect from the coordinator.
    * Drains the job queue, cancels in-flight work, and cleans up resources.

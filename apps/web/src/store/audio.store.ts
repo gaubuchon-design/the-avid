@@ -154,7 +154,9 @@ export const useAudioStore = create<AudioState & AudioActions>()(
         if (t) {
           t.solo = !t.solo;
           if (t.solo) {
-            s.soloedTrackIds.push(trackId);
+            if (!s.soloedTrackIds.includes(trackId)) {
+              s.soloedTrackIds.push(trackId);
+            }
           } else {
             s.soloedTrackIds = s.soloedTrackIds.filter((id) => id !== trackId);
           }

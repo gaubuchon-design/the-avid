@@ -1,30 +1,24 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useEditorStore } from '../../store/editor.store';
 import { usePlayerStore } from '../../store/player.store';
-import { playbackEngine } from '../../engine/PlaybackEngine';
-import { frameCompositor } from '../../engine/FrameCompositor';
+import { useTitleStore } from '../../store/title.store';
+import {
+  compositeRecordFrame,
+  findActiveClip,
+  getSourceTime,
+  syncVideoPlayback,
+  pauseVideoSource,
+  tryLoadClipSource,
+} from '../../engine/compositeRecordFrame';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function frameToTimecode(frame: number, fps = 23.976): string {
-  const totalSeconds = frame / fps;
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = Math.floor(totalSeconds % 60);
-  const f = Math.floor(frame % Math.ceil(fps));
-  return (
-    String(h).padStart(2, '0') + ':' +
-    String(m).padStart(2, '0') + ':' +
-    String(s).padStart(2, '0') + ':' +
-    String(f).padStart(2, '0')
-  );
-}
-
-function timeToTimecode(sec: number): string {
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const s = Math.floor(sec % 60);
-  const f = Math.floor((sec % 1) * 24);
+function timeToTimecode(sec: number, fps = 24): string {
+  const totalFrames = Math.round(sec * fps);
+  const h = Math.floor(totalFrames / (fps * 3600));
+  const m = Math.floor((totalFrames % (fps * 3600)) / (fps * 60));
+  const s = Math.floor((totalFrames % (fps * 60)) / fps);
+  const f = totalFrames % Math.ceil(fps);
   return (
     String(h).padStart(2, '0') + ':' +
     String(m).padStart(2, '0') + ':' +
@@ -39,75 +33,118 @@ export function RecordMonitor() {
   const playheadTime = useEditorStore((s) => s.playheadTime);
   const editorIsPlaying = useEditorStore((s) => s.isPlaying);
   const editorTogglePlay = useEditorStore((s) => s.togglePlay);
-  const showSafeZones = useEditorStore((s) => s.showSafeZones);
   const duration = useEditorStore((s) => s.duration);
+  const fps = useEditorStore((s) => s.sequenceSettings.fps);
 
   const { setActiveMonitor } = usePlayerStore();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const rafRef = useRef<number>();
+  const lastClipIdRef = useRef<string | null>(null);
+  const [canvasSize, setCanvasSize] = useState({ w: 480, h: 270 });
 
-  // Get timeline tracks and sequence settings for compositing
-  const tracks = useEditorStore((s) => s.tracks);
-  const sequenceSettings = useEditorStore((s) => s.sequenceSettings);
+  // Responsive canvas sizing
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width: cw, height: ch } = entry.contentRect;
+        if (cw <= 0 || ch <= 0) continue;
+        const ar = 16 / 9;
+        let w: number, h: number;
+        if (cw / ch > ar) {
+          h = Math.floor(ch);
+          w = Math.floor(h * ar);
+        } else {
+          w = Math.floor(cw);
+          h = Math.floor(w / ar);
+        }
+        setCanvasSize({ w: Math.max(w, 160), h: Math.max(h, 90) });
+      }
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
 
-  // Render composited timeline frame or placeholder
+  // ── Continuous RAF render loop ──────────────────────────────────────────────
+  // Uses the shared compositing pipeline for full compositing:
+  // intrinsic transforms + effects + titles + subtitles + safe zones.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
 
-    const w = canvas.width;
-    const h = canvas.height;
+    const render = () => {
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { rafRef.current = requestAnimationFrame(render); return; }
 
-    // Check if there are any video tracks with clips
-    const hasVideoClips = tracks.some(
-      (t) => (t.type === 'VIDEO' || t.type === 'GRAPHIC') && t.clips.length > 0
-    );
+      const { w, h } = canvasSize;
+      canvas.width = w;
+      canvas.height = h;
 
-    if (hasVideoClips) {
-      frameCompositor
-        .renderTimelineFrame(tracks, playheadTime, sequenceSettings, w, h)
-        .then((bitmap) => {
-          if (bitmap) {
-            ctx.clearRect(0, 0, w, h);
-            ctx.drawImage(bitmap, 0, 0, w, h);
-            bitmap.close();
-            // Draw progress bar overlay
-            drawProgressBar(ctx, w, h);
-          } else {
-            drawPlaceholder(ctx, w, h);
-          }
-        })
-        .catch(() => {
-          drawPlaceholder(ctx, w, h);
-        });
-    } else {
-      drawPlaceholder(ctx, w, h);
+      // Read latest state (non-reactive inside RAF)
+      const state = useEditorStore.getState();
+      const titleState = useTitleStore.getState();
+
+      // Sync video playback for the active clip
+      const activeClip = findActiveClip(state.tracks, state.playheadTime);
+
+      // Handle clip transitions: pause old clip, start new
+      if (activeClip?.assetId !== lastClipIdRef.current) {
+        if (lastClipIdRef.current) {
+          pauseVideoSource(lastClipIdRef.current);
+        }
+        lastClipIdRef.current = activeClip?.assetId ?? null;
+      }
+
+      // Sync playback for the active clip
+      if (activeClip) {
+        syncVideoPlayback(activeClip, state.isPlaying, state.playheadTime, state.sequenceSettings.fps);
+      }
+
+      // Try loading unloaded clip sources
+      if (activeClip?.assetId) {
+        tryLoadClipSource(activeClip.assetId, state.bins as any);
+      }
+
+      // Composite the full frame
+      compositeRecordFrame({
+        ctx,
+        canvasW: w,
+        canvasH: h,
+        playheadTime: state.playheadTime,
+        tracks: state.tracks,
+        fps: state.sequenceSettings.fps,
+        aspectRatio: 16 / 9,
+        showSafeZones: state.showSafeZones,
+        isPlaying: state.isPlaying,
+        titleClips: state.titleClips,
+        subtitleTracks: state.subtitleTracks,
+        currentTitle: titleState.currentTitle,
+        isTitleEditing: titleState.isEditing,
+      });
+
+      rafRef.current = requestAnimationFrame(render);
+    };
+
+    rafRef.current = requestAnimationFrame(render);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [canvasSize]);
+
+  // Auto-inspect clip at playhead (Premiere Pro behavior — Inspector shows
+  // properties for the clip currently visible in the record monitor)
+  useEffect(() => {
+    const state = useEditorStore.getState();
+    if (state.selectedClipIds.length === 0) {
+      const clip = findActiveClip(state.tracks, playheadTime);
+      if (clip) {
+        state.setInspectedClip(clip.id);
+      }
     }
-
-    function drawProgressBar(c: CanvasRenderingContext2D, cw: number, ch: number) {
-      const progress = duration > 0 ? playheadTime / duration : 0;
-      c.fillStyle = 'rgba(255, 255, 255, 0.05)';
-      c.fillRect(0, ch - 3, cw, 3);
-      c.fillStyle = '#7c5cfc';
-      c.fillRect(0, ch - 3, cw * progress, 3);
-    }
-
-    function drawPlaceholder(c: CanvasRenderingContext2D, cw: number, ch: number) {
-      c.fillStyle = '#000000';
-      c.fillRect(0, 0, cw, ch);
-      c.fillStyle = 'rgba(255, 255, 255, 0.12)';
-      c.font = '700 28px system-ui, sans-serif';
-      c.textAlign = 'center';
-      c.textBaseline = 'middle';
-      c.fillText('RECORD', cw / 2, ch / 2 - 14);
-      c.fillStyle = 'rgba(255, 255, 255, 0.25)';
-      c.font = '500 13px monospace';
-      c.fillText(timeToTimecode(playheadTime), cw / 2, ch / 2 + 16);
-      drawProgressBar(c, cw, ch);
-    }
-  }, [playheadTime, duration, tracks, sequenceSettings]);
+  }, [playheadTime]);
 
   // Transport handlers
   const handlePlayPause = useCallback(() => {
@@ -124,13 +161,13 @@ export function RecordMonitor() {
 
   const handlePrevFrame = useCallback(() => {
     const current = useEditorStore.getState().playheadTime;
-    useEditorStore.getState().setPlayhead(Math.max(0, current - 1 / 24));
-  }, []);
+    useEditorStore.getState().setPlayhead(Math.max(0, current - 1 / fps));
+  }, [fps]);
 
   const handleNextFrame = useCallback(() => {
     const current = useEditorStore.getState().playheadTime;
-    useEditorStore.getState().setPlayhead(current + 1 / 24);
-  }, []);
+    useEditorStore.getState().setPlayhead(current + 1 / fps);
+  }, [fps]);
 
   const handleRewind = useCallback(() => {
     const current = useEditorStore.getState().playheadTime;
@@ -143,32 +180,30 @@ export function RecordMonitor() {
   }, []);
 
   const handleMatchFrame = useCallback(() => {
-    // Match frame: sync the source monitor's frame to the record playhead position
-    const frame = Math.round(playheadTime * playbackEngine.fps);
-    playbackEngine.seekToFrame(frame);
-  }, [playheadTime]);
+    const state = useEditorStore.getState();
+    const clip = findActiveClip(state.tracks, state.playheadTime);
+    if (clip?.assetId) {
+      const sourceTime = getSourceTime(clip, state.playheadTime);
+      const bin = state.bins.find((b) => b.assets.some((a) => a.id === clip.assetId));
+      const asset = bin?.assets.find((a) => a.id === clip.assetId);
+      if (asset) {
+        state.setSourceAsset(asset);
+        state.setSourcePlayhead(sourceTime);
+        state.setInspectedClip(clip.id);
+        usePlayerStore.getState().setActiveMonitor('source');
+      }
+    }
+  }, []);
 
-  // Focus this monitor on click
   const handleFocus = useCallback(() => {
     setActiveMonitor('record');
   }, [setActiveMonitor]);
 
-  // F key for match frame
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.key.toLowerCase() === 'f') {
-        handleMatchFrame();
-      }
-    };
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [handleMatchFrame]);
-
-  const tc = timeToTimecode(playheadTime);
+  const tc = timeToTimecode(playheadTime, fps);
+  const isActive = usePlayerStore((s) => s.activeMonitor === 'record');
 
   return (
-    <div className="monitor" onClick={handleFocus} role="region" aria-label="Record Monitor">
+    <div className={`monitor${isActive ? ' monitor-active' : ''}`} onClick={handleFocus} role="region" aria-label="Record Monitor">
       {/* Header */}
       <div className="monitor-header">
         <span className="monitor-label record" aria-hidden="true">RECORD</span>
@@ -176,19 +211,13 @@ export function RecordMonitor() {
       </div>
 
       {/* Canvas area */}
-      <div className="monitor-canvas">
+      <div className="monitor-canvas" ref={containerRef} style={{ flex: 1, minHeight: 0 }}>
         <canvas
           ref={canvasRef}
-          width={480}
-          height={270}
+          width={canvasSize.w}
+          height={canvasSize.h}
           style={{ width: '100%', height: '100%', objectFit: 'contain' }}
         />
-        {showSafeZones && (
-          <div className="safe-zone">
-            <div className="safe-zone-action" />
-            <div className="safe-zone-title" />
-          </div>
-        )}
       </div>
 
       {/* Footer / Transport */}

@@ -987,11 +987,13 @@ export function AdminDashboard() {
       <div style={headerStyle}>Admin Dashboard</div>
 
       {/* Tab bar */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border-default)', flexShrink: 0 }}>
+      <div role="tablist" style={{ display: 'flex', borderBottom: '1px solid var(--border-default)', flexShrink: 0 }}>
         {TAB_LABELS.map((t) => (
-          <div
+          <button
             key={t.key}
             onClick={() => setTab(t.key)}
+            aria-selected={tab === t.key}
+            role="tab"
             style={{
               flex: 1,
               height: 32,
@@ -1003,13 +1005,15 @@ export function AdminDashboard() {
               letterSpacing: '0.05em',
               textTransform: 'uppercase',
               color: tab === t.key ? 'var(--brand-bright)' : 'var(--text-muted)',
+              background: 'none',
+              border: 'none',
               borderBottom: `2px solid ${tab === t.key ? 'var(--brand)' : 'transparent'}`,
               cursor: 'pointer',
               transition: 'all 80ms',
             }}
           >
             {t.label}
-          </div>
+          </button>
         ))}
       </div>
 

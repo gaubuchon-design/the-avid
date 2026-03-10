@@ -152,8 +152,8 @@ export function DashboardPage() {
     time: formatRelativeDate(project.updatedAt),
   }));
 
-  const [createError, setCreateError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const createAndOpenProject = async (template: ProjectTemplate, workspace?: string) => {
     // Prevent duplicate creation when rapidly clicking
@@ -183,7 +183,9 @@ export function DashboardPage() {
               onClick={() => setNavItem(item)}
               role="tab"
               aria-selected={navItem === item}
+              aria-current={navItem === item ? 'page' : undefined}
               tabIndex={navItem === item ? 0 : -1}
+              type="button"
               onKeyDown={(e) => {
                 const items = ['Projects', 'Templates', 'Marketplace', 'Team'];
                 const idx = items.indexOf(item);
@@ -450,10 +452,18 @@ export function DashboardPage() {
 
             <div style={{ marginTop: 16 }}>
               <div className="section-header"><span className="section-title">Quick Start</span></div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {createError && (
+                <div role="alert" style={{ padding: '8px 12px', marginBottom: 8, background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: 'var(--radius-md)', fontSize: 11, color: '#ef4444' }}>
+                  {createError}
+                </div>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, opacity: isCreating ? 0.6 : 1, pointerEvents: isCreating ? 'none' : 'auto' }}>
                 {TEMPLATE_OPTIONS.map((option) => (
                   <div key={option.label}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => { void createAndOpenProject(option.template, option.workspace); }}
+                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void createAndOpenProject(option.template, option.workspace); } }}
                     style={{ display: 'flex', gap: 10, padding: '8px 12px', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', cursor: 'pointer', transition: 'all 150ms' }}
                     onMouseEnter={(event) => (event.currentTarget.style.borderColor = 'var(--border-strong)')}
                     onMouseLeave={(event) => (event.currentTarget.style.borderColor = 'var(--border-default)')}

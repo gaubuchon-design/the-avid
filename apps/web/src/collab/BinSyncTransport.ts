@@ -183,10 +183,15 @@ class MockWebSocket {
 
   close(): void {
     // Release all locks held by the current user on disconnect
+    // Collect keys first to avoid modifying the map during iteration
+    const toDelete: string[] = [];
     for (const [binId, lock] of this.serverLocks) {
       if (lock.userId === this.currentUserId) {
-        this.serverLocks.delete(binId);
+        toDelete.push(binId);
       }
+    }
+    for (const binId of toDelete) {
+      this.serverLocks.delete(binId);
     }
     this.readyState = this.CLOSED;
     this.oncloseHandler?.();
@@ -397,13 +402,19 @@ export class BinSyncTransport {
     const now = Date.now();
     const staleThreshold = 30_000; // 30 seconds
     const online: PresenceUpdate[] = [];
+    const stale: string[] = [];
 
     for (const [uid, p] of this.presence) {
       if (now - p.lastSeen < staleThreshold) {
         online.push(p);
       } else {
-        this.presence.delete(uid);
+        stale.push(uid);
       }
+    }
+
+    // Remove stale entries after iteration to avoid modifying map during iteration
+    for (const uid of stale) {
+      this.presence.delete(uid);
     }
 
     return online;

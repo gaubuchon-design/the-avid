@@ -1,9 +1,10 @@
 import React, { useRef, useEffect, useCallback, memo } from 'react';
 import { useEditorStore } from '../../store/editor.store';
-import { editEngine } from '../../engine/EditEngine';
 import { AddTrackCommand, RemoveTrackCommand } from '../../engine/commands';
 import type { Track, TrackType, TimelineViewMode, EditTool } from '../../store/editor.store';
+import { editEngine } from '../../engine/EditEngine';
 import { TrackHeaders } from './TrackHeaders';
+import { TrackPatchPanel } from './TrackPatchPanel';
 import { Ruler } from './Ruler';
 import { TimelineCanvas } from './TimelineCanvas';
 import { ClipView } from './ClipView';
@@ -49,124 +50,10 @@ const TrackLane = memo(function TrackLane({
   );
 });
 
-// ─── Undo / Redo hook ────────────────────────────────────────────────────────
-
-function useKeyboardShortcuts(): void {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      // Ignore when typing in inputs
-      const tagName = (e.target as Element)?.tagName;
-      if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') return;
-
-      const isMod = e.metaKey || e.ctrlKey;
-
-      // Undo/Redo
-      if (isMod && e.key === 'z' && !e.shiftKey) {
-        e.preventDefault(); editEngine.undo(); return;
-      }
-      if (isMod && ((e.key === 'z' && e.shiftKey) || e.key === 'y')) {
-        e.preventDefault(); editEngine.redo(); return;
-      }
-
-      const state = useEditorStore.getState();
-
-      switch (e.key) {
-        // Mark In/Out
-        case 'i': case 'I':
-          e.preventDefault();
-          state.setInPoint(state.playheadTime);
-          break;
-        case 'o': case 'O':
-          e.preventDefault();
-          state.setOutPoint(state.playheadTime);
-          break;
-
-        // Delete selected clips
-        case 'Delete': case 'Backspace':
-          if (state.selectedClipIds.length > 0) {
-            e.preventDefault();
-            state.deleteSelectedClips();
-          }
-          break;
-
-        // Split at playhead (S or C)
-        case 's':
-          if (!isMod && state.selectedClipIds.length > 0) {
-            e.preventDefault();
-            state.splitClip(state.selectedClipIds[0]!, state.playheadTime);
-          }
-          break;
-        case 'c':
-          if (!isMod) {
-            e.preventDefault();
-            // If clips selected, split; otherwise switch to razor tool
-            if (state.selectedClipIds.length > 0) {
-              state.splitClip(state.selectedClipIds[0]!, state.playheadTime);
-            } else {
-              state.setActiveTool('razor');
-            }
-          }
-          break;
-
-        // Tool shortcuts
-        case 'v': case 'V':
-          if (!isMod) { e.preventDefault(); state.setActiveTool('select'); }
-          break;
-        case 't': case 'T':
-          if (!isMod) { e.preventDefault(); state.setActiveTool('trim'); }
-          break;
-        case 'y': case 'Y':
-          if (!isMod) { e.preventDefault(); state.setActiveTool('slip'); }
-          break;
-
-        // Duplicate (Cmd/Ctrl+D)
-        case 'd': case 'D':
-          if (isMod && state.selectedClipIds.length > 0) {
-            e.preventDefault();
-            state.duplicateClip(state.selectedClipIds[0]!);
-          }
-          break;
-
-        // Frame stepping (Left/Right arrows)
-        case 'ArrowLeft':
-          e.preventDefault();
-          state.setPlayhead(Math.max(0, state.playheadTime - (e.shiftKey ? 1 : (1 / 24))));
-          break;
-        case 'ArrowRight':
-          e.preventDefault();
-          state.setPlayhead(Math.min(state.duration, state.playheadTime + (e.shiftKey ? 1 : (1 / 24))));
-          break;
-
-        // Home/End -- jump to start/end
-        case 'Home':
-          e.preventDefault();
-          state.setPlayhead(0);
-          break;
-        case 'End':
-          e.preventDefault();
-          state.setPlayhead(state.duration);
-          break;
-
-        // Select all (Cmd/Ctrl+A)
-        case 'a': case 'A':
-          if (isMod) {
-            e.preventDefault();
-            const allClipIds = state.tracks.flatMap(t => t.clips.map(c => c.id));
-            allClipIds.forEach((id, i) => {
-              useEditorStore.getState().selectClip(id, i > 0);
-            });
-          }
-          break;
-
-        // Deselect (Escape)
-        case 'Escape':
-          state.clearSelection();
-          break;
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
+// Keyboard shortcuts are now handled centrally by useGlobalKeyboard() in EditorPage.
+// This empty hook remains as a placeholder so the component structure stays clean.
+function useKeyboardShortcuts() {
+  // No-op — all keyboard dispatch is in hooks/useGlobalKeyboard.ts
 }
 
 // ─── TimelinePanel ───────────────────────────────────────────────────────────
@@ -200,11 +87,15 @@ export function TimelinePanel() {
     inPoint,
     outPoint,
   } = useEditorStore();
+  const fps = useEditorStore((s) => s.sequenceSettings.fps);
+  const frameDuration = 1 / (fps || 24);
 
   const contentRef = useRef<HTMLDivElement>(null);
   const totalWidth = Math.max(duration * zoom + 200, 800);
 
   useKeyboardShortcuts();
+
+  // Playback advancement is handled by the store's togglePlay action
 
   // Sync vertical scroll between headers and content
   const handleScroll = useCallback(
@@ -333,7 +224,7 @@ export function TimelinePanel() {
 
         {/* Transport controls */}
         <div className="tl-group" role="group" aria-label="Transport Controls">
-          <button className="tl-btn" title="Step Back (Left Arrow)" aria-label="Step back one frame" onClick={() => setPlayhead(Math.max(0, playheadTime - 1/24))}>
+          <button className="tl-btn" title="Step Back (Left Arrow)" aria-label="Step back one frame" onClick={() => setPlayhead(Math.max(0, playheadTime - frameDuration))}>
             <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <rect x="4" y="5" width="3" height="14" rx="1" /><polygon points="20 5 10 12 20 19" />
             </svg>
@@ -355,7 +246,7 @@ export function TimelinePanel() {
               </svg>
             )}
           </button>
-          <button className="tl-btn" title="Step Forward (Right Arrow)" aria-label="Step forward one frame" onClick={() => setPlayhead(Math.min(duration, playheadTime + 1/24))}>
+          <button className="tl-btn" title="Step Forward (Right Arrow)" aria-label="Step forward one frame" onClick={() => setPlayhead(Math.min(duration, playheadTime + frameDuration))}>
             <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <polygon points="4 5 14 12 4 19" /><rect x="17" y="5" width="3" height="14" rx="1" />
             </svg>
@@ -420,6 +311,7 @@ export function TimelinePanel() {
 
       {/* Body */}
       <div className="timeline-body" role="grid" aria-label="Timeline tracks and clips">
+        <TrackPatchPanel />
         <TrackHeaders />
 
         <div

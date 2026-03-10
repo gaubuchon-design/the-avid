@@ -175,8 +175,9 @@ router.post('/:id/purchase', authenticate, validate(uuidParam, 'params'), async 
 
 // ─── POST /marketplace -- publish item (authenticated authors) ──────────────────
 router.post('/', authenticate, validate(schemas.createMarketplaceItem), async (req: Request, res: Response) => {
+  const { name, type, description, priceTokens, tags, slug } = req.body;
   const item = await db.marketplaceItem.create({
-    data: { ...req.body, authorId: req.user!.id, isPublished: false },
+    data: { name, type, description, priceTokens, tags, slug, authorId: req.user!.id, isPublished: false },
   });
   res.status(201).json({ item });
 });
