@@ -87,10 +87,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Closed the remaining desktop ingest parity gap by routing BinPanel file-picker imports through desktop `openFile(...)` + `importMedia(...)` when Electron is available, then reloading the persisted project from repository storage.
 - Hardened web-load repository hydration by ignoring stale `loadProject(...)` responses when project switches race, and persisted restored collaboration snapshots immediately so reopened projects reflect restored timeline/shell state without depending on autosave timing.
 - Added phase-1 hydration coverage proving (a) latest web-load repository payload wins over late stale responses and (b) restored collaboration snapshots survive reopen via repository persistence.
+- Wired collaboration connect/disconnect lifecycle into the editor shell so collab sessions now auto-connect on project open and cleanly disconnect on project switches/unmount without manual store calls.
+- Added focused hook coverage for auto-connect on open, session switch reconnect, `new`/unset project disconnect, and unmount cleanup.
 
 ## Next Execution Slices
 
-1. Wire collaboration connect/disconnect lifecycle into the editor shell so repository-backed version history hydration runs automatically on project open, not only in tests/manual store calls.
+1. Hydrate collaboration identity from authenticated user profile (name/avatar) during auto-connect so comments/activity/version metadata align with real user sessions.
 
 ## Exit Signals For These Early Phases
 
