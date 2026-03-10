@@ -42,6 +42,7 @@ export interface ProjectVersion {
   name: string;
   createdAt: number;
   createdBy: string;
+  createdByProfile?: CollabVersionAuthorProfile;
   description: string;
   kind: 'demo' | 'restore-point';
   isRestorePoint?: boolean;
@@ -52,6 +53,13 @@ export interface ProjectVersion {
   compareMetrics: ProjectVersionCompareMetric[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- snapshot is an opaque serialized project blob
   snapshotData: any;
+}
+
+export interface CollabVersionAuthorProfile {
+  userId?: string;
+  displayName: string;
+  avatarUrl?: string;
+  color?: string;
 }
 
 export interface ProjectVersionSnapshotSummary {
@@ -182,6 +190,11 @@ const DEMO_VERSIONS: ProjectVersion[] = [
     name: 'First Assembly',
     createdAt: now - 86400000 * 2, // 2 days ago
     createdBy: 'Sarah K.',
+    createdByProfile: {
+      userId: 'u1',
+      displayName: 'Sarah K.',
+      color: '#7c5cfc',
+    },
     description: 'Initial rough cut with all scenes assembled in order.',
     kind: 'demo',
     retentionPolicy: 'fixture',
@@ -201,6 +214,11 @@ const DEMO_VERSIONS: ProjectVersion[] = [
     name: 'Director\'s Review Cut',
     createdAt: now - 86400000, // 1 day ago
     createdBy: 'Marcus T.',
+    createdByProfile: {
+      userId: 'u2',
+      displayName: 'Marcus T.',
+      color: '#2bb672',
+    },
     description: 'Tightened edit after director feedback. Removed 8s of dead air, added B-roll transitions.',
     kind: 'demo',
     retentionPolicy: 'fixture',
@@ -412,6 +430,7 @@ function buildVersionCompareMetrics(
 function cloneVersion(version: ProjectVersion): ProjectVersion {
   return {
     ...version,
+    createdByProfile: version.createdByProfile ? { ...version.createdByProfile } : undefined,
     compareSummary: version.compareSummary ? { ...version.compareSummary } : null,
     compareMetrics: version.compareMetrics.map((metric) => ({ ...metric })),
     snapshotSummary: version.snapshotSummary ? { ...version.snapshotSummary } : null,
@@ -619,6 +638,12 @@ export class CollabEngine {
       name,
       createdAt: Date.now(),
       createdBy: this.currentUserName,
+      createdByProfile: {
+        userId: this.currentUserId,
+        displayName: this.currentUserName,
+        avatarUrl: this.users.get(this.currentUserId)?.avatar,
+        color: this.users.get(this.currentUserId)?.color,
+      },
       description,
       kind: 'restore-point',
       isRestorePoint: true,

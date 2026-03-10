@@ -15,6 +15,10 @@ function makeVersion(createdBy: string): ProjectVersion {
     name: 'Identity Snapshot',
     createdAt: Date.now(),
     createdBy,
+    createdByProfile: {
+      displayName: createdBy,
+      color: '#f59e0b',
+    },
     description: 'Identity check',
     kind: 'restore-point',
     isRestorePoint: true,
@@ -62,6 +66,42 @@ describe('phase 1 collab identity UI', () => {
 
     expect(container.querySelector('img[alt="Alex Editor avatar"]')).toBeTruthy();
     expect(container.textContent).toContain('by Alex Editor');
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it('renders persisted author avatar in version cards for non-current users', async () => {
+    useCollabStore.setState({
+      activeTab: 'versions',
+      currentUserName: 'Alex Editor',
+      currentUserAvatar: 'avatar://alex',
+      versions: [
+        {
+          ...makeVersion('Jordan Reviewer'),
+          id: 'version-jordan',
+          createdByProfile: {
+            userId: 'user-jordan',
+            displayName: 'Jordan Reviewer',
+            avatarUrl: 'avatar://jordan',
+            color: '#118ab2',
+          },
+        },
+      ],
+    });
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<CollabPanel />);
+    });
+
+    expect(container.querySelector('img[alt="Jordan Reviewer avatar"]')).toBeTruthy();
+    expect(container.textContent).toContain('by Jordan Reviewer');
 
     await act(async () => {
       root.unmount();

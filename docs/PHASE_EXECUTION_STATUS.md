@@ -95,10 +95,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Added phase-1 UI coverage that asserts authenticated avatar rendering in version and activity views.
 - Extended authenticated identity avatar rendering into users-tab rows and comment/reply threads so all major collaboration surfaces now show consistent profile identity instead of placeholder initials.
 - Expanded phase-1 UI coverage with users-tab and comment-thread avatar assertions for authenticated identity paths.
+- Persisted and hydrated rich version-author profile metadata (`userId`/display name/avatar/color) in repository-backed version history so non-current collaborators render stable identity after reopen.
+- Updated collaboration version cards to prefer persisted author profiles over current-user-only avatar inference, and added Phase-1 coverage for non-current user avatar rendering from hydrated version entries.
 
 ## Next Execution Slices
 
-1. Persist and hydrate richer collaborator profile metadata (avatar/display name/color) alongside version history entries so non-current users render stable identity after reopen.
+1. Persist and hydrate collaborator identity metadata for activity feed entries and threaded comment authorship so reopened projects retain non-current user avatars beyond version history cards.
 
 ## Exit Signals For These Early Phases
 

@@ -237,6 +237,12 @@ export interface EditorProjectVersionHistoryEntry {
   name: string;
   createdAt: number;
   createdBy: string;
+  createdByProfile?: {
+    userId?: string;
+    displayName: string;
+    avatarUrl?: string;
+    color?: string;
+  };
   description: string;
   snapshotData: unknown;
   isRestorePoint?: boolean;

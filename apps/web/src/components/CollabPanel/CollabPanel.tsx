@@ -1131,8 +1131,10 @@ function VersionCard({
   onCompare: () => void;
   selectedForCompare: boolean;
 }) {
-  const versionAuthorAvatar = version.createdBy === currentUserName ? currentUserAvatar : undefined;
-  const versionAuthorColor = getDisplayColorForUser(version.createdBy);
+  const authorName = version.createdByProfile?.displayName || version.createdBy;
+  const versionAuthorAvatar = version.createdByProfile?.avatarUrl
+    ?? (authorName === currentUserName ? currentUserAvatar : undefined);
+  const versionAuthorColor = version.createdByProfile?.color || getDisplayColorForUser(authorName);
   return (
     <div
       style={{
@@ -1153,14 +1155,14 @@ function VersionCard({
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
         <IdentityAvatar
-          name={version.createdBy}
+          name={authorName}
           avatarUrl={versionAuthorAvatar}
           color={versionAuthorColor}
           size={14}
           fontSize={8}
         />
         <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-          by {version.createdBy}
+          by {authorName}
         </div>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>

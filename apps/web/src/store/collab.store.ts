@@ -170,6 +170,14 @@ function toPersistedVersionHistoryEntry(version: ProjectVersion): EditorProjectV
     name: version.name,
     createdAt: version.createdAt,
     createdBy: version.createdBy,
+    createdByProfile: version.createdByProfile
+      ? {
+        userId: version.createdByProfile.userId,
+        displayName: version.createdByProfile.displayName,
+        avatarUrl: version.createdByProfile.avatarUrl,
+        color: version.createdByProfile.color,
+      }
+      : undefined,
     description: version.description,
     snapshotData: version.snapshotData,
     isRestorePoint: version.isRestorePoint,
@@ -182,6 +190,14 @@ function toProjectVersionFromPersistedEntry(entry: EditorProjectVersionHistoryEn
     name: entry.name,
     createdAt: entry.createdAt,
     createdBy: entry.createdBy,
+    createdByProfile: entry.createdByProfile
+      ? {
+        userId: entry.createdByProfile.userId,
+        displayName: entry.createdByProfile.displayName || entry.createdBy,
+        avatarUrl: entry.createdByProfile.avatarUrl,
+        color: entry.createdByProfile.color,
+      }
+      : undefined,
     description: entry.description,
     kind: 'restore-point',
     isRestorePoint: entry.isRestorePoint ?? true,

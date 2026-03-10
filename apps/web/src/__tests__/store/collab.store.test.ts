@@ -76,6 +76,8 @@ describe('useCollabStore', () => {
     expect(state.currentUserAvatar).toBe('avatar://taylor');
     expect(state.comments[0]?.userName).toBe('Taylor Editor');
     expect(state.versions[0]?.createdBy).toBe('Taylor Editor');
+    expect(state.versions[0]?.createdByProfile?.avatarUrl).toBe('avatar://taylor');
+    expect(state.versions[0]?.createdByProfile?.displayName).toBe('Taylor Editor');
     expect(state.activityFeed[0]?.user).toBe('Taylor Editor');
     expect(state.onlineUsers.some((user) => user.id === 'user_identity' && user.avatar === 'avatar://taylor')).toBe(true);
   });
@@ -88,6 +90,12 @@ describe('useCollabStore', () => {
         name: 'Persisted Version',
         createdAt: Date.now() - 1000,
         createdBy: 'User',
+        createdByProfile: {
+          userId: 'user-persisted',
+          displayName: 'User',
+          avatarUrl: 'avatar://persisted-user',
+          color: '#1f9de8',
+        },
         description: 'Saved from repository',
         snapshotData: { id: project.id, name: project.name, tracks: [], bins: [] },
         isRestorePoint: true,
@@ -101,6 +109,8 @@ describe('useCollabStore', () => {
     const hydratedVersion = useCollabStore.getState().versions[0];
     expect(hydratedVersion?.id).toBe('persisted-version-1');
     expect(hydratedVersion?.name).toBe('Persisted Version');
+    expect(hydratedVersion?.createdByProfile?.avatarUrl).toBe('avatar://persisted-user');
+    expect(hydratedVersion?.createdByProfile?.color).toBe('#1f9de8');
     expect(repositoryMocks.getProjectFromRepository).toHaveBeenCalledWith(project.id);
   });
 
@@ -179,6 +189,8 @@ describe('useCollabStore', () => {
     expect(repositoryMocks.saveProjectToRepository).toHaveBeenCalledTimes(1);
     const savedProject = repositoryMocks.saveProjectToRepository.mock.calls[0]?.[0] as EditorProject;
     expect(savedProject.versionHistory?.[0]?.name).toBe('Persisted Cut');
+    expect(savedProject.versionHistory?.[0]?.createdByProfile?.displayName).toBe('You');
+    expect(savedProject.versionHistory?.[0]?.createdByProfile?.userId).toBe('user_1');
 
     repositoryMocks.getProjectFromRepository.mockResolvedValue(savedProject);
     useCollabStore.getState().connect(project.id, 'user_1');
