@@ -366,6 +366,44 @@ export function BinPanel() {
     importMediaFiles(droppedFiles, selectedBinId ?? undefined);
   };
 
+  const openBrowserFilePicker = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.accept = 'video/*,audio/*,image/*,.svg,.exr,.dpx,.tga,.psd,.mxf,.avi,.mkv';
+    input.onchange = () => {
+      if (input.files?.length) {
+        importMediaFiles(input.files, selectedBinId ?? undefined);
+      }
+    };
+    input.click();
+  }, [importMediaFiles, selectedBinId]);
+
+  const handleImportMediaClick = useCallback(async () => {
+    if (!window.electronAPI || !projectId) {
+      openBrowserFilePicker();
+      return;
+    }
+
+    try {
+      const result = await window.electronAPI.openFile({
+        title: 'Import Media',
+        buttonLabel: 'Import',
+        properties: ['openFile', 'openDirectory', 'multiSelections'],
+      });
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return;
+      }
+
+      await window.electronAPI.importMedia(projectId, result.filePaths, selectedBinId ?? undefined);
+      await loadProject(projectId);
+    } catch (error) {
+      console.error('Desktop file-picker ingest failed', error);
+      openBrowserFilePicker();
+    }
+  }, [loadProject, openBrowserFilePicker, projectId, selectedBinId]);
+
   return (
     <div
       className="bin-panel"
@@ -397,17 +435,7 @@ export function BinPanel() {
             <>
               <button className="tl-btn" title="Import Media" style={{ fontSize: 12 }}
                 onClick={() => {
-                  // Trigger native file picker (mock — in production connects to media ingest pipeline)
-                  const input = document.createElement('input');
-                  input.type = 'file';
-                  input.multiple = true;
-                  input.accept = 'video/*,audio/*,image/*,.svg,.exr,.dpx,.tga,.psd,.mxf,.avi,.mkv';
-                  input.onchange = () => {
-                    if (input.files?.length) {
-                      importMediaFiles(input.files, selectedBinId ?? undefined);
-                    }
-                  };
-                  input.click();
+                  void handleImportMediaClick();
                 }}>+</button>
               <button className="tl-btn" title="New Bin"
                 onClick={() => setShowNewBinInput(true)}>
