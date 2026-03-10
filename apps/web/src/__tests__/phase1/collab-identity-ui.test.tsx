@@ -117,6 +117,7 @@ describe('phase 1 collab identity UI', () => {
       activityFeed: [
         {
           id: 'activity-1',
+          userId: 'user-alex',
           user: 'Alex Editor',
           action: 'saved version',
           timestamp: Date.now(),
@@ -136,6 +137,83 @@ describe('phase 1 collab identity UI', () => {
     expect(container.querySelector('img[alt="Alex Editor avatar"]')).toBeTruthy();
     expect(container.textContent).toContain('Alex Editor');
     expect(container.textContent).toContain('saved version');
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it('hydrates non-current collaborator avatars from persisted identity profiles', async () => {
+    useCollabStore.setState({
+      activeTab: 'comments',
+      currentUserName: 'Alex Editor',
+      currentUserAvatar: 'avatar://alex',
+      identityProfiles: {
+        'id:user-robin': {
+          userId: 'user-robin',
+          displayName: 'Robin Producer',
+          avatarUrl: 'avatar://robin',
+          color: '#1f9de8',
+        },
+        'name:robin producer': {
+          userId: 'user-robin',
+          displayName: 'Robin Producer',
+          avatarUrl: 'avatar://robin',
+          color: '#1f9de8',
+        },
+      },
+      comments: [
+        {
+          id: 'comment-robin',
+          userId: 'user-robin',
+          userName: 'Robin Producer',
+          frame: 80,
+          text: 'Persisted profile comment',
+          timestamp: Date.now(),
+          resolved: false,
+          reactions: [],
+          replies: [
+            {
+              id: 'reply-robin',
+              userId: 'user-robin',
+              userName: 'Robin Producer',
+              text: 'Persisted profile reply',
+              timestamp: Date.now(),
+            },
+          ],
+        },
+      ],
+      activityFeed: [
+        {
+          id: 'activity-robin',
+          userId: 'user-robin',
+          user: 'Robin Producer',
+          action: 'reviewed cut',
+          timestamp: Date.now(),
+          detail: 'Persisted profile activity',
+        },
+      ],
+    });
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<CollabPanel />);
+    });
+
+    expect(container.querySelector('img[alt="Robin Producer avatar"]')).toBeTruthy();
+    expect(container.textContent).toContain('Persisted profile comment');
+
+    useCollabStore.setState({ activeTab: 'activity' });
+    await act(async () => {
+      root.render(<CollabPanel />);
+    });
+
+    expect(container.querySelector('img[alt="Robin Producer avatar"]')).toBeTruthy();
+    expect(container.textContent).toContain('Persisted profile activity');
 
     await act(async () => {
       root.unmount();

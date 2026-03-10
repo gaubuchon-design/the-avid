@@ -79,6 +79,7 @@ describe('useCollabStore', () => {
     expect(state.versions[0]?.createdByProfile?.avatarUrl).toBe('avatar://taylor');
     expect(state.versions[0]?.createdByProfile?.displayName).toBe('Taylor Editor');
     expect(state.activityFeed[0]?.user).toBe('Taylor Editor');
+    expect(state.activityFeed[0]?.userId).toBe('user_identity');
     expect(state.onlineUsers.some((user) => user.id === 'user_identity' && user.avatar === 'avatar://taylor')).toBe(true);
   });
 
@@ -111,7 +112,57 @@ describe('useCollabStore', () => {
     expect(hydratedVersion?.name).toBe('Persisted Version');
     expect(hydratedVersion?.createdByProfile?.avatarUrl).toBe('avatar://persisted-user');
     expect(hydratedVersion?.createdByProfile?.color).toBe('#1f9de8');
+    expect(useCollabStore.getState().identityProfiles['id:user-persisted']?.avatarUrl).toBe('avatar://persisted-user');
+    expect(useCollabStore.getState().identityProfiles['name:user']?.color).toBe('#1f9de8');
     expect(repositoryMocks.getProjectFromRepository).toHaveBeenCalledWith(project.id);
+  });
+
+  it('connect() hydrates identity profiles from persisted collaborators for comment/activity authors', async () => {
+    const project = buildRepositoryProject('project_hydrate_collaborators');
+    project.collaborators = [
+      {
+        id: 'user-robin',
+        displayName: 'Robin Producer',
+        avatarUrl: 'avatar://robin',
+        color: '#1f9de8',
+      },
+    ];
+    repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
+
+    useCollabStore.setState({
+      comments: [
+        {
+          id: 'comment-robin',
+          userId: 'user-robin',
+          userName: 'Robin Producer',
+          frame: 120,
+          text: 'Need to adjust pacing here.',
+          timestamp: Date.now(),
+          resolved: false,
+          reactions: [],
+          replies: [],
+        },
+      ],
+      activityFeed: [
+        {
+          id: 'activity-robin',
+          userId: 'user-robin',
+          user: 'Robin Producer',
+          action: 'reviewed cut',
+          timestamp: Date.now(),
+          detail: 'Captured notes from client screening',
+        },
+      ],
+    });
+
+    useCollabStore.getState().connect(project.id, 'user_1');
+    await flushAsyncTasks();
+
+    const profileById = useCollabStore.getState().identityProfiles['id:user-robin'];
+    const profileByName = useCollabStore.getState().identityProfiles['name:robin producer'];
+    expect(profileById?.avatarUrl).toBe('avatar://robin');
+    expect(profileById?.color).toBe('#1f9de8');
+    expect(profileByName?.userId).toBe('user-robin');
   });
 
   it('disconnect() sets connected to false via setState', () => {
