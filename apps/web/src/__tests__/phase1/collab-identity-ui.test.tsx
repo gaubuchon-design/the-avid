@@ -341,6 +341,7 @@ describe('phase 1 collab identity UI', () => {
       commentsComposerVisible: true,
       commentsComposerDraft: 'Need alt b-roll after this line.',
       commentsActiveReplyCommentId: 'comment-reply-target',
+      commentsActiveReactionPickerCommentId: 'comment-reply-target',
       commentsReplyDrafts: {
         'comment-reply-target': 'This beat needs a tighter response.',
       },
@@ -377,6 +378,7 @@ describe('phase 1 collab identity UI', () => {
     expect(composerSummary?.textContent).toContain('Draft: Need alt b-roll after this line.');
     expect(composerSummary?.textContent).toContain('Replying to: comment-reply-target');
     expect(container.textContent).toContain('Draft reply: This beat needs a tighter response.');
+    expect(container.textContent).toContain('❤️');
 
     await act(async () => {
       root.unmount();

@@ -311,6 +311,7 @@ export interface EditorProjectCollaborationPanelPreferences {
   commentsComposerDraft: string;
   commentsActiveReplyCommentId: string | null;
   commentsReplyDrafts: Record<string, string>;
+  commentsActiveReactionPickerCommentId: string | null;
 }
 
 export interface EditorProjectSettings {
@@ -1269,6 +1270,7 @@ function normalizeProject(project: EditorProject): EditorProject {
       commentsComposerDraft: '',
       commentsActiveReplyCommentId: null,
       commentsReplyDrafts: {},
+      commentsActiveReactionPickerCommentId: null,
     }),
     tokenBalance,
     editorialState: {

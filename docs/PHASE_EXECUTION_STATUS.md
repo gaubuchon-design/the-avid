@@ -145,10 +145,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Replaced local per-thread reply draft state with collab-store-backed drafts so in-progress replies survive reconnect/reopen, and added store/UI coverage for reply draft round-trip behavior.
 - Surfaced restored per-thread reply draft indicators directly on comment cards with concise draft-preview chips so in-progress replies are visible without opening each reply editor.
 - Extended phase-1 UI coverage to assert hydrated reply drafts render expected in-card draft indicators.
+- Persisted and hydrated comment-card reaction-picker visibility context (`commentsActiveReactionPickerCommentId`) so interrupted reaction selection can resume on reconnect/reopen when the comment still exists.
+- Replaced local reaction-picker visibility state with collab-store-backed context and added store/UI coverage for reaction-picker visibility round-trip behavior.
 
 ## Next Execution Slices
 
-1. Persist and hydrate comment-card reaction-picker visibility context so interrupted reaction selection can resume on reconnect/reopen.
+1. Surface restored reaction-picker context indicators in the Comments tab header so reopened emoji-selection focus is immediately visible.
 
 ## Exit Signals For These Early Phases
 

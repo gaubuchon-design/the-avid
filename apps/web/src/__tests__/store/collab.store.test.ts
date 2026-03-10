@@ -235,6 +235,7 @@ describe('useCollabStore', () => {
         'persisted-comment-1': 'Persisted reply draft',
         'stale-comment': 'Should be filtered',
       },
+      commentsActiveReactionPickerCommentId: 'persisted-comment-1',
     };
     repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
 
@@ -255,6 +256,7 @@ describe('useCollabStore', () => {
     expect(state.commentsActiveReplyCommentId).toBe('persisted-comment-1');
     expect(state.commentsReplyDrafts['persisted-comment-1']).toBe('Persisted reply draft');
     expect(state.commentsReplyDrafts['stale-comment']).toBeUndefined();
+    expect(state.commentsActiveReactionPickerCommentId).toBe('persisted-comment-1');
     expect(useEditorStore.getState().versionHistoryRetentionPreference).toBe('session');
     expect(useEditorStore.getState().versionHistoryCompareMode).toBe('details');
   });
@@ -300,6 +302,7 @@ describe('useCollabStore', () => {
         'missing-comment': 'Draft for missing comment',
         'existing-comment': 'Draft to keep',
       },
+      commentsActiveReactionPickerCommentId: 'missing-comment',
     };
     project.collaborationComments = [
       {
@@ -323,6 +326,7 @@ describe('useCollabStore', () => {
     expect(useCollabStore.getState().commentsActiveReplyCommentId).toBeNull();
     expect(useCollabStore.getState().commentsReplyDrafts['missing-comment']).toBeUndefined();
     expect(useCollabStore.getState().commentsReplyDrafts['existing-comment']).toBe('Draft to keep');
+    expect(useCollabStore.getState().commentsActiveReactionPickerCommentId).toBeNull();
   });
 
   it('addComment() adds a comment and updates activity feed', () => {
@@ -476,6 +480,7 @@ describe('useCollabStore', () => {
       commentsComposerVisible: true,
       commentsComposerDraft: 'Composer draft',
       commentsActiveReplyCommentId: 'persisted-comment-1',
+      commentsActiveReactionPickerCommentId: 'persisted-comment-1',
     });
     useCollabStore.getState().setCommentReplyDraft('persisted-comment-1', 'Reply draft');
     await flushAsyncTasks();
@@ -499,6 +504,7 @@ describe('useCollabStore', () => {
     expect(savedProject.collaborationPanelPreferences?.commentsComposerDraft).toBe('Composer draft');
     expect(savedProject.collaborationPanelPreferences?.commentsActiveReplyCommentId).toBe('persisted-comment-1');
     expect(savedProject.collaborationPanelPreferences?.commentsReplyDrafts?.['persisted-comment-1']).toBe('Reply draft');
+    expect(savedProject.collaborationPanelPreferences?.commentsActiveReactionPickerCommentId).toBe('persisted-comment-1');
   });
 
   it('persistPanelPreferences() persists version history review controls', async () => {
@@ -576,6 +582,7 @@ describe('useCollabStore', () => {
       commentsComposerVisible: true,
       commentsComposerDraft: 'Follow-up note',
       commentsActiveReplyCommentId: 'composer-reply-comment',
+      commentsActiveReactionPickerCommentId: 'composer-reply-comment',
     });
     await flushAsyncTasks();
 
@@ -583,6 +590,7 @@ describe('useCollabStore', () => {
     expect(savedProject.collaborationPanelPreferences?.commentsComposerVisible).toBe(true);
     expect(savedProject.collaborationPanelPreferences?.commentsComposerDraft).toBe('Follow-up note');
     expect(savedProject.collaborationPanelPreferences?.commentsActiveReplyCommentId).toBe('composer-reply-comment');
+    expect(savedProject.collaborationPanelPreferences?.commentsActiveReactionPickerCommentId).toBe('composer-reply-comment');
   });
 
   it('setCommentReplyDraft() persists per-thread reply draft state', async () => {

@@ -282,6 +282,7 @@ function CommentsTab() {
     commentsComposerVisible,
     commentsComposerDraft,
     commentsActiveReplyCommentId,
+    commentsActiveReactionPickerCommentId,
     setCommentsComposerContext,
     commentsReplyDrafts,
     setCommentReplyDraft,
@@ -571,7 +572,14 @@ function CommentsTab() {
           onSelect={() => selectComment(comment.id === selectedCommentId ? null : comment.id)}
           onSeek={() => setPlayhead(comment.frame / 23.976)}
           onResolve={() => comment.resolved ? reopenComment(comment.id) : resolveComment(comment.id)}
-          onReaction={(emoji) => addReaction(comment.id, emoji)}
+          onReaction={(emoji) => {
+            addReaction(comment.id, emoji);
+            setCommentsComposerContext({ commentsActiveReactionPickerCommentId: null });
+          }}
+          showReactionPicker={commentsActiveReactionPickerCommentId === comment.id}
+          onToggleReactionPicker={() => setCommentsComposerContext({
+            commentsActiveReactionPickerCommentId: commentsActiveReactionPickerCommentId === comment.id ? null : comment.id,
+          })}
           showReply={commentsActiveReplyCommentId === comment.id}
           onToggleReply={() => setCommentsComposerContext({
             commentsActiveReplyCommentId: commentsActiveReplyCommentId === comment.id ? null : comment.id,
@@ -601,6 +609,8 @@ function CommentCard({
   onSeek,
   onResolve,
   onReaction,
+  showReactionPicker,
+  onToggleReactionPicker,
   showReply,
   onToggleReply,
   replyText,
@@ -616,14 +626,14 @@ function CommentCard({
   onSeek: () => void;
   onResolve: () => void;
   onReaction: (emoji: string) => void;
+  showReactionPicker: boolean;
+  onToggleReactionPicker: () => void;
   showReply: boolean;
   onToggleReply: () => void;
   replyText: string;
   onReplyTextChange: (text: string) => void;
   onSubmitReply: () => void;
 }) {
-  const [showReactionPicker, setShowReactionPicker] = useState(false);
-
   const commentIdentity = resolveIdentityProfile(identityProfiles, comment.userId, comment.userName);
   const userColor = commentIdentity?.color || getDisplayColorForUser(comment.userName);
   const commentAvatar = commentIdentity?.avatarUrl
@@ -763,7 +773,7 @@ function CommentCard({
         </button>
         <div style={{ position: 'relative' }}>
           <button
-            onClick={() => setShowReactionPicker(!showReactionPicker)}
+            onClick={onToggleReactionPicker}
             style={{
               padding: '3px 8px',
               borderRadius: 'var(--radius-sm)',
@@ -796,7 +806,7 @@ function CommentCard({
               {REACTION_EMOJI.map((emoji) => (
                 <button
                   key={emoji}
-                  onClick={() => { onReaction(emoji); setShowReactionPicker(false); }}
+                  onClick={() => onReaction(emoji)}
                   style={{
                     padding: '4px 6px',
                     borderRadius: 'var(--radius-sm)',
