@@ -31,6 +31,56 @@ function frameToTimecode(frame: number, fps = 23.976): string {
   return toTimecode(frame / fps);
 }
 
+function getDisplayColorForUser(userName: string): string {
+  if (userName === 'Sarah K.') return '#7c5cfc';
+  if (userName === 'Marcus T.') return '#2bb672';
+  return '#f59e0b';
+}
+
+function IdentityAvatar({
+  name,
+  avatarUrl,
+  color,
+  size,
+  fontSize,
+}: {
+  name: string;
+  avatarUrl?: string;
+  color: string;
+  size: number;
+  fontSize: number;
+}) {
+  const initial = name.trim().charAt(0).toUpperCase() || '?';
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: '50%',
+        background: color,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize,
+        fontWeight: 700,
+        color: '#fff',
+        overflow: 'hidden',
+        flexShrink: 0,
+      }}
+      title={name}
+      aria-label={`${name} avatar`}
+    >
+      {avatarUrl ? (
+        <img
+          src={avatarUrl}
+          alt={`${name} avatar`}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+        />
+      ) : initial}
+    </div>
+  );
+}
+
 const REACTION_EMOJI = ['👍', '❤️', '✨', '🔥', '👀', '🎯'];
 
 // ─── Styles ─────────────────────────────────────────────────────────────────
@@ -662,6 +712,8 @@ function VersionsTab() {
     restoreVersion,
     versionRetentionPreferences,
     setVersionRetentionPreferences,
+    currentUserName,
+    currentUserAvatar,
   } = useCollabStore();
   const {
     versionHistoryRetentionPreference,
@@ -901,6 +953,8 @@ function VersionsTab() {
           key={version.id}
           version={version}
           compareMode={versionHistoryCompareMode}
+          currentUserName={currentUserName}
+          currentUserAvatar={currentUserAvatar}
           canRestore={canRestoreVersion(version)}
           onRestore={() => restoreVersion(version.id)}
           onCompare={() => setCompareTargetVersionId(version.id)}
@@ -1070,6 +1124,8 @@ function formatVersionDuration(duration: number): string {
 function VersionCard({
   version,
   compareMode,
+  currentUserName,
+  currentUserAvatar,
   onRestore,
   canRestore,
   onCompare,
@@ -1077,11 +1133,15 @@ function VersionCard({
 }: {
   version: ProjectVersion;
   compareMode: 'summary' | 'details';
+  currentUserName: string;
+  currentUserAvatar?: string;
   onRestore: () => void;
   canRestore: boolean;
   onCompare: () => void;
   selectedForCompare: boolean;
 }) {
+  const versionAuthorAvatar = version.createdBy === currentUserName ? currentUserAvatar : undefined;
+  const versionAuthorColor = getDisplayColorForUser(version.createdBy);
   return (
     <div
       style={{
@@ -1100,8 +1160,17 @@ function VersionCard({
           {timeAgo(version.createdAt)}
         </span>
       </div>
-      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>
-        by {version.createdBy}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        <IdentityAvatar
+          name={version.createdBy}
+          avatarUrl={versionAuthorAvatar}
+          color={versionAuthorColor}
+          size={14}
+          fontSize={8}
+        />
+        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+          by {version.createdBy}
+        </div>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
         <span
@@ -1220,7 +1289,7 @@ function VersionCard({
 // ─── Activity Tab ───────────────────────────────────────────────────────────
 
 function ActivityTab() {
-  const { activityFeed } = useCollabStore();
+  const { activityFeed, currentUserName, currentUserAvatar } = useCollabStore();
 
   return (
     <div>
@@ -1228,7 +1297,8 @@ function ActivityTab() {
         Recent Activity
       </div>
       {activityFeed.map((entry) => {
-        const userColor = entry.user === 'Sarah K.' ? '#7c5cfc' : entry.user === 'Marcus T.' ? '#2bb672' : '#f59e0b';
+        const userColor = getDisplayColorForUser(entry.user);
+        const userAvatar = entry.user === currentUserName ? currentUserAvatar : undefined;
         return (
           <div
             key={entry.id}
@@ -1239,24 +1309,14 @@ function ActivityTab() {
               borderBottom: '1px solid var(--border-subtle)',
             }}
           >
-            {/* Mini avatar */}
-            <div
-              style={{
-                width: 18,
-                height: 18,
-                borderRadius: '50%',
-                background: userColor,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 8,
-                fontWeight: 700,
-                color: '#fff',
-                flexShrink: 0,
-                marginTop: 1,
-              }}
-            >
-              {entry.user.charAt(0)}
+            <div style={{ marginTop: 1 }}>
+              <IdentityAvatar
+                name={entry.user}
+                avatarUrl={userAvatar}
+                color={userColor}
+                size={18}
+                fontSize={8}
+              />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 11, lineHeight: 1.4 }}>
@@ -1298,25 +1358,14 @@ export function CollabPanel() {
         <span style={S.title}>Collaboration</span>
         <div style={{ display: 'flex' }}>
           {onlineUsers.slice(0, 3).map((u) => (
-            <div
-              key={u.id}
-              title={u.name}
-              style={{
-                width: 20,
-                height: 20,
-                borderRadius: '50%',
-                background: u.color,
-                border: '2px solid var(--bg-surface)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 8,
-                fontWeight: 700,
-                color: '#fff',
-                marginLeft: -4,
-              }}
-            >
-              {u.name.charAt(0)}
+            <div key={u.id} style={{ marginLeft: -4 }}>
+              <IdentityAvatar
+                name={u.name}
+                avatarUrl={u.avatar}
+                color={u.color}
+                size={20}
+                fontSize={8}
+              />
             </div>
           ))}
         </div>

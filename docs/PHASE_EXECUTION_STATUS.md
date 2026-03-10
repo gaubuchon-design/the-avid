@@ -91,10 +91,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Added focused hook coverage for auto-connect on open, session switch reconnect, `new`/unset project disconnect, and unmount cleanup.
 - Hydrated collaboration identity from authenticated user profile during auto-connect (name/avatar), and propagated that identity into comment authorship, version `createdBy`, and collaboration activity labels.
 - Hardened collaboration user presence updates to avoid mutating frozen state references by replacing in-place user mutations with immutable map writes.
+- Surfaced authenticated collaboration identity in UI affordances that previously used placeholder initials by rendering avatar-aware identity chips in version cards, activity feed rows, and panel header online-user stacks.
+- Added phase-1 UI coverage that asserts authenticated avatar rendering in version and activity views.
 
 ## Next Execution Slices
 
-1. Surface authenticated collaboration identity (avatar/display name) in additional UI affordances such as activity feed rows and version cards where fallback placeholders are still shown.
+1. Extend authenticated identity avatar rendering into remaining collaboration views (users tab rows + comment/reply threads) so all collaboration surfaces share consistent profile presentation.
 
 ## Exit Signals For These Early Phases
 
