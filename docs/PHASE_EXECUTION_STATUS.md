@@ -83,12 +83,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Extended evaluated-frame revision metadata and export job telemetry to track overlay-stage selection (`pre` vs `post`) alongside color-stage processing, with parity tests for revision invalidation and frame-step export wiring.
 - Added transport-time pre-color degradation telemetry to the shared playback render path and surfaced cumulative fallback diagnostics in record/program monitors plus the scopes header so realtime grade fallback frequency can be measured during active playback.
 - Routed desktop drag/drop ingest through the same FFprobe-backed desktop import path as file-based ingest by expanding dropped directories server-side, persisting imported assets into project bins, and teaching the bin drop target to prefer desktop `importMedia(...)` when native paths are available.
+- Added repository-backed collaboration version-history hydration/persistence coverage in the collab store so saved restore points are persisted to `project.versionHistory` and restored on reconnect/reopen cycles.
 
 ## Next Execution Slices
 
 1. Hydrate editor timeline/shell state from repository project payloads on web load so persisted version-history restore results are visible after reopen.
-2. Add persisted repository coverage for restored collaboration histories across reopen/reconnect cycles, not just in-session restore flows.
-3. Close the remaining desktop ingest gap by routing file-picker imports through the same persisted desktop import path instead of browser-only probing.
+2. Close the remaining desktop ingest gap by routing file-picker imports through the same persisted desktop import path instead of browser-only probing.
 
 ## Exit Signals For These Early Phases
 

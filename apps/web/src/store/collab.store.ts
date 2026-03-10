@@ -2,7 +2,7 @@
 // Zustand store for collaboration state: online users, comments, versions,
 // and activity feed. Initialized with demo data from CollabEngine.
 
-import type { EditorProject } from '@mcua/core';
+import type { EditorProject, EditorProjectVersionHistoryEntry } from '@mcua/core';
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
@@ -16,6 +16,7 @@ import {
   type VersionRetentionPreset,
 } from '../collab/CollabEngine';
 import { buildProjectFromEditorState, buildProjectPersistenceSnapshot } from '../lib/editorProjectState';
+import { getProjectFromRepository, saveProjectToRepository } from '../lib/projectRepository';
 import { useEditorStore } from './editor.store';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -160,6 +161,51 @@ function persistVersionRetentionPreferences(preferences: VersionRetentionPrefere
   }
 }
 
+function toPersistedVersionHistoryEntry(version: ProjectVersion): EditorProjectVersionHistoryEntry {
+  return {
+    id: version.id,
+    name: version.name,
+    createdAt: version.createdAt,
+    createdBy: version.createdBy,
+    description: version.description,
+    snapshotData: version.snapshotData,
+    isRestorePoint: version.isRestorePoint,
+  };
+}
+
+function toProjectVersionFromPersistedEntry(entry: EditorProjectVersionHistoryEntry): ProjectVersion {
+  return {
+    id: entry.id,
+    name: entry.name,
+    createdAt: entry.createdAt,
+    createdBy: entry.createdBy,
+    description: entry.description,
+    kind: 'restore-point',
+    isRestorePoint: entry.isRestorePoint ?? true,
+    retentionPolicy: 'manual',
+    snapshotSummary: null,
+    compareSummary: null,
+    compareBaselineName: null,
+    compareMetrics: [],
+    snapshotData: entry.snapshotData,
+  };
+}
+
+function getPersistableVersions(): ProjectVersion[] {
+  return collabEngine.getVersions().filter((version) => version.kind === 'restore-point');
+}
+
+async function persistVersionsToRepository(projectId: string | null): Promise<void> {
+  if (!projectId) return;
+  const project = await getProjectFromRepository(projectId);
+  if (!project) return;
+  const versionHistory = getPersistableVersions().map(toPersistedVersionHistoryEntry);
+  await saveProjectToRepository({
+    ...project,
+    versionHistory,
+  });
+}
+
 const initialVersionRetentionPreferences = loadVersionRetentionPreferences();
 collabEngine.setVersionRetentionPreferences(initialVersionRetentionPreferences);
 // ─── Initial State ──────────────────────────────────────────────────────────
@@ -188,6 +234,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
 
       // Connection
       connect: (projectId, userId) => {
+        const connectRequestToken = `${projectId}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`;
         collabEngine.connect(projectId, userId);
         set((s) => {
           s.projectId = projectId;
@@ -195,6 +242,28 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           s.currentUserId = userId;
           s.onlineUsers = collabEngine.getOnlineUsers();
         }, false, 'collab/connect');
+
+        void (async () => {
+          try {
+            const project = await getProjectFromRepository(projectId);
+            if (!project) return;
+            const state = get();
+            const activeToken = `${state.projectId}:${state.connected}`;
+            const expectedToken = `${projectId}:true`;
+            if (activeToken !== expectedToken || !state.connected || state.projectId !== projectId) {
+              return;
+            }
+
+            const persistedVersions = (project.versionHistory ?? []).map(toProjectVersionFromPersistedEntry);
+            collabEngine.hydrateVersions(persistedVersions);
+            set((s) => {
+              if (!s.connected || s.projectId !== projectId) return;
+              s.versions = collabEngine.getVersions();
+            }, false, `collab/hydrateVersions/${connectRequestToken}`);
+          } catch (error) {
+            console.error('Failed to hydrate collaboration version history', error);
+          }
+        })();
       },
 
       disconnect: () => {
@@ -262,6 +331,9 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           s.versions = collabEngine.getVersions();
         }, false, 'collab/saveVersion');
         get().addActivity('You', 'saved version', `"${name}"`);
+        void persistVersionsToRepository(get().projectId).catch((error) => {
+          console.error('Failed to persist collaboration version history', error);
+        });
       },
 
       restoreVersion: (versionId) => {
@@ -295,6 +367,9 @@ export const useCollabStore = create<CollabState & CollabActions>()(
             }));
           }
           get().addActivity('You', 'restored version', `"${version.name}"`);
+          void persistVersionsToRepository(get().projectId).catch((error) => {
+            console.error('Failed to persist collaboration version history', error);
+          });
           return;
         }
 
@@ -312,6 +387,9 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           s.versionRetentionPreferences = mergedPreferences;
           s.versions = collabEngine.getVersions();
         }, false, 'collab/setVersionRetentionPreferences');
+        void persistVersionsToRepository(get().projectId).catch((error) => {
+          console.error('Failed to persist collaboration version history', error);
+        });
       },
 
       // Sync

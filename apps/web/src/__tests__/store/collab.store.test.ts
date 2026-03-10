@@ -1,15 +1,47 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { buildProject, type EditorProject } from '@mcua/core';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useCollabStore } from '../../store/collab.store';
 import { CollabEngine, collabEngine } from '../../collab/CollabEngine';
 import { useEditorStore } from '../../store/editor.store';
 
+const repositoryMocks = vi.hoisted(() => ({
+  getProjectFromRepository: vi.fn(),
+  saveProjectToRepository: vi.fn(),
+}));
+
+vi.mock('../../lib/projectRepository', () => ({
+  getProjectFromRepository: repositoryMocks.getProjectFromRepository,
+  saveProjectToRepository: repositoryMocks.saveProjectToRepository,
+}));
+
 const initialCollabState = useCollabStore.getState();
 const initialEditorState = useEditorStore.getState();
 const seedVersions = new CollabEngine().getVersions();
+const flushAsyncTasks = async (): Promise<void> => {
+  await Promise.resolve();
+  await Promise.resolve();
+};
+
+function buildRepositoryProject(projectId: string): EditorProject {
+  const project = buildProject({
+    name: 'Collab Persistence Project',
+    template: 'film',
+    seedContent: false,
+  });
+  return {
+    ...project,
+    id: projectId,
+    versionHistory: [],
+  };
+}
 
 describe('useCollabStore', () => {
   beforeEach(() => {
     collabEngine.hydrateVersions(seedVersions);
+    repositoryMocks.getProjectFromRepository.mockReset();
+    repositoryMocks.saveProjectToRepository.mockReset();
+    repositoryMocks.getProjectFromRepository.mockResolvedValue(null);
+    repositoryMocks.saveProjectToRepository.mockImplementation(async (project: EditorProject) => project);
     useCollabStore.setState(initialCollabState, true);
     useCollabStore.getState().refreshFromEngine();
     useEditorStore.setState(initialEditorState, true);
@@ -28,6 +60,30 @@ describe('useCollabStore', () => {
     expect(useCollabStore.getState().connected).toBe(true);
     expect(useCollabStore.getState().projectId).toBe('project_1');
     expect(useCollabStore.getState().currentUserId).toBe('user_1');
+  });
+
+  it('connect() hydrates persisted version history from repository', async () => {
+    const project = buildRepositoryProject('project_hydrate_versions');
+    project.versionHistory = [
+      {
+        id: 'persisted-version-1',
+        name: 'Persisted Version',
+        createdAt: Date.now() - 1000,
+        createdBy: 'User',
+        description: 'Saved from repository',
+        snapshotData: { id: project.id, name: project.name, tracks: [], bins: [] },
+        isRestorePoint: true,
+      },
+    ];
+    repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
+
+    useCollabStore.getState().connect(project.id, 'user_1');
+    await flushAsyncTasks();
+
+    const hydratedVersion = useCollabStore.getState().versions[0];
+    expect(hydratedVersion?.id).toBe('persisted-version-1');
+    expect(hydratedVersion?.name).toBe('Persisted Version');
+    expect(repositoryMocks.getProjectFromRepository).toHaveBeenCalledWith(project.id);
   });
 
   it('disconnect() sets connected to false via setState', () => {
@@ -89,6 +145,28 @@ describe('useCollabStore', () => {
     expect(state.versions.length).toBeGreaterThan(before);
     const savedSnapshot = state.versions[0]?.snapshotData as { playheadTime?: number } | undefined;
     expect(savedSnapshot?.playheadTime).toBe(12);
+  });
+
+  it('saveVersion() persists version history for reopen/reconnect cycles', async () => {
+    const project = buildRepositoryProject('project_persist_versions');
+    repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
+
+    useEditorStore.setState({ projectId: project.id, playheadTime: 12 });
+    useCollabStore.getState().connect(project.id, 'user_1');
+    await flushAsyncTasks();
+
+    useCollabStore.getState().saveVersion('Persisted Cut', 'Should survive reconnect');
+    await flushAsyncTasks();
+
+    expect(repositoryMocks.saveProjectToRepository).toHaveBeenCalledTimes(1);
+    const savedProject = repositoryMocks.saveProjectToRepository.mock.calls[0]?.[0] as EditorProject;
+    expect(savedProject.versionHistory?.[0]?.name).toBe('Persisted Cut');
+
+    repositoryMocks.getProjectFromRepository.mockResolvedValue(savedProject);
+    useCollabStore.getState().connect(project.id, 'user_1');
+    await flushAsyncTasks();
+
+    expect(useCollabStore.getState().versions[0]?.name).toBe('Persisted Cut');
   });
 
   it('restoreVersion() creates restore point and applies snapshot', () => {
