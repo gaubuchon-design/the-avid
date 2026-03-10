@@ -1,5 +1,5 @@
 /**
- * MetadataWorker — extracts media metadata via FFprobe and detects scene changes.
+ * MetadataWorker -- extracts media metadata via FFprobe and detects scene changes.
  *
  * Capabilities:
  * - Full FFprobe metadata extraction (JSON output)
@@ -9,6 +9,71 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { WorkerJob } from '../index.js';
+
+// ---------------------------------------------------------------------------
+// FFprobe type definitions (replacing Record<string, any>)
+// ---------------------------------------------------------------------------
+
+/** A single stream entry from FFprobe JSON output. */
+export interface FFprobeStream {
+  readonly index: number;
+  readonly codec_name?: string;
+  readonly codec_long_name?: string;
+  readonly codec_type?: 'video' | 'audio' | 'subtitle' | 'data';
+  readonly codec_tag_string?: string;
+  readonly width?: number;
+  readonly height?: number;
+  readonly coded_width?: number;
+  readonly coded_height?: number;
+  readonly pix_fmt?: string;
+  readonly r_frame_rate?: string;
+  readonly avg_frame_rate?: string;
+  readonly time_base?: string;
+  readonly duration_ts?: number;
+  readonly duration?: string;
+  readonly bit_rate?: string;
+  readonly bits_per_raw_sample?: string;
+  readonly nb_frames?: string;
+  readonly color_space?: string;
+  readonly color_range?: string;
+  readonly color_transfer?: string;
+  readonly color_primaries?: string;
+  readonly sample_rate?: string;
+  readonly channels?: number;
+  readonly channel_layout?: string;
+  readonly sample_fmt?: string;
+  readonly profile?: string;
+  readonly level?: number;
+  readonly disposition?: Readonly<Record<string, number>>;
+  readonly tags?: Readonly<Record<string, string>>;
+  readonly [key: string]: unknown;
+}
+
+/** The format section from FFprobe JSON output. */
+export interface FFprobeFormat {
+  readonly filename?: string;
+  readonly nb_streams?: number;
+  readonly nb_programs?: number;
+  readonly format_name?: string;
+  readonly format_long_name?: string;
+  readonly start_time?: string;
+  readonly duration?: string;
+  readonly size?: string;
+  readonly bit_rate?: string;
+  readonly probe_score?: number;
+  readonly tags?: Readonly<Record<string, string>>;
+  readonly [key: string]: unknown;
+}
+
+/** Top-level FFprobe JSON result. */
+export interface FFprobeResult {
+  readonly streams: readonly FFprobeStream[];
+  readonly format: FFprobeFormat;
+}
+
+// ---------------------------------------------------------------------------
+// Worker-specific types
+// ---------------------------------------------------------------------------
 
 /** Progress data for metadata extraction jobs. */
 export interface MetadataProgress {
@@ -43,13 +108,13 @@ export interface TechnicalQC {
 
 /** Combined metadata result. */
 export interface MetadataResult {
-  probe: Record<string, any>;
+  probe: FFprobeResult;
   scenes: SceneChange[];
   qc: TechnicalQC;
 }
 
 export class MetadataWorker {
-  private process: ChildProcess | null = null;
+  private childProcess: ChildProcess | null = null;
   private cancelled = false;
 
   /**
@@ -73,8 +138,8 @@ export class MetadataWorker {
 
     // Step 2: Scene detection (optional, controlled by params)
     let scenes: SceneChange[] = [];
-    const sceneThreshold = job.params.sceneThreshold ?? 0.3;
-    const skipScenes = job.params.skipSceneDetection === true;
+    const sceneThreshold = ((job.params as Record<string, unknown>)['sceneThreshold'] as number | undefined) ?? 0.3;
+    const skipScenes = (job.params as Record<string, unknown>)['skipSceneDetection'] === true;
 
     if (!skipScenes) {
       onProgress?.({ stage: 'scenes', percent: 35, message: 'Detecting scene changes...' });
@@ -94,15 +159,15 @@ export class MetadataWorker {
   /** Cancel the currently running metadata extraction. */
   cancel(): void {
     this.cancelled = true;
-    if (this.process) {
-      this.process.kill('SIGTERM');
+    if (this.childProcess) {
+      this.childProcess.kill('SIGTERM');
     }
   }
 
   /**
-   * Run FFprobe on the input file and return the full JSON output.
+   * Run FFprobe on the input file and return the typed JSON output.
    */
-  private runFFprobe(inputPath: string): Promise<Record<string, any>> {
+  private runFFprobe(inputPath: string): Promise<FFprobeResult> {
     const args = [
       '-v', 'quiet',
       '-print_format', 'json',
@@ -113,7 +178,7 @@ export class MetadataWorker {
 
     return new Promise((resolve, reject) => {
       const proc = spawn('ffprobe', args, { stdio: ['ignore', 'pipe', 'pipe'] });
-      this.process = proc;
+      this.childProcess = proc;
 
       let stdout = '';
       let stderr = '';
@@ -122,14 +187,15 @@ export class MetadataWorker {
       proc.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
 
       proc.on('close', (code) => {
-        this.process = null;
+        this.childProcess = null;
         if (this.cancelled) {
           reject(new Error('FFprobe cancelled'));
         } else if (code !== 0) {
           reject(new Error(`FFprobe failed (code ${code}): ${stderr.slice(0, 500)}`));
         } else {
           try {
-            resolve(JSON.parse(stdout));
+            const parsed = JSON.parse(stdout) as FFprobeResult;
+            resolve(parsed);
           } catch {
             reject(new Error('Failed to parse FFprobe JSON output'));
           }
@@ -137,7 +203,7 @@ export class MetadataWorker {
       });
 
       proc.on('error', (err) => {
-        this.process = null;
+        this.childProcess = null;
         reject(new Error(`Failed to spawn FFprobe: ${err.message}`));
       });
     });
@@ -159,13 +225,13 @@ export class MetadataWorker {
 
     return new Promise((resolve, reject) => {
       const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
-      this.process = proc;
+      this.childProcess = proc;
 
       let stderr = '';
       proc.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
 
-      proc.on('close', (code) => {
-        this.process = null;
+      proc.on('close', (_code) => {
+        this.childProcess = null;
         if (this.cancelled) {
           reject(new Error('Scene detection cancelled'));
           return;
@@ -180,13 +246,13 @@ export class MetadataWorker {
           // showinfo output: [Parsed_showinfo_1 ...] n: 42 pts: 123456 pts_time:5.1234 ...
           const ptsMatch = line.match(/pts_time:\s*([\d.]+)/);
           if (ptsMatch) {
-            const timestamp = parseFloat(ptsMatch[1]);
+            const timestamp = parseFloat(ptsMatch[1]!);
             const nMatch = line.match(/n:\s*(\d+)/);
-            const frame = nMatch ? parseInt(nMatch[1], 10) : frameIndex;
+            const frame = nMatch ? parseInt(nMatch[1]!, 10) : frameIndex;
 
             // Extract scene score from the select filter metadata if available
             const scoreMatch = line.match(/scene_score=\s*([\d.]+)/);
-            const score = scoreMatch ? parseFloat(scoreMatch[1]) : threshold;
+            const score = scoreMatch ? parseFloat(scoreMatch[1]!) : threshold;
 
             scenes.push({ timestamp, frame, score });
             frameIndex++;
@@ -197,7 +263,7 @@ export class MetadataWorker {
       });
 
       proc.on('error', (err) => {
-        this.process = null;
+        this.childProcess = null;
         reject(new Error(`Failed to spawn FFmpeg for scene detection: ${err.message}`));
       });
     });
@@ -206,19 +272,21 @@ export class MetadataWorker {
   /**
    * Build a TechnicalQC report from the FFprobe JSON output.
    */
-  private buildTechnicalQC(probe: Record<string, any>): TechnicalQC {
-    const streams: any[] = probe.streams ?? [];
-    const format = probe.format ?? {};
+  private buildTechnicalQC(probe: FFprobeResult): TechnicalQC {
+    const streams = probe.streams ?? [];
+    const format = probe.format ?? ({} as FFprobeFormat);
 
-    const videoStream = streams.find((s: any) => s.codec_type === 'video');
-    const audioStream = streams.find((s: any) => s.codec_type === 'audio');
+    const videoStream = streams.find((s) => s.codec_type === 'video');
+    const audioStream = streams.find((s) => s.codec_type === 'audio');
 
     const warnings: string[] = [];
 
     // Parse FPS from r_frame_rate (e.g. "24000/1001")
     let fps = 0;
     if (videoStream?.r_frame_rate) {
-      const [num, den] = videoStream.r_frame_rate.split('/').map(Number);
+      const fpsParts = videoStream.r_frame_rate.split('/').map(Number);
+      const num = fpsParts[0] ?? 0;
+      const den = fpsParts[1];
       fps = den ? num / den : num;
     }
 
@@ -232,14 +300,14 @@ export class MetadataWorker {
     // Codec warnings
     const codec = videoStream?.codec_name ?? 'unknown';
     if (codec === 'mjpeg') {
-      warnings.push('MJPEG codec detected — may not be suitable for editing');
+      warnings.push('MJPEG codec detected -- may not be suitable for editing');
     }
 
     // Color space
     const colorSpace = videoStream?.color_space ?? 'unknown';
     const colorRange = videoStream?.color_range ?? 'unknown';
     if (colorRange === 'pc' || colorRange === 'full') {
-      warnings.push('Full-range color detected — ensure correct levels mapping');
+      warnings.push('Full-range color detected -- ensure correct levels mapping');
     }
 
     // Bit depth

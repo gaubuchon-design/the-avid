@@ -227,14 +227,14 @@ export function useGlobalKeyboard(): void {
         case 's':
           if (!isMod && editorState.selectedClipIds.length > 0) {
             e.preventDefault();
-            editorState.splitClip(editorState.selectedClipIds[0], editorState.playheadTime);
+            editorState.splitClip(editorState.selectedClipIds[0]!, editorState.playheadTime);
           }
           break;
         case 'c':
           if (!isMod) {
             e.preventDefault();
             if (editorState.selectedClipIds.length > 0) {
-              editorState.splitClip(editorState.selectedClipIds[0], editorState.playheadTime);
+              editorState.splitClip(editorState.selectedClipIds[0]!, editorState.playheadTime);
             } else {
               editorState.setActiveTool('razor');
             }
@@ -253,7 +253,7 @@ export function useGlobalKeyboard(): void {
         case 'd': case 'D':
           if (isMod && editorState.selectedClipIds.length > 0) {
             e.preventDefault();
-            editorState.duplicateClip(editorState.selectedClipIds[0]);
+            editorState.duplicateClip(editorState.selectedClipIds[0]!);
           }
           break;
 

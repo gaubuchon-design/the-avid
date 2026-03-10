@@ -93,7 +93,7 @@ function parseCubeFile(contents: string, fallbackName: string): LUT3D | null {
       // TITLE "My LUT" or TITLE My LUT
       const match = line.match(/^TITLE\s+"?(.+?)"?\s*$/);
       if (match) {
-        title = match[1];
+        title = match[1]!;
       }
       continue;
     }
@@ -101,7 +101,7 @@ function parseCubeFile(contents: string, fallbackName: string): LUT3D | null {
     if (line.startsWith('LUT_3D_SIZE')) {
       const match = line.match(/^LUT_3D_SIZE\s+(\d+)/);
       if (match) {
-        size = parseInt(match[1], 10);
+        size = parseInt(match[1]!, 10);
       }
       continue;
     }
@@ -115,7 +115,7 @@ function parseCubeFile(contents: string, fallbackName: string): LUT3D | null {
     if (line.startsWith('DOMAIN_MIN')) {
       const parts = line.replace('DOMAIN_MIN', '').trim().split(/\s+/);
       if (parts.length >= 3) {
-        domainMin = [parseFloat(parts[0]), parseFloat(parts[1]), parseFloat(parts[2])];
+        domainMin = [parseFloat(parts[0]!), parseFloat(parts[1]!), parseFloat(parts[2]!)];
       }
       continue;
     }
@@ -123,7 +123,7 @@ function parseCubeFile(contents: string, fallbackName: string): LUT3D | null {
     if (line.startsWith('DOMAIN_MAX')) {
       const parts = line.replace('DOMAIN_MAX', '').trim().split(/\s+/);
       if (parts.length >= 3) {
-        domainMax = [parseFloat(parts[0]), parseFloat(parts[1]), parseFloat(parts[2])];
+        domainMax = [parseFloat(parts[0]!), parseFloat(parts[1]!), parseFloat(parts[2]!)];
       }
       continue;
     }
@@ -134,9 +134,9 @@ function parseCubeFile(contents: string, fallbackName: string): LUT3D | null {
     // Parse data line: three space-separated floats
     const parts = line.split(/\s+/);
     if (parts.length >= 3) {
-      const r = parseFloat(parts[0]);
-      const g = parseFloat(parts[1]);
-      const b = parseFloat(parts[2]);
+      const r = parseFloat(parts[0]!);
+      const g = parseFloat(parts[1]!);
+      const b = parseFloat(parts[2]!);
       if (!isNaN(r) && !isNaN(g) && !isNaN(b)) {
         rawEntries.push(r, g, b);
       }
@@ -167,9 +167,9 @@ function parseCubeFile(contents: string, fallbackName: string): LUT3D | null {
       const rangeR = domainMax[0] - domainMin[0];
       const rangeG = domainMax[1] - domainMin[1];
       const rangeB = domainMax[2] - domainMin[2];
-      data[i]     = rangeR !== 0 ? (rawEntries[i]     - domainMin[0]) / rangeR : rawEntries[i];
-      data[i + 1] = rangeG !== 0 ? (rawEntries[i + 1] - domainMin[1]) / rangeG : rawEntries[i + 1];
-      data[i + 2] = rangeB !== 0 ? (rawEntries[i + 2] - domainMin[2]) / rangeB : rawEntries[i + 2];
+      data[i]     = rangeR! !== 0 ? (rawEntries[i]!     - domainMin[0]) / rangeR : rawEntries[i]!;
+      data[i + 1] = rangeG! !== 0 ? (rawEntries[i + 1]! - domainMin[1]) / rangeG : rawEntries[i + 1]!;
+      data[i + 2] = rangeB! !== 0 ? (rawEntries[i + 2]! - domainMin[2]) / rangeB : rawEntries[i + 2]!;
     }
   } else {
     data.set(rawEntries);
@@ -224,7 +224,7 @@ export function applyLUT(input: RGBColor, lut: LUT3D): RGBColor {
   // Helper to look up a lattice point value
   // .cube files store data in R-fastest order: for (B) for (G) for (R) { R G B }
   const lookup = (ri: number, gi: number, bi: number, ch: number): number => {
-    return data[(bi * size * size + gi * size + ri) * 3 + ch];
+    return data[(bi * size * size + gi * size + ri) * 3 + ch]!;
   };
 
   // Trilinear interpolation for each output channel
@@ -243,7 +243,7 @@ export function applyLUT(input: RGBColor, lut: LUT3D): RGBColor {
     const c1 = lerp(c01, c11, dg);
 
     // Interpolate along B axis
-    result[channels[ch]] = lerp(c0, c1, db);
+    result[channels[ch]!] = lerp(c0, c1, db);
   }
 
   return result;
@@ -268,9 +268,9 @@ export function applyLUTToImageData(imageData: ImageData, lut: LUT3D): void {
     const offset = i * 4;
 
     // Normalise from 0-255 to 0-1
-    const rIn = data[offset] / 255;
-    const gIn = data[offset + 1] / 255;
-    const bIn = data[offset + 2] / 255;
+    const rIn = data[offset]! / 255;
+    const gIn = data[offset + 1]! / 255;
+    const bIn = data[offset + 2]! / 255;
 
     // Scale to LUT grid
     const rScaled = clamp(rIn, 0, 1) * maxIdx;
@@ -300,10 +300,10 @@ export function applyLUTToImageData(imageData: ImageData, lut: LUT3D): void {
 
     // Trilinear interpolation for each channel
     for (let ch = 0; ch < 3; ch++) {
-      const c00 = lerp(lutData[idx000 + ch], lutData[idx100 + ch], dr);
-      const c01 = lerp(lutData[idx001 + ch], lutData[idx101 + ch], dr);
-      const c10 = lerp(lutData[idx010 + ch], lutData[idx110 + ch], dr);
-      const c11 = lerp(lutData[idx011 + ch], lutData[idx111 + ch], dr);
+      const c00 = lerp(lutData[idx000 + ch]!, lutData[idx100 + ch]!, dr);
+      const c01 = lerp(lutData[idx001 + ch]!, lutData[idx101 + ch]!, dr);
+      const c10 = lerp(lutData[idx010 + ch]!, lutData[idx110 + ch]!, dr);
+      const c11 = lerp(lutData[idx011 + ch]!, lutData[idx111 + ch]!, dr);
 
       const c0 = lerp(c00, c10, dg);
       const c1 = lerp(c01, c11, dg);
@@ -565,7 +565,7 @@ export class LUTEngine {
         for (let r = 0; r < size; r++) {
           const idx = (b * size * size + g * size + r) * 3;
           lines.push(
-            `${data[idx].toFixed(6)} ${data[idx + 1].toFixed(6)} ${data[idx + 2].toFixed(6)}`,
+            `${data[idx]!.toFixed(6)} ${data[idx + 1]!.toFixed(6)} ${data[idx + 2]!.toFixed(6)}`,
           );
         }
       }

@@ -517,7 +517,7 @@ function StorageTab() {
       ctx.moveTo(cx, cy);
       ctx.arc(cx, cy, r, startAngle, startAngle + sliceAngle);
       ctx.closePath();
-      ctx.fillStyle = colors[i % colors.length];
+      ctx.fillStyle = colors[i % colors.length]!;
       ctx.fill();
       startAngle += sliceAngle;
     });
@@ -686,7 +686,7 @@ function TokensTab() {
     // Bars
     days.forEach((day, i) => {
       const x = left + i * (barW + gap);
-      const barH = maxVal > 0 ? (values[i] / maxVal) * (chartH - 10) : 0;
+      const barH = maxVal > 0 ? (values[i]! / maxVal) * (chartH - 10) : 0;
       const y = chartH - barH;
 
       // Bar

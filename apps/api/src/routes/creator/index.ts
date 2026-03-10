@@ -5,10 +5,20 @@
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { db } from '../../db/client';
+import {
+  validate, validateAll, schemas, uuidParam,
+} from '../../utils/validation';
+import { NotFoundError } from '../../utils/errors';
 import { z } from 'zod';
 
 const router = Router();
 router.use(authenticate);
+
+// ─── Compound param schemas for nested routes ───────────────────────────────
+const seriesIdParam = z.object({ id: z.string().uuid() });
+const seriesAndEpisodeParams = z.object({ seriesId: z.string().uuid(), id: z.string().uuid() });
+const seriesIdOnlyParam = z.object({ seriesId: z.string().uuid() });
+const keyParam = z.object({ key: z.string().min(1).max(200) });
 
 // ─── Series / Channels ───────────────────────────────────────────────────────
 
@@ -25,83 +35,95 @@ router.get('/series', async (req: Request, res: Response) => {
   res.json({ series });
 });
 
-router.get('/series/:id', async (req: Request, res: Response) => {
-  const series = await db.series.findUniqueOrThrow({
-    where: { id: req.params.id },
+router.get('/series/:id', validate(seriesIdParam, 'params'), async (req: Request, res: Response) => {
+  const series = await db.series.findUnique({
+    where: { id: req.params['id'] },
     include: {
       episodes: { orderBy: { episodeNumber: 'asc' } },
     },
   });
+  if (!series) throw new NotFoundError('Series');
   res.json({ series });
 });
 
-router.post('/series', async (req: Request, res: Response) => {
+router.post('/series', validate(schemas.createSeries), async (req: Request, res: Response) => {
   const userId = req.user!.id;
   const series = await db.series.create({
     data: {
       userId,
-      name: req.body.name,
-      description: req.body.description,
-      brandColors: req.body.brandColors || [],
-      brandFonts: req.body.brandFonts || {},
+      ...req.body,
     },
   });
   res.status(201).json({ series });
 });
 
-router.patch('/series/:id', async (req: Request, res: Response) => {
-  const allowed = ['name', 'description', 'brandColors', 'brandFonts', 'thumbnailUrl', 'introTemplateId', 'outroTemplateId'];
-  const data: any = {};
-  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+router.patch('/series/:id', validateAll({ params: seriesIdParam, body: schemas.updateSeries }), async (req: Request, res: Response) => {
+  const existing = await db.series.findUnique({ where: { id: req.params['id'] } });
+  if (!existing) throw new NotFoundError('Series');
 
   const series = await db.series.update({
-    where: { id: req.params.id },
-    data,
+    where: { id: req.params['id'] },
+    data: req.body,
   });
   res.json({ series });
 });
 
-router.delete('/series/:id', async (req: Request, res: Response) => {
-  await db.series.delete({ where: { id: req.params.id } });
-  res.json({ success: true });
+router.delete('/series/:id', validate(seriesIdParam, 'params'), async (req: Request, res: Response) => {
+  const existing = await db.series.findUnique({ where: { id: req.params['id'] } });
+  if (!existing) throw new NotFoundError('Series');
+
+  await db.series.delete({ where: { id: req.params['id'] } });
+  res.status(204).send();
 });
 
 // ─── Episodes ────────────────────────────────────────────────────────────────
 
-router.post('/series/:seriesId/episodes', async (req: Request, res: Response) => {
-  // Auto-calculate next episode number
-  const lastEpisode = await db.episode.findFirst({
-    where: { seriesId: req.params.seriesId },
-    orderBy: { episodeNumber: 'desc' },
-  });
+router.post(
+  '/series/:seriesId/episodes',
+  validateAll({ params: seriesIdOnlyParam, body: schemas.createEpisode }),
+  async (req: Request, res: Response) => {
+    // Verify series exists
+    const series = await db.series.findUnique({ where: { id: req.params['seriesId'] } });
+    if (!series) throw new NotFoundError('Series');
 
-  const episode = await db.episode.create({
-    data: {
-      seriesId: req.params.seriesId,
-      episodeNumber: (lastEpisode?.episodeNumber || 0) + 1,
-      title: req.body.title,
-      description: req.body.description,
-      projectId: req.body.projectId,
-    },
-  });
-  res.status(201).json({ episode });
-});
+    // Auto-calculate next episode number
+    const lastEpisode = await db.episode.findFirst({
+      where: { seriesId: req.params['seriesId'] },
+      orderBy: { episodeNumber: 'desc' },
+    });
 
-router.patch('/series/:seriesId/episodes/:id', async (req: Request, res: Response) => {
-  const allowed = ['title', 'description', 'status', 'projectId', 'thumbnailUrl'];
-  const data: any = {};
-  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+    const episode = await db.episode.create({
+      data: {
+        seriesId: req.params['seriesId'],
+        episodeNumber: (lastEpisode?.episodeNumber || 0) + 1,
+        ...req.body,
+      },
+    });
+    res.status(201).json({ episode });
+  }
+);
+
+router.patch(
+  '/series/:seriesId/episodes/:id',
+  validateAll({ params: seriesAndEpisodeParams, body: schemas.updateEpisode }),
+  async (req: Request, res: Response) => {
+    const existing = await db.episode.findUnique({ where: { id: req.params['id'] } });
+    if (!existing) throw new NotFoundError('Episode');
+
+    const episode = await db.episode.update({
+      where: { id: req.params['id'] },
+      data: req.body,
+    });
+    res.json({ episode });
+  }
+);
+
+router.post('/series/:seriesId/episodes/:id/publish', validate(seriesAndEpisodeParams, 'params'), async (req: Request, res: Response) => {
+  const existing = await db.episode.findUnique({ where: { id: req.params['id'] } });
+  if (!existing) throw new NotFoundError('Episode');
 
   const episode = await db.episode.update({
-    where: { id: req.params.id },
-    data,
-  });
-  res.json({ episode });
-});
-
-router.post('/series/:seriesId/episodes/:id/publish', async (req: Request, res: Response) => {
-  const episode = await db.episode.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: {
       status: 'PUBLISHED',
       publishedAt: new Date(),
@@ -121,40 +143,46 @@ router.get('/agent-memory', async (req: Request, res: Response) => {
   res.json({ memories });
 });
 
-router.put('/agent-memory/:key', async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const memory = await db.agentMemory.upsert({
-    where: { userId_key: { userId, key: req.params.key } },
-    create: {
-      userId,
-      key: req.params.key,
-      value: req.body.value,
-      source: req.body.source || 'AUTO',
-      confidence: req.body.confidence || 0.8,
-    },
-    update: {
-      value: req.body.value,
-      confidence: req.body.confidence,
-      lastUsedAt: new Date(),
-    },
-  });
-  res.json({ memory });
-});
+router.put(
+  '/agent-memory/:key',
+  validateAll({ params: keyParam, body: schemas.upsertAgentMemory }),
+  async (req: Request, res: Response) => {
+    const userId = req.user!.id;
+    const { value, source, confidence } = req.body;
+    const memory = await db.agentMemory.upsert({
+      where: { userId_key: { userId, key: req.params['key'] } },
+      create: {
+        userId,
+        key: req.params['key'],
+        value,
+        source,
+        confidence,
+      },
+      update: {
+        value,
+        confidence,
+        lastUsedAt: new Date(),
+      },
+    });
+    res.json({ memory });
+  }
+);
 
-router.delete('/agent-memory/:key', async (req: Request, res: Response) => {
+router.delete('/agent-memory/:key', validate(keyParam, 'params'), async (req: Request, res: Response) => {
   const userId = req.user!.id;
   await db.agentMemory.delete({
-    where: { userId_key: { userId, key: req.params.key } },
+    where: { userId_key: { userId, key: req.params['key'] } },
   });
-  res.json({ success: true });
+  res.status(204).send();
 });
 
 // ─── Agent Playbooks ─────────────────────────────────────────────────────────
 
 router.get('/playbooks', async (req: Request, res: Response) => {
   const { vertical } = req.query;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma dynamic where clause
   const where: any = { isPublished: true };
-  if (vertical) where.vertical = vertical;
+  if (vertical) where['vertical'] = vertical;
 
   const playbooks = await db.agentPlaybook.findMany({
     where,
@@ -173,37 +201,34 @@ router.get('/playbooks/mine', async (req: Request, res: Response) => {
   res.json({ playbooks });
 });
 
-router.post('/playbooks', async (req: Request, res: Response) => {
+router.post('/playbooks', validate(schemas.createPlaybook), async (req: Request, res: Response) => {
   const userId = req.user!.id;
   const playbook = await db.agentPlaybook.create({
     data: {
       authorId: userId,
-      name: req.body.name,
-      description: req.body.description,
-      vertical: req.body.vertical || 'GENERAL',
-      steps: req.body.steps || [],
-      variables: req.body.variables || [],
-      priceTokens: req.body.priceTokens || 0,
+      ...req.body,
     },
   });
   res.status(201).json({ playbook });
 });
 
-router.patch('/playbooks/:id', async (req: Request, res: Response) => {
-  const allowed = ['name', 'description', 'vertical', 'steps', 'variables', 'priceTokens', 'isPublished'];
-  const data: any = {};
-  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+router.patch('/playbooks/:id', validateAll({ params: uuidParam, body: schemas.updatePlaybook }), async (req: Request, res: Response) => {
+  const existing = await db.agentPlaybook.findUnique({ where: { id: req.params['id'] } });
+  if (!existing) throw new NotFoundError('Playbook');
 
   const playbook = await db.agentPlaybook.update({
-    where: { id: req.params.id },
-    data,
+    where: { id: req.params['id'] },
+    data: req.body,
   });
   res.json({ playbook });
 });
 
-router.post('/playbooks/:id/use', async (req: Request, res: Response) => {
+router.post('/playbooks/:id/use', validate(uuidParam, 'params'), async (req: Request, res: Response) => {
+  const existing = await db.agentPlaybook.findUnique({ where: { id: req.params['id'] } });
+  if (!existing) throw new NotFoundError('Playbook');
+
   const playbook = await db.agentPlaybook.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: { usageCount: { increment: 1 } },
   });
   res.json({ playbook });

@@ -48,7 +48,7 @@ describe('EffectsEngine', () => {
       expect(cats).toEqual(['Blur', 'Color', 'Composite', 'Stylize', 'Transform']);
       // Verify sorted
       for (let i = 1; i < cats.length; i++) {
-        expect(cats[i] >= cats[i - 1]).toBe(true);
+        expect(cats[i]! >= cats[i - 1]!).toBe(true);
       }
     });
   });
@@ -66,9 +66,9 @@ describe('EffectsEngine', () => {
       expect(instance).not.toBeNull();
       expect(instance.definitionId).toBe('brightness-contrast');
       expect(instance.enabled).toBe(true);
-      expect(instance.params.brightness).toBe(0);
-      expect(instance.params.contrast).toBe(0);
-      expect(instance.params.useLegacy).toBe(false);
+      expect(instance.params['brightness']).toBe(0);
+      expect(instance.params['contrast']).toBe(0);
+      expect(instance.params['useLegacy']).toBe(false);
       expect(instance.keyframes).toEqual([]);
     });
 
@@ -102,7 +102,7 @@ describe('EffectsEngine', () => {
     it('updateParam() modifies instance params', () => {
       const inst = effectsEngine.createInstance('brightness-contrast')!;
       effectsEngine.updateParam(inst.id, 'brightness', 50);
-      expect(inst.params.brightness).toBe(50);
+      expect(inst.params['brightness']).toBe(50);
     });
 
     it('updateParam() is a no-op for nonexistent instance', () => {
@@ -128,8 +128,8 @@ describe('EffectsEngine', () => {
         frame: 0, paramName: 'radius', value: 0, interpolation: 'linear',
       });
       expect(inst.keyframes.length).toBe(2);
-      expect(inst.keyframes[0].frame).toBe(0);
-      expect(inst.keyframes[1].frame).toBe(100);
+      expect(inst.keyframes[0]!.frame).toBe(0);
+      expect(inst.keyframes[1]!.frame).toBe(100);
     });
 
     it('addKeyframe() replaces existing at same frame/param', () => {
@@ -140,8 +140,8 @@ describe('EffectsEngine', () => {
         frame: 50, paramName: 'radius', value: 30, interpolation: 'bezier',
       });
       expect(inst.keyframes.length).toBe(1);
-      expect(inst.keyframes[0].value).toBe(30);
-      expect(inst.keyframes[0].interpolation).toBe('bezier');
+      expect(inst.keyframes[0]!.value).toBe(30);
+      expect(inst.keyframes[0]!.interpolation).toBe('bezier');
     });
 
     it('removeKeyframe() removes matching keyframe', () => {
@@ -153,7 +153,7 @@ describe('EffectsEngine', () => {
       });
       effectsEngine.removeKeyframe(inst.id, 10, 'radius');
       expect(inst.keyframes.length).toBe(1);
-      expect(inst.keyframes[0].frame).toBe(20);
+      expect(inst.keyframes[0]!.frame).toBe(20);
     });
   });
 
@@ -167,7 +167,7 @@ describe('EffectsEngine', () => {
     });
 
     it('returns static value when no keyframes', () => {
-      inst.params.radius = 15;
+      inst.params['radius'] = 15;
       expect(effectsEngine.getInterpolatedValue(inst, 'radius', 50)).toBe(15);
     });
 
@@ -257,8 +257,8 @@ describe('EffectsEngine', () => {
 
       const effects = effectsEngine.getClipEffects('clip_test');
       expect(effects.length).toBe(2);
-      expect(effects[0].id).toBe(fx1.id);
-      expect(effects[1].id).toBe(fx2.id);
+      expect(effects[0]!.id).toBe(fx1.id);
+      expect(effects[1]!.id).toBe(fx2.id);
     });
 
     it('reorderEffects() changes order', () => {
@@ -269,8 +269,8 @@ describe('EffectsEngine', () => {
 
       effectsEngine.reorderEffects('clip_reorder', [fx2.id, fx1.id]);
       const reordered = effectsEngine.getClipEffects('clip_reorder');
-      expect(reordered[0].id).toBe(fx2.id);
-      expect(reordered[1].id).toBe(fx1.id);
+      expect(reordered[0]!.id).toBe(fx2.id);
+      expect(reordered[1]!.id).toBe(fx1.id);
     });
 
     it('removeInstance() cleans up clip mappings', () => {
@@ -311,7 +311,7 @@ describe('EffectsEngine', () => {
     it('skips disabled effects', () => {
       const fx = effectsEngine.createInstance('brightness-contrast')!;
       fx.enabled = false;
-      fx.params.brightness = 100;
+      fx.params['brightness'] = 100;
       const img = createImageData(4, 4, 100);
       const original = new Uint8ClampedArray(img.data);
       effectsEngine.processFrame(img, [fx]);
@@ -320,7 +320,7 @@ describe('EffectsEngine', () => {
 
     it('applies brightness-contrast effect when enabled', () => {
       const fx = effectsEngine.createInstance('brightness-contrast')!;
-      fx.params.brightness = 50;
+      fx.params['brightness'] = 50;
       const img = createImageData(4, 4, 100);
       effectsEngine.processFrame(img, [fx]);
       // With brightness=50 (modern mode), pixel values should increase

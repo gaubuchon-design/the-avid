@@ -10,13 +10,17 @@
     "./*": "./src/*"
   },
   "scripts": {
+    "dev": "tsc --watch",
     "build": "tsc --project tsconfig.json",
     "type-check": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "clean": "rm -rf dist"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^2.0.0"
   }
 }

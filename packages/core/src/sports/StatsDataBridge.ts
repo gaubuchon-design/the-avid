@@ -152,7 +152,7 @@ export class StatsDataBridge {
   getScoreEvents(): StatsDataPoint[] {
     return this.dataHistory.filter((dp, idx) => {
       if (idx === 0) return false;
-      const prev = this.dataHistory[idx - 1];
+      const prev = this.dataHistory[idx - 1]!;
       return dp.homeScore !== prev.homeScore || dp.awayScore !== prev.awayScore;
     });
   }
@@ -367,7 +367,7 @@ export class StatsDataBridge {
     if (format === 'ORDINAL' && typeof value === 'number') {
       const suffixes = ['th', 'st', 'nd', 'rd'];
       const v = value % 100;
-      return value + (suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]);
+      return value + (suffixes[(v - 20) % 10] ?? suffixes[v] ?? suffixes[0] ?? 'th');
     }
     return String(value);
   }

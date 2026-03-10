@@ -147,6 +147,7 @@ export const typography = {
     display: "'Syne', sans-serif",
     mono:    "'DM Mono', 'JetBrains Mono', 'Fira Code', monospace",
   },
+
   fontSize: {
     '2xs':  '9px',
     xs:     '10px',

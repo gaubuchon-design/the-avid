@@ -41,20 +41,20 @@ export function applyBlendMode(
   mode: string,
   opacity: number,
 ): void {
-  const fn = blendFunctions[mode] || blendFunctions.normal;
+  const fn = blendFunctions[mode] || blendFunctions['normal'];
   const opNorm = opacity / 100;
   const bd = base.data;
   const od = overlay.data;
   const len = Math.min(bd.length, od.length);
 
   for (let i = 0; i < len; i += 4) {
-    const oa = (od[i + 3] / 255) * opNorm;
+    const oa = (od[i + 3]! / 255) * opNorm;
     if (oa <= 0) continue;
 
     for (let c = 0; c < 3; c++) {
-      const blended = fn(bd[i + c], od[i + c]);
-      bd[i + c] = Math.round(bd[i + c] * (1 - oa) + blended * oa);
+      const blended = fn!(bd[i + c]!, od[i + c]!);
+      bd[i + c] = Math.round(bd[i + c]! * (1 - oa) + blended * oa);
     }
-    bd[i + 3] = Math.min(255, Math.round(bd[i + 3] + od[i + 3] * opNorm * (1 - bd[i + 3] / 255)));
+    bd[i + 3] = Math.min(255, Math.round(bd[i + 3]! + od[i + 3]! * opNorm * (1 - bd[i + 3]! / 255)));
   }
 }

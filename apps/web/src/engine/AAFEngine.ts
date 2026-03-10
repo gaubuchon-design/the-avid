@@ -977,7 +977,7 @@ function wrapClipWithEffects(
     const ia = clip.intrinsicAudio;
     if (ia.volume !== 0) {
       const gainDef = WELL_KNOWN_EFFECTS['monoAudioGain'];
-      usedEffectDefs.add(gainDef.uid);
+      usedEffectDefs.add(gainDef!.uid!);
       // Convert dB to linear gain for AAF.
       const linearGain = Math.pow(10, ia.volume / 20);
       currentSegment = {
@@ -985,7 +985,7 @@ function wrapClipWithEffects(
         uid: generateUID(),
         dataDefinition: dataDef,
         length: lengthEU,
-        operationDefinition: gainDef,
+        operationDefinition: gainDef!,
         parameters: [
           { name: 'Level', typeDefinition: 'Rational', interpolation: 'ConstantInterp', value: linearGain },
         ],
@@ -995,7 +995,7 @@ function wrapClipWithEffects(
     }
     if (ia.pan !== 0) {
       const panDef = WELL_KNOWN_EFFECTS['monoAudioPan'];
-      usedEffectDefs.add(panDef.uid);
+      usedEffectDefs.add(panDef!.uid!);
       // Convert -100..100 to 0..1 for AAF (0.5 = center).
       const panValue = (ia.pan + 100) / 200;
       currentSegment = {
@@ -1003,7 +1003,7 @@ function wrapClipWithEffects(
         uid: generateUID(),
         dataDefinition: dataDef,
         length: lengthEU,
-        operationDefinition: panDef,
+        operationDefinition: panDef!,
         parameters: [
           { name: 'Pan', typeDefinition: 'Rational', interpolation: 'ConstantInterp', value: panValue },
         ],
@@ -1018,13 +1018,13 @@ function wrapClipWithEffects(
     const iv = clip.intrinsicVideo;
     if (iv.opacity !== 100) {
       const opacityDef = WELL_KNOWN_EFFECTS['videoOpacity'];
-      usedEffectDefs.add(opacityDef.uid);
+      usedEffectDefs.add(opacityDef!.uid!);
       currentSegment = {
         kind: 'OperationGroup',
         uid: generateUID(),
         dataDefinition: dataDef,
         length: lengthEU,
-        operationDefinition: opacityDef,
+        operationDefinition: opacityDef!,
         parameters: [
           { name: 'Opacity', typeDefinition: 'Rational', interpolation: 'ConstantInterp', value: iv.opacity / 100 },
         ],
@@ -1036,7 +1036,7 @@ function wrapClipWithEffects(
     // Time remap (speed control).
     if (clip.timeRemap.enabled && clip.timeRemap.keyframes.length >= 2) {
       const speedDef = WELL_KNOWN_EFFECTS['videoSpeedControl'];
-      usedEffectDefs.add(speedDef.uid);
+      usedEffectDefs.add(speedDef!.uid!);
       const controlPoints: AAFControlPoint[] = clip.timeRemap.keyframes.map((kf) => ({
         time: { numerator: Math.round(kf.timelineTime * 1000), denominator: 1000 },
         value: kf.sourceTime,
@@ -1055,7 +1055,7 @@ function wrapClipWithEffects(
         uid: generateUID(),
         dataDefinition: dataDef,
         length: lengthEU,
-        operationDefinition: speedDef,
+        operationDefinition: speedDef!,
         parameters: [],
         varyingParameters: [
           {
@@ -1316,7 +1316,7 @@ function parseSimplifiedAAF(
   const decoder = new TextDecoder('utf-8');
   const jsonString = decoder.decode(payloadBytes);
 
-  let parsed: any;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(jsonString);
   } catch (err) {
@@ -1400,6 +1400,7 @@ function parseOLEStructuredStorage(
  * Validate and normalise a parsed JSON object into a well-typed AAFDocument.
  * Fills in missing fields with sensible defaults.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- raw parsed JSON needs runtime validation
 function validateAAFDocument(raw: any): AAFDocument {
   if (!raw || typeof raw !== 'object') {
     throw new AAFParseError('Parsed AAF content is not an object.');
@@ -1554,7 +1555,7 @@ function resolveCompositionEditRate(comp: AAFCompositionMob): AAFRational {
   }
   // Fallback: check timecode tracks, then default.
   if (comp.timelineSlots.length > 0) {
-    return comp.timelineSlots[0].editRate;
+    return comp.timelineSlots[0]!.editRate;
   }
   return { numerator: 24, denominator: 1 };
 }
@@ -1663,7 +1664,7 @@ function importSegment(
     case 'NestedScope':
       // Import the first slot of a nested scope.
       if (segment.slots.length > 0) {
-        for (const innerSeg of segment.slots[0].segments) {
+        for (const innerSeg of segment.slots[0]!.segments) {
           const result = importSegment(
             innerSeg,
             cursorEU,
@@ -1767,7 +1768,7 @@ function importOperationGroup(
   // Recurse into the first input segment.
   if (opGroup.inputSegments.length > 0) {
     const innerResult = importSegment(
-      opGroup.inputSegments[0],
+      opGroup.inputSegments[0]!,
       cursorEU,
       editRate,
       trackId,
@@ -2135,7 +2136,7 @@ class AAFEngine {
       sourceMobCount: document.sourceMobs.length,
       effectDefinitionCount: document.effectDefinitions.length,
       createdBy: document.header.identifications.length > 0
-        ? `${document.header.identifications[0].productName} ${document.header.identifications[0].productVersionString}`
+        ? `${document.header.identifications[0]!.productName} ${document.header.identifications[0]!.productVersionString}`
         : 'Unknown',
     };
   }

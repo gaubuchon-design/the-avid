@@ -56,7 +56,7 @@ function validateChapters(chapters: ChapterMarker[]): ChapterValidationResult {
 
   // YouTube requires first chapter at 0:00
   const sorted = [...chapters].sort((a, b) => a.time - b.time);
-  if (sorted[0].time !== 0) {
+  if (sorted[0]!.time !== 0) {
     errors.push('First chapter must start at 0:00 for YouTube compatibility.');
   }
 
@@ -67,10 +67,10 @@ function validateChapters(chapters: ChapterMarker[]): ChapterValidationResult {
 
   // Each chapter must be at least 10 seconds
   for (let i = 0; i < sorted.length - 1; i++) {
-    const duration = sorted[i + 1].time - sorted[i].time;
+    const duration = sorted[i + 1]!.time - sorted[i]!.time;
     if (duration < 10) {
       errors.push(
-        `Chapter "${sorted[i].title}" is only ${duration.toFixed(1)}s long. YouTube requires at least 10 seconds per chapter.`,
+        `Chapter "${sorted[i]!.title}" is only ${duration.toFixed(1)}s long. YouTube requires at least 10 seconds per chapter.`,
       );
     }
   }
@@ -133,8 +133,8 @@ function suggestChaptersFromTranscript(
   const minChapterGap = 30; // minimum 30 seconds between AI chapters
 
   for (let i = 1; i < segments.length; i++) {
-    const prev = segments[i - 1];
-    const curr = segments[i];
+    const prev = segments[i - 1]!;
+    const curr = segments[i]!;
     const timeSinceLastChapter = curr.startTime - lastChapterTime;
 
     if (timeSinceLastChapter < minChapterGap) continue;
@@ -217,8 +217,8 @@ function exportToSRTChapterFormat(chapters: ChapterMarker[]): string {
   const lines: string[] = [];
 
   for (let i = 0; i < sorted.length; i++) {
-    const chapter = sorted[i];
-    const nextTime = i < sorted.length - 1 ? sorted[i + 1].time : chapter.time + 30;
+    const chapter = sorted[i]!;
+    const nextTime = i < sorted.length - 1 ? sorted[i + 1]!.time : chapter.time + 30;
 
     lines.push(`${i + 1}`);
     lines.push(`${formatSRTTimestamp(chapter.time)} --> ${formatSRTTimestamp(nextTime)}`);

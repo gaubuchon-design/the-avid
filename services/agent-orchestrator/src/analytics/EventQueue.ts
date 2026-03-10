@@ -190,6 +190,11 @@ export class EventQueue {
         void this.flush();
       }
     }, this.flushIntervalMs);
+
+    // Unref the timer so it does not prevent process exit during shutdown
+    if (typeof this.flushTimer === 'object' && 'unref' in this.flushTimer) {
+      this.flushTimer.unref();
+    }
   }
 
   /**
@@ -230,5 +235,16 @@ export class EventQueue {
    */
   isOnline(): boolean {
     return this.online;
+  }
+
+  /**
+   * Destroy the queue: stop auto-flush and discard all pending events.
+   *
+   * Call this during graceful shutdown to release resources. After calling
+   * `destroy()`, the queue should not be used again.
+   */
+  destroy(): void {
+    this.stopAutoFlush();
+    this.queue = [];
   }
 }

@@ -795,6 +795,69 @@ function getPreferredTrack(state: Pick<EditorState, 'tracks' | 'selectedTrackId'
 // the resolve callback outside of the store state.
 let _alphaDialogResolve: ((mode: AlphaMode) => void) | null = null;
 
+// ─── Demo data ────────────────────────────────────────────────────────────────
+const DEMO_BINS: Bin[] = [
+  {
+    id: 'b1', name: 'Rushes', color: '#5b6af5', isOpen: true, children: [
+      { id: 'b1a', name: 'Day 1', color: '#818cf8', isOpen: false, children: [], assets: [
+        { id: 'a1', name: 'Scene 01 - Take 01', type: 'VIDEO', duration: 45.2, status: 'READY', tags: ['dialogue'], isFavorite: true },
+        { id: 'a2', name: 'Scene 01 - Take 02', type: 'VIDEO', duration: 48.7, status: 'READY', tags: ['dialogue'], isFavorite: false },
+        { id: 'a3', name: 'Scene 02 - Take 01', type: 'VIDEO', duration: 22.1, status: 'READY', tags: ['action'], isFavorite: false },
+      ]},
+      { id: 'b1b', name: 'Day 2', color: '#818cf8', isOpen: false, children: [], assets: [
+        { id: 'a4', name: 'Scene 03 - Wide', type: 'VIDEO', duration: 67.5, status: 'READY', tags: ['wide-shot'], isFavorite: false },
+        { id: 'a5', name: 'Scene 03 - Close', type: 'VIDEO', duration: 31.2, status: 'READY', tags: ['close-up'], isFavorite: false },
+      ]},
+      { id: 'b1c', name: 'B-Roll', color: '#818cf8', isOpen: false, children: [], assets: [
+        { id: 'a6', name: 'City Timelapse', type: 'VIDEO', duration: 12.0, status: 'READY', tags: ['broll', 'city'], isFavorite: true },
+        { id: 'a7', name: 'Sky Clouds', type: 'VIDEO', duration: 8.5, status: 'READY', tags: ['broll'], isFavorite: false },
+      ]},
+    ],
+    assets: [],
+  },
+  {
+    id: 'b2', name: 'Music', color: '#2bb672', isOpen: false, children: [], assets: [
+      { id: 'a8', name: 'Main Theme', type: 'AUDIO', duration: 180.0, status: 'READY', tags: ['music'], isFavorite: true },
+      { id: 'a9', name: 'Tension Underscore', type: 'AUDIO', duration: 90.0, status: 'READY', tags: ['music', 'tension'], isFavorite: false },
+    ],
+  },
+  {
+    id: 'b3', name: 'Graphics', color: '#e8943a', isOpen: false, children: [], assets: [
+      { id: 'a10', name: 'Title Card', type: 'IMAGE', status: 'READY', tags: ['graphics'], isFavorite: false },
+      { id: 'a11', name: 'Lower Third', type: 'IMAGE', status: 'READY', tags: ['graphics'], isFavorite: false },
+    ],
+  },
+  { id: 'b4', name: 'Selects', color: '#e05b8e', isOpen: false, children: [], assets: [] },
+];
+
+const DEMO_SMART_BINS: SmartBin[] = [
+  {
+    id: 'sb1', name: 'All Video', color: '#5bbfc7',
+    rules: [{ field: 'type', operator: 'equals', value: 'VIDEO' }],
+    matchAll: true,
+  },
+  {
+    id: 'sb2', name: 'Favorites', color: '#f59e0b',
+    rules: [{ field: 'favorite', operator: 'is', value: 'true' }],
+    matchAll: true,
+  },
+  {
+    id: 'sb3', name: 'Long Takes (>30s)', color: '#e05b8e',
+    rules: [{ field: 'duration', operator: 'greaterThan', value: '30' }],
+    matchAll: true,
+  },
+  {
+    id: 'sb4', name: 'Dialogue Clips', color: '#818cf8',
+    rules: [{ field: 'tag', operator: 'contains', value: 'dialogue' }],
+    matchAll: true,
+  },
+  {
+    id: 'sb5', name: 'Music & Audio', color: '#2bb672',
+    rules: [{ field: 'type', operator: 'equals', value: 'AUDIO' }],
+    matchAll: true,
+  },
+];
+
 // ─── Playback ────────────────────────────────────────────────────────────────
 // Timeline playback is driven by PlaybackEngine (RAF-based).
 // The store subscribes to frame updates and converts frames → seconds.
@@ -821,10 +884,10 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     selectedClipIds: [],
     selectedTrackId: null,
     inspectedClipId: null,
-    bins: INITIAL_BINS,
-    selectedBinId: 'b-master',
-    activeBinAssets: [],
-    smartBins: INITIAL_SMART_BINS,
+    bins: DEMO_BINS,
+    selectedBinId: 'b1a',
+    activeBinAssets: DEMO_BINS[0]!.children[0]!.assets,
+    smartBins: DEMO_SMART_BINS,
     selectedSmartBinId: null,
     sequenceSettings: {
       name: 'Sequence 1',
@@ -990,7 +1053,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       let movedClip: Clip | undefined;
       s.tracks.forEach(t => {
         const idx = t.clips.findIndex(c => c.id === clipId);
-        if (idx >= 0) { movedClip = { ...t.clips[idx] }; t.clips.splice(idx, 1); }
+        if (idx >= 0) { movedClip = { ...t.clips[idx]! }; t.clips.splice(idx, 1); }
       });
       if (movedClip) {
         const dur = movedClip.endTime - movedClip.startTime;
@@ -1015,16 +1078,16 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         const idx = t.clips.findIndex(c => c.id === clipId);
         if (idx >= 0) {
           const orig = t.clips[idx];
-          if (time <= orig.startTime || time >= orig.endTime) return;
+          if (time <= orig!.startTime || time >= orig!.endTime) return;
           const newClip: Clip = {
-            ...orig,
-            id: `${orig.id}_split_${Date.now()}`,
+            ...orig!,
+            id: `${orig!.id}_split_${Date.now()}`,
             startTime: time,
-            intrinsicVideo: { ...orig.intrinsicVideo },
-            intrinsicAudio: { ...orig.intrinsicAudio },
-            timeRemap: { ...orig.timeRemap, keyframes: orig.timeRemap.keyframes.map(kf => ({ ...kf })) },
+            intrinsicVideo: { ...orig!.intrinsicVideo },
+            intrinsicAudio: { ...orig!.intrinsicAudio },
+            timeRemap: { ...orig!.timeRemap, keyframes: orig!.timeRemap.keyframes.map(kf => ({ ...kf })) },
           };
-          orig.endTime = time;
+          orig!.endTime = time;
           t.clips.splice(idx + 1, 0, newClip);
         }
       });
@@ -1034,16 +1097,16 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         const idx = t.clips.findIndex(c => c.id === clipId);
         if (idx >= 0) {
           const orig = t.clips[idx];
-          if (time <= orig.startTime || time >= orig.endTime) return;
+          if (time <= orig!.startTime || time >= orig!.endTime) return;
           const newClip: Clip = {
-            ...orig,
+            ...orig!,
             id: newClipId,
             startTime: time,
-            intrinsicVideo: { ...orig.intrinsicVideo },
-            intrinsicAudio: { ...orig.intrinsicAudio },
-            timeRemap: { ...orig.timeRemap, keyframes: orig.timeRemap.keyframes.map(kf => ({ ...kf })) },
+            intrinsicVideo: { ...orig!.intrinsicVideo },
+            intrinsicAudio: { ...orig!.intrinsicAudio },
+            timeRemap: { ...orig!.timeRemap, keyframes: orig!.timeRemap.keyframes.map(kf => ({ ...kf })) },
           };
-          orig.endTime = time;
+          orig!.endTime = time;
           t.clips.splice(idx + 1, 0, newClip);
           return;
         }
@@ -1424,16 +1487,16 @@ export const useEditorStore = create<EditorState & EditorActions>()(
 
         for (let index = 0; index < track.clips.length; index += 1) {
           const clip = track.clips[index];
-          if (clip.startTime < splitTime && clip.endTime > splitTime) {
+          if (clip!.startTime! < splitTime && clip!.endTime! > splitTime) {
             const nextClip: Clip = {
-              ...clip,
+              ...clip!,
               id: createId('clip'),
               startTime: splitTime,
-              intrinsicVideo: { ...clip.intrinsicVideo },
-              intrinsicAudio: { ...clip.intrinsicAudio },
-              timeRemap: { ...clip.timeRemap, keyframes: clip.timeRemap.keyframes.map(kf => ({ ...kf })) },
+              intrinsicVideo: { ...clip!.intrinsicVideo },
+              intrinsicAudio: { ...clip!.intrinsicAudio },
+              timeRemap: { ...clip!.timeRemap, keyframes: clip!.timeRemap.keyframes.map(kf => ({ ...kf })) },
             };
-            clip.endTime = splitTime;
+            clip!.endTime! = splitTime;
             track.clips.splice(index + 1, 0, nextClip);
             index += 1;
           }
@@ -1607,14 +1670,14 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         const idx = t.clips.findIndex(c => c.id === clipId);
         if (idx >= 0) {
           const clip = t.clips[idx];
-          const dur = clip.endTime - clip.startTime;
+          const dur = clip!.endTime! - clip!.startTime!;
           // Remove the clip
           t.clips.splice(idx, 1);
           // Shift all subsequent clips left by the deleted duration
           for (let i = idx; i < t.clips.length; i++) {
-            if (t.clips[i].startTime >= clip.startTime) {
-              t.clips[i].startTime -= dur;
-              t.clips[i].endTime -= dur;
+            if (t.clips[i]!.startTime >= clip!.startTime!) {
+              t.clips[i]!.startTime -= dur;
+              t.clips[i]!.endTime -= dur;
             }
           }
           // Remove from selection
@@ -1637,15 +1700,15 @@ export const useEditorStore = create<EditorState & EditorActions>()(
           if (delta < 0) {
             // Sliding left: trim prev clip shorter, next clip starts earlier
             if (prev) prev.endTime = Math.max(prev.startTime + 0.1, prev.endTime + delta);
-            if (next) next.startTime = Math.max(clip.endTime + delta, clip.endTime - (next.endTime - next.startTime) + 0.1);
+            if (next) next.startTime = Math.max(clip!.endTime! + delta, clip!.endTime! - (next.endTime - next.startTime) + 0.1);
           } else {
             // Sliding right: trim next clip shorter, prev clip ends later
             if (next) next.startTime = Math.min(next.endTime - 0.1, next.startTime + delta);
-            if (prev) prev.endTime = Math.min(clip.startTime + delta, clip.startTime + (prev.endTime - prev.startTime) - 0.1);
+            if (prev) prev.endTime = Math.min(clip!.startTime! + delta, clip!.startTime! + (prev.endTime - prev.startTime) - 0.1);
           }
           // Adjust the source offset (trim points)
-          clip.trimStart = Math.max(0, clip.trimStart + delta);
-          clip.trimEnd = Math.max(0, clip.trimEnd - delta);
+          clip!.trimStart! = Math.max(0, clip!.trimStart! + delta);
+          clip!.trimEnd! = Math.max(0, clip!.trimEnd! - delta);
           return;
         }
       }
@@ -1862,27 +1925,27 @@ export const useEditorStore = create<EditorState & EditorActions>()(
 
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
-          const mime = file.type || '';
-          const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+          const mime = file!.type! || '';
+          const ext = file!.name.split('.').pop()?.toLowerCase()! ?? '';
           const isVideo = mime.startsWith('video/') || ['mov', 'mxf', 'avi', 'mkv'].includes(ext);
           const isAudio = mime.startsWith('audio/');
           const isImage = mime.startsWith('image/') || ['exr', 'dpx', 'tga', 'psd'].includes(ext);
           const isSvg = ext === 'svg' || mime === 'image/svg+xml';
-          const url = URL.createObjectURL(file);
+          const url = URL.createObjectURL(file!);
 
           const assetId = createId('asset');
           assetIds.push(assetId);
 
           const asset: MediaAsset = {
             id: assetId,
-            name: file.name,
+            name: file!.name!,
             type: isSvg ? 'GRAPHIC' : isVideo ? 'VIDEO' : isAudio ? 'AUDIO' : isImage ? 'IMAGE' : 'DOCUMENT',
             duration: 0,
             status: 'INGESTING',
             playbackUrl: url,
             tags: [],
             isFavorite: false,
-            fileSize: file.size,
+            fileSize: file!.size!,
             mimeType: mime,
             fileHandle: file,
           };
@@ -2027,6 +2090,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         set((s) => {
           s.showAlphaImportDialog = true;
           s.alphaDialogAssetId = assetId;
+          // Resolve callback stored module-level in _alphaDialogResolve (functions are not Immer-compatible)
         });
       });
     },

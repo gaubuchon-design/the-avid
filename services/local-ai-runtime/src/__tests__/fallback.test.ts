@@ -111,7 +111,7 @@ describe('MockBackend execution', () => {
     expect(result.output.embeddings![0]).toHaveLength(384);
     // Verify L2 normalisation (should be close to 1)
     const norm = Math.sqrt(
-      result.output.embeddings![0].reduce((s, v) => s + v * v, 0),
+      result!.output.embeddings![0]!.reduce((s, v) => s + v * v, 0),
     );
     expect(norm).toBeCloseTo(1, 1);
   });
@@ -127,11 +127,11 @@ describe('MockBackend execution', () => {
     expect(result.output.transcriptSegments!.length).toBeGreaterThan(0);
 
     const seg = result.output.transcriptSegments![0];
-    expect(seg.startTime).toBeDefined();
-    expect(seg.endTime).toBeGreaterThan(seg.startTime);
-    expect(seg.text).toBeTruthy();
-    expect(seg.confidence).toBeGreaterThan(0);
-    expect(seg.confidence).toBeLessThanOrEqual(1);
+    expect(seg!.startTime).toBeDefined();
+    expect(seg!.endTime).toBeGreaterThan(seg!.startTime);
+    expect(seg!.text).toBeTruthy();
+    expect(seg!.confidence).toBeGreaterThan(0);
+    expect(seg!.confidence).toBeLessThanOrEqual(1);
   });
 
   it('should produce translated text with target language prefix', async () => {

@@ -29,11 +29,13 @@ const textDecoder = new TextDecoder();
 
 // ─── Structural delta types ─────────────────────────────────────────────────
 
+/* eslint-disable @typescript-eslint/no-explicit-any -- generic JSON diff operates on untyped data */
 export interface StructuralDelta {
   added: any[];
   removed: string[];
   changed: { id: string; fields: Record<string, any> }[];
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // ─── DeltaCompressor ────────────────────────────────────────────────────────
 
@@ -104,6 +106,7 @@ export class DeltaCompressor {
    * Compute the structural difference between two states.
    * Each state element is expected to have an `id` field (or `assetId`).
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic JSON diff
   computeDelta(
     before: any[],
     after: any[],
@@ -174,6 +177,7 @@ export class DeltaCompressor {
   /**
    * Apply a structural delta to a state array, producing a new state.
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic JSON diff
   applyDelta(
     state: any[],
     delta: StructuralDelta,
@@ -329,7 +333,7 @@ export class DeltaCompressor {
       }
 
       default:
-        throw new Error(`Unknown op type tag: 0x${tag.toString(16)}`);
+        throw new Error(`Unknown op type tag: 0x${tag!.toString(16)}`);
     }
 
     return { op, bytesRead: offset - startOffset };
@@ -419,6 +423,7 @@ export class DeltaCompressor {
 
 // ─── Deep equality helper ───────────────────────────────────────────────────
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic deep equality
 function deepEqual(a: any, b: any): boolean {
   if (a === b) return true;
   if (a == null || b == null) return false;

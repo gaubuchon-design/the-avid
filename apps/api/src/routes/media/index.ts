@@ -1,7 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../../db/client';
 import { authenticate, requireProjectAccess } from '../../middleware/auth';
-import { validate, schemas, paginationQuery, paginate } from '../../utils/validation';
+import {
+  validate, validateAll, schemas, paginationQuery, paginate,
+  projectIdParam, projectIdAndBinIdParams, projectIdAndAssetIdParams,
+} from '../../utils/validation';
 import { NotFoundError, BadRequestError } from '../../utils/errors';
 import { mediaService } from '../../services/media.service';
 import multer from 'multer';
@@ -9,132 +12,235 @@ import multer from 'multer';
 const router = Router();
 router.use(authenticate);
 
+const ALLOWED_MIMETYPES = /^(video|audio|image)\//;
+const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024; // 10GB
+
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 * 1024 }, // 10GB
+  limits: { fileSize: MAX_FILE_SIZE },
   fileFilter: (_req, file, cb) => {
-    const allowed = /video|audio|image/;
-    cb(null, allowed.test(file.mimetype));
+    if (ALLOWED_MIMETYPES.test(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new BadRequestError(`Unsupported file type: ${file.mimetype}`) as any);
+    }
   },
 });
 
 // ─── BINS ──────────────────────────────────────────────────────────────────────
 
 // GET /projects/:projectId/bins
-router.get('/projects/:projectId/bins', requireProjectAccess('VIEWER'), async (req: Request, res: Response) => {
-  const bins = await db.bin.findMany({
-    where: { projectId: req.params.projectId },
-    include: {
-      children: { include: { _count: { select: { mediaAssets: true } } } },
-      _count: { select: { mediaAssets: true } },
-    },
-    orderBy: { sortOrder: 'asc' },
-  });
-  res.json({ bins });
-});
+router.get(
+  '/projects/:projectId/bins',
+  requireProjectAccess('VIEWER'),
+  validate(projectIdParam, 'params'),
+  async (req: Request, res: Response) => {
+    const bins = await db.bin.findMany({
+      where: { projectId: req.params['projectId']!, parentId: null },
+      select: {
+        id: true,
+        name: true,
+        color: true,
+        sortOrder: true,
+        parentId: true,
+        projectId: true,
+        children: {
+          select: {
+            id: true,
+            name: true,
+            color: true,
+            sortOrder: true,
+            parentId: true,
+            _count: { select: { mediaAssets: true } },
+          },
+          orderBy: { sortOrder: 'asc' },
+        },
+        _count: { select: { mediaAssets: true } },
+      },
+      orderBy: { sortOrder: 'asc' },
+    });
+
+    // Bin structure is relatively stable -- cache for 15 seconds
+    res.setHeader('Cache-Control', 'private, max-age=15, stale-while-revalidate=30');
+    res.json({ bins });
+  }
+);
 
 // POST /projects/:projectId/bins
-router.post('/projects/:projectId/bins', requireProjectAccess('EDITOR'), validate(schemas.createBin), async (req: Request, res: Response) => {
-  const bin = await db.bin.create({
-    data: { ...req.body, projectId: req.params.projectId },
-  });
-  res.status(201).json({ bin });
-});
+router.post(
+  '/projects/:projectId/bins',
+  requireProjectAccess('EDITOR'),
+  validateAll({ params: projectIdParam, body: schemas.createBin }),
+  async (req: Request, res: Response) => {
+    // If parentId is provided, verify it belongs to this project
+    if (req.body['parentId']) {
+      const parent = await db.bin.findFirst({
+        where: { id: req.body['parentId'], projectId: req.params['projectId']! },
+      });
+      if (!parent) throw new NotFoundError('Parent bin');
+    }
+
+    const bin = await db.bin.create({
+      data: { ...req.body, projectId: req.params['projectId']! },
+    });
+    res.status(201).json({ bin });
+  }
+);
 
 // PATCH /projects/:projectId/bins/:binId
-router.patch('/projects/:projectId/bins/:binId', requireProjectAccess('EDITOR'), async (req: Request, res: Response) => {
-  const allowed = ['name', 'color', 'sortOrder', 'parentId'];
-  const data: any = {};
-  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
-
-  const bin = await db.bin.update({
-    where: { id: req.params.binId, projectId: req.params.projectId },
-    data,
-  });
-  res.json({ bin });
-});
+router.patch(
+  '/projects/:projectId/bins/:binId',
+  requireProjectAccess('EDITOR'),
+  validateAll({ params: projectIdAndBinIdParams, body: schemas.updateBin }),
+  async (req: Request, res: Response) => {
+    const bin = await db.bin.update({
+      where: { id: req.params['binId']!, projectId: req.params['projectId']! },
+      data: req.body,
+    });
+    res.json({ bin });
+  }
+);
 
 // DELETE /projects/:projectId/bins/:binId
-router.delete('/projects/:projectId/bins/:binId', requireProjectAccess('EDITOR'), async (req: Request, res: Response) => {
-  // Verify bin belongs to this project before deleting
-  const bin = await db.bin.findFirst({ where: { id: req.params.binId, projectId: req.params.projectId } });
-  if (!bin) throw new NotFoundError('Bin');
-  await db.bin.delete({ where: { id: req.params.binId } });
-  res.status(204).send();
-});
+router.delete(
+  '/projects/:projectId/bins/:binId',
+  requireProjectAccess('EDITOR'),
+  validate(projectIdAndBinIdParams, 'params'),
+  async (req: Request, res: Response) => {
+    // Check for child bins and media assets in parallel to avoid sequential queries
+    const [childCount, assetCount] = await Promise.all([
+      db.bin.count({ where: { parentId: req.params['binId']! } }),
+      db.mediaAsset.count({ where: { binId: req.params['binId']! } }),
+    ]);
+    if (childCount > 0) {
+      throw new BadRequestError('Cannot delete bin with child bins. Move or delete children first.');
+    }
+    if (assetCount > 0) {
+      throw new BadRequestError(`Cannot delete bin with ${assetCount} media assets. Move or delete assets first.`);
+    }
+
+    await db.bin.delete({ where: { id: req.params['binId']! } });
+    res.status(204).send();
+  }
+);
 
 // ─── MEDIA ASSETS ─────────────────────────────────────────────────────────────
 
 // GET /projects/:projectId/media
-router.get('/projects/:projectId/media', requireProjectAccess('VIEWER'), validate(paginationQuery, 'query'), async (req: Request, res: Response) => {
-  const { page, limit, sortBy, sortOrder } = req.query as any;
-  const { binId, type, search, isFavorite } = req.query as any;
-  const skip = (page - 1) * limit;
+router.get(
+  '/projects/:projectId/media',
+  requireProjectAccess('VIEWER'),
+  validate(schemas.mediaQuery, 'query'),
+  validate(projectIdParam, 'params'),
+  async (req: Request, res: Response) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- validated by middleware
+    const { page, limit, sortBy, sortOrder } = req.query as any;
+    const { binId, type, search, isFavorite, status } = req.query as Record<string, string>;
+    const skip = ((page as number) - 1) * (limit as number);
 
-  // Allowlist sortable fields
-  const allowedSortFields = ['createdAt', 'name', 'type', 'duration', 'fileSize', 'updatedAt'];
-  const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma where clause is dynamic
+    const where: any = {
+      bin: { projectId: req.params['projectId']! },
+      ...(binId ? { binId } : {}),
+      ...(type ? { type: type.toUpperCase() } : {}),
+      ...(status ? { status: status.toUpperCase() } : {}),
+      ...(isFavorite === 'true' ? { isFavorite: true } : {}),
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: 'insensitive' } },
+              { tags: { hasSome: [search] } },
+              { transcript: { contains: search, mode: 'insensitive' } },
+              { description: { contains: search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
 
-  const where: any = {
-    bin: { projectId: req.params.projectId },
-    ...(binId ? { binId } : {}),
-    ...(type ? { type: type.toUpperCase() } : {}),
-    ...(isFavorite === 'true' ? { isFavorite: true } : {}),
-    ...(search
-      ? {
-          OR: [
-            { name: { contains: search, mode: 'insensitive' } },
-            { tags: { has: search } },
-            { transcript: { contains: search, mode: 'insensitive' } },
-            { description: { contains: search, mode: 'insensitive' } },
-          ],
-        }
-      : {}),
-  };
+    const allowedSortFields = ['createdAt', 'name', 'type', 'fileSize', 'duration', 'updatedAt'];
+    const orderField = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
 
-  const [assets, total] = await Promise.all([
-    db.mediaAsset.findMany({
-      where,
-      skip,
-      take: limit,
-      orderBy: { [safeSortBy]: sortOrder },
-    }),
-    db.mediaAsset.count({ where }),
-  ]);
+    const [assets, total] = await Promise.all([
+      db.mediaAsset.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          status: true,
+          mimeType: true,
+          fileSize: true,
+          duration: true,
+          s3Key: true,
+          proxyS3Key: true,
+          thumbnailS3Key: true,
+          waveformS3Key: true,
+          isFavorite: true,
+          tags: true,
+          binId: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        skip,
+        take: limit,
+        orderBy: { [orderField]: sortOrder },
+      }),
+      db.mediaAsset.count({ where }),
+    ]);
 
-  // Enrich with signed URLs (bind to preserve context)
-  const enriched = await Promise.all(assets.map((a) => mediaService.enrichWithUrls(a)));
+    // Enrich with signed URLs (bind to preserve context)
+    const enriched = await Promise.all(assets.map((a: typeof assets[number]) => mediaService.enrichWithUrls(a)));
 
-  res.json({ assets: enriched, pagination: paginate(total, page, limit) });
-});
+    // Media list is dynamic but can tolerate 5 second staleness
+    res.setHeader('Cache-Control', 'private, max-age=5, stale-while-revalidate=15');
+    res.json({ assets: enriched, pagination: paginate(total, page, limit) });
+  }
+);
 
-// POST /projects/:projectId/bins/:binId/media — initiate upload
-router.post('/projects/:projectId/bins/:binId/media/upload-url', requireProjectAccess('EDITOR'), async (req: Request, res: Response) => {
-  const { fileName, mimeType, fileSize } = req.body;
-  if (!fileName || !mimeType) throw new BadRequestError('fileName and mimeType required');
+// POST /projects/:projectId/bins/:binId/media/upload-url -- initiate presigned upload
+router.post(
+  '/projects/:projectId/bins/:binId/media/upload-url',
+  requireProjectAccess('EDITOR'),
+  validateAll({ params: projectIdAndBinIdParams, body: schemas.initiateUpload }),
+  async (req: Request, res: Response) => {
+    const { fileName, mimeType, fileSize } = req.body;
 
-  const { asset, uploadUrl } = await mediaService.initiateUpload({
-    projectId: req.params.projectId,
-    binId: req.params.binId,
-    fileName,
-    mimeType,
-    fileSize: fileSize ? BigInt(fileSize) : undefined,
-  });
+    // Verify bin belongs to project
+    const bin = await db.bin.findFirst({
+      where: { id: req.params['binId']!, projectId: req.params['projectId']! },
+    });
+    if (!bin) throw new NotFoundError('Bin');
 
-  res.status(201).json({ asset, uploadUrl });
-});
+    const { asset, uploadUrl } = await mediaService.initiateUpload({
+      projectId: req.params['projectId']!,
+      binId: req.params['binId']!,
+      fileName,
+      mimeType,
+      fileSize: fileSize ? BigInt(fileSize) : undefined,
+    });
 
-// POST /projects/:projectId/bins/:binId/media/upload — direct upload
+    res.status(201).json({ asset, uploadUrl });
+  }
+);
+
+// POST /projects/:projectId/bins/:binId/media -- direct upload
 router.post(
   '/projects/:projectId/bins/:binId/media',
   requireProjectAccess('EDITOR'),
+  validate(projectIdAndBinIdParams, 'params'),
   upload.single('file'),
   async (req: Request, res: Response) => {
     if (!req.file) throw new BadRequestError('No file uploaded');
 
+    // Verify bin belongs to project
+    const bin = await db.bin.findFirst({
+      where: { id: req.params['binId']!, projectId: req.params['projectId']! },
+    });
+    if (!bin) throw new NotFoundError('Bin');
+
     const asset = await mediaService.directUpload({
-      projectId: req.params.projectId,
-      binId: req.params.binId,
+      projectId: req.params['projectId']!,
+      binId: req.params['binId']!,
       file: req.file,
       metadata: req.body,
     });
@@ -143,40 +249,132 @@ router.post(
   }
 );
 
-// POST /projects/:projectId/media/:assetId/confirm — confirm S3 upload complete
-router.post('/projects/:projectId/media/:assetId/confirm', requireProjectAccess('EDITOR'), async (req: Request, res: Response) => {
-  const asset = await mediaService.confirmUpload(req.params.assetId);
-  res.json({ asset });
-});
+// POST /projects/:projectId/media/:assetId/confirm -- confirm S3 upload complete
+router.post(
+  '/projects/:projectId/media/:assetId/confirm',
+  requireProjectAccess('EDITOR'),
+  validate(projectIdAndAssetIdParams, 'params'),
+  async (req: Request, res: Response) => {
+    // Verify asset belongs to this project
+    const existing = await db.mediaAsset.findFirst({
+      where: { id: req.params['assetId']!, bin: { projectId: req.params['projectId']! } },
+    });
+    if (!existing) throw new NotFoundError('Media asset');
+    if (existing.status !== 'UPLOADING') {
+      throw new BadRequestError(`Asset is in "${existing.status}" state, cannot confirm upload`);
+    }
+
+    const asset = await mediaService.confirmUpload(req.params['assetId']!);
+    res.json({ asset });
+  }
+);
 
 // GET /projects/:projectId/media/:assetId
-router.get('/projects/:projectId/media/:assetId', requireProjectAccess('VIEWER'), async (req: Request, res: Response) => {
-  const asset = await db.mediaAsset.findUnique({ where: { id: req.params.assetId } });
-  if (!asset) throw new NotFoundError('Media asset');
-  const enriched = await mediaService.enrichWithUrls(asset);
-  res.json({ asset: enriched });
-});
+router.get(
+  '/projects/:projectId/media/:assetId',
+  requireProjectAccess('VIEWER'),
+  validate(projectIdAndAssetIdParams, 'params'),
+  async (req: Request, res: Response) => {
+    const asset = await db.mediaAsset.findFirst({
+      where: { id: req.params['assetId']!, bin: { projectId: req.params['projectId']! } },
+    });
+    if (!asset) throw new NotFoundError('Media asset');
+    const enriched = await mediaService.enrichWithUrls(asset);
+
+    // Cache single asset for 10 seconds
+    res.setHeader('Cache-Control', 'private, max-age=10, stale-while-revalidate=30');
+    res.json({ asset: enriched });
+  }
+);
 
 // PATCH /projects/:projectId/media/:assetId
-router.patch('/projects/:projectId/media/:assetId', requireProjectAccess('EDITOR'), async (req: Request, res: Response) => {
-  const allowed = ['name', 'description', 'tags', 'rating', 'isFavorite', 'tapeName', 'reel', 'scene', 'take'];
-  const data: any = {};
-  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+router.patch(
+  '/projects/:projectId/media/:assetId',
+  requireProjectAccess('EDITOR'),
+  validateAll({ params: projectIdAndAssetIdParams, body: schemas.updateMediaAsset }),
+  async (req: Request, res: Response) => {
+    // Verify asset belongs to this project
+    const existing = await db.mediaAsset.findFirst({
+      where: { id: req.params['assetId']!, bin: { projectId: req.params['projectId']! } },
+    });
+    if (!existing) throw new NotFoundError('Media asset');
 
-  const asset = await db.mediaAsset.update({ where: { id: req.params.assetId }, data });
-  res.json({ asset });
-});
+    const asset = await db.mediaAsset.update({
+      where: { id: req.params['assetId']! },
+      data: req.body,
+    });
+    res.json({ asset });
+  }
+);
+
+// POST /projects/:projectId/media/:assetId/move -- move asset to another bin
+router.post(
+  '/projects/:projectId/media/:assetId/move',
+  requireProjectAccess('EDITOR'),
+  validateAll({ params: projectIdAndAssetIdParams, body: schemas.moveAsset }),
+  async (req: Request, res: Response) => {
+    const { binId } = req.body;
+
+    // Verify target bin belongs to this project
+    const bin = await db.bin.findFirst({
+      where: { id: binId, projectId: req.params['projectId']! },
+    });
+    if (!bin) throw new NotFoundError('Target bin');
+
+    const asset = await db.mediaAsset.update({
+      where: { id: req.params['assetId']! },
+      data: { binId },
+    });
+    res.json({ asset });
+  }
+);
 
 // DELETE /projects/:projectId/media/:assetId
-router.delete('/projects/:projectId/media/:assetId', requireProjectAccess('EDITOR'), async (req: Request, res: Response) => {
-  await mediaService.deleteAsset(req.params.assetId);
-  res.status(204).send();
-});
+router.delete(
+  '/projects/:projectId/media/:assetId',
+  requireProjectAccess('EDITOR'),
+  validate(projectIdAndAssetIdParams, 'params'),
+  async (req: Request, res: Response) => {
+    // Verify asset belongs to this project
+    const existing = await db.mediaAsset.findFirst({
+      where: { id: req.params['assetId']!, bin: { projectId: req.params['projectId']! } },
+    });
+    if (!existing) throw new NotFoundError('Media asset');
+
+    // Check if asset is used in any clips
+    const clipCount = await db.clip.count({ where: { mediaAssetId: req.params['assetId']! } });
+    if (clipCount > 0 && req.query['force'] !== 'true') {
+      throw new BadRequestError(
+        `Asset is used in ${clipCount} clip(s). Use ?force=true to delete anyway.`
+      );
+    }
+
+    await mediaService.deleteAsset(req.params['assetId']!);
+    res.status(204).send();
+  }
+);
 
 // GET /projects/:projectId/media/:assetId/waveform
-router.get('/projects/:projectId/media/:assetId/waveform', requireProjectAccess('VIEWER'), async (req: Request, res: Response) => {
-  const waveform = await mediaService.getWaveform(req.params.assetId);
-  res.json({ waveform });
-});
+router.get(
+  '/projects/:projectId/media/:assetId/waveform',
+  requireProjectAccess('VIEWER'),
+  validate(projectIdAndAssetIdParams, 'params'),
+  async (req: Request, res: Response) => {
+    const waveform = await mediaService.getWaveform(req.params['assetId']!);
+    res.json({ waveform });
+  }
+);
+
+// GET /projects/:projectId/media/:assetId/download
+router.get(
+  '/projects/:projectId/media/:assetId/download',
+  requireProjectAccess('VIEWER'),
+  validate(projectIdAndAssetIdParams, 'params'),
+  async (req: Request, res: Response) => {
+    const useProxy = req.query['proxy'] === 'true';
+    const downloadUrl = await mediaService.getDownloadUrl(req.params['assetId']!, useProxy);
+    res.json({ downloadUrl });
+  }
+);
 
 export default router;

@@ -97,7 +97,7 @@ function multiplyHomography(a: HomographyMatrix, b: HomographyMatrix): Homograph
   const r: number[] = new Array(9);
   for (let i = 0; i < 3; i++) {
     for (let j = 0; j < 3; j++) {
-      r[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
+      r[i * 3 + j] = a[i * 3]! * b[j]! + a[i * 3 + 1]! * b[3 + j]! + a[i * 3 + 2]! * b[6 + j]!;
     }
   }
   return r as HomographyMatrix;

@@ -13,7 +13,7 @@ import type { NDIConfig } from './types';
 
 interface GrandioseModule {
   find(opts?: { showLocalSources?: boolean; timeout?: number }): Promise<NDISource[]>;
-  receive(opts: { source: NDISource }): Promise<NDIReceiver>;
+  receive(opts: { source: NDISource }): Promise<NDIReceiverInterface>;
   send?(opts: { name: string; groups?: string; clockVideo?: boolean; clockAudio?: boolean }): NDISenderHandle;
 }
 
@@ -22,7 +22,7 @@ interface NDISource {
   urlAddress: string;
 }
 
-interface NDIReceiver {
+interface NDIReceiverInterface {
   video(): Promise<NDIVideoFrame>;
   audio(): Promise<NDIAudioFrame>;
   metadata(): Promise<{ data: string }>;
@@ -191,7 +191,7 @@ export class NDISender {
  */
 export class NDIDiscovery {
   private grandiose: GrandioseModule | null = null;
-  private receiver: NDIReceiver | null = null;
+  private receiver: NDIReceiverInterface | null = null;
 
   async loadModule(): Promise<boolean> {
     try {

@@ -23,6 +23,7 @@ import type {
   SessionInfo,
   TempMusicOptions,
 } from '../IProToolsAdapter';
+import { AdapterError } from '../AdapterError';
 import {
   SharedJobHistory,
   type JobHistoryEntry,
@@ -108,7 +109,12 @@ export class ProToolsBridge implements IProToolsAdapter {
   /** Retrieve metadata for the currently open session. */
   async getSessionInfo(): Promise<SessionInfo> {
     if (!this.currentSession) {
-      throw new Error('No Pro Tools session is currently open.');
+      throw new AdapterError({
+        adapterName: 'pro-tools',
+        code: 'CONFLICT',
+        message: 'No Pro Tools session is currently open.',
+        recoverable: false,
+      });
     }
     return { ...this.currentSession };
   }
@@ -361,7 +367,12 @@ export class ProToolsBridge implements IProToolsAdapter {
 
   private ensureSession(): void {
     if (!this.currentSession) {
-      throw new Error('No Pro Tools session is currently open.');
+      throw new AdapterError({
+        adapterName: 'pro-tools',
+        code: 'CONFLICT',
+        message: 'No Pro Tools session is currently open.',
+        recoverable: false,
+      });
     }
   }
 

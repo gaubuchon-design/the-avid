@@ -25,7 +25,7 @@ export function applyLumaKey(
 
   for (let i = 0; i < data.length; i += 4) {
     // ITU-R BT.709 luminance
-    const luma = (0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]) / 255;
+    const luma = (0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!) / 255;
     const l = invert ? 1 - luma : luma;
 
     if (l < innerThreshold) {
@@ -34,7 +34,7 @@ export function applyLumaKey(
     } else if (l < outerThreshold) {
       // Soft edge — partial transparency
       const alpha = (l - innerThreshold) / range;
-      data[i + 3] = Math.round(data[i + 3] * alpha);
+      data[i + 3] = Math.round(data[i + 3]! * alpha);
     }
     // else: fully opaque, leave alpha unchanged
   }

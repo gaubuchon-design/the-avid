@@ -417,7 +417,7 @@ export namespace ProjectManifest {
       totalAssetSizeBytes: totalAssetSize,
       totalDurationSeconds: totalDuration,
       latestVersion: manifest.versionChain.length > 0
-        ? manifest.versionChain[manifest.versionChain.length - 1].name
+        ? manifest.versionChain[manifest.versionChain.length - 1]!.name
         : null,
       generatedAt: manifest.generatedAt,
     };

@@ -1,30 +1,93 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": ["**/.env.*local"],
+  "globalDependencies": [
+    "**/.env.*local",
+    "tsconfig.base.json"
+  ],
+  "globalPassThroughEnv": [
+    "NODE_ENV",
+    "CI",
+    "GITHUB_ACTIONS",
+    "VERCEL",
+    "npm_lifecycle_event"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "out/**", "build/**"]
+      "inputs": [
+        "src/**",
+        "tsconfig.json",
+        "package.json",
+        "vite.config.*",
+        "electron.vite.config.*"
+      ],
+      "outputs": ["dist/**", ".next/**", "out/**", "build/**"],
+      "env": ["NODE_ENV"]
     },
     "dev": {
+      "dependsOn": ["^build"],
       "cache": false,
-      "persistent": true,
-      "dependsOn": ["^build"]
+      "persistent": true
     },
     "lint": {
       "dependsOn": ["^build"],
+      "inputs": [
+        "src/**",
+        ".eslintrc*",
+        ".eslintignore",
+        "package.json"
+      ],
       "outputs": []
+    },
+    "lint:fix": {
+      "dependsOn": ["^build"],
+      "cache": false
     },
     "type-check": {
       "dependsOn": ["^build"],
+      "inputs": [
+        "src/**",
+        "tsconfig.json",
+        "../../tsconfig.base.json",
+        "package.json"
+      ],
       "outputs": []
     },
     "test": {
       "dependsOn": ["^build"],
+      "inputs": [
+        "src/**",
+        "vitest.config.*",
+        "package.json"
+      ],
       "outputs": ["coverage/**"],
-      "cache": false
+      "env": ["NODE_ENV", "DATABASE_URL", "CI"]
+    },
+    "test:watch": {
+      "cache": false,
+      "persistent": true
+    },
+    "test:coverage": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "src/**",
+        "vitest.config.*",
+        "package.json"
+      ],
+      "outputs": ["coverage/**"],
+      "env": ["NODE_ENV", "DATABASE_URL", "CI"]
     },
     "clean": {
+      "cache": false
+    },
+    "db:generate": {
+      "inputs": ["prisma/schema.prisma"],
+      "cache": false
+    },
+    "db:migrate": {
+      "cache": false
+    },
+    "db:seed": {
       "cache": false
     }
   }

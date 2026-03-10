@@ -107,6 +107,7 @@ export type {
   AnalyticsEntry,
   AnalyticsEventType,
   AnalyticsFilter,
+  SessionSummary,
 } from './logging/AnalyticsLogger';
 
 // ---------------------------------------------------------------------------

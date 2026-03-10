@@ -2,7 +2,7 @@
 //  THE AVID — Effects, Titles & Compositing Panel
 // ═══════════════════════════════════════════════════════════════════════════
 
-import React, { useMemo, useCallback, useRef, useState } from 'react';
+import React, { useMemo, useCallback, useRef, useState, memo } from 'react';
 import { useEffectsStore } from '../../store/effects.store';
 import { useEditorStore } from '../../store/editor.store';
 import { effectsEngine, EffectDefinition, EffectInstance, EffectParamDef } from '../../engine/EffectsEngine';
@@ -336,7 +336,7 @@ const S = {
 
 // ─── Effect Browser ────────────────────────────────────────────────────────
 
-function EffectBrowser() {
+const EffectBrowser = memo(function EffectBrowser() {
   const {
     searchQuery,
     setSearch,
@@ -377,7 +377,7 @@ function EffectBrowser() {
   );
 
   return (
-    <div style={S.browser}>
+    <div style={S.browser} role="search" aria-label="Effects browser">
       <div style={S.browserHeader}>
         <input
           type="text"
@@ -385,12 +385,14 @@ function EffectBrowser() {
           value={searchQuery}
           onChange={(e) => setSearch(e.target.value)}
           style={S.searchInput}
+          aria-label="Search effects"
         />
       </div>
-      <div style={S.filterPills}>
+      <div style={S.filterPills} role="group" aria-label="Category filters">
         <button
           style={S.pill(categoryFilter === null)}
           onClick={() => setCategoryFilter(null)}
+          aria-pressed={categoryFilter === null}
         >
           All
         </button>
@@ -399,18 +401,23 @@ function EffectBrowser() {
             key={cat}
             style={S.pill(categoryFilter === cat)}
             onClick={() => setCategoryFilter(categoryFilter === cat ? null : cat)}
+            aria-pressed={categoryFilter === cat}
           >
             {cat}
           </button>
         ))}
       </div>
-      <div style={S.effectList}>
+      <div style={S.effectList} role="listbox" aria-label="Available effects">
         {filtered.map((def) => (
           <div
             key={def.id}
             style={S.effectItem(false)}
             onDoubleClick={() => handleDoubleClick(def.id)}
             title={selectedClipId ? 'Double-click to apply' : 'Select a clip first'}
+            role="option"
+            aria-selected={false}
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleDoubleClick(def.id); }}
           >
             <span style={S.effectName}>{def.name}</span>
             <span style={S.catBadge(def.category)}>{def.category}</span>
@@ -418,20 +425,22 @@ function EffectBrowser() {
               style={S.starBtn(favorites.includes(def.id))}
               onClick={(e) => { e.stopPropagation(); toggleFavorite(def.id); }}
               title={favorites.includes(def.id) ? 'Remove from favorites' : 'Add to favorites'}
+              aria-label={favorites.includes(def.id) ? `Remove ${def.name} from favorites` : `Add ${def.name} to favorites`}
+              aria-pressed={favorites.includes(def.id)}
             >
               {favorites.includes(def.id) ? '\u2605' : '\u2606'}
             </button>
           </div>
         ))}
         {filtered.length === 0 && (
-          <div style={{ padding: '12px 8px', fontSize: '10px', color: 'var(--text-muted)', textAlign: 'center' }}>
+          <div style={{ padding: '12px 8px', fontSize: '10px', color: 'var(--text-muted)', textAlign: 'center' }} role="status">
             No effects found
           </div>
         )}
       </div>
     </div>
   );
-}
+});
 
 // ─── Applied Effects List ──────────────────────────────────────────────────
 
@@ -461,7 +470,7 @@ function AppliedEffectsList() {
     if (selectedClipId) {
       const newOrder = effects.map((e) => e.id);
       const [moved] = newOrder.splice(dragIdx.current, 1);
-      newOrder.splice(idx, 0, moved);
+      newOrder.splice(idx, 0, moved!);
       reorderEffects(selectedClipId, newOrder);
       dragIdx.current = idx;
     }
@@ -520,7 +529,7 @@ function AppliedEffectsList() {
 
 // ─── Parameter Controls ────────────────────────────────────────────────────
 
-function NumberParam({
+const NumberParam = memo(function NumberParam({
   paramDef,
   value,
   onChange,
@@ -533,6 +542,7 @@ function NumberParam({
   hasKeyframe: boolean;
   onToggleKeyframe: () => void;
 }) {
+  const displayValue = typeof value === 'number' ? value.toFixed(paramDef.step && paramDef.step < 1 ? 1 : 0) : value;
   return (
     <div style={S.paramRow}>
       <span style={S.paramLabel}>{paramDef.name}</span>
@@ -545,23 +555,27 @@ function NumberParam({
         value={value}
         onChange={(e) => onChange(+e.target.value)}
         style={S.paramSlider}
+        aria-label={paramDef.name}
+        aria-valuetext={`${displayValue}${paramDef.unit ?? ''}`}
       />
-      <span style={S.paramValue}>
-        {typeof value === 'number' ? value.toFixed(paramDef.step && paramDef.step < 1 ? 1 : 0) : value}
+      <span style={S.paramValue} aria-hidden="true">
+        {displayValue}
         {paramDef.unit ? paramDef.unit : ''}
       </span>
       <button
         style={S.keyframeDiamond(hasKeyframe)}
         onClick={onToggleKeyframe}
         title={hasKeyframe ? 'Remove keyframe' : 'Add keyframe'}
+        aria-label={`${paramDef.name} keyframe: ${hasKeyframe ? 'active' : 'none'}`}
+        aria-pressed={hasKeyframe}
       >
         {hasKeyframe ? '\u25C6' : '\u25C7'}
       </button>
     </div>
   );
-}
+});
 
-function ColorParam({
+const ColorParam = memo(function ColorParam({
   paramDef,
   value,
   onChange,
@@ -582,20 +596,23 @@ function ColorParam({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         style={S.colorInput}
+        aria-label={paramDef.name}
       />
-      <span style={S.paramValue}>{value}</span>
+      <span style={S.paramValue} aria-hidden="true">{value}</span>
       <button
         style={S.keyframeDiamond(hasKeyframe)}
         onClick={onToggleKeyframe}
         title={hasKeyframe ? 'Remove keyframe' : 'Add keyframe'}
+        aria-label={`${paramDef.name} keyframe: ${hasKeyframe ? 'active' : 'none'}`}
+        aria-pressed={hasKeyframe}
       >
         {hasKeyframe ? '\u25C6' : '\u25C7'}
       </button>
     </div>
   );
-}
+});
 
-function BooleanParam({
+const BooleanParam = memo(function BooleanParam({
   paramDef,
   value,
   onChange,
@@ -614,22 +631,29 @@ function BooleanParam({
       <div
         style={S.toggleSwitch(value)}
         onClick={() => onChange(!value)}
+        role="switch"
+        aria-checked={value}
+        aria-label={paramDef.name}
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onChange(!value); } }}
       >
         <div style={S.toggleDot(value)} />
       </div>
-      <span style={{ ...S.paramValue, flex: 1 }}>{value ? 'On' : 'Off'}</span>
+      <span style={{ ...S.paramValue, flex: 1 }} aria-hidden="true">{value ? 'On' : 'Off'}</span>
       <button
         style={S.keyframeDiamond(hasKeyframe)}
         onClick={onToggleKeyframe}
         title={hasKeyframe ? 'Remove keyframe' : 'Add keyframe'}
+        aria-label={`${paramDef.name} keyframe: ${hasKeyframe ? 'active' : 'none'}`}
+        aria-pressed={hasKeyframe}
       >
         {hasKeyframe ? '\u25C6' : '\u25C7'}
       </button>
     </div>
   );
-}
+});
 
-function SelectParam({
+const SelectParam = memo(function SelectParam({
   paramDef,
   value,
   onChange,
@@ -648,6 +672,7 @@ function SelectParam({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        aria-label={paramDef.name}
         style={{
           flex: 1,
           background: 'var(--bg-void)',
@@ -668,12 +693,14 @@ function SelectParam({
         style={S.keyframeDiamond(hasKeyframe)}
         onClick={onToggleKeyframe}
         title={hasKeyframe ? 'Remove keyframe' : 'Add keyframe'}
+        aria-label={`${paramDef.name} keyframe: ${hasKeyframe ? 'active' : 'none'}`}
+        aria-pressed={hasKeyframe}
       >
         {hasKeyframe ? '\u25C6' : '\u25C7'}
       </button>
     </div>
   );
-}
+});
 
 function ParameterControls() {
   const {
@@ -810,12 +837,12 @@ function KeyframeBar() {
 
   const goPrev = () => {
     const prev = sortedFrames.filter((f) => f < currentFrame);
-    if (prev.length > 0) setCurrentFrame(prev[prev.length - 1]);
+    if (prev.length > 0) setCurrentFrame(prev[prev.length - 1]!);
   };
 
   const goNext = () => {
     const next = sortedFrames.filter((f) => f > currentFrame);
-    if (next.length > 0) setCurrentFrame(next[0]);
+    if (next.length > 0) setCurrentFrame(next[0]!);
   };
 
   return (
@@ -870,7 +897,7 @@ export function EffectsPanel() {
   // Keep effects store in sync with editor selection
   React.useEffect(() => {
     if (editorSelectedClipId !== selectedClipId) {
-      selectClip(editorSelectedClipId);
+      selectClip(editorSelectedClipId!);
     }
   }, [editorSelectedClipId, selectedClipId, selectClip]);
 
@@ -881,7 +908,7 @@ export function EffectsPanel() {
 
   if (!clip) {
     return (
-      <div style={S.root}>
+      <div style={S.root} role="region" aria-label="Effects Panel">
         <EffectBrowser />
         <div style={S.controls}>
           <div style={S.controlsHeader}>
@@ -896,7 +923,7 @@ export function EffectsPanel() {
   }
 
   return (
-    <div style={S.root}>
+    <div style={S.root} role="region" aria-label="Effects Panel">
       <EffectBrowser />
       <div style={S.controls}>
         <div style={S.controlsHeader}>

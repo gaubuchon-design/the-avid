@@ -6,7 +6,7 @@
 function hexToRgb(hex: string): [number, number, number] {
   const m = hex.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
   if (!m) return [0, 0, 0];
-  return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+  return [parseInt(m[1]!, 16), parseInt(m[2]!, 16), parseInt(m[3]!, 16)];
 }
 
 /**
@@ -26,8 +26,8 @@ export function applySolidColor(
   const blend = opacity / 100;
 
   for (let i = 0; i < data.length; i += 4) {
-    data[i] = Math.round(data[i] * (1 - blend) + r * blend);
-    data[i + 1] = Math.round(data[i + 1] * (1 - blend) + g * blend);
-    data[i + 2] = Math.round(data[i + 2] * (1 - blend) + b * blend);
+    data[i] = Math.round(data[i]! * (1 - blend) + r * blend);
+    data[i + 1] = Math.round(data[i + 1]! * (1 - blend) + g * blend);
+    data[i + 2] = Math.round(data[i + 2]! * (1 - blend) + b * blend);
   }
 }

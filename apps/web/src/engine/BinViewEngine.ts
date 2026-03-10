@@ -458,17 +458,17 @@ export class BinViewEngine {
     state.columns.splice(idx, 1);
 
     // Remove sort references.
-    state.sort.columns = state.sort.columns.filter((s) => s.field !== col.field);
+    state.sort.columns = state.sort.columns.filter((s) => s.field !== col!.field!);
 
     // Remove sift references.
-    state.sift.criteria = state.sift.criteria.filter((s) => s.column !== col.field);
+    state.sift.criteria = state.sift.criteria.filter((s) => s.column !== col!.field!);
     if (state.sift.criteria.length === 0) {
       state.sift.active = false;
     }
 
     // Remove custom column values for this field.
     for (const [, assetMap] of this.customColumnValues) {
-      assetMap.delete(col.field);
+      assetMap.delete(col!.field!);
     }
 
     this.notify();
@@ -839,7 +839,7 @@ export class BinViewEngine {
       id,
       name: name ?? `SuperBin ${this.superBins.size + 1}`,
       binIds: [...binIds],
-      activeBinId: binIds[0],
+      activeBinId: binIds[0]!,
     };
 
     this.superBins.set(id, sb);

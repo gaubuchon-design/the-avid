@@ -1,3 +1,7 @@
+import { createLogger } from './lib/logger';
+
+const logger = createLogger('PWA');
+
 /**
  * PWA registration and offline support.
  */
@@ -6,20 +10,20 @@ export function registerServiceWorker(): void {
     window.addEventListener('load', async () => {
       try {
         const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
-        console.log('[PWA] Service Worker registered:', registration.scope);
+        logger.info('Service Worker registered', { scope: registration.scope });
 
         registration.addEventListener('updatefound', () => {
           const newWorker = registration.installing;
           if (newWorker) {
             newWorker.addEventListener('statechange', () => {
               if (newWorker.state === 'activated') {
-                console.log('[PWA] New content available, refresh to update');
+                logger.info('New content available, refresh to update');
               }
             });
           }
         });
       } catch (err) {
-        console.warn('[PWA] Service Worker registration failed:', err);
+        logger.warn('Service Worker registration failed', { error: String(err) });
       }
     });
   }

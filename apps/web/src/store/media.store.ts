@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -199,58 +200,58 @@ interface MediaActions {
   // Reset
   resetExportState: () => void;
   resetRelinkState: () => void;
+  resetStore: () => void;
 }
+
+// ─── Initial State ──────────────────────────────────────────────────────────
+
+const INITIAL_MEDIA_STATE: MediaState = {
+  aafExportStatus: 'idle',
+  aafExportFormat: 'aaf',
+  aafExportProgress: 0,
+  aafExportError: null,
+  aafIncludeMarkers: true,
+  aafIncludeEffects: true,
+  aafEmbedMedia: false,
+  interchangeFormat: 'edl',
+  interchangeTimecodeMode: 'non-drop',
+  interchangeExportResult: null,
+  relinkStatus: 'idle',
+  relinkProposals: [],
+  relinkProgress: 0,
+  relinkError: null,
+  offlineAssetCount: 0,
+  multiCamGroups: [],
+  activeMultiCamGroupId: null,
+  multiCamViewMode: 'grid',
+  multiCamAudioFollowsVideo: true,
+  stems: [],
+  stemExportStatus: 'idle',
+  stemExportProgress: 0,
+  stemPresetName: 'Film/TV Standard',
+  stemFormat: 'wav',
+  stemBitDepth: 24,
+  stemSampleRate: 48000,
+  binLocks: [],
+  isComparing: false,
+  comparisonResult: null,
+  frameRateWarnings: [],
+  showFrameRateIndicators: true,
+  showExportDialog: false,
+  showRelinkDialog: false,
+  showMultiCamViewer: false,
+  showStemExportDialog: false,
+  showSequenceCompare: false,
+  activeExportTab: 'aaf',
+};
 
 // ─── Store ──────────────────────────────────────────────────────────────────
 
 export const useMediaStore = create<MediaState & MediaActions>()(
-  immer((set) => ({
-    // Initial state
-    aafExportStatus: 'idle',
-    aafExportFormat: 'aaf',
-    aafExportProgress: 0,
-    aafExportError: null,
-    aafIncludeMarkers: true,
-    aafIncludeEffects: true,
-    aafEmbedMedia: false,
-
-    interchangeFormat: 'edl',
-    interchangeTimecodeMode: 'non-drop',
-    interchangeExportResult: null,
-
-    relinkStatus: 'idle',
-    relinkProposals: [],
-    relinkProgress: 0,
-    relinkError: null,
-    offlineAssetCount: 0,
-
-    multiCamGroups: [],
-    activeMultiCamGroupId: null,
-    multiCamViewMode: 'grid',
-    multiCamAudioFollowsVideo: true,
-
-    stems: [],
-    stemExportStatus: 'idle',
-    stemExportProgress: 0,
-    stemPresetName: 'Film/TV Standard',
-    stemFormat: 'wav',
-    stemBitDepth: 24,
-    stemSampleRate: 48000,
-
-    binLocks: [],
-
-    isComparing: false,
-    comparisonResult: null,
-
-    frameRateWarnings: [],
-    showFrameRateIndicators: true,
-
-    showExportDialog: false,
-    showRelinkDialog: false,
-    showMultiCamViewer: false,
-    showStemExportDialog: false,
-    showSequenceCompare: false,
-    activeExportTab: 'aaf',
+  devtools(
+    immer((set) => ({
+      // Initial state
+      ...INITIAL_MEDIA_STATE,
 
     // Actions - AAF
     setAAFExportFormat: (format) => set((s) => { s.aafExportFormat = format; }),
@@ -355,6 +356,48 @@ export const useMediaStore = create<MediaState & MediaActions>()(
       s.relinkProposals = [];
       s.relinkProgress = 0;
       s.relinkError = null;
-    }),
+    }, false, 'media/resetRelinkState'),
+
+    resetStore: () => set(() => ({
+      ...INITIAL_MEDIA_STATE,
+    }), true, 'media/resetStore'),
   })),
+  { name: 'MediaStore', enabled: process.env["NODE_ENV"] === 'development' },
+  )
 );
+
+// ─── Named Selectors ────────────────────────────────────────────────────────
+
+type MediaStoreState = MediaState & MediaActions;
+
+export const selectAAFExportStatus = (state: MediaStoreState) => state.aafExportStatus;
+export const selectAAFExportFormat = (state: MediaStoreState) => state.aafExportFormat;
+export const selectAAFExportProgress = (state: MediaStoreState) => state.aafExportProgress;
+export const selectAAFExportError = (state: MediaStoreState) => state.aafExportError;
+export const selectRelinkStatus = (state: MediaStoreState) => state.relinkStatus;
+export const selectRelinkProposals = (state: MediaStoreState) => state.relinkProposals;
+export const selectRelinkProgress = (state: MediaStoreState) => state.relinkProgress;
+export const selectRelinkError = (state: MediaStoreState) => state.relinkError;
+export const selectOfflineAssetCount = (state: MediaStoreState) => state.offlineAssetCount;
+export const selectMultiCamGroups = (state: MediaStoreState) => state.multiCamGroups;
+export const selectActiveMultiCamGroupId = (state: MediaStoreState) => state.activeMultiCamGroupId;
+export const selectMultiCamViewMode = (state: MediaStoreState) => state.multiCamViewMode;
+export const selectStems = (state: MediaStoreState) => state.stems;
+export const selectStemExportStatus = (state: MediaStoreState) => state.stemExportStatus;
+export const selectStemExportProgress = (state: MediaStoreState) => state.stemExportProgress;
+export const selectBinLocks = (state: MediaStoreState) => state.binLocks;
+export const selectIsComparing = (state: MediaStoreState) => state.isComparing;
+export const selectComparisonResult = (state: MediaStoreState) => state.comparisonResult;
+export const selectFrameRateWarnings = (state: MediaStoreState) => state.frameRateWarnings;
+export const selectShowExportDialog = (state: MediaStoreState) => state.showExportDialog;
+export const selectActiveExportTab = (state: MediaStoreState) => state.activeExportTab;
+export const selectMediaIsExporting = (state: MediaStoreState) =>
+  state.aafExportStatus === 'exporting' || state.stemExportStatus === 'exporting';
+export const selectHasRelinkErrors = (state: MediaStoreState) =>
+  state.relinkError !== null || state.relinkStatus === 'error';
+export const selectConfirmedRelinkCount = (state: MediaStoreState) =>
+  state.relinkProposals.filter((p) => p.confirmed).length;
+export const selectActiveMultiCamGroup = (state: MediaStoreState) =>
+  state.multiCamGroups.find((g) => g.id === state.activeMultiCamGroupId) ?? null;
+export const selectEnabledStems = (state: MediaStoreState) =>
+  state.stems.filter((s) => s.enabled);

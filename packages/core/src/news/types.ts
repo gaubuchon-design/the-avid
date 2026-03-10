@@ -42,6 +42,8 @@ export interface NRCSConnection {
   lastError?: string;
   mosId?: string;
   ncsId?: string;
+  serverName?: string;
+  lastHeartbeat?: string;
 }
 
 // ─── Rundown Event ─────────────────────────────────────────────────────────
@@ -146,6 +148,7 @@ export interface PlayoutDestination {
   protocol: PlayoutTransferProtocol;
   credentials?: NRCSCredentials;
   isDefault: boolean;
+  isOnline?: boolean;
 }
 
 export type PlayoutJobStatus =
@@ -154,15 +157,17 @@ export type PlayoutJobStatus =
   | 'TRANSFERRING'
   | 'VERIFYING'
   | 'COMPLETED'
-  | 'FAILED';
+  | 'FAILED'
+  | 'QUEUED';
 
 export interface PlayoutJob {
   id: string;
   storyId: string;
   destinationId: string;
+  destinationName?: string;
   status: PlayoutJobStatus;
   progress: number;
-  format: PlayoutExportFormat;
+  format?: PlayoutExportFormat;
   startedAt?: string;
   completedAt?: string;
   error?: string;

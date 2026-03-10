@@ -206,6 +206,9 @@ export class KnowledgeDB {
   /** The underlying `better-sqlite3` database handle. */
   readonly db: Database.Database;
 
+  /** Whether the database connection has been closed. */
+  private _closed = false;
+
   // ── Prepared statement cache ────────────────────────────────────────────
 
   // Assets
@@ -254,6 +257,16 @@ export class KnowledgeDB {
   private readonly stmtInsertShardMeta: Database.Statement;
   private readonly stmtUpdateShardMeta: Database.Statement;
 
+  // Table counts (prepared with hard-coded table names for SQL injection safety)
+  private readonly stmtCountAssets: Database.Statement;
+  private readonly stmtCountTranscripts: Database.Statement;
+  private readonly stmtCountVisionEvents: Database.Statement;
+  private readonly stmtCountEmbeddings: Database.Statement;
+  private readonly stmtCountMarkers: Database.Statement;
+  private readonly stmtCountPlaybooks: Database.Statement;
+  private readonly stmtCountToolTraces: Database.Statement;
+  private readonly stmtCountPublishVariants: Database.Statement;
+
   /**
    * Open (or create) a Knowledge DB at the given path and run
    * outstanding migrations.
@@ -263,10 +276,12 @@ export class KnowledgeDB {
   constructor(dbPath: string) {
     this.db = new Database(dbPath);
 
-    // Performance pragmas
+    // Performance and reliability pragmas
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.db.pragma('synchronous = NORMAL');
+    this.db.pragma('busy_timeout = 5000');
+    this.db.pragma('cache_size = -8000'); // 8 MB page cache
 
     // Run migrations
     migrate(this.db);
@@ -444,13 +459,40 @@ export class KnowledgeDB {
     this.stmtUpdateShardMeta = this.db.prepare(`
       UPDATE shard_meta SET checksum = @checksum WHERE shard_id = @shard_id
     `);
+
+    // Count statements — prepared with hard-coded table names
+    this.stmtCountAssets = this.db.prepare('SELECT COUNT(*) AS cnt FROM assets');
+    this.stmtCountTranscripts = this.db.prepare('SELECT COUNT(*) AS cnt FROM transcript_segments');
+    this.stmtCountVisionEvents = this.db.prepare('SELECT COUNT(*) AS cnt FROM vision_events');
+    this.stmtCountEmbeddings = this.db.prepare('SELECT COUNT(*) AS cnt FROM embedding_chunks');
+    this.stmtCountMarkers = this.db.prepare('SELECT COUNT(*) AS cnt FROM markers_notes');
+    this.stmtCountPlaybooks = this.db.prepare('SELECT COUNT(*) AS cnt FROM playbooks');
+    this.stmtCountToolTraces = this.db.prepare('SELECT COUNT(*) AS cnt FROM tool_traces');
+    this.stmtCountPublishVariants = this.db.prepare('SELECT COUNT(*) AS cnt FROM publish_variants');
   }
 
   // ── Close ───────────────────────────────────────────────────────────────
 
   /** Close the database connection and release all resources. */
   close(): void {
+    if (this._closed) return;
+    this._closed = true;
     this.db.close();
+  }
+
+  /** Whether the database connection has been closed. */
+  get isClosed(): boolean {
+    return this._closed;
+  }
+
+  /**
+   * Ensure the database is open before performing operations.
+   * @throws {Error} if the database has been closed.
+   */
+  private ensureOpen(): void {
+    if (this._closed) {
+      throw new Error('Database connection has been closed.');
+    }
   }
 
   // ── Assets ──────────────────────────────────────────────────────────────
@@ -462,6 +504,7 @@ export class KnowledgeDB {
    *   automatically converted to snake_case for SQL.
    */
   insertAsset(asset: AssetRow): void {
+    this.ensureOpen();
     const now = new Date().toISOString();
     this.stmtInsertAsset.run(
       camelToSnake({
@@ -479,6 +522,7 @@ export class KnowledgeDB {
    * @returns The asset row, or `undefined` if not found.
    */
   getAsset(id: string): AssetRow | undefined {
+    this.ensureOpen();
     const row = this.stmtGetAsset.get(id) as Record<string, unknown> | undefined;
     return row ? snakeToCamel<AssetRow>(row) : undefined;
   }
@@ -495,8 +539,20 @@ export class KnowledgeDB {
     return rows.map((r) => snakeToCamel<AssetRow>(r));
   }
 
+  /** Allow-listed column names for the assets table to prevent SQL injection. */
+  private static readonly ALLOWED_ASSET_COLUMNS: ReadonlySet<string> = new Set([
+    'name', 'type', 'shard_id', 'duration_ms', 'file_size',
+    'media_root', 'relative_path', 'format', 'codec',
+    'resolution_w', 'resolution_h', 'frame_rate', 'sample_rate', 'channels',
+    'checksum', 'approval_status', 'rights_json', 'tags_json',
+    'created_at', 'updated_at',
+  ]);
+
   /**
    * Update specific fields of an existing asset.
+   *
+   * Column names are validated against an allow-list to prevent SQL
+   * injection through dynamic field keys.
    *
    * @param id - The asset ID to update.
    * @param fields - Partial asset data with only the fields to change.
@@ -508,6 +564,10 @@ export class KnowledgeDB {
 
     for (const [key, value] of Object.entries(snakeFields)) {
       if (key === 'id') continue;
+      // Validate column name against allow-list to prevent SQL injection
+      if (!KnowledgeDB.ALLOWED_ASSET_COLUMNS.has(key)) {
+        continue; // Skip unknown column names silently
+      }
       setClauses.push(`${key} = ?`);
       values.push(value);
     }
@@ -793,25 +853,27 @@ export class KnowledgeDB {
   /**
    * Get row counts for every data table.
    *
+   * Uses prepared statements with hard-coded table names to prevent
+   * any possibility of SQL injection.
+   *
    * @returns An object with counts per table.
    */
   getStats(): DBStats {
-    const count = (table: string): number => {
-      const row = this.db
-        .prepare(`SELECT COUNT(*) AS cnt FROM ${table}`)
-        .get() as { cnt: number };
+    this.ensureOpen();
+    const getCount = (stmt: Database.Statement): number => {
+      const row = stmt.get() as { cnt: number };
       return row.cnt;
     };
 
     return {
-      assets: count('assets'),
-      transcriptSegments: count('transcript_segments'),
-      visionEvents: count('vision_events'),
-      embeddingChunks: count('embedding_chunks'),
-      markersNotes: count('markers_notes'),
-      playbooks: count('playbooks'),
-      toolTraces: count('tool_traces'),
-      publishVariants: count('publish_variants'),
+      assets: getCount(this.stmtCountAssets),
+      transcriptSegments: getCount(this.stmtCountTranscripts),
+      visionEvents: getCount(this.stmtCountVisionEvents),
+      embeddingChunks: getCount(this.stmtCountEmbeddings),
+      markersNotes: getCount(this.stmtCountMarkers),
+      playbooks: getCount(this.stmtCountPlaybooks),
+      toolTraces: getCount(this.stmtCountToolTraces),
+      publishVariants: getCount(this.stmtCountPublishVariants),
     };
   }
 
@@ -819,6 +881,7 @@ export class KnowledgeDB {
    * Run SQLite VACUUM to reclaim unused space and compact the database.
    */
   vacuum(): void {
+    this.ensureOpen();
     this.db.exec('VACUUM');
   }
 }

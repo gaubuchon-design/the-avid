@@ -118,6 +118,12 @@ export class BruteForceIndex implements IANNIndex {
 
   /** @inheritdoc */
   add(id: string, vector: number[]): void {
+    if (!id || typeof id !== 'string') {
+      throw new Error('Vector ID must be a non-empty string');
+    }
+    if (vector.length === 0) {
+      throw new Error('Vector must have at least one dimension');
+    }
     if (this.dimensions === null) {
       this.dimensions = vector.length;
     } else if (vector.length !== this.dimensions) {
@@ -131,9 +137,15 @@ export class BruteForceIndex implements IANNIndex {
     this.norms.set(id, computeNorm(f32));
   }
 
-  /** @inheritdoc */
+  /**
+   * Search using a min-heap to efficiently maintain top-K results without
+   * sorting the entire result set.
+   *
+   * @inheritdoc
+   */
   search(query: number[], topK: number): ANNSearchResult[] {
     if (this.vectors.size === 0) return [];
+    if (topK <= 0) return [];
 
     const qf32 = new Float32Array(query);
     const qNorm = computeNorm(qf32);
@@ -143,7 +155,9 @@ export class BruteForceIndex implements IANNIndex {
       return [];
     }
 
-    const results: ANNSearchResult[] = [];
+    // Use a simple array-based min-heap for efficient top-K tracking.
+    // For small K relative to N this avoids the O(N log N) full sort.
+    const heap: ANNSearchResult[] = [];
 
     for (const [id, vec] of this.vectors.entries()) {
       const vNorm = this.norms.get(id)!;
@@ -151,12 +165,44 @@ export class BruteForceIndex implements IANNIndex {
 
       const dot = dotProduct(qf32, vec);
       const score = dot / (qNorm * vNorm);
-      results.push({ id, score });
+
+      if (heap.length < topK) {
+        heap.push({ id, score });
+        // Bubble up to maintain min-heap (smallest score at index 0)
+        heapBubbleUp(heap);
+      } else if (heap.length > 0 && score > heap[0]!.score) {
+        // Replace the smallest element and sift down
+        heap[0] = { id, score };
+        heapSiftDown(heap);
+      }
     }
 
-    // Sort descending by score and take topK.
-    results.sort((a, b) => b.score - a.score);
-    return results.slice(0, topK);
+    // Extract results sorted descending by score
+    const results: ANNSearchResult[] = [];
+    while (heap.length > 0) {
+      results.push(heap[0]!);
+      // Move last element to root and sift down
+      const last = heap.pop()!;
+      if (heap.length > 0) {
+        heap[0] = last;
+        heapSiftDown(heap);
+      }
+    }
+
+    // Results were extracted in ascending order from the min-heap, so reverse
+    results.reverse();
+    return results;
+  }
+
+  /**
+   * Add multiple vectors in a single call.
+   *
+   * @param entries - Array of { id, vector } pairs.
+   */
+  addBatch(entries: Array<{ id: string; vector: number[] }>): void {
+    for (const entry of entries) {
+      this.add(entry.id, entry.vector);
+    }
   }
 
   /** @inheritdoc */
@@ -220,7 +266,8 @@ export class BruteForceIndex implements IANNIndex {
 function computeNorm(v: Float32Array): number {
   let sum = 0;
   for (let i = 0; i < v.length; i++) {
-    sum += v[i] * v[i];
+    const val = v[i]!;
+    sum += val * val;
   }
   return Math.sqrt(sum);
 }
@@ -236,7 +283,57 @@ function dotProduct(a: Float32Array, b: Float32Array): number {
   let sum = 0;
   const len = Math.min(a.length, b.length);
   for (let i = 0; i < len; i++) {
-    sum += a[i] * b[i];
+    sum += a[i]! * b[i]!;
   }
   return sum;
+}
+
+// ─── Min-Heap Helpers (by score, smallest at root) ──────────────────────────
+
+/**
+ * Bubble up the last element in a min-heap to restore heap property.
+ */
+function heapBubbleUp(heap: ANNSearchResult[]): void {
+  let idx = heap.length - 1;
+  while (idx > 0) {
+    const parent = Math.floor((idx - 1) / 2);
+    if (heap[idx]!.score < heap[parent]!.score) {
+      const tmp = heap[idx]!;
+      heap[idx] = heap[parent]!;
+      heap[parent] = tmp;
+      idx = parent;
+    } else {
+      break;
+    }
+  }
+}
+
+/**
+ * Sift down the root element in a min-heap to restore heap property.
+ */
+function heapSiftDown(heap: ANNSearchResult[]): void {
+  let idx = 0;
+  const len = heap.length;
+
+  while (true) {
+    const left = 2 * idx + 1;
+    const right = 2 * idx + 2;
+    let smallest = idx;
+
+    if (left < len && heap[left]!.score < heap[smallest]!.score) {
+      smallest = left;
+    }
+    if (right < len && heap[right]!.score < heap[smallest]!.score) {
+      smallest = right;
+    }
+
+    if (smallest !== idx) {
+      const tmp = heap[idx]!;
+      heap[idx] = heap[smallest]!;
+      heap[smallest] = tmp;
+      idx = smallest;
+    } else {
+      break;
+    }
+  }
 }

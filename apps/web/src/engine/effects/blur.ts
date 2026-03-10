@@ -55,53 +55,53 @@ function boxBlurH(
     const lv_idx = (y * w + w - 1) * 4;
     const lv = [src[lv_idx], src[lv_idx + 1], src[lv_idx + 2], src[lv_idx + 3]];
 
-    const val = [fv[0] * (r + 1), fv[1] * (r + 1), fv[2] * (r + 1), fv[3] * (r + 1)];
+    const val = [fv[0]! * (r + 1), fv[1]! * (r + 1), fv[2]! * (r + 1), fv[3]! * (r + 1)];
 
     for (let j = 0; j < r; j++) {
       const idx = Math.min(j, w - 1) * 4 + y * w * 4;
-      val[0] += src[idx];
-      val[1] += src[idx + 1];
-      val[2] += src[idx + 2];
-      val[3] += src[idx + 3];
+      val[0]! += src[idx]!;
+      val[1]! += src[idx + 1]!;
+      val[2]! += src[idx + 2]!;
+      val[3]! += src[idx + 3]!;
     }
 
     for (let j = 0; j <= r; j++) {
       const idx = Math.min(j + r, w - 1) * 4 + y * w * 4;
-      val[0] += src[idx] - fv[0];
-      val[1] += src[idx + 1] - fv[1];
-      val[2] += src[idx + 2] - fv[2];
-      val[3] += src[idx + 3] - fv[3];
-      dst[ti]     = Math.round(val[0] * iarr);
-      dst[ti + 1] = Math.round(val[1] * iarr);
-      dst[ti + 2] = Math.round(val[2] * iarr);
-      dst[ti + 3] = Math.round(val[3] * iarr);
+      val[0]! += src[idx]! - fv[0]!;
+      val[1]! += src[idx + 1]! - fv[1]!;
+      val[2]! += src[idx + 2]! - fv[2]!;
+      val[3]! += src[idx + 3]! - fv[3]!;
+      dst[ti]     = Math.round(val[0]! * iarr);
+      dst[ti + 1] = Math.round(val[1]! * iarr);
+      dst[ti + 2] = Math.round(val[2]! * iarr);
+      dst[ti + 3] = Math.round(val[3]! * iarr);
       ti += 4;
     }
 
     for (let j = r + 1; j < w - r; j++) {
       const add_idx = (j + r) * 4 + y * w * 4;
       const sub_idx = (j - r - 1) * 4 + y * w * 4;
-      val[0] += src[add_idx] - src[sub_idx];
-      val[1] += src[add_idx + 1] - src[sub_idx + 1];
-      val[2] += src[add_idx + 2] - src[sub_idx + 2];
-      val[3] += src[add_idx + 3] - src[sub_idx + 3];
-      dst[ti]     = Math.round(val[0] * iarr);
-      dst[ti + 1] = Math.round(val[1] * iarr);
-      dst[ti + 2] = Math.round(val[2] * iarr);
-      dst[ti + 3] = Math.round(val[3] * iarr);
+      val[0]! += src[add_idx]! - src[sub_idx]!;
+      val[1]! += src[add_idx + 1]! - src[sub_idx + 1]!;
+      val[2]! += src[add_idx + 2]! - src[sub_idx + 2]!;
+      val[3]! += src[add_idx + 3]! - src[sub_idx + 3]!;
+      dst[ti]     = Math.round(val[0]! * iarr);
+      dst[ti + 1] = Math.round(val[1]! * iarr);
+      dst[ti + 2] = Math.round(val[2]! * iarr);
+      dst[ti + 3] = Math.round(val[3]! * iarr);
       ti += 4;
     }
 
     for (let j = w - r; j < w; j++) {
       const sub_idx = (j - r - 1) * 4 + y * w * 4;
-      val[0] += lv[0] - src[sub_idx];
-      val[1] += lv[1] - src[sub_idx + 1];
-      val[2] += lv[2] - src[sub_idx + 2];
-      val[3] += lv[3] - src[sub_idx + 3];
-      dst[ti]     = Math.round(val[0] * iarr);
-      dst[ti + 1] = Math.round(val[1] * iarr);
-      dst[ti + 2] = Math.round(val[2] * iarr);
-      dst[ti + 3] = Math.round(val[3] * iarr);
+      val[0]! += lv[0]! - src[sub_idx]!;
+      val[1]! += lv[1]! - src[sub_idx + 1]!;
+      val[2]! += lv[2]! - src[sub_idx + 2]!;
+      val[3]! += lv[3]! - src[sub_idx + 3]!;
+      dst[ti]     = Math.round(val[0]! * iarr);
+      dst[ti + 1] = Math.round(val[1]! * iarr);
+      dst[ti + 2] = Math.round(val[2]! * iarr);
+      dst[ti + 3] = Math.round(val[3]! * iarr);
       ti += 4;
     }
   }
@@ -122,54 +122,54 @@ function boxBlurV(
     const lv_idx = ((h - 1) * w + x) * 4;
     const lv = [src[lv_idx], src[lv_idx + 1], src[lv_idx + 2], src[lv_idx + 3]];
 
-    const val = [fv[0] * (r + 1), fv[1] * (r + 1), fv[2] * (r + 1), fv[3] * (r + 1)];
+    const val = [fv[0]! * (r + 1), fv[1]! * (r + 1), fv[2]! * (r + 1), fv[3]! * (r + 1)];
 
     for (let j = 0; j < r; j++) {
       const idx = (Math.min(j, h - 1) * w + x) * 4;
-      val[0] += src[idx];
-      val[1] += src[idx + 1];
-      val[2] += src[idx + 2];
-      val[3] += src[idx + 3];
+      val[0]! += src[idx]!;
+      val[1]! += src[idx + 1]!;
+      val[2]! += src[idx + 2]!;
+      val[3]! += src[idx + 3]!;
     }
 
     let ti = ti_start;
     for (let j = 0; j <= r; j++) {
       const idx = (Math.min(j + r, h - 1) * w + x) * 4;
-      val[0] += src[idx] - fv[0];
-      val[1] += src[idx + 1] - fv[1];
-      val[2] += src[idx + 2] - fv[2];
-      val[3] += src[idx + 3] - fv[3];
-      dst[ti]     = Math.round(val[0] * iarr);
-      dst[ti + 1] = Math.round(val[1] * iarr);
-      dst[ti + 2] = Math.round(val[2] * iarr);
-      dst[ti + 3] = Math.round(val[3] * iarr);
+      val[0]! += src[idx]! - fv[0]!;
+      val[1]! += src[idx + 1]! - fv[1]!;
+      val[2]! += src[idx + 2]! - fv[2]!;
+      val[3]! += src[idx + 3]! - fv[3]!;
+      dst[ti]     = Math.round(val[0]! * iarr);
+      dst[ti + 1] = Math.round(val[1]! * iarr);
+      dst[ti + 2] = Math.round(val[2]! * iarr);
+      dst[ti + 3] = Math.round(val[3]! * iarr);
       ti += w * 4;
     }
 
     for (let j = r + 1; j < h - r; j++) {
       const add_idx = ((j + r) * w + x) * 4;
       const sub_idx = ((j - r - 1) * w + x) * 4;
-      val[0] += src[add_idx] - src[sub_idx];
-      val[1] += src[add_idx + 1] - src[sub_idx + 1];
-      val[2] += src[add_idx + 2] - src[sub_idx + 2];
-      val[3] += src[add_idx + 3] - src[sub_idx + 3];
-      dst[ti]     = Math.round(val[0] * iarr);
-      dst[ti + 1] = Math.round(val[1] * iarr);
-      dst[ti + 2] = Math.round(val[2] * iarr);
-      dst[ti + 3] = Math.round(val[3] * iarr);
+      val[0]! += src[add_idx]! - src[sub_idx]!;
+      val[1]! += src[add_idx + 1]! - src[sub_idx + 1]!;
+      val[2]! += src[add_idx + 2]! - src[sub_idx + 2]!;
+      val[3]! += src[add_idx + 3]! - src[sub_idx + 3]!;
+      dst[ti]     = Math.round(val[0]! * iarr);
+      dst[ti + 1] = Math.round(val[1]! * iarr);
+      dst[ti + 2] = Math.round(val[2]! * iarr);
+      dst[ti + 3] = Math.round(val[3]! * iarr);
       ti += w * 4;
     }
 
     for (let j = h - r; j < h; j++) {
       const sub_idx = ((j - r - 1) * w + x) * 4;
-      val[0] += lv[0] - src[sub_idx];
-      val[1] += lv[1] - src[sub_idx + 1];
-      val[2] += lv[2] - src[sub_idx + 2];
-      val[3] += lv[3] - src[sub_idx + 3];
-      dst[ti]     = Math.round(val[0] * iarr);
-      dst[ti + 1] = Math.round(val[1] * iarr);
-      dst[ti + 2] = Math.round(val[2] * iarr);
-      dst[ti + 3] = Math.round(val[3] * iarr);
+      val[0]! += lv[0]! - src[sub_idx]!;
+      val[1]! += lv[1]! - src[sub_idx + 1]!;
+      val[2]! += lv[2]! - src[sub_idx + 2]!;
+      val[3]! += lv[3]! - src[sub_idx + 3]!;
+      dst[ti]     = Math.round(val[0]! * iarr);
+      dst[ti + 1] = Math.round(val[1]! * iarr);
+      dst[ti + 2] = Math.round(val[2]! * iarr);
+      dst[ti + 3] = Math.round(val[3]! * iarr);
       ti += w * 4;
     }
   }

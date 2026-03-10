@@ -156,7 +156,7 @@ function timecodeToSeconds(tc: string, fps = 23.976): number {
   const parts = tc.split(':').map(Number);
   if (parts.length !== 4) return 0;
   const [h, m, s, f] = parts;
-  return h * 3600 + m * 60 + s + f / Math.ceil(fps);
+  return h! * 3600 + m! * 60 + s! + f! / Math.ceil(fps);
 }
 
 // =============================================================================
@@ -411,8 +411,8 @@ export class MarkerEngine {
     // Walk backwards to find the first marker strictly before current time
     let prev: Marker | null = null;
     for (let i = sorted.length - 1; i >= 0; i--) {
-      if (sorted[i].time < t - 1e-6) {
-        prev = sorted[i];
+      if (sorted[i]!.time < t - 1e-6) {
+        prev = sorted[i]!;
         break;
       }
     }
@@ -592,6 +592,7 @@ export class MarkerEngine {
 
     switch (format) {
       case 'json': {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- parsed JSON markers are untyped
         let parsed: any[];
         try {
           parsed = JSON.parse(data);
@@ -619,10 +620,10 @@ export class MarkerEngine {
         const lines = data.split('\n').filter((l) => l.trim().length > 0);
         // Skip header
         for (let i = 1; i < lines.length; i++) {
-          const fields = parseCsvLine(lines[i]);
+          const fields = parseCsvLine(lines[i]!);
           if (fields.length < 6) continue;
           const [, timeStr, endTimeStr, label, comment, color, , trackId, clipId, author] = fields;
-          const time = parseFloat(timeStr);
+          const time = parseFloat(timeStr!);
           if (isNaN(time)) continue;
           const endTime = endTimeStr ? parseFloat(endTimeStr) : undefined;
           const m = this.addMarker(time, {
@@ -676,8 +677,8 @@ export class MarkerEngine {
             // Extract timecodes (simplified parse: tokens 4 and 5)
             const tokens = trimmed.split(/\s+/);
             if (tokens.length >= 6) {
-              pendingTcIn = tokens[4];
-              pendingTcOut = tokens[5];
+              pendingTcIn = tokens[4]!;
+              pendingTcOut = tokens[5]!;
             }
           } else if (trimmed.startsWith('* COLOR:')) {
             const raw = trimmed.replace('* COLOR:', '').trim().toLowerCase();

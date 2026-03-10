@@ -77,6 +77,8 @@ function generateAfter(target: number): LoudnessMeasurement {
   };
 }
 
+import { InvalidArgumentError } from '../AdapterError';
+
 // ---------------------------------------------------------------------------
 // Workflow
 // ---------------------------------------------------------------------------
@@ -107,7 +109,7 @@ export async function runLoudnessPrep(
   targetLUFS: number,
 ): Promise<LoudnessPrepResult> {
   if (trackIds.length === 0) {
-    throw new Error('At least one track ID is required for loudness prep.');
+    throw new InvalidArgumentError('pro-tools', 'trackIds', 'At least one track ID is required for loudness prep.');
   }
 
   // Simulate processing delay.

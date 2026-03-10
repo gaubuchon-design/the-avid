@@ -6,6 +6,15 @@
  * compensation function that reverses the effect. If the plan is later
  * rolled back the compensation manager invokes these functions in reverse
  * order to restore the timeline to its pre-plan state.
+ *
+ * ## Resilience
+ *
+ * - **Timeout**: Each compensation function is bounded by a configurable
+ *   timeout to avoid indefinite hangs.
+ * - **Retry**: Transient compensation failures are retried once before
+ *   being recorded as failed.
+ * - **Idempotency**: Compensations that have already executed are not
+ *   re-invoked, and their prior result is returned immediately.
  */
 
 // ---------------------------------------------------------------------------
@@ -28,6 +37,12 @@ export interface CompensationEntry {
   success?: boolean;
   /** Error message if compensation failed. */
   error?: string;
+  /** ISO-8601 timestamp when the compensation was executed. */
+  executedAt?: string;
+  /** Wall-clock duration of the compensation in milliseconds. */
+  durationMs?: number;
+  /** Number of attempts made (1 = first try, 2 = retried once). */
+  attempts?: number;
 }
 
 /** Internal entry with the actual compensation function. */
@@ -35,6 +50,33 @@ interface InternalCompensationEntry extends CompensationEntry {
   /** The compensation function to execute. */
   readonly compensate: () => Promise<void>;
 }
+
+/** Options for the CompensationManager. */
+export interface CompensationManagerOptions {
+  /** Timeout in milliseconds for each compensation function (default: 30 000). */
+  readonly timeoutMs?: number;
+  /** Number of retry attempts for transient failures (default: 1). */
+  readonly maxRetries?: number;
+}
+
+/** Summary returned by plan-level compensation. */
+export interface CompensationSummary {
+  /** Number of steps successfully compensated. */
+  readonly compensated: number;
+  /** Number of steps that failed compensation. */
+  readonly failed: number;
+  /** Number of steps that were skipped (no compensation registered). */
+  readonly skipped: number;
+  /** Total wall-clock time for the compensation pass in milliseconds. */
+  readonly totalDurationMs: number;
+}
+
+// ---------------------------------------------------------------------------
+// Defaults
+// ---------------------------------------------------------------------------
+
+const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_RETRIES = 1;
 
 // ---------------------------------------------------------------------------
 // CompensationManager
@@ -49,6 +91,17 @@ interface InternalCompensationEntry extends CompensationEntry {
 export class CompensationManager {
   /** All registered compensations keyed by step ID. */
   private compensations: Map<string, InternalCompensationEntry> = new Map();
+
+  /** Compensation timeout in milliseconds. */
+  private readonly timeoutMs: number;
+
+  /** Maximum retry attempts for transient failures. */
+  private readonly maxRetries: number;
+
+  constructor(options?: CompensationManagerOptions) {
+    this.timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
+  }
 
   // -----------------------------------------------------------------------
   // Public API
@@ -81,36 +134,56 @@ export class CompensationManager {
   /**
    * Execute the compensation for a single step.
    *
+   * The compensation function is bounded by the configured timeout and
+   * retried up to `maxRetries` times on transient failures.
+   *
    * @param stepId - The step to compensate.
    * @returns `true` if the compensation succeeded, `false` otherwise.
    */
   async compensateStep(stepId: string): Promise<boolean> {
     const entry = this.compensations.get(stepId);
     if (!entry) {
-      console.warn(`[CompensationManager] No compensation registered for step "${stepId}".`);
+      // No compensation registered -- silently return false
       return false;
     }
 
     if (entry.executed) {
-      console.warn(`[CompensationManager] Compensation for step "${stepId}" already executed.`);
+      // Already executed -- return prior result
       return entry.success ?? false;
     }
 
-    try {
-      await entry.compensate();
-      entry.executed = true;
-      entry.success = true;
-      return true;
-    } catch (error) {
-      entry.executed = true;
-      entry.success = false;
-      entry.error = error instanceof Error ? error.message : String(error);
-      console.error(
-        `[CompensationManager] Compensation for step "${stepId}" failed:`,
-        entry.error,
-      );
-      return false;
+    const start = Date.now();
+    let lastError: string | undefined;
+    const maxAttempts = 1 + this.maxRetries;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await this.executeWithTimeout(entry.compensate, entry.description);
+        entry.executed = true;
+        entry.success = true;
+        entry.executedAt = new Date().toISOString();
+        entry.durationMs = Date.now() - start;
+        entry.attempts = attempt;
+        return true;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+
+        // Only retry if we have attempts remaining
+        if (attempt < maxAttempts) {
+          // Brief delay before retry (200ms)
+          await new Promise<void>((resolve) => setTimeout(resolve, 200));
+        }
+      }
     }
+
+    // All attempts exhausted
+    entry.executed = true;
+    entry.success = false;
+    entry.error = lastError;
+    entry.executedAt = new Date().toISOString();
+    entry.durationMs = Date.now() - start;
+    entry.attempts = maxAttempts;
+    return false;
   }
 
   /**
@@ -118,14 +191,16 @@ export class CompensationManager {
    *
    * @param planId - The plan identifier.
    * @param steps  - The plan's step list (used to determine execution order).
-   * @returns Summary of compensated and failed counts.
+   * @returns Summary with compensated, failed, and skipped counts.
    */
   async compensatePlan(
     planId: string,
     steps: { id: string; status: string }[],
-  ): Promise<{ compensated: number; failed: number }> {
+  ): Promise<CompensationSummary> {
+    const start = Date.now();
     let compensated = 0;
     let failed = 0;
+    let skipped = 0;
 
     // Only compensate steps that have actually been executed (completed or failed)
     const executedSteps = steps
@@ -135,6 +210,7 @@ export class CompensationManager {
     for (const step of executedSteps) {
       const entry = this.compensations.get(step.id);
       if (!entry || entry.executed) {
+        skipped++;
         continue;
       }
 
@@ -146,7 +222,12 @@ export class CompensationManager {
       }
     }
 
-    return { compensated, failed };
+    return {
+      compensated,
+      failed,
+      skipped,
+      totalDurationMs: Date.now() - start,
+    };
   }
 
   /**
@@ -169,6 +250,9 @@ export class CompensationManager {
           executed: entry.executed,
           success: entry.success,
           error: entry.error,
+          executedAt: entry.executedAt,
+          durationMs: entry.durationMs,
+          attempts: entry.attempts,
         });
       }
     }
@@ -187,9 +271,78 @@ export class CompensationManager {
   }
 
   /**
+   * Get the total number of registered compensations.
+   */
+  get size(): number {
+    return this.compensations.size;
+  }
+
+  /**
+   * Get aggregate statistics about all compensations.
+   */
+  getStats(): {
+    total: number;
+    executed: number;
+    succeeded: number;
+    failed: number;
+    pending: number;
+  } {
+    let executed = 0;
+    let succeeded = 0;
+    let failedCount = 0;
+
+    for (const entry of this.compensations.values()) {
+      if (entry.executed) {
+        executed++;
+        if (entry.success) {
+          succeeded++;
+        } else {
+          failedCount++;
+        }
+      }
+    }
+
+    return {
+      total: this.compensations.size,
+      executed,
+      succeeded,
+      failed: failedCount,
+      pending: this.compensations.size - executed,
+    };
+  }
+
+  /**
    * Remove all compensations (e.g. when resetting state).
    */
   clear(): void {
     this.compensations.clear();
+  }
+
+  // -----------------------------------------------------------------------
+  // Private helpers
+  // -----------------------------------------------------------------------
+
+  /**
+   * Execute a compensation function with timeout protection.
+   */
+  private async executeWithTimeout(
+    fn: () => Promise<void>,
+    description: string,
+  ): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`Compensation timed out after ${this.timeoutMs}ms: ${description}`)),
+        this.timeoutMs,
+      );
+    });
+
+    try {
+      await Promise.race([fn(), timeoutPromise]);
+    } finally {
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+    }
   }
 }

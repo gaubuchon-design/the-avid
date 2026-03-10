@@ -378,7 +378,7 @@ export function getDefaultPluginPaths(): string[] {
 /** Resolve user home directory via Electron bridge or fallback. */
 function getHomePath(): string {
   // In Electron we can query the main process; fallback to env stub.
-  return (typeof process !== 'undefined' && process.env?.HOME) || '~';
+  return (typeof process !== 'undefined' && process.env?.['HOME']) || '~';
 }
 
 /**
@@ -793,7 +793,7 @@ export class OFXPropertySuiteImpl {
     if (!ps) return { status: OFXStatus.ErrBadHandle, value: '' };
     const arr = ps.strings[property];
     if (!arr || index >= arr.length) return { status: OFXStatus.ErrBadIndex, value: '' };
-    return { status: OFXStatus.OK, value: arr[index] };
+    return { status: OFXStatus.OK, value: arr[index]! };
   }
 
   // -- Int properties --
@@ -811,7 +811,7 @@ export class OFXPropertySuiteImpl {
     if (!ps) return { status: OFXStatus.ErrBadHandle, value: 0 };
     const arr = ps.ints[property];
     if (!arr || index >= arr.length) return { status: OFXStatus.ErrBadIndex, value: 0 };
-    return { status: OFXStatus.OK, value: arr[index] };
+    return { status: OFXStatus.OK, value: arr[index]! };
   }
 
   // -- Double properties --
@@ -829,7 +829,7 @@ export class OFXPropertySuiteImpl {
     if (!ps) return { status: OFXStatus.ErrBadHandle, value: 0 };
     const arr = ps.doubles[property];
     if (!arr || index >= arr.length) return { status: OFXStatus.ErrBadIndex, value: 0 };
-    return { status: OFXStatus.OK, value: arr[index] };
+    return { status: OFXStatus.OK, value: arr[index]! };
   }
 
   // -- Pointer properties --
@@ -847,7 +847,7 @@ export class OFXPropertySuiteImpl {
     if (!ps) return { status: OFXStatus.ErrBadHandle, value: null };
     const arr = ps.pointers[property];
     if (!arr || index >= arr.length) return { status: OFXStatus.ErrBadIndex, value: null };
-    return { status: OFXStatus.OK, value: arr[index] };
+    return { status: OFXStatus.OK, value: arr[index]! };
   }
 
   // -- Dimension query --
@@ -987,20 +987,20 @@ export class OFXParameterSuiteImpl {
     const sorted = [...keyframes].sort((a, b) => a.time - b.time);
 
     // Before first keyframe.
-    if (time <= sorted[0].time) {
-      return { status: OFXStatus.OK, value: sorted[0].value };
+    if (time <= sorted[0]!.time) {
+      return { status: OFXStatus.OK, value: sorted[0]!.value };
     }
     // After last keyframe.
-    if (time >= sorted[sorted.length - 1].time) {
-      return { status: OFXStatus.OK, value: sorted[sorted.length - 1].value };
+    if (time >= sorted[sorted.length - 1]!.time) {
+      return { status: OFXStatus.OK, value: sorted[sorted.length - 1]!.value };
     }
 
     // Find surrounding keyframes and lerp.
     for (let i = 0; i < sorted.length - 1; i++) {
-      if (time >= sorted[i].time && time <= sorted[i + 1].time) {
-        const t = (time - sorted[i].time) / (sorted[i + 1].time - sorted[i].time);
-        const interpolated = sorted[i].value.map(
-          (v, idx) => v + (sorted[i + 1].value[idx] - v) * t,
+      if (time >= sorted[i]!.time && time <= sorted[i + 1]!.time) {
+        const t = (time - sorted[i]!.time) / (sorted[i + 1]!.time - sorted[i]!.time);
+        const interpolated = sorted[i]!.value.map(
+          (v, idx) => v + (sorted[i + 1]!.value[idx]! - v) * t,
         );
         return { status: OFXStatus.OK, value: interpolated };
       }
@@ -1028,7 +1028,7 @@ export class OFXParameterSuiteImpl {
     // Replace existing keyframe at this time or insert.
     const existing = keyframes.findIndex((kf) => Math.abs(kf.time - time) < 1e-9);
     if (existing >= 0) {
-      keyframes[existing].value = value;
+      keyframes[existing]!.value = value;
     } else {
       keyframes.push({ time, value });
     }
@@ -1080,7 +1080,7 @@ export class OFXParameterSuiteImpl {
       return { status: OFXStatus.ErrBadIndex, time: 0 };
     }
     const sorted = [...keyframes].sort((a, b) => a.time - b.time);
-    return { status: OFXStatus.OK, time: sorted[nthKey].time };
+    return { status: OFXStatus.OK, time: sorted[nthKey]!.time };
   }
 }
 
@@ -1247,7 +1247,7 @@ export class OFXMessageSuiteImpl {
         console.warn(`[OFX:${pluginId}]`, format);
         break;
       default:
-        console.log(`[OFX:${pluginId}]`, format);
+        console.debug(`[OFX:${pluginId}]`, format);
         break;
     }
 
@@ -1332,7 +1332,7 @@ export function ofxImageToImageData(ofxImage: OFXImage): ImageData {
         const srcOffset = y * ofxImage.rowBytes;
         const dstOffset = y * width * 4;
         for (let x = 0; x < width * 4; x++) {
-          dst[dstOffset + x] = src[srcOffset + x];
+          dst[dstOffset + x] = src[srcOffset + x]!;
         }
       }
     } else if (ofxImage.components === OFXImageComponent.RGB) {
@@ -1340,9 +1340,9 @@ export function ofxImageToImageData(ofxImage: OFXImage): ImageData {
         const srcRowStart = y * ofxImage.rowBytes;
         const dstRowStart = y * width * 4;
         for (let x = 0; x < width; x++) {
-          dst[dstRowStart + x * 4]     = src[srcRowStart + x * 3];
-          dst[dstRowStart + x * 4 + 1] = src[srcRowStart + x * 3 + 1];
-          dst[dstRowStart + x * 4 + 2] = src[srcRowStart + x * 3 + 2];
+          dst[dstRowStart + x * 4]     = src[srcRowStart + x * 3]!;
+          dst[dstRowStart + x * 4 + 1] = src[srcRowStart + x * 3 + 1]!;
+          dst[dstRowStart + x * 4 + 2] = src[srcRowStart + x * 3 + 2]!;
           dst[dstRowStart + x * 4 + 3] = 255;
         }
       }
@@ -1352,9 +1352,9 @@ export function ofxImageToImageData(ofxImage: OFXImage): ImageData {
         const dstRowStart = y * width * 4;
         for (let x = 0; x < width; x++) {
           const a = src[srcRowStart + x];
-          dst[dstRowStart + x * 4]     = a;
-          dst[dstRowStart + x * 4 + 1] = a;
-          dst[dstRowStart + x * 4 + 2] = a;
+          dst[dstRowStart + x * 4]     = a!;
+          dst[dstRowStart + x * 4 + 1] = a!;
+          dst[dstRowStart + x * 4 + 2] = a!;
           dst[dstRowStart + x * 4 + 3] = 255;
         }
       }
@@ -1367,10 +1367,10 @@ export function ofxImageToImageData(ofxImage: OFXImage): ImageData {
         const srcRowStart = y * srcPixelStride;
         const dstRowStart = y * width * 4;
         for (let x = 0; x < width; x++) {
-          dst[dstRowStart + x * 4]     = clampByte(src[srcRowStart + x * 4] * 255);
-          dst[dstRowStart + x * 4 + 1] = clampByte(src[srcRowStart + x * 4 + 1] * 255);
-          dst[dstRowStart + x * 4 + 2] = clampByte(src[srcRowStart + x * 4 + 2] * 255);
-          dst[dstRowStart + x * 4 + 3] = clampByte(src[srcRowStart + x * 4 + 3] * 255);
+          dst[dstRowStart + x * 4]     = clampByte(src[srcRowStart + x * 4]! * 255);
+          dst[dstRowStart + x * 4 + 1] = clampByte(src[srcRowStart + x * 4 + 1]! * 255);
+          dst[dstRowStart + x * 4 + 2] = clampByte(src[srcRowStart + x * 4 + 2]! * 255);
+          dst[dstRowStart + x * 4 + 3] = clampByte(src[srcRowStart + x * 4 + 3]! * 255);
         }
       }
     } else if (ofxImage.components === OFXImageComponent.Alpha) {
@@ -1379,7 +1379,7 @@ export function ofxImageToImageData(ofxImage: OFXImage): ImageData {
         const srcRowStart = y * srcPixelStride;
         const dstRowStart = y * width * 4;
         for (let x = 0; x < width; x++) {
-          const a = clampByte(src[srcRowStart + x] * 255);
+          const a = clampByte(src[srcRowStart + x]! * 255);
           dst[dstRowStart + x * 4]     = a;
           dst[dstRowStart + x * 4 + 1] = a;
           dst[dstRowStart + x * 4 + 2] = a;
@@ -1411,7 +1411,7 @@ export function convertByteToFloat(image: OFXImage): OFXImage {
       for (let c = 0; c < channels; c++) {
         const srcIdx = y * image.rowBytes + x * channels + c;
         const dstIdx = y * width * channels + x * channels + c;
-        dst[dstIdx] = src[srcIdx] / 255;
+        dst[dstIdx] = src[srcIdx]! / 255;
       }
     }
   }
@@ -1445,7 +1445,7 @@ export function convertFloatToByte(image: OFXImage): OFXImage {
       for (let c = 0; c < channels; c++) {
         const srcIdx = y * srcPixelsPerRow + x * channels + c;
         const dstIdx = y * byteRowBytes + x * channels + c;
-        dst[dstIdx] = clampByte(src[srcIdx] * 255);
+        dst[dstIdx] = clampByte(src[srcIdx]! * 255);
       }
     }
   }
@@ -1577,7 +1577,7 @@ export class OFXIPCBridge {
       }
     }) as (...args: unknown[]) => void);
 
-    console.log('[OFXIPCBridge] Initialized');
+    console.debug('[OFXIPCBridge] Initialized');
     return true;
   }
 
@@ -1765,7 +1765,7 @@ function mapGroupingToCategory(grouping: string): string {
   if (!grouping) return 'OFX';
 
   // Use the first segment of the grouping path.
-  const firstSegment = grouping.split('/')[0].trim();
+  const firstSegment = grouping.split('/')[0]!.trim();
 
   // Map common OFX groupings to existing app categories.
   const mapping: Record<string, string> = {
@@ -1843,14 +1843,14 @@ export async function initializeOFXPlugins(paths?: string[]): Promise<EffectDefi
       const def = registerOFXPlugin(plugin);
       if (def) {
         definitions.push(def);
-        console.log(`[OpenFXBridge] Registered plugin: ${def.name} (${def.id})`);
+        console.debug(`[OpenFXBridge] Registered plugin: ${def.name} (${def.id})`);
       }
     } catch (err) {
       console.error(`[OpenFXBridge] Failed to load plugin at "${bundle.path}":`, err);
     }
   }
 
-  console.log(`[OpenFXBridge] Initialized ${definitions.length} OFX plugin(s)`);
+  console.debug(`[OpenFXBridge] Initialized ${definitions.length} OFX plugin(s)`);
   return definitions;
 }
 
@@ -1892,5 +1892,5 @@ export async function shutdownOFXPlugins(): Promise<void> {
   // Dispose bridge.
   ofxBridge.dispose();
 
-  console.log('[OpenFXBridge] Shutdown complete');
+  console.debug('[OpenFXBridge] Shutdown complete');
 }

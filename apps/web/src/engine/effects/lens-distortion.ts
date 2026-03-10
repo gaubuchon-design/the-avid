@@ -6,7 +6,7 @@
 function hexToRgb(hex: string): [number, number, number] {
   const m = hex.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
   if (!m) return [0, 0, 0];
-  return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+  return [parseInt(m[1]!, 16), parseInt(m[2]!, 16), parseInt(m[3]!, 16)];
 }
 
 /**
@@ -76,10 +76,10 @@ export function applyLensDistortion(
       const i11 = (y1 * width + x1) * 4;
 
       for (let c = 0; c < 4; c++) {
-        const v = src[i00 + c] * (1 - fx) * (1 - fy)
-                + src[i10 + c] * fx * (1 - fy)
-                + src[i01 + c] * (1 - fx) * fy
-                + src[i11 + c] * fx * fy;
+        const v = src[i00 + c]! * (1 - fx) * (1 - fy)
+                + src[i10 + c]! * fx * (1 - fy)
+                + src[i01 + c]! * (1 - fx) * fy
+                + src[i11 + c]! * fx * fy;
         data[di + c] = Math.round(v);
       }
     }

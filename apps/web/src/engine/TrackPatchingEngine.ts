@@ -268,11 +268,11 @@ export class TrackPatchingEngine {
           sourceTrackId: src.id,
           sourceTrackType: src.type,
           sourceTrackIndex: src.index,
-          recordTrackId: recordTrack.id,
+          recordTrackId: recordTrack!.id!,
           enabled: true,
         };
         this.patchMap.set(src.id, patch);
-        this.reversePatchMap.set(recordTrack.id, src.id);
+        this.reversePatchMap.set(recordTrack!.id!, src.id);
       }
     }
   }

@@ -5,7 +5,7 @@
 //  breaking news alert banner, and live mode toggle.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useNewsStore } from '../../store/news.store';
 import type { RundownEvent, StoryStatus } from '@mcua/core';
 
@@ -94,9 +94,9 @@ function BreakingBanner() {
           animation: 'pulse 1.5s ease-in-out infinite',
         }}
       >
-        {latest.priority}
+        {latest!.priority!}
       </span>
-      <span style={{ color: '#ef4444', flex: 1 }}>{latest.message}</span>
+      <span style={{ color: '#ef4444', flex: 1 }}>{latest!.message!}</span>
       {unacknowledged.length > 1 && (
         <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>
           +{unacknowledged.length - 1} more
@@ -104,7 +104,7 @@ function BreakingBanner() {
       )}
       <button
         className="tl-btn"
-        onClick={() => acknowledgeAlert(latest.id)}
+        onClick={() => acknowledgeAlert(latest!.id!)}
         style={{
           padding: '3px 10px',
           border: '1px solid rgba(239,68,68,0.4)',
@@ -284,6 +284,95 @@ function StoryRowActions({ story }: { story: RundownEvent }) {
   );
 }
 
+// ─── MOS Connection Status ─────────────────────────────────────────────────
+
+function MOSStatusBar() {
+  const { nrcsConnection } = useNewsStore();
+  if (!nrcsConnection) return null;
+
+  const { status, serverName, mosId, lastHeartbeat } = nrcsConnection;
+  const isConnected = status === 'CONNECTED';
+
+  return (
+    <div
+      role="status"
+      aria-label="MOS connection status"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '3px 12px',
+        borderBottom: '1px solid var(--border-subtle)',
+        fontSize: 9,
+        color: 'var(--text-muted)',
+        background: isConnected ? 'rgba(34,197,94,0.04)' : 'rgba(239,68,68,0.04)',
+      }}
+    >
+      <span style={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>MOS</span>
+      {serverName && <span>{serverName}</span>}
+      {mosId && <span style={{ fontFamily: 'var(--font-mono)' }}>{mosId}</span>}
+      {lastHeartbeat && (
+        <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)' }}>
+          Last sync: {new Date(lastHeartbeat).toLocaleTimeString()}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ─── Playout Export Button ────────────────────────────────────────────────
+
+function PlayoutExportButton() {
+  const { playoutDestinations, activeRundownId, rundowns, exportToPlayout } = useNewsStore();
+  const [isExporting, setIsExporting] = useState(false);
+
+  const activeRundown = rundowns.find((r) => r.id === activeRundownId);
+  const readyStories = activeRundown?.stories.filter((s) => s.status === 'READY') ?? [];
+
+  const handleExport = useCallback(async () => {
+    if (!activeRundownId || readyStories.length === 0) return;
+    setIsExporting(true);
+    try {
+      for (const dest of playoutDestinations) {
+        if (dest.isOnline) {
+          exportToPlayout(activeRundownId, dest.id);
+        }
+      }
+    } finally {
+      setTimeout(() => setIsExporting(false), 1000);
+    }
+  }, [activeRundownId, readyStories.length, playoutDestinations, exportToPlayout]);
+
+  const onlineDestinations = playoutDestinations.filter((d) => d.isOnline);
+
+  return (
+    <button
+      className="tl-btn"
+      onClick={handleExport}
+      disabled={readyStories.length === 0 || isExporting || onlineDestinations.length === 0}
+      aria-label={`Export ${readyStories.length} ready stories to playout`}
+      title={
+        onlineDestinations.length === 0
+          ? 'No playout destinations online'
+          : `Export ${readyStories.length} ready stories to ${onlineDestinations.length} destination(s)`
+      }
+      style={{
+        padding: '2px 8px',
+        fontSize: 10,
+        fontWeight: 600,
+        color: readyStories.length > 0 && onlineDestinations.length > 0 ? '#06b6d4' : 'var(--text-muted)',
+        background: readyStories.length > 0 && onlineDestinations.length > 0 ? 'rgba(6,182,212,0.12)' : 'transparent',
+        border: `1px solid ${readyStories.length > 0 && onlineDestinations.length > 0 ? 'rgba(6,182,212,0.3)' : 'var(--border-subtle)'}`,
+        borderRadius: 'var(--radius-sm, 4px)',
+        opacity: readyStories.length === 0 || isExporting ? 0.5 : 1,
+        cursor: readyStories.length === 0 || isExporting ? 'default' : 'pointer',
+      }}
+    >
+      {isExporting ? 'Exporting...' : 'Export'}
+    </button>
+  );
+}
+
 // ─── RundownPanel Component ────────────────────────────────────────────────
 
 export function RundownPanel() {
@@ -297,9 +386,11 @@ export function RundownPanel() {
     setActiveStory,
     setRundownFilter,
     setPolling,
+    reorderStory,
   } = useNewsStore();
 
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const activeRundown = useMemo(
     () => rundowns.find((r) => r.id === activeRundownId) ?? null,
@@ -333,24 +424,109 @@ export function RundownPanel() {
     [filteredStories, storyTimers],
   );
 
+  // Keyboard shortcuts for rundown navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't handle if typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+      // Only handle when panel is focused or contains focus
+      if (panelRef.current && !panelRef.current.contains(document.activeElement) && document.activeElement !== document.body) return;
+
+      const currentIdx = filteredStories.findIndex((s) => s.storyId === activeStoryId);
+
+      switch (e.key) {
+        case 'ArrowDown':
+        case 'j': {
+          e.preventDefault();
+          const nextIdx = Math.min(currentIdx + 1, filteredStories.length - 1);
+          if (nextIdx >= 0 && filteredStories[nextIdx]) {
+            setActiveStory(filteredStories[nextIdx].storyId);
+          }
+          break;
+        }
+        case 'ArrowUp':
+        case 'k': {
+          e.preventDefault();
+          const prevIdx = Math.max(currentIdx - 1, 0);
+          if (prevIdx >= 0 && filteredStories[prevIdx]) {
+            setActiveStory(filteredStories[prevIdx].storyId);
+          }
+          break;
+        }
+        case 'Home': {
+          e.preventDefault();
+          if (filteredStories.length > 0) {
+            setActiveStory(filteredStories[0]!.storyId);
+          }
+          break;
+        }
+        case 'End': {
+          e.preventDefault();
+          if (filteredStories.length > 0) {
+            setActiveStory(filteredStories[filteredStories.length - 1]!.storyId);
+          }
+          break;
+        }
+        // L key to toggle live mode
+        case 'l':
+        case 'L': {
+          if (!e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            setPolling(!isPolling);
+          }
+          break;
+        }
+      }
+
+      // Alt+Arrow for reorder
+      if (e.altKey && activeStoryId && currentIdx >= 0) {
+        if (e.key === 'ArrowUp' && currentIdx > 0) {
+          e.preventDefault();
+          reorderStory(activeStoryId, currentIdx - 1);
+        } else if (e.key === 'ArrowDown' && currentIdx < filteredStories.length - 1) {
+          e.preventDefault();
+          reorderStory(activeStoryId, currentIdx + 1);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [filteredStories, activeStoryId, isPolling, setActiveStory, setPolling, reorderStory]);
+
   return (
-    <div className="bin-panel" style={{ display: 'flex', flexDirection: 'column' }}>
+    <div
+      ref={panelRef}
+      className="bin-panel"
+      style={{ display: 'flex', flexDirection: 'column' }}
+      role="region"
+      aria-label="News rundown"
+      tabIndex={0}
+    >
       {/* Breaking News Banner */}
       <BreakingBanner />
 
+      {/* MOS Connection Status */}
+      <MOSStatusBar />
+
       {/* Header */}
-      <div className="panel-header">
-        <span className="panel-title">Rundown</span>
+      <div className="panel-header" role="toolbar" aria-label="Rundown controls">
+        <span className="panel-title" id="rundown-panel-title">Rundown</span>
         <ConnectionDot />
         <span style={{ color: 'var(--text-muted)', fontSize: 11, marginRight: 'auto' }}>
           {activeRundown?.name ?? 'No rundown'}
         </span>
 
+        {/* Playout Export */}
+        <PlayoutExportButton />
+
         {/* Live Mode Toggle */}
         <button
           className="tl-btn"
           onClick={() => setPolling(!isPolling)}
-          title={isPolling ? 'Live mode ON - click to pause' : 'Live mode OFF - click to resume'}
+          aria-pressed={isPolling}
+          aria-label={isPolling ? 'Live mode enabled, press L to toggle' : 'Live mode disabled, press L to toggle'}
+          title={isPolling ? 'Live mode ON - click to pause (L)' : 'Live mode OFF - click to resume (L)'}
           style={{
             padding: '2px 8px',
             fontSize: 10,
@@ -366,10 +542,17 @@ export function RundownPanel() {
       </div>
 
       {/* Filter Tabs */}
-      <div className="panel-tabs" style={{ display: 'flex', gap: 2, padding: '4px 8px', borderBottom: '1px solid var(--border-subtle)' }}>
+      <div
+        className="panel-tabs"
+        role="tablist"
+        aria-label="Story status filter"
+        style={{ display: 'flex', gap: 2, padding: '4px 8px', borderBottom: '1px solid var(--border-subtle)' }}
+      >
         {(['all', 'UNASSIGNED', 'IN_EDIT', 'READY', 'AIRED', 'KILLED'] as const).map((f) => (
           <button
             key={f}
+            role="tab"
+            aria-selected={rundownFilter === f}
             className={`panel-tab${rundownFilter === f ? ' active' : ''}`}
             onClick={() => setRundownFilter(f)}
             style={{ fontSize: 10, padding: '2px 7px' }}
@@ -381,6 +564,8 @@ export function RundownPanel() {
 
       {/* Total Runtime Bar */}
       <div
+        role="status"
+        aria-label={`Total runtime: target ${formatRunsDuration(totalTarget)}, actual ${formatRunsDuration(totalActual)}`}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -406,6 +591,8 @@ export function RundownPanel() {
 
       {/* Column Headers */}
       <div
+        role="row"
+        aria-hidden="true"
         style={{
           display: 'grid',
           gridTemplateColumns: '28px 22px 1fr 60px 60px 70px 60px',
@@ -430,7 +617,13 @@ export function RundownPanel() {
       </div>
 
       {/* Story Rows */}
-      <div className="panel-body" style={{ flex: 1, overflow: 'auto' }}>
+      <div
+        className="panel-body"
+        role="listbox"
+        aria-label="Rundown stories"
+        aria-activedescendant={activeStoryId ?? undefined}
+        style={{ flex: 1, overflow: 'auto' }}
+      >
         {filteredStories.length === 0 && (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
             {activeRundown ? 'No stories match the current filter.' : 'No rundown loaded. Connect to NRCS to load rundown.'}
@@ -446,9 +639,14 @@ export function RundownPanel() {
           return (
             <div
               key={story.storyId}
+              id={story.storyId}
+              role="option"
+              aria-selected={isActive}
+              aria-label={`Story ${story.sortOrder + 1}: ${story.slugline}, status ${STATUS_COLORS[story.status].label}, duration ${formatRunsDuration(story.targetDuration)}`}
               onClick={() => handleStoryClick(story.storyId)}
               onMouseEnter={() => setHoveredRow(story.storyId)}
               onMouseLeave={() => setHoveredRow(null)}
+              tabIndex={isActive ? 0 : -1}
               style={{
                 display: 'grid',
                 gridTemplateColumns: '28px 22px 1fr 60px 60px 70px 60px',
@@ -531,6 +729,8 @@ export function RundownPanel() {
 
       {/* Footer */}
       <div
+        role="status"
+        aria-live="polite"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -544,6 +744,9 @@ export function RundownPanel() {
         }}
       >
         <span>{filteredStories.length} stories</span>
+        <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>
+          J/K: navigate | Alt+Arrow: reorder | L: live toggle
+        </span>
         <span style={{ marginLeft: 'auto' }}>
           {isPolling ? 'Auto-refresh ON' : 'Auto-refresh OFF'}
         </span>

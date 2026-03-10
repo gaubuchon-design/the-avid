@@ -73,7 +73,7 @@ export function TemplatePanel() {
     const groups: Record<string, PublishingTemplate[]> = {};
     for (const tpl of filtered) {
       if (!groups[tpl.category]) groups[tpl.category] = [];
-      groups[tpl.category].push(tpl);
+      groups[tpl.category]!.push(tpl);
     }
     return groups;
   }, [filtered, categoryFilter]);

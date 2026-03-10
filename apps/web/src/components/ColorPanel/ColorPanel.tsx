@@ -3,7 +3,7 @@
 //  Primary/Log wheels, curves, qualifier, power windows, node graph.
 // =============================================================================
 
-import React from 'react';
+import React, { memo } from 'react';
 import { useColorStore, ColorViewTab } from '../../store/color.store';
 import { PrimaryWheels, LogWheels } from './PrimaryWheels';
 import { CurvesEditor } from './CurvesEditor';
@@ -24,24 +24,27 @@ const TABS: { value: ColorViewTab; label: string }[] = [
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-export function ColorPanel() {
+export const ColorPanel = memo(function ColorPanel() {
   const activeView = useColorStore((s) => s.activeView);
   const setActiveView = useColorStore((s) => s.setActiveView);
   const processingMode = useColorStore((s) => s.processingMode);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }} role="region" aria-label="Color Panel">
       {/* Tab bar */}
       <div style={{
         display: 'flex',
         borderBottom: '1px solid var(--border-default)',
         background: 'var(--bg-raised)',
         flexShrink: 0,
-      }}>
+      }} role="tablist" aria-label="Color correction tabs">
         {TABS.map((tab) => (
           <button
             key={tab.value}
             onClick={() => setActiveView(tab.value)}
+            role="tab"
+            aria-selected={activeView === tab.value}
+            aria-controls={`color-panel-${tab.value}`}
             style={{
               padding: '5px 14px',
               fontSize: 10,
@@ -69,19 +72,19 @@ export function ColorPanel() {
           padding: '0 8px',
           fontSize: 8,
           color: 'var(--text-muted)',
-        }}>
+        }} role="status" aria-label={`Processing mode: ${processingMode.toUpperCase()}`}>
           <div style={{
             width: 6,
             height: 6,
             borderRadius: '50%',
             background: processingMode === 'gpu' ? '#4ade80' : '#fbbf24',
-          }} />
+          }} aria-hidden="true" />
           {processingMode.toUpperCase()}
         </div>
       </div>
 
       {/* Active panel */}
-      <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
+      <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }} role="tabpanel" id={`color-panel-${activeView}`}>
         {activeView === 'primary' && <PrimaryWheels />}
         {activeView === 'log' && <LogWheels />}
         {activeView === 'curves' && <CurvesEditor />}
@@ -91,4 +94,4 @@ export function ColorPanel() {
       </div>
     </div>
   );
-}
+});

@@ -16,6 +16,7 @@ import type {
   SessionInfo,
   TempMusicOptions,
 } from './IProToolsAdapter';
+import { AdapterError, InvalidArgumentError } from './AdapterError';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -88,7 +89,7 @@ export class MockProToolsAdapter implements IProToolsAdapter {
 
   async getSessionInfo(): Promise<SessionInfo> {
     if (!this.currentSession) {
-      throw new Error('No Pro Tools session is currently open.');
+      throw new AdapterError({ adapterName: 'pro-tools', code: 'CONFLICT', message: 'No Pro Tools session is currently open.', recoverable: false });
     }
     return { ...this.currentSession };
   }
@@ -233,10 +234,12 @@ export class MockProToolsAdapter implements IProToolsAdapter {
     this.ensureSession();
 
     if (this.currentSession!.sessionId !== sessionId) {
-      throw new Error(
-        `Session ${sessionId} is not currently open. ` +
-          `Open session is ${this.currentSession!.sessionId}.`,
-      );
+      throw new AdapterError({
+        adapterName: 'pro-tools',
+        code: 'CONFLICT',
+        message: `Session ${sessionId} is not currently open. Open session is ${this.currentSession!.sessionId}.`,
+        recoverable: false,
+      });
     }
 
     await simulateDelay(800, 2000);
@@ -260,7 +263,7 @@ export class MockProToolsAdapter implements IProToolsAdapter {
 
   private ensureSession(): void {
     if (!this.currentSession) {
-      throw new Error('No Pro Tools session is currently open.');
+      throw new AdapterError({ adapterName: 'pro-tools', code: 'CONFLICT', message: 'No Pro Tools session is currently open.', recoverable: false });
     }
   }
 }

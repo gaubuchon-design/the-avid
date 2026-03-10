@@ -256,7 +256,7 @@ export class SportsHighlightsEngine {
     const lastScore = prevScoreHighlights[0];
     if (lastScore) {
       const lastData = lastScore.sourceDetections.find((d) => d.method === 'SCOREBOARD_OCR')?.rawData;
-      if (lastData && (lastData.homeScore !== homeScore || lastData.awayScore !== awayScore)) {
+      if (lastData && (lastData['homeScore'] !== homeScore || lastData['awayScore'] !== awayScore)) {
         this.addDetection(timestamp, 'GOAL', confidence, {
           method: 'SCOREBOARD_OCR',
           confidence,
@@ -441,7 +441,7 @@ export class SportsHighlightsEngine {
         type: eventType,
         confidence,
         confidenceLevel: classifyConfidence(confidence),
-        players: source.rawData?.players as string[] ?? [],
+        players: source.rawData?.['players'] as string[] ?? [],
         description: this.generateDescription(eventType, source),
         duration: this.config.minHighlightDuration,
         clipIds: [],

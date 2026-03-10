@@ -130,7 +130,7 @@ function secondsToVTT(seconds: number): string {
 /** Check whether the Web Speech API is available in this browser. */
 function getSpeechRecognitionCtor(): SpeechRecognitionConstructor | null {
   const w = globalThis as Record<string, unknown>;
-  return (w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null) as SpeechRecognitionConstructor | null;
+  return (w['SpeechRecognition'] ?? w['webkitSpeechRecognition'] ?? null) as SpeechRecognitionConstructor | null;
 }
 
 // -- Engine -------------------------------------------------------------------
@@ -266,12 +266,12 @@ class SubtitleEngine {
       recognition.onresult = (event: SpeechRecognitionEvent) => {
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const result = event.results[i];
-          if (result.isFinal) {
-            const text = result[0].transcript.trim();
+          if (result!.isFinal!) {
+            const text = result![0]!.transcript.trim();
             if (!text) continue;
 
             const currentTime = media.currentTime;
-            const confidence = result[0].confidence;
+            const confidence = result![0]!.confidence;
             const estimatedDuration = Math.max(
               opts.minDuration,
               Math.min(opts.maxDuration, text.length * 0.06),

@@ -74,9 +74,9 @@ export function applyColorLookup(
   const blend = intensity / 100;
 
   for (let i = 0; i < data.length; i += 4) {
-    const [lr, lg, lb] = transform(data[i], data[i + 1], data[i + 2]);
-    data[i] = Math.max(0, Math.min(255, Math.round(data[i] * (1 - blend) + lr * blend)));
-    data[i + 1] = Math.max(0, Math.min(255, Math.round(data[i + 1] * (1 - blend) + lg * blend)));
-    data[i + 2] = Math.max(0, Math.min(255, Math.round(data[i + 2] * (1 - blend) + lb * blend)));
+    const [lr, lg, lb] = transform(data[i]!, data[i + 1]!, data[i + 2]!);
+    data[i] = Math.max(0, Math.min(255, Math.round(data[i]! * (1 - blend) + lr * blend)));
+    data[i + 1] = Math.max(0, Math.min(255, Math.round(data[i + 1]! * (1 - blend) + lg * blend)));
+    data[i + 2] = Math.max(0, Math.min(255, Math.round(data[i + 2]! * (1 - blend) + lb * blend)));
   }
 }

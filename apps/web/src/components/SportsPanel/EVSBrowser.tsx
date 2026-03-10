@@ -152,7 +152,7 @@ function QuickRecallButtons() {
   const handleRecall = useCallback((highlightId: string, clipIds: string[]) => {
     selectHighlight(highlightId);
     if (clipIds.length > 0) {
-      selectEVSClip(clipIds[0]);
+      selectEVSClip(clipIds[0]!);
     }
   }, [selectHighlight, selectEVSClip]);
 

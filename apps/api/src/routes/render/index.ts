@@ -1,15 +1,20 @@
 import { Router, Request, Response } from 'express';
 import { renderFarmService } from '../../services/renderfarm.service';
-import { BadRequestError, NotFoundError } from '../../utils/errors';
+import { NotFoundError } from '../../utils/errors';
+import { validate, schemas } from '../../utils/validation';
+import { z } from 'zod';
 
 const router = Router();
+
+// ─── Param schemas ───────────────────────────────────────────────────────────
+const nodeIdParam = z.object({ nodeId: z.string().min(1) });
+const jobIdParam = z.object({ jobId: z.string().min(1) });
 
 // ─── Workers ────────────────────────────────────────────────────────────────
 
 // POST /workers — register a new render worker
-router.post('/workers', async (req: Request, res: Response) => {
+router.post('/workers', validate(schemas.registerRenderWorker), async (req: Request, res: Response) => {
   const { hostname, ip, port, workerTypes, capabilities } = req.body;
-  if (!hostname) throw new BadRequestError('hostname is required');
 
   const node = renderFarmService.registerWorker({
     hostname,
@@ -23,11 +28,11 @@ router.post('/workers', async (req: Request, res: Response) => {
 });
 
 // DELETE /workers/:nodeId — remove a worker
-router.delete('/workers/:nodeId', async (req: Request, res: Response) => {
-  const worker = renderFarmService.getWorker(req.params.nodeId);
+router.delete('/workers/:nodeId', validate(nodeIdParam, 'params'), async (req: Request, res: Response) => {
+  const worker = renderFarmService.getWorker(req.params['nodeId']!);
   if (!worker) throw new NotFoundError('Worker node');
 
-  renderFarmService.removeWorker(req.params.nodeId);
+  renderFarmService.removeWorker(req.params['nodeId']!);
   res.status(204).send();
 });
 
@@ -40,12 +45,8 @@ router.get('/workers', async (_req: Request, res: Response) => {
 // ─── Jobs ───────────────────────────────────────────────────────────────────
 
 // POST /jobs — submit a new render job
-router.post('/jobs', async (req: Request, res: Response) => {
+router.post('/jobs', validate(schemas.submitRenderJob), async (req: Request, res: Response) => {
   const { name, presetId, priority, sourceTimelineId, totalFrames, templateId, exportSettings, segmentCount } = req.body;
-  if (!name) throw new BadRequestError('name is required');
-  if (!presetId) throw new BadRequestError('presetId is required');
-  if (!sourceTimelineId) throw new BadRequestError('sourceTimelineId is required');
-  if (!totalFrames || totalFrames <= 0) throw new BadRequestError('totalFrames must be a positive number');
 
   const job = renderFarmService.submitJob({
     name,
@@ -68,39 +69,37 @@ router.get('/jobs', async (_req: Request, res: Response) => {
 });
 
 // PUT /jobs/:jobId/cancel — cancel a job
-router.put('/jobs/:jobId/cancel', async (req: Request, res: Response) => {
-  const job = renderFarmService.getJob(req.params.jobId);
+router.put('/jobs/:jobId/cancel', validate(jobIdParam, 'params'), async (req: Request, res: Response) => {
+  const job = renderFarmService.getJob(req.params['jobId']!);
   if (!job) throw new NotFoundError('Render job');
 
-  renderFarmService.cancelJob(req.params.jobId);
-  res.json({ status: 'cancelled', jobId: req.params.jobId });
+  renderFarmService.cancelJob(req.params['jobId']!);
+  res.json({ status: 'cancelled', jobId: req.params['jobId']! });
 });
 
 // PUT /jobs/:jobId/pause — pause a job
-router.put('/jobs/:jobId/pause', async (req: Request, res: Response) => {
-  const job = renderFarmService.getJob(req.params.jobId);
+router.put('/jobs/:jobId/pause', validate(jobIdParam, 'params'), async (req: Request, res: Response) => {
+  const job = renderFarmService.getJob(req.params['jobId']!);
   if (!job) throw new NotFoundError('Render job');
 
-  renderFarmService.pauseJob(req.params.jobId);
-  res.json({ status: 'paused', jobId: req.params.jobId });
+  renderFarmService.pauseJob(req.params['jobId']!);
+  res.json({ status: 'paused', jobId: req.params['jobId']! });
 });
 
 // PUT /jobs/:jobId/resume — resume a paused job
-router.put('/jobs/:jobId/resume', async (req: Request, res: Response) => {
-  const job = renderFarmService.getJob(req.params.jobId);
+router.put('/jobs/:jobId/resume', validate(jobIdParam, 'params'), async (req: Request, res: Response) => {
+  const job = renderFarmService.getJob(req.params['jobId']!);
   if (!job) throw new NotFoundError('Render job');
 
-  renderFarmService.resumeJob(req.params.jobId);
-  res.json({ status: 'resumed', jobId: req.params.jobId });
+  renderFarmService.resumeJob(req.params['jobId']!);
+  res.json({ status: 'resumed', jobId: req.params['jobId']! });
 });
 
 // ─── Queue ──────────────────────────────────────────────────────────────────
 
 // PUT /queue/reorder — reorder a job in the queue
-router.put('/queue/reorder', async (req: Request, res: Response) => {
+router.put('/queue/reorder', validate(schemas.reorderRenderQueue), async (req: Request, res: Response) => {
   const { jobId, newIndex } = req.body;
-  if (!jobId) throw new BadRequestError('jobId is required');
-  if (newIndex === undefined || newIndex < 0) throw new BadRequestError('newIndex must be a non-negative integer');
 
   const job = renderFarmService.getJob(jobId);
   if (!job) throw new NotFoundError('Render job');
@@ -114,10 +113,10 @@ router.put('/queue/reorder', async (req: Request, res: Response) => {
   if (clampedIndex <= 0) {
     job.createdAt = sorted[0] ? sorted[0].createdAt - 1 : Date.now();
   } else if (clampedIndex >= sorted.length - 1) {
-    job.createdAt = sorted[sorted.length - 1].createdAt + 1;
+    job.createdAt = sorted[sorted.length - 1]!.createdAt + 1;
   } else {
-    const before = sorted[clampedIndex - 1];
-    const after = sorted[clampedIndex];
+    const before = sorted[clampedIndex - 1]!;
+    const after = sorted[clampedIndex]!;
     job.createdAt = Math.floor((before.createdAt + after.createdAt) / 2);
   }
 
@@ -127,9 +126,9 @@ router.put('/queue/reorder', async (req: Request, res: Response) => {
 // ─── Install Script ─────────────────────────────────────────────────────────
 
 // GET /install-script — generate a bash install script for render agents
-router.get('/install-script', async (req: Request, res: Response) => {
-  const host = (req.query.host as string) || req.get('host') || 'localhost:4000';
-  const workerTypes = (req.query.workerTypes as string)?.split(',') ?? ['render'];
+router.get('/install-script', validate(schemas.renderInstallScriptQuery, 'query'), async (req: Request, res: Response) => {
+  const host = (req.query['host'] as string) || req.get('host') || 'localhost:4000';
+  const workerTypes = (req.query['workerTypes'] as string)?.split(',') ?? ['render'];
 
   const script = renderFarmService.generateInstallScript(host, workerTypes);
 

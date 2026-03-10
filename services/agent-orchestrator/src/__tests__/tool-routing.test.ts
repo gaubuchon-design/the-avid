@@ -141,9 +141,9 @@ describe('ToolCallLogger', () => {
 
       const logs = logger.getRecentLogs();
       expect(logs).toHaveLength(1);
-      expect(logs[0].type).toBe('tool-complete');
-      expect(logs[0].toolName).toBe('detect_scene_changes');
-      expect(logs[0].success).toBe(true);
+      expect(logs[0]!.type).toBe('tool-complete');
+      expect(logs[0]!.toolName).toBe('detect_scene_changes');
+      expect(logs[0]!.success).toBe(true);
     });
 
     it('should log a failed tool call', () => {
@@ -159,8 +159,8 @@ describe('ToolCallLogger', () => {
 
       const logs = logger.getRecentLogs();
       expect(logs).toHaveLength(1);
-      expect(logs[0].type).toBe('tool-error');
-      expect(logs[0].error).toBe('Clip not found');
+      expect(logs[0]!.type).toBe('tool-error');
+      expect(logs[0]!.error).toBe('Clip not found');
     });
   });
 
@@ -186,8 +186,8 @@ describe('ToolCallLogger', () => {
       logger.logPlanEvent({ type: 'plan-approved', planId: 'p1' });
 
       const logs = logger.getRecentLogs();
-      expect(logs[0].type).toBe('plan-approved');
-      expect(logs[1].type).toBe('plan-created');
+      expect(logs[0]!.type).toBe('plan-approved');
+      expect(logs[1]!.type).toBe('plan-created');
     });
 
     it('should respect the limit parameter', () => {
@@ -471,7 +471,7 @@ describe('AnalyticsLogger', () => {
 
     const entries = analytics.getEntries({ type: 'prompt' });
     expect(entries).toHaveLength(1);
-    expect(entries[0].data.prompt).toBe('remove silence');
+    expect(entries[0]!.data['prompt']).toBe('remove silence');
   });
 
   it('should log plans', () => {
@@ -490,7 +490,7 @@ describe('AnalyticsLogger', () => {
     analytics.logPlan('session-1', plan);
     const entries = analytics.getEntries({ type: 'plan' });
     expect(entries).toHaveLength(1);
-    expect(entries[0].planId).toBe('plan-001');
+    expect(entries[0]!.planId).toBe('plan-001');
   });
 
   it('should log approvals', () => {
@@ -499,9 +499,9 @@ describe('AnalyticsLogger', () => {
 
     const entries = analytics.getEntries({ type: 'approval' });
     expect(entries).toHaveLength(2);
-    expect((entries[0].data as any).approved).toBe(true);
-    expect((entries[1].data as any).approved).toBe(false);
-    expect((entries[1].data as any).stepId).toBe('step-002');
+    expect((entries[0]!.data as any).approved).toBe(true);
+    expect((entries[1]!.data as any).approved).toBe(false);
+    expect((entries[1]!.data as any).stepId).toBe('step-002');
   });
 
   it('should log executions', () => {
@@ -516,15 +516,15 @@ describe('AnalyticsLogger', () => {
     analytics.logExecution('session-1', 'plan-001', result);
     const entries = analytics.getEntries({ type: 'execution' });
     expect(entries).toHaveLength(1);
-    expect((entries[0].data as any).toolName).toBe('detect_scene_changes');
+    expect((entries[0]!.data as any).toolName).toBe('detect_scene_changes');
   });
 
   it('should log token usage', () => {
     analytics.logTokenUsage('session-1', 'plan-001', 42, 'planning');
     const entries = analytics.getEntries({ type: 'token-usage' });
     expect(entries).toHaveLength(1);
-    expect((entries[0].data as any).tokens).toBe(42);
-    expect((entries[0].data as any).category).toBe('planning');
+    expect((entries[0]!.data as any).tokens).toBe(42);
+    expect((entries[0]!.data as any).category).toBe('planning');
   });
 
   it('should filter entries by session, plan, and type', () => {

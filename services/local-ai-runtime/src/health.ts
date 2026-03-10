@@ -100,12 +100,23 @@ export async function getHealthInfo(
     })),
   );
 
-  const anyAvailable = backendStatuses.some((b) => b.available);
+  const availableCount = backendStatuses.filter((b) => b.available).length;
+  const totalCount = backendStatuses.length;
+
+  // Determine status: ok if all available, degraded if some, unavailable if none
+  let status: 'ok' | 'degraded' | 'unavailable';
+  if (availableCount === 0) {
+    status = 'unavailable';
+  } else if (availableCount < totalCount) {
+    status = 'degraded';
+  } else {
+    status = 'ok';
+  }
 
   const mem = process.memoryUsage();
 
   return {
-    status: anyAvailable ? 'ok' : 'unavailable',
+    status,
     service: serviceName,
     version,
     uptime: process.uptime(),
@@ -181,9 +192,9 @@ export async function runBenchmark(
     backend: backend.name,
     iterations: MEASURED_ITERATIONS,
     avgLatencyMs: round(sum / latencies.length),
-    minLatencyMs: round(latencies[0]),
-    maxLatencyMs: round(latencies[latencies.length - 1]),
-    p95LatencyMs: round(latencies[p95Index]),
+    minLatencyMs: round(latencies[0] ?? 0),
+    maxLatencyMs: round(latencies[latencies.length - 1] ?? 0),
+    p95LatencyMs: round(latencies[p95Index] ?? 0),
   };
 }
 

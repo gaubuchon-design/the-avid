@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { keyboardEngine } from '../engine/KeyboardEngine';
+import { keyboardEngine, type KeyModifier } from '../engine/KeyboardEngine';
 import { useUserSettingsStore } from '../store/userSettings.store';
 
 /**
@@ -26,7 +26,7 @@ export function KeyboardProvider({ children }: { children: React.ReactNode }) {
     for (const binding of customKeyBindings) {
       keyboardEngine.setBinding(
         binding.key,
-        binding.modifiers as any[],
+        binding.modifiers as KeyModifier[],
         binding.action,
       );
     }

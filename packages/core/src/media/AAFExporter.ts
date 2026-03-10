@@ -434,7 +434,7 @@ export class AAFExporter {
     const descriptors: AAFClipDescriptor[] = [];
 
     for (let trackIdx = 0; trackIdx < tracks.length; trackIdx++) {
-      const track = tracks[trackIdx];
+      const track = tracks[trackIdx]!;
       const isAudio = track.type === 'AUDIO';
 
       for (const clip of track.clips) {
@@ -510,7 +510,7 @@ export class AAFExporter {
       trackIndex: tracks.indexOf(track),
       trackName: track.name,
       channelCount: 1,
-      outputChannel: channelLabels[idx % channelLabels.length],
+      outputChannel: channelLabels[idx % channelLabels.length]!,
     }));
   }
 
@@ -525,10 +525,10 @@ export class AAFExporter {
     if (!match) return undefined;
 
     return {
-      hours: parseInt(match[1], 10),
-      minutes: parseInt(match[2], 10),
-      seconds: parseInt(match[3], 10),
-      frames: parseInt(match[4], 10),
+      hours: parseInt(match[1]!, 10),
+      minutes: parseInt(match[2]!, 10),
+      seconds: parseInt(match[3]!, 10),
+      frames: parseInt(match[4]!, 10),
       dropFrame: tc.includes(';') || dropFrame,
       frameRate,
     };

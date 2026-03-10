@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
+// ─── Typed subscription helper ──────────────────────────────────────────────────
+
 function subscribe<Args extends unknown[]>(
   channel: string,
   callback: (...args: Args) => void,
@@ -14,110 +16,393 @@ function subscribe<Args extends unknown[]>(
   };
 }
 
+// ─── Allowed IPC channels (security whitelist) ──────────────────────────────────
+
+const ALLOWED_INVOKE_CHANNELS = new Set([
+  // App info
+  'app:get-version',
+  'app:get-platform',
+  'app:version',
+  'app:get-media-tools',
+  'app:get-paths',
+  'app:reveal-in-finder',
+  'app:download-update',
+  'app:check-for-updates',
+  'app:install-update',
+  'app:notify',
+  'app:get-theme',
+  'app:set-theme',
+  'app:confirm-discard',
+  'app:get-dropped-file-info',
+  'app:system-info',
+  'app:filter-droppable-files',
+
+  // Dialogs
+  'dialog:open-file',
+  'dialog:open',
+  'dialog:save-file',
+  'dialog:save',
+
+  // GPU / Hardware acceleration
+  'gpu:info',
+  'hw-accel:get-settings',
+  'hw-accel:save-settings',
+  'hw:get-system-resources',
+  'hw:get-displays',
+
+  // Render dispatch
+  'render:get-gpu-accel-args',
+  'render:get-decode-args',
+
+  // Projects
+  'projects:list',
+  'projects:get',
+  'projects:save',
+  'projects:delete',
+  'projects:import-media',
+  'projects:scan-media',
+  'projects:relink-media',
+  'projects:add-watch-folder',
+  'projects:remove-watch-folder',
+  'projects:rescan-watch-folders',
+  'projects:recent',
+  'projects:add-recent',
+  'projects:clear-recent',
+  'projects:mark-dirty',
+  'projects:auto-save-status',
+
+  // Jobs
+  'jobs:list',
+  'jobs:start-export',
+
+  // File system
+  'fs:read-text',
+  'fs:write-text',
+
+  // Video I/O
+  'video-io:available',
+  'video-io:enumerate',
+  'video-io:start-capture',
+  'video-io:stop-capture',
+  'video-io:start-playback',
+  'video-io:stop-playback',
+  'video-io:send-frame',
+  'video-io:device-status',
+  'video-io:get-transport-buffer',
+
+  // Streaming
+  'streaming:available',
+  'streaming:start-ndi',
+  'streaming:start-srt',
+  'streaming:stop',
+  'streaming:stop-all',
+  'streaming:stats',
+  'streaming:targets',
+
+  // Deck control
+  'deck:available',
+  'deck:list-ports',
+  'deck:connect',
+  'deck:disconnect',
+  'deck:command',
+  'deck:jog',
+  'deck:shuttle',
+  'deck:timecode',
+  'deck:go-to-tc',
+  'deck:connected-decks',
+
+  // Window control
+  'window:minimize',
+  'window:maximize',
+  'window:close',
+  'window:is-maximized',
+  'window:is-fullscreen',
+  'window:set-title',
+]);
+
+const ALLOWED_SUBSCRIBE_CHANNELS = new Set([
+  // Menu events
+  'menu:new-project',
+  'menu:open-project',
+  'menu:import-media',
+  'menu:save',
+  'menu:save-as',
+  'menu:export',
+  'menu:consolidate',
+  'menu:preferences',
+  'menu:keyboard-shortcuts',
+
+  // Edit menu
+  'menu:paste-insert',
+  'menu:delete',
+  'menu:ripple-delete',
+  'menu:deselect-all',
+
+  // Clip/NLE menu
+  'menu:razor',
+  'menu:split',
+  'menu:lift',
+  'menu:extract',
+  'menu:toggle-link',
+  'menu:group',
+  'menu:ungroup',
+  'menu:nest',
+  'menu:match-frame',
+
+  // Mark menu
+  'menu:mark-in',
+  'menu:mark-out',
+  'menu:clear-marks',
+  'menu:add-marker',
+  'menu:next-marker',
+  'menu:prev-marker',
+  'menu:goto-in',
+  'menu:goto-out',
+
+  // View menu
+  'menu:view-source',
+  'menu:view-record',
+  'menu:view-timeline',
+  'menu:view-bins',
+  'menu:view-effects',
+
+  // Job & I/O events
+  'desktop-job:updated',
+  'video-io:frame-available',
+  'streaming:stats-update',
+  'deck:timecode-update',
+  'deck:status-update',
+
+  // Auto-update events
+  'app:update-available',
+  'app:update-progress',
+  'app:update-downloaded',
+
+  // Deep link events
+  'app:deep-link',
+
+  // Theme events
+  'app:theme-changed',
+]);
+
+/**
+ * Validated invoke -- only dispatches to whitelisted channels.
+ */
+function safeInvoke(channel: string, ...args: unknown[]): Promise<unknown> {
+  if (!ALLOWED_INVOKE_CHANNELS.has(channel)) {
+    return Promise.reject(new Error(`IPC channel not allowed: ${channel}`));
+  }
+  return ipcRenderer.invoke(channel, ...args);
+}
+
+/**
+ * Validated subscribe -- only listens on whitelisted channels.
+ */
+function safeSubscribe<Args extends unknown[]>(
+  channel: string,
+  callback: (...args: Args) => void,
+): () => void {
+  if (!ALLOWED_SUBSCRIBE_CHANNELS.has(channel)) {
+    console.warn(`[Preload] Attempted subscription to disallowed channel: ${channel}`);
+    return () => {};
+  }
+  return subscribe(channel, callback);
+}
+
 // ─── Secure API exposed to renderer ───────────────────────────────────────────
+
 contextBridge.exposeInMainWorld('electronAPI', {
   // App info
-  getVersion:  () => ipcRenderer.invoke('app:get-version'),
-  getPlatform: () => ipcRenderer.invoke('app:get-platform'),
-  getMediaTools: () => ipcRenderer.invoke('app:get-media-tools'),
+  getVersion:  () => safeInvoke('app:get-version') as Promise<string>,
+  getPlatform: () => safeInvoke('app:get-platform') as Promise<string>,
+  getMediaTools: () => safeInvoke('app:get-media-tools') as Promise<unknown>,
   app: {
-    getVersion: () => ipcRenderer.invoke('app:version'),
+    getVersion: () => safeInvoke('app:version') as Promise<string>,
     platform: process.platform,
+    getPaths: () => safeInvoke('app:get-paths') as Promise<Record<string, string>>,
+    revealInFinder: (filePath: string) => safeInvoke('app:reveal-in-finder', filePath) as Promise<boolean>,
+    downloadUpdate: () => safeInvoke('app:download-update') as Promise<boolean>,
+    checkForUpdates: () => safeInvoke('app:check-for-updates') as Promise<unknown>,
+    installUpdate: () => safeInvoke('app:install-update') as Promise<void>,
   },
   gpu: {
-    getInfo: () => ipcRenderer.invoke('gpu:info'),
+    getInfo: () => safeInvoke('gpu:info'),
   },
 
   // Dialogs
   openFile: (opts?: Electron.OpenDialogOptions) =>
-    ipcRenderer.invoke('dialog:open-file', opts),
+    safeInvoke('dialog:open-file', opts),
   saveFile: (opts?: Electron.SaveDialogOptions) =>
-    ipcRenderer.invoke('dialog:save-file', opts),
+    safeInvoke('dialog:save-file', opts),
   dialog: {
-    openFile: (options: Electron.OpenDialogOptions) => ipcRenderer.invoke('dialog:open', options),
-    saveFile: (options: Electron.SaveDialogOptions) => ipcRenderer.invoke('dialog:save', options),
+    openFile: (options: Electron.OpenDialogOptions) => safeInvoke('dialog:open', options),
+    saveFile: (options: Electron.SaveDialogOptions) => safeInvoke('dialog:save', options),
   },
+
+  // Project CRUD
   listProjects: () =>
-    ipcRenderer.invoke('projects:list'),
+    safeInvoke('projects:list'),
   getProject: (projectId: string) =>
-    ipcRenderer.invoke('projects:get', projectId),
+    safeInvoke('projects:get', projectId),
   saveProject: (project: unknown) =>
-    ipcRenderer.invoke('projects:save', project),
+    safeInvoke('projects:save', project),
   deleteProject: (projectId: string) =>
-    ipcRenderer.invoke('projects:delete', projectId),
+    safeInvoke('projects:delete', projectId),
   importMedia: (projectId: string, filePaths: string[]) =>
-    ipcRenderer.invoke('projects:import-media', projectId, filePaths),
+    safeInvoke('projects:import-media', projectId, filePaths),
   scanProjectMedia: (projectId: string) =>
-    ipcRenderer.invoke('projects:scan-media', projectId),
+    safeInvoke('projects:scan-media', projectId),
   relinkProjectMedia: (projectId: string, searchRoots: string[]) =>
-    ipcRenderer.invoke('projects:relink-media', projectId, searchRoots),
+    safeInvoke('projects:relink-media', projectId, searchRoots),
   addWatchFolder: (projectId: string, folderPath: string) =>
-    ipcRenderer.invoke('projects:add-watch-folder', projectId, folderPath),
+    safeInvoke('projects:add-watch-folder', projectId, folderPath),
   removeWatchFolder: (projectId: string, watchFolderId: string) =>
-    ipcRenderer.invoke('projects:remove-watch-folder', projectId, watchFolderId),
+    safeInvoke('projects:remove-watch-folder', projectId, watchFolderId),
   rescanWatchFolders: (projectId: string) =>
-    ipcRenderer.invoke('projects:rescan-watch-folders', projectId),
+    safeInvoke('projects:rescan-watch-folders', projectId),
   listDesktopJobs: () =>
-    ipcRenderer.invoke('jobs:list'),
+    safeInvoke('jobs:list'),
   startExportJob: (project: unknown) =>
-    ipcRenderer.invoke('jobs:start-export', project),
+    safeInvoke('jobs:start-export', project),
   readTextFile: (filePath: string) =>
-    ipcRenderer.invoke('fs:read-text', filePath),
+    safeInvoke('fs:read-text', filePath) as Promise<string>,
   writeTextFile: (filePath: string, contents: string) =>
-    ipcRenderer.invoke('fs:write-text', filePath, contents),
+    safeInvoke('fs:write-text', filePath, contents) as Promise<boolean>,
+
+  // ─── Auto-save / dirty tracking ──────────────────────────────────────
+  markProjectDirty: (projectId: string) =>
+    safeInvoke('projects:mark-dirty', projectId) as Promise<boolean>,
+  getAutoSaveStatus: () =>
+    safeInvoke('projects:auto-save-status') as Promise<{
+      dirtyCount: number;
+      dirtyIds: string[];
+      intervalMs: number;
+    }>,
+
+  // ─── Render dispatch ─────────────────────────────────────────────────
+  render: {
+    getGPUAccelArgs: (codec: string) => safeInvoke('render:get-gpu-accel-args', codec),
+    getDecodeArgs: () => safeInvoke('render:get-decode-args'),
+  },
+
+  // ─── Hardware info ──────────────────────────────────────────────────
+  hardware: {
+    getSystemResources: () => safeInvoke('hw:get-system-resources'),
+    getDisplays: () => safeInvoke('hw:get-displays'),
+    getHWAccelSettings: () => safeInvoke('hw-accel:get-settings'),
+    saveHWAccelSettings: (settings: unknown) => safeInvoke('hw-accel:save-settings', settings),
+  },
+
+  // ─── File drag & drop helpers ────────────────────────────────────────
+  filterDroppableFiles: (filePaths: string[]) =>
+    safeInvoke('app:filter-droppable-files', filePaths) as Promise<string[]>,
 
   // ─── Video I/O (DeckLink, AJA) ────────────────────────────────────────
   videoIO: {
-    available:      () => ipcRenderer.invoke('video-io:available'),
-    enumerate:      () => ipcRenderer.invoke('video-io:enumerate'),
-    startCapture:   (config: unknown) => ipcRenderer.invoke('video-io:start-capture', config),
-    stopCapture:    (deviceId: string) => ipcRenderer.invoke('video-io:stop-capture', deviceId),
-    startPlayback:  (config: unknown) => ipcRenderer.invoke('video-io:start-playback', config),
-    stopPlayback:   (deviceId: string) => ipcRenderer.invoke('video-io:stop-playback', deviceId),
-    sendFrame:      (deviceId: string, data: ArrayBuffer) => ipcRenderer.invoke('video-io:send-frame', deviceId, data),
-    deviceStatus:   (deviceId: string) => ipcRenderer.invoke('video-io:device-status', deviceId),
-    getTransportBuffer: (deviceId: string) => ipcRenderer.invoke('video-io:get-transport-buffer', deviceId),
-    onFrameAvailable: (cb: (info: unknown) => void) => subscribe('video-io:frame-available', cb),
+    available:      () => safeInvoke('video-io:available'),
+    enumerate:      () => safeInvoke('video-io:enumerate'),
+    startCapture:   (config: unknown) => safeInvoke('video-io:start-capture', config),
+    stopCapture:    (deviceId: string) => safeInvoke('video-io:stop-capture', deviceId),
+    startPlayback:  (config: unknown) => safeInvoke('video-io:start-playback', config),
+    stopPlayback:   (deviceId: string) => safeInvoke('video-io:stop-playback', deviceId),
+    sendFrame:      (deviceId: string, data: ArrayBuffer) => safeInvoke('video-io:send-frame', deviceId, data),
+    deviceStatus:   (deviceId: string) => safeInvoke('video-io:device-status', deviceId),
+    getTransportBuffer: (deviceId: string) => safeInvoke('video-io:get-transport-buffer', deviceId),
+    onFrameAvailable: (cb: (info: unknown) => void) => safeSubscribe('video-io:frame-available', cb),
   },
 
   // ─── Streaming (NDI, SRT) ───────────────────────────────────────────
   streaming: {
-    available:  () => ipcRenderer.invoke('streaming:available'),
-    startNDI:   (config: unknown) => ipcRenderer.invoke('streaming:start-ndi', config),
-    startSRT:   (config: unknown) => ipcRenderer.invoke('streaming:start-srt', config),
-    stop:       (targetId: string) => ipcRenderer.invoke('streaming:stop', targetId),
-    stopAll:    () => ipcRenderer.invoke('streaming:stop-all'),
-    stats:      () => ipcRenderer.invoke('streaming:stats'),
-    targets:    () => ipcRenderer.invoke('streaming:targets'),
-    onStatsUpdate: (cb: (stats: unknown) => void) => subscribe('streaming:stats-update', cb),
+    available:  () => safeInvoke('streaming:available'),
+    startNDI:   (config: unknown) => safeInvoke('streaming:start-ndi', config),
+    startSRT:   (config: unknown) => safeInvoke('streaming:start-srt', config),
+    stop:       (targetId: string) => safeInvoke('streaming:stop', targetId),
+    stopAll:    () => safeInvoke('streaming:stop-all'),
+    stats:      () => safeInvoke('streaming:stats'),
+    targets:    () => safeInvoke('streaming:targets'),
+    onStatsUpdate: (cb: (stats: unknown) => void) => safeSubscribe('streaming:stats-update', cb),
   },
 
   // ─── Deck Control (Sony 9-pin RS-422) ───────────────────────────────
   deckControl: {
-    available:     () => ipcRenderer.invoke('deck:available'),
-    listPorts:     () => ipcRenderer.invoke('deck:list-ports'),
-    connect:       (portPath: string) => ipcRenderer.invoke('deck:connect', portPath),
-    disconnect:    (deckId: string) => ipcRenderer.invoke('deck:disconnect', deckId),
-    command:       (deckId: string, cmd: string) => ipcRenderer.invoke('deck:command', deckId, cmd),
-    jog:           (deckId: string, speed: number) => ipcRenderer.invoke('deck:jog', deckId, speed),
-    shuttle:       (deckId: string, speed: number) => ipcRenderer.invoke('deck:shuttle', deckId, speed),
-    timecode:      (deckId: string) => ipcRenderer.invoke('deck:timecode', deckId),
-    goToTimecode:  (deckId: string, tc: unknown) => ipcRenderer.invoke('deck:go-to-tc', deckId, tc),
-    connectedDecks: () => ipcRenderer.invoke('deck:connected-decks'),
-    onTimecodeUpdate: (cb: (info: unknown) => void) => subscribe('deck:timecode-update', cb),
-    onStatusUpdate:   (cb: (info: unknown) => void) => subscribe('deck:status-update', cb),
+    available:     () => safeInvoke('deck:available'),
+    listPorts:     () => safeInvoke('deck:list-ports'),
+    connect:       (portPath: string) => safeInvoke('deck:connect', portPath),
+    disconnect:    (deckId: string) => safeInvoke('deck:disconnect', deckId),
+    command:       (deckId: string, cmd: string) => safeInvoke('deck:command', deckId, cmd),
+    jog:           (deckId: string, speed: number) => safeInvoke('deck:jog', deckId, speed),
+    shuttle:       (deckId: string, speed: number) => safeInvoke('deck:shuttle', deckId, speed),
+    timecode:      (deckId: string) => safeInvoke('deck:timecode', deckId),
+    goToTimecode:  (deckId: string, tc: unknown) => safeInvoke('deck:go-to-tc', deckId, tc),
+    connectedDecks: () => safeInvoke('deck:connected-decks'),
+    onTimecodeUpdate: (cb: (info: unknown) => void) => safeSubscribe('deck:timecode-update', cb),
+    onStatusUpdate:   (cb: (info: unknown) => void) => safeSubscribe('deck:status-update', cb),
   },
 
-  // Menu event listeners
-  onNewProject:  (cb: () => void) => subscribe('menu:new-project', cb),
-  onOpenProject: (cb: (path: string) => void) => subscribe('menu:open-project', cb),
-  onImportMedia: (cb: () => void) => subscribe('menu:import-media', cb),
-  onSave:        (cb: () => void) => subscribe('menu:save', cb),
-  onExport:      (cb: () => void) => subscribe('menu:export', cb),
-  onDesktopJobUpdate: (cb: (job: unknown) => void) => subscribe('desktop-job:updated', cb),
+  // ─── Menu event listeners ───────────────────────────────────────────
+  onNewProject:  (cb: () => void) => safeSubscribe('menu:new-project', cb),
+  onOpenProject: (cb: (path: string) => void) => safeSubscribe('menu:open-project', cb),
+  onImportMedia: (cb: () => void) => safeSubscribe('menu:import-media', cb),
+  onSave:        (cb: () => void) => safeSubscribe('menu:save', cb),
+  onSaveAs:      (cb: () => void) => safeSubscribe('menu:save-as', cb),
+  onExport:      (cb: () => void) => safeSubscribe('menu:export', cb),
+  onConsolidate: (cb: () => void) => safeSubscribe('menu:consolidate', cb),
+  onPreferences: (cb: () => void) => safeSubscribe('menu:preferences', cb),
+  onDesktopJobUpdate: (cb: (job: unknown) => void) => safeSubscribe('desktop-job:updated', cb),
+
+  // NLE-specific menu event listeners
+  onMarkIn:     (cb: () => void) => safeSubscribe('menu:mark-in', cb),
+  onMarkOut:    (cb: () => void) => safeSubscribe('menu:mark-out', cb),
+  onClearMarks: (cb: () => void) => safeSubscribe('menu:clear-marks', cb),
+  onAddMarker:  (cb: () => void) => safeSubscribe('menu:add-marker', cb),
+  onNextMarker: (cb: () => void) => safeSubscribe('menu:next-marker', cb),
+  onPrevMarker: (cb: () => void) => safeSubscribe('menu:prev-marker', cb),
+  onGotoIn:     (cb: () => void) => safeSubscribe('menu:goto-in', cb),
+  onGotoOut:    (cb: () => void) => safeSubscribe('menu:goto-out', cb),
+  onRazor:      (cb: () => void) => safeSubscribe('menu:razor', cb),
+  onSplit:      (cb: () => void) => safeSubscribe('menu:split', cb),
+  onLift:       (cb: () => void) => safeSubscribe('menu:lift', cb),
+  onExtract:    (cb: () => void) => safeSubscribe('menu:extract', cb),
+  onToggleLink: (cb: () => void) => safeSubscribe('menu:toggle-link', cb),
+  onGroup:      (cb: () => void) => safeSubscribe('menu:group', cb),
+  onUngroup:    (cb: () => void) => safeSubscribe('menu:ungroup', cb),
+  onNest:       (cb: () => void) => safeSubscribe('menu:nest', cb),
+  onMatchFrame: (cb: () => void) => safeSubscribe('menu:match-frame', cb),
+
+  // Edit menu events
+  onPasteInsert:  (cb: () => void) => safeSubscribe('menu:paste-insert', cb),
+  onDelete:       (cb: () => void) => safeSubscribe('menu:delete', cb),
+  onRippleDelete: (cb: () => void) => safeSubscribe('menu:ripple-delete', cb),
+  onDeselectAll:  (cb: () => void) => safeSubscribe('menu:deselect-all', cb),
+
+  // View panel events
+  onViewSource:   (cb: () => void) => safeSubscribe('menu:view-source', cb),
+  onViewRecord:   (cb: () => void) => safeSubscribe('menu:view-record', cb),
+  onViewTimeline: (cb: () => void) => safeSubscribe('menu:view-timeline', cb),
+  onViewBins:     (cb: () => void) => safeSubscribe('menu:view-bins', cb),
+  onViewEffects:  (cb: () => void) => safeSubscribe('menu:view-effects', cb),
+
+  // Keyboard shortcuts menu
+  onKeyboardShortcuts: (cb: () => void) => safeSubscribe('menu:keyboard-shortcuts', cb),
+
+  // Auto-update events
+  onUpdateAvailable:  (cb: (info: { version: string }) => void) => safeSubscribe('app:update-available', cb),
+  onUpdateProgress:   (cb: (info: { percent: number }) => void) => safeSubscribe('app:update-progress', cb),
+  onUpdateDownloaded: (cb: (info: { version: string }) => void) => safeSubscribe('app:update-downloaded', cb),
+
+  // Deep link events
+  onDeepLink: (cb: (url: string) => void) => safeSubscribe('app:deep-link', cb),
+
+  // Theme change events
+  onThemeChanged: (cb: (info: { shouldUseDarkColors: boolean; themeSource: string }) => void) =>
+    safeSubscribe('app:theme-changed', cb),
 
   // Cleanup
-  removeAllListeners: (channel: string) => ipcRenderer.removeAllListeners(channel),
+  removeAllListeners: (channel: string) => {
+    if (ALLOWED_SUBSCRIBE_CHANNELS.has(channel)) {
+      ipcRenderer.removeAllListeners(channel);
+    }
+  },
 });
 
 // ─── TypeScript type declaration (for renderer) ────────────────────────────────

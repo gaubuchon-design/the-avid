@@ -152,7 +152,7 @@ describe('SnapEngine', () => {
 
     // Check sorted order
     for (let i = 1; i < anchors.length; i++) {
-      expect(anchors[i]).toBeGreaterThanOrEqual(anchors[i - 1]);
+      expect(anchors[i]).toBeGreaterThanOrEqual(anchors[i - 1]!);
     }
   });
 });

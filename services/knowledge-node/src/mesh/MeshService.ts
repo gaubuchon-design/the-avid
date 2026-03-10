@@ -356,8 +356,8 @@ export class MeshService {
     // Handle search request from a peer.
     if (type === 'search:request') {
       const req = payload as Record<string, unknown>;
-      const requestId = req.__requestId as string;
-      const fromNodeId = req.__fromNodeId as string;
+      const requestId = req['__requestId'] as string;
+      const fromNodeId = req['__fromNodeId'] as string;
       const query = req as unknown as SearchQuery;
 
       const hits = this.searchLocal(query);
@@ -370,10 +370,10 @@ export class MeshService {
     // Handle replication requests.
     if (type === 'replication:request') {
       const req = payload as Record<string, unknown>;
-      const requestId = req.__requestId as string;
-      const fromNodeId = req.__fromNodeId as string;
-      const shardId = req.shardId as string;
-      const sinceSequence = (req.sinceSequence as number) ?? 0;
+      const requestId = req['__requestId'] as string;
+      const fromNodeId = req['__fromNodeId'] as string;
+      const shardId = req['shardId'] as string;
+      const sinceSequence = (req['sinceSequence'] as number) ?? 0;
 
       const events = this.replicationManager.getEventsSince(shardId, sinceSequence);
       this.peerDiscovery.sendResponse(
@@ -388,9 +388,9 @@ export class MeshService {
     // Handle lease queries.
     if (type === 'lease:query:request') {
       const req = payload as Record<string, unknown>;
-      const requestId = req.__requestId as string;
-      const fromNodeId = req.__fromNodeId as string;
-      const shardId = req.shardId as string;
+      const requestId = req['__requestId'] as string;
+      const fromNodeId = req['__fromNodeId'] as string;
+      const shardId = req['shardId'] as string;
 
       const lease = this.leaseManager.getLease(shardId);
       this.peerDiscovery.sendResponse(

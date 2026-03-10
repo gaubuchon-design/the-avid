@@ -179,27 +179,73 @@ export class FrameRateMixer {
   private assetMap: Map<string, EditorMediaAsset>;
   private conformOverrides: Map<string, ConformMethod> = new Map();
 
+  // ── Performance caches ──────────────────────────────────────────────────
+  /** Pre-built lookup from frame rate preset values to labels for O(1) access. */
+  private static readonly frameRateLabelCache: Map<number, string> = new Map(
+    Object.entries(FRAME_RATE_PRESETS).map(([label, value]) => [value, label]),
+  );
+
+  /** Pre-computed conversion lookup table for common frame rate pairs. */
+  private static readonly conversionLUT: Map<string, number> = (() => {
+    const lut = new Map<string, number>();
+    for (const from of STANDARD_FRAME_RATES) {
+      for (const to of STANDARD_FRAME_RATES) {
+        if (from !== to) {
+          lut.set(`${from}:${to}`, to / from);
+        }
+      }
+    }
+    return lut;
+  })();
+
+  /** Cache for clip frame rates to avoid repeated asset map lookups. */
+  private clipFrameRateCache: Map<string, number> = new Map();
+
+  /**
+   * @param project - The editor project to analyse. Must have valid settings.frameRate.
+   * @throws {FrameRateMixerError} if the project has an invalid frame rate.
+   */
   constructor(project: EditorProject) {
+    if (!project || typeof project !== 'object') {
+      throw new FrameRateMixerError('Project must be a valid object', 'INVALID_FRAME_RATE');
+    }
+    const projectRate = project.settings?.frameRate;
+    if (!projectRate || !Number.isFinite(projectRate) || projectRate <= 0) {
+      throw new FrameRateMixerError(
+        `Project frame rate must be a positive number, got ${String(projectRate)}`,
+        'INVALID_FRAME_RATE',
+      );
+    }
     this.project = project;
     this.assetMap = new Map();
-    for (const asset of flattenAssets(project.bins)) {
+    for (const asset of flattenAssets(project.bins ?? [])) {
       this.assetMap.set(asset.id, asset);
     }
+  }
+
+  /**
+   * Look up the pre-computed conversion ratio between two standard frame rates.
+   * Returns undefined if the pair is not in the lookup table.
+   */
+  static getConversionRatio(fromRate: number, toRate: number): number | undefined {
+    return FrameRateMixer.conversionLUT.get(`${fromRate}:${toRate}`);
   }
 
   // ── Analysis ────────────────────────────────────────────────────────────
 
   /**
    * Get a summary of frame rates across the entire project.
+   * Handles empty sequences (no tracks/clips) gracefully.
    */
   getSummary(): FrameRateSummary {
     const timelineRate = this.project.settings.frameRate;
+    const tracks = this.project.tracks ?? [];
     const fpsMap = new Map<number, number>(); // fps -> count
     let totalClips = 0;
     let matching = 0;
 
-    for (const track of this.project.tracks) {
-      for (const clip of track.clips) {
+    for (const track of tracks) {
+      for (const clip of track.clips ?? []) {
         totalClips++;
         const clipRate = this.getClipFrameRate(clip);
 
@@ -231,14 +277,15 @@ export class FrameRateMixer {
 
   /**
    * Get mismatch warnings for all clips.
+   * Returns an empty array for empty sequences.
    */
   getWarnings(): FrameRateMismatchWarning[] {
     const timelineRate = this.project.settings.frameRate;
     const warnings: FrameRateMismatchWarning[] = [];
     let warnId = 0;
 
-    for (const track of this.project.tracks) {
-      for (const clip of track.clips) {
+    for (const track of this.project.tracks ?? []) {
+      for (const clip of track.clips ?? []) {
         const clipRate = this.getClipFrameRate(clip);
         if (this.isFrameRateMatch(clipRate, timelineRate)) continue;
 
@@ -264,18 +311,20 @@ export class FrameRateMixer {
 
   /**
    * Get frame-rate indicators for all clips (for timeline UI).
+   * Returns an empty array for empty sequences.
+   * Handles zero-duration clips and clips at frame 0.
    */
   getClipIndicators(): ClipFrameRateIndicator[] {
     const timelineRate = this.project.settings.frameRate;
     const indicators: ClipFrameRateIndicator[] = [];
 
-    for (const track of this.project.tracks) {
-      for (const clip of track.clips) {
+    for (const track of this.project.tracks ?? []) {
+      for (const clip of track.clips ?? []) {
         const clipRate = this.getClipFrameRate(clip);
         const isMismatch = !this.isFrameRateMatch(clipRate, timelineRate);
         const conformMethod = this.conformOverrides.get(clip.id) ?? (isMismatch ? 'nearest' : 'none');
         const speedRatio = this.calculateSpeedRatio(clipRate, timelineRate, conformMethod);
-        const originalDuration = clip.endTime - clip.startTime;
+        const originalDuration = Math.max(0, clip.endTime - clip.startTime);
 
         indicators.push({
           clipId: clip.id,
@@ -290,7 +339,7 @@ export class FrameRateMixer {
             : `${clipRate}fps (matches timeline)`,
           conformMethod,
           speedRatio,
-          conformedDurationSeconds: originalDuration / speedRatio,
+          conformedDurationSeconds: speedRatio !== 0 ? originalDuration / speedRatio : originalDuration,
           hasPulldownCadence: this.hasPulldownCadence(clipRate, timelineRate),
         });
       }
@@ -303,15 +352,24 @@ export class FrameRateMixer {
 
   /**
    * Apply a conform method to a clip (or all clips with the same source FPS).
+   *
+   * @param options - Conform options with clipId, method, and applyToAll flag.
+   * @throws {FrameRateMixerError} if the clip is not found (CLIP_NOT_FOUND).
+   * @throws {FrameRateMixerError} if the clipId is empty (CLIP_NOT_FOUND).
    */
   conform(options: ConformOptions): ConformResult {
     const { clipId, method, applyToAll } = options;
+
+    if (!clipId || typeof clipId !== 'string') {
+      throw new FrameRateMixerError('clipId must be a non-empty string', 'CLIP_NOT_FOUND');
+    }
+
     const timelineRate = this.project.settings.frameRate;
 
     // Find the target clip
     let targetClip: EditorClip | undefined;
-    for (const track of this.project.tracks) {
-      targetClip = track.clips.find((c) => c.id === clipId);
+    for (const track of this.project.tracks ?? []) {
+      targetClip = (track.clips ?? []).find((c) => c.id === clipId);
       if (targetClip) break;
     }
     if (!targetClip) {
@@ -323,18 +381,18 @@ export class FrameRateMixer {
 
     if (applyToAll) {
       // Apply to all clips with the same source frame rate
-      for (const track of this.project.tracks) {
-        for (const clip of track.clips) {
+      for (const track of this.project.tracks ?? []) {
+        for (const clip of track.clips ?? []) {
           const rate = this.getClipFrameRate(clip);
           if (this.isFrameRateMatch(rate, sourceRate)) {
             this.conformOverrides.set(clip.id, method);
             const speedRatio = this.calculateSpeedRatio(rate, timelineRate, method);
-            const originalDur = clip.endTime - clip.startTime;
+            const originalDur = Math.max(0, clip.endTime - clip.startTime);
             details.push({
               clipId: clip.id,
               clipName: clip.name,
               originalDuration: originalDur,
-              conformedDuration: originalDur / speedRatio,
+              conformedDuration: speedRatio !== 0 ? originalDur / speedRatio : originalDur,
               speedRatio,
               method,
             });
@@ -344,12 +402,12 @@ export class FrameRateMixer {
     } else {
       this.conformOverrides.set(clipId, method);
       const speedRatio = this.calculateSpeedRatio(sourceRate, timelineRate, method);
-      const originalDur = targetClip.endTime - targetClip.startTime;
+      const originalDur = Math.max(0, targetClip.endTime - targetClip.startTime);
       details.push({
         clipId,
         clipName: targetClip.name,
         originalDuration: originalDur,
-        conformedDuration: originalDur / speedRatio,
+        conformedDuration: speedRatio !== 0 ? originalDur / speedRatio : originalDur,
         speedRatio,
         method,
       });
@@ -376,15 +434,31 @@ export class FrameRateMixer {
 
   /**
    * Check if two frame rates are functionally equivalent.
+   * Returns false if either rate is not a finite positive number.
+   *
+   * @param rateA - First frame rate.
+   * @param rateB - Second frame rate.
    */
   static areEquivalent(rateA: number, rateB: number): boolean {
+    if (!Number.isFinite(rateA) || !Number.isFinite(rateB)) return false;
+    if (rateA <= 0 || rateB <= 0) return false;
     return Math.abs(rateA - rateB) < 0.02;
   }
 
   /**
    * Get the nearest standard frame rate.
+   * Returns 24 if the input is not a finite positive number.
+   *
+   * @param rate - The frame rate to match.
+   * @throws {FrameRateMixerError} if rate is not a positive number.
    */
   static nearestStandard(rate: number): number {
+    if (!Number.isFinite(rate) || rate <= 0) {
+      throw new FrameRateMixerError(
+        `Frame rate must be a positive number, got ${String(rate)}`,
+        'INVALID_FRAME_RATE',
+      );
+    }
     let nearest: number = STANDARD_FRAME_RATES[0];
     let minDiff = Math.abs(rate - nearest);
     for (const std of STANDARD_FRAME_RATES) {
@@ -399,8 +473,37 @@ export class FrameRateMixer {
 
   /**
    * Convert a frame count between frame rates.
+   * Guards against division by zero and NaN.
+   *
+   * @param frames - Number of frames. Must be non-negative.
+   * @param fromRate - Source frame rate. Must be positive.
+   * @param toRate - Target frame rate. Must be positive.
+   * @throws {FrameRateMixerError} if any parameter is invalid.
    */
   static convertFrames(frames: number, fromRate: number, toRate: number): number {
+    if (!Number.isFinite(frames) || frames < 0) {
+      throw new FrameRateMixerError(
+        `frames must be a non-negative number, got ${String(frames)}`,
+        'INVALID_FRAME_RATE',
+      );
+    }
+    if (!Number.isFinite(fromRate) || fromRate <= 0) {
+      throw new FrameRateMixerError(
+        `fromRate must be a positive number, got ${String(fromRate)}`,
+        'INVALID_FRAME_RATE',
+      );
+    }
+    if (!Number.isFinite(toRate) || toRate <= 0) {
+      throw new FrameRateMixerError(
+        `toRate must be a positive number, got ${String(toRate)}`,
+        'INVALID_FRAME_RATE',
+      );
+    }
+    // Use pre-computed ratio from LUT for standard frame rate pairs
+    const lutRatio = FrameRateMixer.conversionLUT.get(`${fromRate}:${toRate}`);
+    if (lutRatio !== undefined) {
+      return Math.round(frames * lutRatio);
+    }
     const seconds = frames / fromRate;
     return Math.round(seconds * toRate);
   }
@@ -408,13 +511,19 @@ export class FrameRateMixer {
   // ── Private helpers ─────────────────────────────────────────────────────
 
   private getClipFrameRate(clip: EditorClip): number {
+    // Check per-instance cache first for repeated lookups
+    const cached = this.clipFrameRateCache.get(clip.id);
+    if (cached !== undefined) return cached;
+
+    let rate = this.project.settings.frameRate;
     if (clip.assetId) {
       const asset = this.assetMap.get(clip.assetId);
       if (asset?.technicalMetadata?.frameRate) {
-        return asset.technicalMetadata.frameRate;
+        rate = asset.technicalMetadata.frameRate;
       }
     }
-    return this.project.settings.frameRate;
+    this.clipFrameRateCache.set(clip.id, rate);
+    return rate;
   }
 
   private isFrameRateMatch(rateA: number, rateB: number): boolean {
@@ -422,6 +531,7 @@ export class FrameRateMixer {
   }
 
   private getMismatchSeverity(clipRate: number, timelineRate: number): MismatchSeverity {
+    if (timelineRate === 0 || !Number.isFinite(clipRate) || !Number.isFinite(timelineRate)) return 'error';
     const ratio = clipRate / timelineRate;
 
     // Integer multiples are relatively safe
@@ -473,6 +583,10 @@ export class FrameRateMixer {
   }
 
   private calculateSpeedRatio(clipRate: number, timelineRate: number, method: ConformMethod): number {
+    // Guard against division by zero
+    if (timelineRate === 0 || !Number.isFinite(clipRate) || !Number.isFinite(timelineRate)) {
+      return 1.0;
+    }
     switch (method) {
       case 'speed_adjust':
         // Clip playback rate is adjusted to match the timeline frame rate.
@@ -508,7 +622,12 @@ export class FrameRateMixer {
   }
 
   private getFrameRateLabel(rate: number): string {
-    for (const [label, value] of Object.entries(FRAME_RATE_PRESETS)) {
+    // O(1) lookup for exact matches via pre-built cache
+    const exact = FrameRateMixer.frameRateLabelCache.get(rate);
+    if (exact) return exact;
+
+    // Fall back to fuzzy match for non-exact rates
+    for (const [value, label] of FrameRateMixer.frameRateLabelCache) {
       if (this.isFrameRateMatch(rate, value)) return label;
     }
     return `${rate}fps`;

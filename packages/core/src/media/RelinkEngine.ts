@@ -217,7 +217,7 @@ export class RelinkEngine {
     const proposals: RelinkProposal[] = [];
 
     for (let i = 0; i < offlineAssets.length; i++) {
-      const asset = offlineAssets[i];
+      const asset = offlineAssets[i]!;
       this.events.onScanProgress?.(i + 1, offlineAssets.length);
 
       const candidates: RelinkCandidate[] = [];
@@ -246,17 +246,17 @@ export class RelinkEngine {
       // Auto-select if top match exceeds threshold and is significantly better than second
       let selectedIndex: number | null = null;
       let confirmed = false;
-      if (limited.length > 0 && limited[0].confidence >= this.config.autoMatchThreshold) {
-        if (limited.length === 1 || limited[0].confidence - limited[1].confidence > 0.15) {
+      if (limited.length > 0 && limited[0]!.confidence >= this.config.autoMatchThreshold) {
+        if (limited.length === 1 || limited[0]!.confidence - limited[1]!.confidence > 0.15) {
           selectedIndex = 0;
           confirmed = false; // Still needs user confirmation
         }
       }
 
       const status: RelinkAssetStatus = limited.length > 1 &&
-        limited[0].confidence > 0.7 &&
-        limited[1].confidence > 0.7 &&
-        limited[0].confidence - limited[1].confidence < 0.1
+        limited[0]!.confidence > 0.7 &&
+        limited[1]!.confidence > 0.7 &&
+        limited[0]!.confidence - limited[1]!.confidence < 0.1
         ? 'conflict'
         : 'offline';
 
@@ -270,7 +270,7 @@ export class RelinkEngine {
       });
 
       if (limited.length > 0) {
-        this.events.onMatchFound?.(asset.id, limited[0]);
+        this.events.onMatchFound?.(asset.id, limited[0]!);
       }
     }
 
@@ -323,7 +323,7 @@ export class RelinkEngine {
     const updateAssetInBins = (bins: EditorBin[]): void => {
       for (const bin of bins) {
         for (let i = 0; i < bin.assets.length; i++) {
-          const asset = bin.assets[i];
+          const asset = bin.assets[i]!;
           const candidate = relinkMap.get(asset.id);
 
           if (candidate) {
@@ -333,7 +333,7 @@ export class RelinkEngine {
               pathHistory.push(asset.locations.originalPath);
             }
 
-            bin.assets[i] = {
+            bin.assets[i]! = {
               ...asset,
               status: 'READY',
               indexStatus: 'READY',

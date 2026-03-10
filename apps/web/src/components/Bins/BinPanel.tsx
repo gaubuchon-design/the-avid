@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo, useCallback } from 'react';
 import { useEditorStore } from '../../store/editor.store';
 import type { Bin, MediaAsset, SmartBin } from '../../store/editor.store';
 
@@ -13,7 +13,12 @@ function formatDate(d?: Date | string): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function BinItem({ bin, depth = 0 }: { bin: Bin; depth?: number }) {
+interface BinItemProps {
+  bin: Bin;
+  depth?: number;
+}
+
+const BinItem = memo(function BinItem({ bin, depth = 0 }: BinItemProps) {
   const { selectedBinId, selectBin, toggleBin } = useEditorStore();
   const isSelected = selectedBinId === bin.id;
   const hasChildren = bin.children.length > 0;
@@ -26,6 +31,16 @@ function BinItem({ bin, depth = 0 }: { bin: Bin; depth?: number }) {
         style={{ paddingLeft: 8 + depth * 14 }}
         onClick={() => selectBin(bin.id)}
         onDoubleClick={() => hasChildren && toggleBin(bin.id)}
+        role="treeitem"
+        aria-label={`${bin.name} (${assetCount} items)`}
+        aria-selected={isSelected}
+        aria-expanded={hasChildren ? bin.isOpen : undefined}
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') selectBin(bin.id);
+          if (e.key === 'ArrowRight' && hasChildren && !bin.isOpen) toggleBin(bin.id);
+          if (e.key === 'ArrowLeft' && hasChildren && bin.isOpen) toggleBin(bin.id);
+        }}
       >
         <div className="bin-indent">
           {hasChildren ? (
@@ -42,9 +57,13 @@ function BinItem({ bin, depth = 0 }: { bin: Bin; depth?: number }) {
       ))}
     </>
   );
+});
+
+interface AssetCardProps {
+  asset: MediaAsset;
 }
 
-function AssetCard({ asset }: { asset: MediaAsset }) {
+const AssetCard = memo(function AssetCard({ asset }: AssetCardProps) {
   const { setSourceAsset, sourceAsset } = useEditorStore();
   const isSelected = sourceAsset?.id === asset.id;
 
@@ -55,6 +74,13 @@ function AssetCard({ asset }: { asset: MediaAsset }) {
       className={`asset-card${isSelected ? ' selected' : ''}`}
       onClick={() => setSourceAsset(asset)}
       onDoubleClick={() => setSourceAsset(asset)}
+      role="option"
+      aria-selected={isSelected}
+      aria-label={`${asset.name} (${asset.type}${asset.duration ? `, ${formatDuration(asset.duration)}` : ''})`}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') setSourceAsset(asset);
+      }}
     >
       <div className="asset-thumb">
         {asset.status === 'PROCESSING' ? (
@@ -69,7 +95,7 @@ function AssetCard({ asset }: { asset: MediaAsset }) {
       <div className="asset-name truncate" title={asset.name}>{asset.name}</div>
     </div>
   );
-}
+});
 
 function formatResolution(w?: number, h?: number): string {
   if (!w || !h) return '--';
@@ -319,6 +345,8 @@ export function BinPanel() {
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
+      role="region"
+      aria-label={isEffectsMode ? 'Effects Browser' : 'Media Browser'}
     >
       {/* Drop zone overlay */}
       {isDragOver && (
@@ -440,7 +468,7 @@ export function BinPanel() {
         /* ── Media browser mode ── */
         <>
           {/* Bin tree — normal or smart bins */}
-          <div className="bin-tree" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+          <div className="bin-tree" style={{ borderBottom: '1px solid var(--border-subtle)' }} role="tree" aria-label="Media bins">
             {tab === 'smart' ? (
               smartBins.length > 0 ? (
                 smartBins.map(sb => <SmartBinItem key={sb.id} smartBin={sb} />)

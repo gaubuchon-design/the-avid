@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { create } from 'zustand';
+import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { effectsEngine, EffectInstance, Keyframe } from '../engine/EffectsEngine';
 
@@ -34,24 +35,32 @@ interface EffectsActions {
   reorderEffects: (clipId: string, newOrder: string[]) => void;
   setShowKeyframes: (show: boolean) => void;
   setCurrentFrame: (frame: number) => void;
+  resetStore: () => void;
 }
+
+// ─── Initial State ────────────────────────────────────────────────────────
+
+const INITIAL_EFFECTS_STATE: EffectsState = {
+  clipEffects: {},
+  selectedClipId: null,
+  selectedEffectId: null,
+  searchQuery: '',
+  categoryFilter: null,
+  favorites: ['blur-gaussian', 'hue-saturation', 'film-grain'],
+  showKeyframes: false,
+  currentFrame: 0,
+};
 
 // ─── Store ─────────────────────────────────────────────────────────────────
 
 export const useEffectsStore = create<EffectsState & EffectsActions>()(
-  immer((set) => ({
-    // State
-    clipEffects: {},
-    selectedClipId: null,
-    selectedEffectId: null,
-    searchQuery: '',
-    categoryFilter: null,
-    favorites: ['blur-gaussian', 'hue-saturation', 'film-grain'],
-    showKeyframes: false,
-    currentFrame: 0,
+  devtools(
+    immer((set) => ({
+      // State
+      ...INITIAL_EFFECTS_STATE,
 
-    // Actions
-    selectClip: (clipId) => set((s) => {
+      // Actions
+      selectClip: (clipId) => set((s) => {
       s.selectedClipId = clipId;
       s.selectedEffectId = null;
     }),
@@ -161,5 +170,35 @@ export const useEffectsStore = create<EffectsState & EffectsActions>()(
     setCurrentFrame: (frame) => set((s) => {
       s.currentFrame = frame;
     }),
-  }))
+
+    resetStore: () => set(() => ({
+      ...INITIAL_EFFECTS_STATE,
+      favorites: [...INITIAL_EFFECTS_STATE.favorites],
+    }), true, 'effects/resetStore'),
+  })),
+  { name: 'EffectsStore', enabled: process.env["NODE_ENV"] === 'development' },
+  )
 );
+
+// ─── Named Selectors ────────────────────────────────────────────────────────
+
+type EffectsStoreState = EffectsState & EffectsActions;
+
+export const selectClipEffects = (state: EffectsStoreState) => state.clipEffects;
+export const selectEffectsSelectedClipId = (state: EffectsStoreState) => state.selectedClipId;
+export const selectSelectedEffectId = (state: EffectsStoreState) => state.selectedEffectId;
+export const selectEffectsSearchQuery = (state: EffectsStoreState) => state.searchQuery;
+export const selectEffectsCategoryFilter = (state: EffectsStoreState) => state.categoryFilter;
+export const selectEffectsFavorites = (state: EffectsStoreState) => state.favorites;
+export const selectShowKeyframes = (state: EffectsStoreState) => state.showKeyframes;
+export const selectEffectsCurrentFrame = (state: EffectsStoreState) => state.currentFrame;
+export const selectEffectsForClip = (clipId: string) => (state: EffectsStoreState) =>
+  state.clipEffects[clipId] ?? [];
+export const selectSelectedEffect = (state: EffectsStoreState) => {
+  if (!state.selectedClipId || !state.selectedEffectId) return null;
+  const effects = state.clipEffects[state.selectedClipId];
+  if (!effects) return null;
+  return effects.find((e) => e.id === state.selectedEffectId) ?? null;
+};
+export const selectIsFavorite = (definitionId: string) => (state: EffectsStoreState) =>
+  state.favorites.includes(definitionId);

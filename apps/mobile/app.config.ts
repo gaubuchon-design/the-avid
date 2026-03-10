@@ -5,6 +5,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   name: 'The Avid',
   slug: 'the-avid',
   version: '0.1.0',
+  scheme: 'theavid',
   orientation: 'landscape',
   icon: './assets/icon.png',
   userInterfaceStyle: 'dark',
@@ -18,10 +19,17 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     supportsTablet: true,
     bundleIdentifier: 'com.theavid.app',
     buildNumber: '1',
+    requireFullScreen: false,
+    config: {
+      usesNonExemptEncryption: false,
+    },
     infoPlist: {
-      NSCameraUsageDescription: 'Camera access for capturing media',
-      NSMicrophoneUsageDescription: 'Microphone access for audio recording',
-      NSPhotoLibraryUsageDescription: 'Photo library access for importing media',
+      NSCameraUsageDescription: 'Camera access for capturing media to import into your project',
+      NSMicrophoneUsageDescription: 'Microphone access for recording audio and voiceovers',
+      NSPhotoLibraryUsageDescription: 'Photo library access for importing media into your timeline',
+      NSPhotoLibraryAddUsageDescription: 'Photo library write access for exporting finished edits',
+      UIBackgroundModes: ['audio'],
+      ITSAppUsesNonExemptEncryption: false,
     },
   },
   android: {
@@ -36,20 +44,33 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'android.permission.RECORD_AUDIO',
       'android.permission.READ_EXTERNAL_STORAGE',
       'android.permission.WRITE_EXTERNAL_STORAGE',
+      'android.permission.READ_MEDIA_VIDEO',
+      'android.permission.READ_MEDIA_AUDIO',
+      'android.permission.READ_MEDIA_IMAGES',
     ],
   },
   web: {
     favicon: './assets/favicon.png',
+    bundler: 'metro',
   },
   plugins: [
     'expo-router',
-    'expo-av',
+    ['expo-av', { microphonePermission: 'Allow $(PRODUCT_NAME) to access your microphone for audio recording.' }],
     'expo-document-picker',
     'expo-file-system',
-    'expo-media-library',
+    ['expo-media-library', { photosPermission: 'Allow $(PRODUCT_NAME) to access your photos for media import.' }],
+    'expo-splash-screen',
   ],
   experiments: {
     typedRoutes: true,
+  },
+  updates: {
+    url: 'https://u.expo.dev/YOUR_EAS_PROJECT_ID',
+    fallbackToCacheTimeout: 30000,
+    checkAutomatically: 'ON_LOAD',
+  },
+  runtimeVersion: {
+    policy: 'sdkVersion',
   },
   extra: {
     eas: {

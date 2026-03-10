@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { forwardRef, useRef, useState, useEffect, useCallback, memo } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -16,11 +16,32 @@ export interface ContextPillProps {
   onClick?: () => void;
   /** Called when the remove/dismiss button is clicked. */
   onRemove?: () => void;
+  /** Whether the pill is currently the active/selected context. */
+  isActive?: boolean;
+  /** Additional CSS class(es) to apply to the root element. */
+  className?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Merge base and optional extra class names. */
+function cx(...parts: Array<string | undefined | false>): string {
+  return parts.filter(Boolean).join(' ');
+}
+
+/** Human-readable type label for screen readers. */
+function typeLabel(type: ContextPillType): string {
+  const labels: Record<ContextPillType, string> = {
+    project: 'Project',
+    bin: 'Bin',
+    selection: 'Selection',
+    sequence: 'Sequence',
+    clip: 'Clip',
+  };
+  return labels[type];
+}
 
 /** Returns an SVG icon element matching the context type. */
 function ContextIcon({ type }: { type: ContextPillType }) {
@@ -84,42 +105,128 @@ function ContextIcon({ type }: { type: ContextPillType }) {
 /**
  * Compact pill/badge that communicates the editing context the agent is
  * operating on. Provides optional click-to-inspect and remove affordances.
+ *
+ * Features:
+ * - Tooltip on truncated labels
+ * - Keyboard dismiss (Backspace/Delete on focused pill)
+ * - Enter/exit animations via CSS classes
+ * - Active state highlighting
  */
-export function ContextPill({ type, label, onClick, onRemove }: ContextPillProps) {
-  return (
-    <span
-      className={`context-pill context-pill--${type}`}
-      role="status"
-      aria-label={`${type} context: ${label}`}
-    >
-      <span
-        className="context-pill-body"
-        onClick={onClick}
-        onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') onClick(); } : undefined}
-        role={onClick ? 'button' : undefined}
-        tabIndex={onClick ? 0 : undefined}
-      >
-        <ContextIcon type={type} />
-        <span className="context-pill-label">{label}</span>
-      </span>
+/** Memoized icon to avoid re-rendering SVGs on parent re-render. */
+const MemoContextIcon = memo(ContextIcon);
 
-      {onRemove && (
-        <button
-          type="button"
-          className="context-pill-remove"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-          aria-label={`Remove ${type} context`}
-          title="Remove context"
+export const ContextPill = memo(forwardRef<HTMLSpanElement, ContextPillProps>(
+  function ContextPill({ type, label, onClick, onRemove, isActive, className }, ref) {
+    const labelRef = useRef<HTMLSpanElement>(null);
+    const [isTruncated, setIsTruncated] = useState(false);
+    const [isDismissing, setIsDismissing] = useState(false);
+
+    // Detect truncation to show tooltip
+    useEffect(() => {
+      const el = labelRef.current;
+      if (el) {
+        setIsTruncated(el.scrollWidth > el.clientWidth);
+      }
+    }, [label]);
+
+    const handleRemove = useCallback(() => {
+      if (!onRemove) return;
+      setIsDismissing(true);
+      // Allow CSS exit animation to play before calling onRemove
+      const timeout = setTimeout(() => {
+        onRemove();
+      }, 150);
+      return () => clearTimeout(timeout);
+    }, [onRemove]);
+
+    const handleBodyKeyDown = useCallback(
+      (e: React.KeyboardEvent<HTMLSpanElement>) => {
+        if (onClick && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          onClick();
+          return;
+        }
+        // Allow keyboard dismiss from the pill body
+        if (onRemove && (e.key === 'Backspace' || e.key === 'Delete')) {
+          e.preventDefault();
+          handleRemove();
+        }
+      },
+      [onClick, onRemove, handleRemove],
+    );
+
+    const handleRemoveKeyDown = useCallback(
+      (e: React.KeyboardEvent<HTMLButtonElement>) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation();
+          handleRemove();
+        }
+      },
+      [handleRemove],
+    );
+
+    const humanType = typeLabel(type);
+
+    return (
+      <span
+        ref={ref}
+        className={cx(
+          'context-pill',
+          `context-pill--${type}`,
+          isActive && 'context-pill--active',
+          isDismissing && 'context-pill--dismissing',
+          className,
+        )}
+        role="status"
+        aria-label={`${humanType} context: ${label}`}
+      >
+        <span
+          className="context-pill-body"
+          onClick={onClick}
+          onKeyDown={handleBodyKeyDown}
+          role={onClick ? 'button' : undefined}
+          tabIndex={onClick || onRemove ? 0 : undefined}
+          aria-label={onClick ? `Inspect ${humanType}: ${label}` : undefined}
         >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
-      )}
-    </span>
-  );
-}
+          <MemoContextIcon type={type} />
+          <span
+            ref={labelRef}
+            className="context-pill-label"
+            title={isTruncated ? label : undefined}
+          >
+            {label}
+          </span>
+        </span>
+
+        {onRemove && (
+          <button
+            type="button"
+            className="context-pill-remove"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleRemove();
+            }}
+            onKeyDown={handleRemoveKeyDown}
+            aria-label={`Remove ${humanType} context: ${label}`}
+            title="Remove context"
+          >
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        )}
+      </span>
+    );
+  },
+));

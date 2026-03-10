@@ -196,8 +196,8 @@ export class ApprovalPolicyEngine {
           return rule.action;
         }
       } catch {
-        // If a rule throws, skip it rather than blocking the pipeline
-        console.warn(`[ApprovalPolicyEngine] Rule "${rule.name}" threw an error, skipping.`);
+        // If a rule throws, skip it rather than blocking the pipeline.
+        // Error is silently swallowed; rule evaluation continues with the next rule.
       }
     }
     return null;

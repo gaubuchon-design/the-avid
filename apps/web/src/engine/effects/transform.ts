@@ -42,9 +42,9 @@ export function applyLetterbox(
 
     for (let x = 0; x < width; x++) {
       const idx = (y * width + x) * 4;
-      data[idx]     = Math.round(data[idx] * (1 - opNorm) + barColor.r * opNorm);
-      data[idx + 1] = Math.round(data[idx + 1] * (1 - opNorm) + barColor.g * opNorm);
-      data[idx + 2] = Math.round(data[idx + 2] * (1 - opNorm) + barColor.b * opNorm);
+      data[idx]     = Math.round(data[idx]! * (1 - opNorm) + barColor.r * opNorm);
+      data[idx + 1] = Math.round(data[idx + 1]! * (1 - opNorm) + barColor.g * opNorm);
+      data[idx + 2] = Math.round(data[idx + 2]! * (1 - opNorm) + barColor.b * opNorm);
     }
   }
 }
@@ -105,7 +105,7 @@ function applyEasing(t: number, easing: string): number {
 function parseAspectRatio(ratio: string): number {
   const parts = ratio.split(':');
   if (parts.length === 2) {
-    return parseFloat(parts[0]) / parseFloat(parts[1]);
+    return parseFloat(parts[0]!) / parseFloat(parts[1]!);
   }
   return parseFloat(ratio) || 1.78;
 }
@@ -114,8 +114,8 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
   const match = hex.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
   if (!match) return { r: 0, g: 0, b: 0 };
   return {
-    r: parseInt(match[1], 16),
-    g: parseInt(match[2], 16),
-    b: parseInt(match[3], 16),
+    r: parseInt(match[1]!, 16),
+    g: parseInt(match[2]!, 16),
+    b: parseInt(match[3]!, 16),
   };
 }

@@ -157,11 +157,12 @@ export class TranscriptEngine {
 
     const segment: TranscriptSegment = {
       clipId,
-      words: result.words.map(w => ({
-        text: (w as any).word ?? (w as any).text ?? '',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Gemini response shape may include 'word' or 'text'
+      words: result.words.map((w: any) => ({
+        text: w.word ?? w.text ?? '',
         startTime: w.startTime,
         endTime: w.endTime,
-        confidence: (w as any).confidence ?? 0.90 + Math.random() * 0.09,
+        confidence: w.confidence ?? 0.90 + Math.random() * 0.09,
         speaker: 'Speaker A',
       })),
       language: 'en',
@@ -200,7 +201,7 @@ export class TranscriptEngine {
       if (queryWords.length === 1) {
         // Single word search
         for (let i = 0; i < words.length; i++) {
-          const wordLower = words[i].text.toLowerCase().replace(/[.,!?;:'"]/g, '');
+          const wordLower = words[i]!.text.toLowerCase().replace(/[.,!?;:'"]/g, '');
           if (wordLower.includes(queryLower) || queryLower.includes(wordLower)) {
             // Build context: 3 words before and after
             const ctxStart = Math.max(0, i - 3);
@@ -210,10 +211,10 @@ export class TranscriptEngine {
             results.push({
               clipId,
               clipName: CLIP_NAMES[clipId] ?? clipId,
-              startTime: words[i].startTime,
-              endTime: words[i].endTime,
+              startTime: words[i]!.startTime,
+              endTime: words[i]!.endTime,
               text: contextWords.map(w => w.text).join(' '),
-              score: words[i].confidence,
+              score: words[i]!.confidence,
             });
           }
         }
@@ -226,8 +227,8 @@ export class TranscriptEngine {
             .join(' ');
 
           if (windowText.includes(queryLower) || queryLower.includes(windowText)) {
-            const matchStart = words[i].startTime;
-            const matchEnd = words[i + queryWords.length - 1].endTime;
+            const matchStart = words[i]!.startTime;
+            const matchEnd = words[i + queryWords.length - 1]!.endTime;
 
             // Wider context
             const ctxStart = Math.max(0, i - 2);
@@ -258,7 +259,7 @@ export class TranscriptEngine {
         let wordIdx = 0;
         for (let i = 0; i < words.length; i++) {
           if (charCount >= idx) { wordIdx = i; break; }
-          charCount += words[i].text.length + 1; // +1 for space
+          charCount += words[i]!.text.length + 1; // +1 for space
         }
 
         const ctxStart = Math.max(0, wordIdx - 2);

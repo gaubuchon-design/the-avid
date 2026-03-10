@@ -223,8 +223,9 @@ export class JobQuoter {
         total = baseRate * clipCount;
 
         // Resolution multiplier
-        if (params.resolution && RESOLUTION_MULTIPLIER[params.resolution]) {
-          const mult = RESOLUTION_MULTIPLIER[params.resolution];
+        const resMult = params.resolution ? RESOLUTION_MULTIPLIER[params.resolution] : undefined;
+        if (resMult !== undefined) {
+          const mult = resMult;
           if (mult !== 1.0) {
             breakdown['resolution_multiplier'] = mult;
             total = Math.ceil(total * mult);

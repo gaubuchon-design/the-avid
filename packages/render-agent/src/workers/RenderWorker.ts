@@ -1,24 +1,41 @@
 /**
- * RenderWorker — main FFmpeg encoding worker for the render farm.
+ * RenderWorker -- main FFmpeg encoding worker for the render farm.
  *
  * Supports all major codecs (H.264, H.265, ProRes, DNxHD/DNxHR, AV1, VP9),
  * segment-based encoding with frame-accurate in/out points,
  * hardware acceleration detection (NVENC, VideoToolbox, VAAPI),
  * and real-time progress parsing from FFmpeg stderr.
+ *
+ * Features:
+ * - Input validation for all job parameters
+ * - AbortController-based cancellation
+ * - Configurable retry logic with exponential backoff
+ * - Temp file cleanup on error
+ * - Timeout handling
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { WorkerJob } from '../index.js';
+import { getAvailableDiskSpace } from '../capabilities.js';
 
 /** FFmpeg progress data parsed from stderr output. */
 export interface RenderProgress {
+  /** Current frame number. */
   frame: number;
+  /** Encoding speed in frames per second. */
   fps: number;
+  /** Current position timestamp (HH:MM:SS.ms). */
   time: string;
+  /** Current encoding bitrate. */
   bitrate: string;
+  /** Completion percentage (0-100). */
   percent: number;
+  /** Encoding speed multiplier (e.g. "2.5x"). */
   speed: string;
+  /** Estimated remaining time in seconds. */
   estimatedRemainingSec: number;
 }
 
@@ -29,6 +46,37 @@ interface CodecConfig {
   container: string;
   args: string[];
 }
+
+/** Configuration for render worker retry behavior. */
+export interface RenderWorkerConfig {
+  /** Maximum retries per process invocation. Default: 2 */
+  readonly maxRetries: number;
+  /** Base delay in ms for exponential backoff between retries. Default: 1000 */
+  readonly retryBaseDelayMs: number;
+  /** Maximum backoff delay in ms. Default: 10000 */
+  readonly retryMaxDelayMs: number;
+  /** Timeout in ms for the entire render process. 0 = no limit. Default: 0 */
+  readonly timeoutMs: number;
+  /** Minimum free memory in MB required to start a render. Default: 256 */
+  readonly minFreeMemoryMB: number;
+  /** Minimum free disk space in bytes required to start a render. Default: 500MB */
+  readonly minFreeDiskBytes: number;
+  /** Interval in ms for checking memory during render. Default: 5000 */
+  readonly memoryCheckIntervalMs: number;
+  /** Maximum memory usage percentage before aborting render. Default: 95 */
+  readonly maxMemoryPercent: number;
+}
+
+const DEFAULT_RENDER_CONFIG: RenderWorkerConfig = {
+  maxRetries: 2,
+  retryBaseDelayMs: 1000,
+  retryMaxDelayMs: 10_000,
+  timeoutMs: 0,
+  minFreeMemoryMB: 256,
+  minFreeDiskBytes: 500 * 1024 * 1024, // 500 MB
+  memoryCheckIntervalMs: 5000,
+  maxMemoryPercent: 95,
+};
 
 /** Map of codec names to their FFmpeg configuration. */
 const CODEC_CONFIGS: Record<string, CodecConfig> = {
@@ -113,43 +161,187 @@ const HW_ENCODERS: Record<string, Record<string, string>> = {
   },
 };
 
+/** Valid hardware acceleration names. */
+const VALID_HW_ACCEL = new Set(['nvenc', 'videotoolbox', 'vaapi']);
+
 /** Progress regex matching FFmpeg stderr output. */
 const PROGRESS_REGEX = /frame=\s*(\d+).*fps=\s*([\d.]+).*time=(\S+).*bitrate=\s*(\S+)/;
 const SPEED_REGEX = /speed=\s*([\d.]+x)/;
 
 export class RenderWorker {
-  private process: ChildProcess | null = null;
+  private childProcess: ChildProcess | null = null;
   private cancelled = false;
   private startTime = 0;
+  private currentOutputPath: string | null = null;
+  private config: RenderWorkerConfig;
+  private memoryCheckTimer: ReturnType<typeof setInterval> | null = null;
+  /** Tracks all temp files created during rendering so they can be cleaned up on any exit path. */
+  private tempFiles: Set<string> = new Set();
+
+  constructor(config: Partial<RenderWorkerConfig> = {}) {
+    this.config = { ...DEFAULT_RENDER_CONFIG, ...config };
+  }
+
+  // ── Resource Checks ──────────────────────────────────────────────
 
   /**
-   * Process a render/encode job.
+   * Check that system has sufficient resources before starting a render.
+   * @throws {Error} if memory or disk space is below configured thresholds.
+   */
+  private async checkResourcesBeforeRender(outputDir: string): Promise<void> {
+    // Memory check
+    const freeMemMB = Math.round(os.freemem() / (1024 * 1024));
+    if (freeMemMB < this.config.minFreeMemoryMB) {
+      throw new Error(
+        `Insufficient memory to start render: ${freeMemMB}MB free, ` +
+        `minimum ${this.config.minFreeMemoryMB}MB required`,
+      );
+    }
+
+    // Disk space check
+    try {
+      const freeDiskBytes = await getAvailableDiskSpace(outputDir);
+      if (freeDiskBytes > 0 && freeDiskBytes < this.config.minFreeDiskBytes) {
+        const freeMB = Math.round(freeDiskBytes / (1024 * 1024));
+        const requiredMB = Math.round(this.config.minFreeDiskBytes / (1024 * 1024));
+        throw new Error(
+          `Insufficient disk space to start render: ${freeMB}MB free ` +
+          `at ${outputDir}, minimum ${requiredMB}MB required`,
+        );
+      }
+    } catch (err) {
+      // If disk space check itself fails (not an insufficient space error), log and continue
+      if (err instanceof Error && err.message.includes('Insufficient disk space')) {
+        throw err;
+      }
+      console.warn(`[RenderWorker] Disk space check failed, continuing: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * Start monitoring memory usage during render.
+   * Cancels the render if memory exceeds the configured threshold.
+   */
+  private startMemoryMonitor(): void {
+    if (this.config.memoryCheckIntervalMs <= 0) return;
+
+    this.memoryCheckTimer = setInterval(() => {
+      const totalMem = os.totalmem();
+      const freeMem = os.freemem();
+      const usedPercent = Math.round(((totalMem - freeMem) / totalMem) * 100);
+
+      if (usedPercent >= this.config.maxMemoryPercent) {
+        console.error(
+          `[RenderWorker] Memory usage critical: ${usedPercent}% used ` +
+          `(threshold: ${this.config.maxMemoryPercent}%). Cancelling render.`,
+        );
+        this.cancel();
+      }
+    }, this.config.memoryCheckIntervalMs);
+
+    // Don't keep the process alive for memory checks
+    if (typeof this.memoryCheckTimer === 'object' && 'unref' in this.memoryCheckTimer) {
+      this.memoryCheckTimer.unref();
+    }
+  }
+
+  /** Stop the memory monitoring timer. */
+  private stopMemoryMonitor(): void {
+    if (this.memoryCheckTimer) {
+      clearInterval(this.memoryCheckTimer);
+      this.memoryCheckTimer = null;
+    }
+  }
+
+  /** Track a temp file for cleanup. */
+  private trackTempFile(filePath: string): void {
+    this.tempFiles.add(filePath);
+  }
+
+  /** Remove a tracked temp file. */
+  private untrackTempFile(filePath: string): void {
+    this.tempFiles.delete(filePath);
+  }
+
+  /** Clean up all tracked temp files. Called on error paths and process exit. */
+  private cleanupAllTempFiles(): void {
+    for (const filePath of this.tempFiles) {
+      this.cleanupTempFile(filePath);
+    }
+    this.tempFiles.clear();
+  }
+
+  /**
+   * Validate the output file after render completes.
+   * Checks that the file exists and has a non-zero size (is not corrupt/truncated).
+   * @throws {Error} if the output file is missing or has zero size.
+   */
+  private validateOutputFile(outputPath: string): void {
+    try {
+      const stats = fs.statSync(outputPath);
+      if (stats.size === 0) {
+        throw new Error(`Render produced empty output file: ${outputPath}`);
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('empty output file')) {
+        // Clean up the corrupt/empty file
+        this.cleanupTempFile(outputPath);
+        throw err;
+      }
+      throw new Error(`Render output file not found or inaccessible: ${outputPath}`);
+    }
+  }
+
+  /**
+   * Process a render/encode job with input validation, retry logic,
+   * and temp file cleanup.
    *
    * @param job - The worker job describing input, output, codec, and frame range.
    * @param onProgress - Callback fired as FFmpeg reports encoding progress.
+   * @param signal - Optional AbortSignal for cancellation.
    * @returns Path to the rendered output file.
    */
   async process(
     job: WorkerJob,
     onProgress?: (progress: RenderProgress) => void,
+    signal?: AbortSignal,
   ): Promise<string> {
+    // ── Input validation ──────────────────────────────────────────
+    this.validateJob(job);
+
     this.cancelled = false;
     this.startTime = Date.now();
 
-    const codecKey = job.codec ?? job.params.codec ?? 'h264';
+    // Wire up AbortSignal
+    if (signal) {
+      if (signal.aborted) {
+        throw new Error('Render job cancelled before start');
+      }
+      signal.addEventListener('abort', () => {
+        this.cancel();
+      }, { once: true });
+    }
+
+    const codecKey = (job.codec ?? job.params['codec'] ?? 'h264') as string;
     const config = CODEC_CONFIGS[codecKey];
     if (!config) {
       throw new Error(`Unsupported codec: ${codecKey}. Available: ${Object.keys(CODEC_CONFIGS).join(', ')}`);
     }
 
-    // Determine encoder — use HW acceleration if requested and available
+    // Determine encoder -- use HW acceleration if requested and available
     let encoder = config.encoder;
-    const hwAccel = job.params.hwAccel as string | undefined;
-    if (hwAccel && HW_ENCODERS[hwAccel]) {
-      const baseCodec = codecKey.split('-')[0]; // e.g. "prores-422" -> "prores"
-      const hwEncoder = HW_ENCODERS[hwAccel][baseCodec];
-      if (hwEncoder) {
-        encoder = hwEncoder;
+    const hwAccel = job.params['hwAccel'] as string | undefined;
+    if (hwAccel) {
+      if (!VALID_HW_ACCEL.has(hwAccel)) {
+        throw new Error(`Invalid hardware acceleration: ${hwAccel}. Valid: ${[...VALID_HW_ACCEL].join(', ')}`);
+      }
+      const hwMap = HW_ENCODERS[hwAccel];
+      if (hwMap) {
+        const baseCodec = codecKey.split('-')[0]!; // e.g. "prores-422" -> "prores"
+        const hwEncoder = hwMap[baseCodec];
+        if (hwEncoder) {
+          encoder = hwEncoder;
+        }
       }
     }
 
@@ -161,21 +353,210 @@ export class RenderWorker {
         `${path.basename(job.inputUrl, path.extname(job.inputUrl))}_render.${config.container}`,
       );
 
-    // Calculate total frames for progress
-    const totalFrames = (job.endFrame && job.startFrame != null)
-      ? job.endFrame - job.startFrame
-      : (job.params.totalFrames ?? 0);
+    this.currentOutputPath = outputPath;
+    this.trackTempFile(outputPath);
 
-    const fps = job.params.fps ?? 24;
+    // ── Pre-flight resource checks ──────────────────────────────
+    const outputDir = path.dirname(outputPath);
+    await this.checkResourcesBeforeRender(outputDir);
+
+    // Calculate total frames for progress
+    const totalFrames = (job.endFrame != null && job.startFrame != null)
+      ? job.endFrame - job.startFrame
+      : ((job.params['totalFrames'] as number | undefined) ?? 0);
+
+    const fps = (job.params['fps'] as number | undefined) ?? 24;
 
     // Build FFmpeg arguments
     const args = this.buildFFmpegArgs(job, encoder, config, outputPath, fps);
 
-    return new Promise<string>((resolve, reject) => {
-      const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
-      this.process = proc;
+    // ── Retry loop with exponential backoff ───────────────────────
+    let lastError: Error | null = null;
 
+    // Start memory monitoring during render
+    this.startMemoryMonitor();
+
+    try {
+      for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
+        if (this.cancelled) {
+          this.cleanupTempFile(outputPath);
+          this.untrackTempFile(outputPath);
+          throw new Error('Render job cancelled');
+        }
+
+        if (attempt > 0) {
+          // Exponential backoff
+          const delay = Math.min(
+            this.config.retryBaseDelayMs * Math.pow(2, attempt - 1),
+            this.config.retryMaxDelayMs,
+          );
+          const jitter = delay * 0.2 * Math.random();
+          await this.sleep(Math.round(delay + jitter));
+          console.info(`[RenderWorker] Retry ${attempt}/${this.config.maxRetries} for job ${job.id}`);
+
+          // Check resources again before retry
+          try {
+            await this.checkResourcesBeforeRender(outputDir);
+          } catch (resourceErr) {
+            lastError = resourceErr instanceof Error ? resourceErr : new Error(String(resourceErr));
+            console.error(`[RenderWorker] Resource check failed on retry: ${lastError.message}`);
+            // Don't retry if resources are exhausted
+            break;
+          }
+        }
+
+        try {
+          const result = await this.executeFFmpeg(args, totalFrames, onProgress);
+          const finalPath = result ?? outputPath;
+
+          // Validate the output file is not corrupt/truncated
+          this.validateOutputFile(finalPath);
+
+          this.currentOutputPath = null;
+          this.untrackTempFile(outputPath);
+          return finalPath;
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error(String(err));
+
+          // Don't retry on cancellation or abort
+          if (this.cancelled || lastError.message.includes('cancelled')) {
+            this.cleanupTempFile(outputPath);
+            this.untrackTempFile(outputPath);
+            throw lastError;
+          }
+
+          // Don't retry on validation errors
+          if (lastError.message.includes('Failed to spawn')) {
+            this.cleanupTempFile(outputPath);
+            this.untrackTempFile(outputPath);
+            throw lastError;
+          }
+
+          // Detect OOM kills (exit code 137 on Linux)
+          if (lastError.message.includes('code 137') || lastError.message.includes('SIGKILL')) {
+            console.error(`[RenderWorker] Process was OOM-killed for job ${job.id}`);
+            this.cleanupTempFile(outputPath);
+            this.untrackTempFile(outputPath);
+            throw new Error(`Render process killed (likely OOM): ${lastError.message}`);
+          }
+
+          // Detect disk full errors
+          if (
+            lastError.message.includes('No space left on device') ||
+            lastError.message.includes('ENOSPC')
+          ) {
+            console.error(`[RenderWorker] Disk full during render for job ${job.id}`);
+            this.cleanupTempFile(outputPath);
+            this.untrackTempFile(outputPath);
+            throw new Error(`Disk full during render: ${lastError.message}`);
+          }
+
+          console.error(`[RenderWorker] Attempt ${attempt + 1} failed: ${lastError.message}`);
+        }
+      }
+
+      // All retries exhausted
+      this.cleanupTempFile(outputPath);
+      this.untrackTempFile(outputPath);
+      throw lastError ?? new Error('Render failed after all retries');
+    } finally {
+      this.stopMemoryMonitor();
+    }
+  }
+
+  /** Cancel the currently running render process and clean up resources. */
+  cancel(): void {
+    this.cancelled = true;
+    this.stopMemoryMonitor();
+
+    if (this.childProcess) {
+      this.childProcess.kill('SIGTERM');
+      const pid = this.childProcess.pid;
+      const cp = this.childProcess;
+      setTimeout(() => {
+        try {
+          if (pid) process.kill(pid, 0);
+          cp.kill('SIGKILL');
+        } catch {
+          // Already dead
+        }
+      }, 5000);
+    }
+
+    // Clean up any partial output
+    if (this.currentOutputPath) {
+      this.cleanupTempFile(this.currentOutputPath);
+      this.untrackTempFile(this.currentOutputPath);
+    }
+  }
+
+  // ── Validation ──────────────────────────────────────────────────────
+
+  /** Validate job parameters before processing. */
+  private validateJob(job: WorkerJob): void {
+    if (!job.id || typeof job.id !== 'string') {
+      throw new Error('Job must have a non-empty string id');
+    }
+
+    if (!job.inputUrl || typeof job.inputUrl !== 'string') {
+      throw new Error(`Job ${job.id}: inputUrl must be a non-empty string`);
+    }
+
+    if (job.startFrame != null && job.endFrame != null) {
+      if (job.startFrame < 0) {
+        throw new Error(`Job ${job.id}: startFrame must be >= 0, got ${job.startFrame}`);
+      }
+      if (job.endFrame <= job.startFrame) {
+        throw new Error(`Job ${job.id}: endFrame (${job.endFrame}) must be > startFrame (${job.startFrame})`);
+      }
+    }
+
+    if (job.outputPath != null && typeof job.outputPath !== 'string') {
+      throw new Error(`Job ${job.id}: outputPath must be a string`);
+    }
+
+    const fps = job.params['fps'];
+    if (fps != null && (typeof fps !== 'number' || fps <= 0 || fps > 240)) {
+      throw new Error(`Job ${job.id}: fps must be a positive number <= 240, got ${String(fps)}`);
+    }
+
+    const threads = job.params['threads'];
+    if (threads != null && (typeof threads !== 'number' || threads < 0)) {
+      throw new Error(`Job ${job.id}: threads must be a non-negative number, got ${String(threads)}`);
+    }
+  }
+
+  // ── FFmpeg Execution ────────────────────────────────────────────────
+
+  /**
+   * Execute FFmpeg with the given arguments, handling progress parsing
+   * and timeout.
+   */
+  private executeFFmpeg(
+    args: string[],
+    totalFrames: number,
+    onProgress?: (progress: RenderProgress) => void,
+  ): Promise<string | null> {
+    return new Promise<string | null>((resolve, reject) => {
+      let proc: ChildProcess;
+      try {
+        proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      } catch (err) {
+        reject(new Error(`Failed to spawn FFmpeg: ${(err as Error).message}`));
+        return;
+      }
+
+      this.childProcess = proc;
       let stderrBuf = '';
+
+      // Timeout handling
+      let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+      if (this.config.timeoutMs > 0) {
+        timeoutTimer = setTimeout(() => {
+          this.cancel();
+          reject(new Error(`Render timed out after ${this.config.timeoutMs}ms`));
+        }, this.config.timeoutMs);
+      }
 
       proc.stderr?.on('data', (chunk: Buffer) => {
         stderrBuf += chunk.toString();
@@ -191,39 +572,42 @@ export class RenderWorker {
       });
 
       proc.on('close', (code) => {
-        this.process = null;
+        this.childProcess = null;
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+
         if (this.cancelled) {
           reject(new Error('Render job cancelled'));
         } else if (code !== 0) {
           reject(new Error(`FFmpeg render exited with code ${code}`));
         } else {
-          resolve(outputPath);
+          resolve(null);
         }
       });
 
       proc.on('error', (err) => {
-        this.process = null;
+        this.childProcess = null;
+        if (timeoutTimer) clearTimeout(timeoutTimer);
         reject(new Error(`Failed to spawn FFmpeg: ${err.message}`));
       });
     });
   }
 
-  /** Cancel the currently running render process. */
-  cancel(): void {
-    this.cancelled = true;
-    if (this.process) {
-      this.process.kill('SIGTERM');
-      const pid = this.process.pid;
-      setTimeout(() => {
-        try {
-          if (pid) process.kill(pid, 0);
-          this.process?.kill('SIGKILL');
-        } catch {
-          // Already dead
-        }
-      }, 5000);
+  // ── Temp File Cleanup ───────────────────────────────────────────────
+
+  /** Remove a partially-written output file on error. */
+  private cleanupTempFile(filePath: string): void {
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        console.debug(`[RenderWorker] Cleaned up temp file: ${filePath}`);
+      }
+    } catch (err) {
+      console.error(`[RenderWorker] Failed to clean up temp file ${filePath}:`, (err as Error).message);
     }
+    this.currentOutputPath = null;
   }
+
+  // ── FFmpeg Argument Builder ─────────────────────────────────────────
 
   /**
    * Build the complete FFmpeg argument list for a render job.
@@ -238,7 +622,7 @@ export class RenderWorker {
     const args: string[] = ['-y'];
 
     // Hardware decode acceleration input flags
-    const hwAccel = job.params.hwAccel as string | undefined;
+    const hwAccel = job.params['hwAccel'] as string | undefined;
     if (hwAccel === 'nvenc') {
       args.push('-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda');
     } else if (hwAccel === 'videotoolbox') {
@@ -267,39 +651,39 @@ export class RenderWorker {
     args.push(...config.args);
 
     // Apply custom params if provided
-    if (job.params.videoBitrate) {
-      args.push('-b:v', String(job.params.videoBitrate));
+    if (job.params['videoBitrate']) {
+      args.push('-b:v', String(job.params['videoBitrate']));
     }
-    if (job.params.maxRate) {
-      args.push('-maxrate', String(job.params.maxRate));
-      args.push('-bufsize', String(job.params.bufSize ?? job.params.maxRate));
+    if (job.params['maxRate']) {
+      args.push('-maxrate', String(job.params['maxRate']));
+      args.push('-bufsize', String(job.params['bufSize'] ?? job.params['maxRate']));
     }
-    if (job.params.resolution) {
-      args.push('-s', String(job.params.resolution));
+    if (job.params['resolution']) {
+      args.push('-s', String(job.params['resolution']));
     }
 
     // Audio encoding
-    const audioCodec = job.params.audioCodec ?? 'aac';
+    const audioCodec = (job.params['audioCodec'] as string | undefined) ?? 'aac';
     if (audioCodec === 'copy') {
       args.push('-c:a', 'copy');
     } else if (audioCodec === 'none') {
       args.push('-an');
     } else {
       args.push('-c:a', audioCodec);
-      if (job.params.audioBitrate) {
-        args.push('-b:a', String(job.params.audioBitrate));
+      if (job.params['audioBitrate']) {
+        args.push('-b:a', String(job.params['audioBitrate']));
       }
     }
 
     // Thread control
-    const threads = job.params.threads ?? 0; // 0 = auto
+    const threads = (job.params['threads'] as number | undefined) ?? 0; // 0 = auto
     if (threads > 0) {
       args.push('-threads', String(threads));
     }
 
     // LUT / color space transform
-    if (job.params.lut) {
-      args.push('-vf', `lut3d=${job.params.lut}`);
+    if (job.params['lut']) {
+      args.push('-vf', `lut3d=${job.params['lut']}`);
     }
 
     args.push('-progress', 'pipe:2');
@@ -308,6 +692,8 @@ export class RenderWorker {
     return args;
   }
 
+  // ── Progress Parsing ────────────────────────────────────────────────
+
   /**
    * Parse a single FFmpeg stderr line for progress information.
    */
@@ -315,13 +701,13 @@ export class RenderWorker {
     const match = line.match(PROGRESS_REGEX);
     if (!match) return null;
 
-    const frame = parseInt(match[1], 10);
-    const fps = parseFloat(match[2]);
-    const time = match[3];
-    const bitrate = match[4];
+    const frame = parseInt(match[1]!, 10);
+    const fps = parseFloat(match[2]!);
+    const time = match[3]!;
+    const bitrate = match[4]!;
 
     const speedMatch = line.match(SPEED_REGEX);
-    const speed = speedMatch ? speedMatch[1] : '0x';
+    const speed = speedMatch?.[1] ?? '0x';
 
     let percent = 0;
     if (totalFrames > 0) {
@@ -345,5 +731,11 @@ export class RenderWorker {
       speed,
       estimatedRemainingSec: Math.round(estimatedRemainingSec),
     };
+  }
+
+  // ── Utility ─────────────────────────────────────────────────────────
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

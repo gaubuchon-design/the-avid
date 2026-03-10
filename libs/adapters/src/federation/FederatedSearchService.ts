@@ -10,6 +10,7 @@
 
 import type { IContentCoreAdapter } from '../IContentCoreAdapter';
 import type { ArchiveResult } from '../contracts-types';
+import { UnavailableError } from '../AdapterError';
 import { CacheManager } from './CacheManager';
 import {
   ResultMerger,
@@ -191,7 +192,8 @@ export class FederatedSearchService {
    */
   async hydrate(resultId: string): Promise<FederatedResult> {
     if (!this.contentCoreAdapter) {
-      throw new Error(
+      throw new UnavailableError(
+        'federated-search',
         'Cannot hydrate: no Content Core adapter is configured.',
       );
     }

@@ -5,50 +5,57 @@
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { db } from '../../db/client';
+import {
+  validate, validateAll, schemas, uuidParam, projectIdParam,
+} from '../../utils/validation';
 import { z } from 'zod';
+import { BadRequestError } from '../../utils/errors';
 
 const router = Router();
 router.use(authenticate);
 
+// ─── Param schemas ───────────────────────────────────────────────────────────
+const sessionIdParam = z.object({ id: z.string().uuid() });
+const sessionIdOnlyParam = z.object({ sessionId: z.string().uuid() });
+
 // ─── Pro Tools Sessions ──────────────────────────────────────────────────────
 
-router.get('/sessions/:projectId', async (req: Request, res: Response) => {
+router.get('/sessions/:projectId', validate(projectIdParam, 'params'), async (req: Request, res: Response) => {
   const session = await db.proToolsSession.findFirst({
-    where: { projectId: req.params.projectId },
+    where: { projectId: req.params['projectId'] },
     include: { markerSyncs: { take: 50, orderBy: { syncedAt: 'desc' } } },
   });
   res.json({ session });
 });
 
-router.post('/sessions', async (req: Request, res: Response) => {
+router.post('/sessions', validate(schemas.createProToolsSession), async (req: Request, res: Response) => {
   const session = await db.proToolsSession.create({
     data: {
-      projectId: req.body.projectId,
-      mediaCentralId: req.body.mediaCentralId,
-      proToolsHost: req.body.proToolsHost,
-      syncMode: req.body.syncMode || 'AAF',
+      ...req.body,
       connectedUserId: req.user!.id,
     },
   });
   res.status(201).json({ session });
 });
 
-router.patch('/sessions/:id', async (req: Request, res: Response) => {
-  const data: any = {};
-  if (req.body.status !== undefined) data.status = req.body.status;
-  if (req.body.lastSyncAt) data.lastSyncAt = new Date(req.body.lastSyncAt);
-  if (req.body.syncMode !== undefined) data.syncMode = req.body.syncMode;
+router.patch('/sessions/:id', validateAll({ params: sessionIdParam, body: schemas.updateProToolsSession }), async (req: Request, res: Response) => {
+  const existing = await db.proToolsSession.findUnique({ where: { id: req.params['id'] } });
+  if (!existing) throw new BadRequestError('Pro Tools session not found');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma dynamic data payload
+  const data: any = { ...req.body };
+  if (data['lastSyncAt']) data['lastSyncAt'] = new Date(data['lastSyncAt']);
 
   const session = await db.proToolsSession.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data,
   });
   res.json({ session });
 });
 
-router.post('/sessions/:id/connect', async (req: Request, res: Response) => {
+router.post('/sessions/:id/connect', validate(sessionIdParam, 'params'), async (req: Request, res: Response) => {
   const session = await db.proToolsSession.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: {
       status: 'CONNECTING',
       connectedUserId: req.user!.id,
@@ -58,9 +65,9 @@ router.post('/sessions/:id/connect', async (req: Request, res: Response) => {
   res.json({ session, message: 'Connection initiated' });
 });
 
-router.post('/sessions/:id/disconnect', async (req: Request, res: Response) => {
+router.post('/sessions/:id/disconnect', validate(sessionIdParam, 'params'), async (req: Request, res: Response) => {
   const session = await db.proToolsSession.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: { status: 'DISCONNECTED' },
   });
   res.json({ session });
@@ -68,78 +75,80 @@ router.post('/sessions/:id/disconnect', async (req: Request, res: Response) => {
 
 // ─── Marker Sync ─────────────────────────────────────────────────────────────
 
-router.get('/sessions/:sessionId/markers', async (req: Request, res: Response) => {
+router.get('/sessions/:sessionId/markers', validate(sessionIdOnlyParam, 'params'), async (req: Request, res: Response) => {
   const markers = await db.markerSync.findMany({
-    where: { sessionId: req.params.sessionId },
+    where: { sessionId: req.params['sessionId'] },
     orderBy: { timecode: 'asc' },
   });
   res.json({ markers });
 });
 
-router.post('/sessions/:sessionId/markers', async (req: Request, res: Response) => {
-  const marker = await db.markerSync.create({
-    data: {
-      sessionId: req.params.sessionId,
-      avidMarkerId: req.body.avidMarkerId,
-      proToolsLocId: req.body.proToolsLocId,
-      timecode: req.body.timecode,
-      label: req.body.label,
-      color: req.body.color,
-      syncDirection: req.body.syncDirection || 'BIDIRECTIONAL',
-    },
-  });
-  res.status(201).json({ marker });
-});
-
-router.post('/sessions/:sessionId/markers/sync', async (req: Request, res: Response) => {
-  // Batch sync markers from Avid to Pro Tools or vice versa
-  const { direction, markers } = req.body;
-  if (!direction || !Array.isArray(markers) || markers.length === 0) {
-    return res.status(400).json({ error: { message: 'direction and non-empty markers array required', code: 'BAD_REQUEST' } });
+router.post(
+  '/sessions/:sessionId/markers',
+  validateAll({ params: sessionIdOnlyParam, body: schemas.createMarkerSync }),
+  async (req: Request, res: Response) => {
+    const marker = await db.markerSync.create({
+      data: {
+        sessionId: req.params['sessionId'],
+        ...req.body,
+      },
+    });
+    res.status(201).json({ marker });
   }
-  const created = await Promise.all(
-    markers.map((m: any) =>
-      db.markerSync.create({
-        data: {
-          sessionId: req.params.sessionId,
-          avidMarkerId: m.avidMarkerId,
-          proToolsLocId: m.proToolsLocId,
-          timecode: m.timecode,
-          label: m.label,
-          color: m.color,
-          syncDirection: direction,
-        },
-      })
-    )
-  );
-  res.json({ synced: created.length, markers: created });
-});
+);
+
+router.post(
+  '/sessions/:sessionId/markers/sync',
+  validateAll({ params: sessionIdOnlyParam, body: schemas.batchMarkerSync }),
+  async (req: Request, res: Response) => {
+    const { direction, markers } = req.body;
+    const created = await Promise.all(
+      markers.map((m: { avidMarkerId?: string; proToolsLocId?: string; timecode: string; label?: string; color?: string }) =>
+        db.markerSync.create({
+          data: {
+            sessionId: req.params['sessionId'],
+            avidMarkerId: m.avidMarkerId,
+            proToolsLocId: m.proToolsLocId,
+            timecode: m.timecode,
+            label: m.label,
+            color: m.color,
+            syncDirection: direction,
+          },
+        })
+      )
+    );
+    res.json({ synced: created.length, markers: created });
+  }
+);
 
 // ─── AAF Export/Import ───────────────────────────────────────────────────────
 
-router.post('/sessions/:sessionId/export-aaf', async (req: Request, res: Response) => {
-  const session = await db.proToolsSession.findUniqueOrThrow({
-    where: { id: req.params.sessionId },
-  });
+router.post(
+  '/sessions/:sessionId/export-aaf',
+  validateAll({ params: sessionIdOnlyParam, body: schemas.proToolsExportAAF }),
+  async (req: Request, res: Response) => {
+    const session = await db.proToolsSession.findUnique({
+      where: { id: req.params['sessionId'] },
+    });
+    if (!session) throw new BadRequestError('Pro Tools session not found');
 
-  // In production: generate AAF file from timeline data
-  // and either upload to MediaCentral or provide download URL
-  const { timelineId, handleDuration = 2 } = req.body;
+    const { timelineId, handleDuration } = req.body;
 
-  res.json({
-    status: 'QUEUED',
-    message: `AAF export queued for timeline ${timelineId} with ${handleDuration}s handles`,
-    estimatedMs: 5000,
-  });
-});
+    res.json({
+      status: 'QUEUED',
+      message: `AAF export queued for timeline ${timelineId} with ${handleDuration}s handles`,
+      estimatedMs: 5000,
+    });
+  }
+);
 
-router.post('/sessions/:sessionId/import-aaf', async (req: Request, res: Response) => {
-  const session = await db.proToolsSession.findUniqueOrThrow({
-    where: { id: req.params.sessionId },
+router.post('/sessions/:sessionId/import-aaf', validate(sessionIdOnlyParam, 'params'), async (req: Request, res: Response) => {
+  const session = await db.proToolsSession.findUnique({
+    where: { id: req.params['sessionId'] },
   });
+  if (!session) throw new BadRequestError('Pro Tools session not found');
 
   // In production: parse incoming AAF from Pro Tools mix
-  // re-link audio to timeline, show diff
   res.json({
     status: 'QUEUED',
     message: 'AAF import queued for processing',

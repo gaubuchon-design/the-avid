@@ -103,7 +103,7 @@ describe('ExportEngine', () => {
       expect(jobs.length).toBeGreaterThanOrEqual(2);
       // Should be sorted by startedAt descending
       if (jobs.length >= 2) {
-        expect(jobs[0].startedAt).toBeGreaterThanOrEqual(jobs[1].startedAt);
+        expect(jobs[0]!.startedAt).toBeGreaterThanOrEqual(jobs[1]!.startedAt);
       }
 
       // Cleanup

@@ -140,7 +140,7 @@ export class DashboardData {
 
     for (const event of this.events) {
       if (event.type === 'prompt') {
-        const text = (event.payload.promptText as string) ?? '';
+        const text = (event.payload['promptText'] as string) ?? '';
         const normalized = text.toLowerCase().trim();
         if (normalized) {
           counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
@@ -176,8 +176,8 @@ export class DashboardData {
 
     for (const event of this.events) {
       if (event.type === 'step-override') {
-        const toolName = (event.payload.toolName as string) ?? 'unknown';
-        const reason = (event.payload.reason as string) ?? 'unspecified';
+        const toolName = (event.payload['toolName'] as string) ?? 'unknown';
+        const reason = (event.payload['reason'] as string) ?? 'unspecified';
         const key = `${toolName}::${reason}`;
         const existing = counts.get(key);
         if (existing) {
@@ -214,8 +214,8 @@ export class DashboardData {
 
     for (const event of this.events) {
       if (event.type === 'missing-endpoint') {
-        const tool = (event.payload.requestedTool as string) ?? 'unknown';
-        const context = (event.payload.context as string) ?? '';
+        const tool = (event.payload['requestedTool'] as string) ?? 'unknown';
+        const context = (event.payload['context'] as string) ?? '';
         const existing = map.get(tool);
         if (existing) {
           existing.frequency += 1;
@@ -256,8 +256,8 @@ export class DashboardData {
 
     for (const event of this.events) {
       if (event.type === 'step-failure') {
-        const toolName = (event.payload.toolName as string) ?? 'unknown';
-        const errorMessage = (event.payload.errorMessage as string) ?? 'unknown';
+        const toolName = (event.payload['toolName'] as string) ?? 'unknown';
+        const errorMessage = (event.payload['errorMessage'] as string) ?? 'unknown';
         const key = `${toolName}::${errorMessage}`;
         const existing = clusters.get(key);
         if (existing) {
@@ -301,8 +301,8 @@ export class DashboardData {
 
     for (const event of this.events) {
       if (event.type === 'token-consumed') {
-        const category = (event.payload.category as string) ?? 'uncategorized';
-        const tokens = (event.payload.tokensConsumed as number) ?? 0;
+        const category = (event.payload['category'] as string) ?? 'uncategorized';
+        const tokens = (event.payload['tokensConsumed'] as number) ?? 0;
         const existing = usage.get(category);
         if (existing) {
           existing.total += tokens;
@@ -348,8 +348,8 @@ export class DashboardData {
 
     for (const event of this.events) {
       if (event.type === 'time-saved-estimate') {
-        const savings = (event.payload.savingsMs as number) ?? 0;
-        const conf = (event.payload.confidence as string) ?? 'low';
+        const savings = (event.payload['savingsMs'] as number) ?? 0;
+        const conf = (event.payload['confidence'] as string) ?? 'low';
         totalSavedMs += savings;
         planCount += 1;
         confidence[conf] = (confidence[conf] ?? 0) + 1;
@@ -387,12 +387,12 @@ export class DashboardData {
 
     for (const event of this.events) {
       if (event.type === 'latency-report') {
-        const operation = (event.payload.operation as string) ?? 'unknown';
-        const durationMs = (event.payload.durationMs as number) ?? 0;
-        const p50 = (event.payload.p50 as number) ?? 0;
-        const p95 = (event.payload.p95 as number) ?? 0;
-        const p99 = (event.payload.p99 as number) ?? 0;
-        const sampleCount = (event.payload.sampleCount as number) ?? 0;
+        const operation = (event.payload['operation'] as string) ?? 'unknown';
+        const durationMs = (event.payload['durationMs'] as number) ?? 0;
+        const p50 = (event.payload['p50'] as number) ?? 0;
+        const p95 = (event.payload['p95'] as number) ?? 0;
+        const p99 = (event.payload['p99'] as number) ?? 0;
+        const sampleCount = (event.payload['sampleCount'] as number) ?? 0;
 
         // Aggregate: we compute running averages for avg, and keep latest percentiles
         const existing = stats.get(operation);
@@ -453,7 +453,7 @@ export class DashboardData {
     for (const event of this.events) {
       if (event.type === 'publish-outcome') {
         total += 1;
-        const status = event.payload.status as string;
+        const status = event.payload['status'] as string;
         switch (status) {
           case 'success':
             success += 1;

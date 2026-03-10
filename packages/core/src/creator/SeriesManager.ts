@@ -53,7 +53,7 @@ function canTransition(from: EpisodeStatus, to: EpisodeStatus): boolean {
 
 function getNextStatus(current: EpisodeStatus): EpisodeStatus | null {
   const index = STATUS_ORDER.indexOf(current);
-  if (index < STATUS_ORDER.length - 1) return STATUS_ORDER[index + 1];
+  if (index < STATUS_ORDER.length - 1) return STATUS_ORDER[index + 1]!;
   return null;
 }
 

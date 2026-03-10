@@ -406,8 +406,10 @@ export class ColorEngine {
       const nodes = this.getAllNodes().filter((n) => n.enabled);
       const connections = this.getConnections();
       // CPU path is synchronous within the pipeline
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- pipeline exposes internal CPU path
       return (colorGradingPipeline as any).processFrameCPU(
         imageData,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (colorGradingPipeline as any).topologicalSort(nodes, connections)
           .filter((n: ColorNode) => n.enabled && n.type !== 'source' && n.type !== 'output'),
       );

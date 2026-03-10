@@ -147,7 +147,7 @@ const S = {
       critical: { bg: 'rgba(239, 68, 68, 0.15)', fg: '#ef4444' },
       unknown: { bg: 'rgba(148, 163, 184, 0.15)', fg: '#94a3b8' },
     };
-    const c = colors[status] ?? colors.unknown;
+    const c = colors[status] ?? colors['unknown'];
     return {
       display: 'inline-flex',
       alignItems: 'center',
@@ -156,8 +156,8 @@ const S = {
       borderRadius: '10px',
       fontSize: '10px',
       fontWeight: 600,
-      background: c.bg,
-      color: c.fg,
+      background: c!.bg!,
+      color: c!.fg!,
     };
   },
   dot: (color: string) => ({

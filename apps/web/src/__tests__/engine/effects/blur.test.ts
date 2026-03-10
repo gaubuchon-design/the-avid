@@ -52,7 +52,7 @@ describe('applyGaussianBlur', () => {
     const originalCenter = img.data[centerIdx]; // 255
     applyGaussianBlur(img, 2, 1);
     // Center should be less than 255 because it's averaged with neighbors
-    expect(img.data[centerIdx]).toBeLessThan(originalCenter);
+    expect(img.data[centerIdx]).toBeLessThan(originalCenter!);
     // A neighbor pixel should now have some brightness (spread from center)
     const neighborIdx = ((cy - 1) * 10 + cx) * 4;
     expect(img.data[neighborIdx]).toBeGreaterThan(0);
@@ -69,7 +69,7 @@ describe('applyGaussianBlur', () => {
     applyGaussianBlur(img2, 2, 3);
 
     // More iterations = more blur = lower peak at center
-    expect(img2.data[centerIdx]).toBeLessThanOrEqual(img1.data[centerIdx]);
+    expect(img2.data[centerIdx]).toBeLessThanOrEqual(img1.data[centerIdx]!);
   });
 
   it('handles 1x1 images without error', () => {

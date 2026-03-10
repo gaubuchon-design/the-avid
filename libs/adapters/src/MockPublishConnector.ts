@@ -15,6 +15,7 @@ import type {
   PublishStatus,
   PublishVariant,
 } from './contracts-types';
+import { ConflictError, NotFoundError } from './AdapterError';
 import type {
   IPublishConnector,
   PlatformCapabilities,
@@ -212,7 +213,7 @@ export class MockPublishConnector implements IPublishConnector {
   async getPublishStatus(jobId: string): Promise<PublishStatusInfo> {
     const job = this.jobs.get(jobId);
     if (!job) {
-      throw new Error(`Publish job not found: ${jobId}`);
+      throw new NotFoundError('publish', 'PublishJob', jobId);
     }
 
     return {
@@ -228,11 +229,12 @@ export class MockPublishConnector implements IPublishConnector {
   async revoke(publishId: string): Promise<void> {
     const job = this.jobs.get(publishId);
     if (!job) {
-      throw new Error(`Publish job not found: ${publishId}`);
+      throw new NotFoundError('publish', 'PublishJob', publishId);
     }
 
     if (job.status !== 'published') {
-      throw new Error(
+      throw new ConflictError(
+        'publish',
         `Cannot revoke job ${publishId} -- current status is "${job.status}".`,
       );
     }

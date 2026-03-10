@@ -66,7 +66,7 @@ describe('applyChromaKey', () => {
     const softAlpha = dataSoft[3];
     const hardAlpha = dataHard[3];
     // They should be different or at least both affected
-    expect(softAlpha + hardAlpha).toBeLessThan(510); // At least one must be < 255
+    expect(softAlpha! + hardAlpha!).toBeLessThan(510); // At least one must be < 255
   });
 
   it('spill suppression reduces green fringing on edges', () => {
@@ -77,8 +77,8 @@ describe('applyChromaKey', () => {
 
     // Green channel should be reduced (suppressed toward max of R, B)
     // Only applied when alpha > 0 (pixel not fully keyed)
-    if (data[3] > 0) {
-      expect(data[1]).toBeLessThanOrEqual(originalG);
+    if (data[3]! > 0) {
+      expect(data[1]).toBeLessThanOrEqual(originalG!);
     }
   });
 

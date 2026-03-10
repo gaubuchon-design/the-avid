@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { create } from 'zustand';
+import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { audioEngine } from '../engine/AudioEngine';
 
@@ -52,6 +53,11 @@ interface AudioActions {
   selectTrack: (trackId: string | null) => void;
   setLufsTarget: (target: number) => void;
   updateLUFS: (lufs: number) => void;
+  addTrack: (track: AudioTrackState) => void;
+  removeTrack: (trackId: string) => void;
+  resetTrackEQ: (trackId: string) => void;
+  resetTrackCompressor: (trackId: string) => void;
+  resetStore: () => void;
 }
 
 // ─── Default EQ bands ──────────────────────────────────────────────────────
@@ -99,112 +105,174 @@ const DEMO_AUDIO_TRACKS: AudioTrackState[] = [
   makeTrack('t4', 'A2 - Ambient', 0.6),
 ];
 
+const INITIAL_STATE: AudioState = {
+  tracks: DEMO_AUDIO_TRACKS,
+  masterGain: 1,
+  masterMuted: false,
+  soloedTrackIds: [],
+  activeTab: 'mixer',
+  selectedTrackId: null,
+  lufsTarget: -14,
+  currentLUFS: -14,
+};
+
 // ─── Store ─────────────────────────────────────────────────────────────────
 
 export const useAudioStore = create<AudioState & AudioActions>()(
-  immer((set) => ({
-    // State
-    tracks: DEMO_AUDIO_TRACKS,
-    masterGain: 1,
-    masterMuted: false,
-    soloedTrackIds: [],
-    activeTab: 'mixer',
-    selectedTrackId: null,
-    lufsTarget: -14,
-    currentLUFS: -14,
+  devtools(
+    immer((set) => ({
+      // State
+      ...INITIAL_STATE,
 
-    // Actions
-    setGain: (trackId, gain) => set((s) => {
-      const t = s.tracks.find((t) => t.id === trackId);
-      if (t) {
-        t.gain = Math.max(0, Math.min(2, gain));
-        audioEngine.setTrackGain(trackId, t.gain);
-      }
-    }),
-
-    setPan: (trackId, pan) => set((s) => {
-      const t = s.tracks.find((t) => t.id === trackId);
-      if (t) {
-        t.pan = Math.max(-1, Math.min(1, pan));
-        audioEngine.setTrackPan(trackId, t.pan);
-      }
-    }),
-
-    toggleMute: (trackId) => set((s) => {
-      const t = s.tracks.find((t) => t.id === trackId);
-      if (t) {
-        t.muted = !t.muted;
-        audioEngine.setTrackMute(trackId, t.muted);
-      }
-    }),
-
-    toggleSolo: (trackId) => set((s) => {
-      const t = s.tracks.find((t) => t.id === trackId);
-      if (t) {
-        t.solo = !t.solo;
-        if (t.solo) {
-          if (!s.soloedTrackIds.includes(trackId)) {
-            s.soloedTrackIds.push(trackId);
-          }
-        } else {
-          s.soloedTrackIds = s.soloedTrackIds.filter((id) => id !== trackId);
+      // Actions
+      setGain: (trackId, gain) => set((s) => {
+        const t = s.tracks.find((tr) => tr.id === trackId);
+        if (t) {
+          t.gain = Math.max(0, Math.min(2, gain));
+          audioEngine.setTrackGain(trackId, t.gain);
         }
-        audioEngine.setTrackSolo(trackId, t.solo);
-      }
-    }),
+      }, false, 'audio/setGain'),
 
-    setMasterGain: (gain) => set((s) => {
-      s.masterGain = Math.max(0, Math.min(2, gain));
-      audioEngine.setMasterGain(s.masterGain);
-    }),
+      setPan: (trackId, pan) => set((s) => {
+        const t = s.tracks.find((tr) => tr.id === trackId);
+        if (t) {
+          t.pan = Math.max(-1, Math.min(1, pan));
+          audioEngine.setTrackPan(trackId, t.pan);
+        }
+      }, false, 'audio/setPan'),
 
-    toggleMasterMute: () => set((s) => {
-      s.masterMuted = !s.masterMuted;
-      audioEngine.setMasterGain(s.masterMuted ? 0 : s.masterGain);
-    }),
+      toggleMute: (trackId) => set((s) => {
+        const t = s.tracks.find((tr) => tr.id === trackId);
+        if (t) {
+          t.muted = !t.muted;
+          audioEngine.setTrackMute(trackId, t.muted);
+        }
+      }, false, 'audio/toggleMute'),
 
-    setEQBand: (trackId, band, params) => set((s) => {
-      const t = s.tracks.find((t) => t.id === trackId);
-      if (t && band >= 0 && band < t.eq.length) {
-        t.eq[band] = { ...params };
-        audioEngine.setEQ(trackId, band, params);
-      }
-    }),
+      toggleSolo: (trackId) => set((s) => {
+        const t = s.tracks.find((tr) => tr.id === trackId);
+        if (t) {
+          t.solo = !t.solo;
+          if (t.solo) {
+            if (!s.soloedTrackIds.includes(trackId)) {
+              s.soloedTrackIds.push(trackId);
+            }
+          } else {
+            s.soloedTrackIds = s.soloedTrackIds.filter((id) => id !== trackId);
+          }
+          audioEngine.setTrackSolo(trackId, t.solo);
+        }
+      }, false, 'audio/toggleSolo'),
 
-    setCompressorParam: (trackId, param, value) => set((s) => {
-      const t = s.tracks.find((t) => t.id === trackId);
-      if (t) {
-        t.compressor[param] = value;
-        audioEngine.setCompressor(trackId, {
-          ...t.compressor,
-          attack: t.compressor.attack / 1000,  // ms -> seconds for Web Audio
-          release: t.compressor.release / 1000,
-        });
-      }
-    }),
+      setMasterGain: (gain) => set((s) => {
+        s.masterGain = Math.max(0, Math.min(2, gain));
+        audioEngine.setMasterGain(s.masterGain);
+      }, false, 'audio/setMasterGain'),
 
-    updateMeter: (trackId, peakL, peakR) => set((s) => {
-      const t = s.tracks.find((t) => t.id === trackId);
-      if (t) {
-        t.peakL = peakL;
-        t.peakR = peakR;
-      }
-    }),
+      toggleMasterMute: () => set((s) => {
+        s.masterMuted = !s.masterMuted;
+        audioEngine.setMasterGain(s.masterMuted ? 0 : s.masterGain);
+      }, false, 'audio/toggleMasterMute'),
 
-    setActiveTab: (tab) => set((s) => {
-      s.activeTab = tab;
-    }),
+      setEQBand: (trackId, band, params) => set((s) => {
+        const t = s.tracks.find((tr) => tr.id === trackId);
+        if (t && band >= 0 && band < t.eq.length) {
+          t.eq[band]!.frequency = params.frequency;
+          t.eq[band]!.gain = params.gain;
+          t.eq[band]!.Q = params.Q;
+          audioEngine.setEQ(trackId, band, params);
+        }
+      }, false, 'audio/setEQBand'),
 
-    selectTrack: (trackId) => set((s) => {
-      s.selectedTrackId = trackId;
-    }),
+      setCompressorParam: (trackId, param, value) => set((s) => {
+        const t = s.tracks.find((tr) => tr.id === trackId);
+        if (t) {
+          t.compressor[param] = value;
+          audioEngine.setCompressor(trackId, {
+            ...t.compressor,
+            attack: t.compressor.attack / 1000,  // ms -> seconds for Web Audio
+            release: t.compressor.release / 1000,
+          });
+        }
+      }, false, 'audio/setCompressorParam'),
 
-    setLufsTarget: (target) => set((s) => {
-      s.lufsTarget = target;
-    }),
+      updateMeter: (trackId, peakL, peakR) => set((s) => {
+        const t = s.tracks.find((tr) => tr.id === trackId);
+        if (t) {
+          t.peakL = peakL;
+          t.peakR = peakR;
+        }
+      }, false, 'audio/updateMeter'),
 
-    updateLUFS: (lufs) => set((s) => {
-      s.currentLUFS = lufs;
-    }),
-  }))
+      setActiveTab: (tab) => set((s) => {
+        s.activeTab = tab;
+      }, false, 'audio/setActiveTab'),
+
+      selectTrack: (trackId) => set((s) => {
+        s.selectedTrackId = trackId;
+      }, false, 'audio/selectTrack'),
+
+      setLufsTarget: (target) => set((s) => {
+        s.lufsTarget = target;
+      }, false, 'audio/setLufsTarget'),
+
+      updateLUFS: (lufs) => set((s) => {
+        s.currentLUFS = lufs;
+      }, false, 'audio/updateLUFS'),
+
+      addTrack: (track) => set((s) => {
+        s.tracks.push(track);
+      }, false, 'audio/addTrack'),
+
+      removeTrack: (trackId) => set((s) => {
+        s.tracks = s.tracks.filter((t) => t.id !== trackId);
+        if (s.selectedTrackId === trackId) {
+          s.selectedTrackId = null;
+        }
+        s.soloedTrackIds = s.soloedTrackIds.filter((id) => id !== trackId);
+      }, false, 'audio/removeTrack'),
+
+      resetTrackEQ: (trackId) => set((s) => {
+        const t = s.tracks.find((tr) => tr.id === trackId);
+        if (t) {
+          t.eq = DEFAULT_EQ_BANDS.map((b) => ({ ...b }));
+        }
+      }, false, 'audio/resetTrackEQ'),
+
+      resetTrackCompressor: (trackId) => set((s) => {
+        const t = s.tracks.find((tr) => tr.id === trackId);
+        if (t) {
+          t.compressor = { ...DEFAULT_COMPRESSOR };
+        }
+      }, false, 'audio/resetTrackCompressor'),
+
+      resetStore: () => set(() => ({
+        ...INITIAL_STATE,
+        tracks: DEMO_AUDIO_TRACKS.map((t) => ({
+          ...t,
+          eq: DEFAULT_EQ_BANDS.map((b) => ({ ...b })),
+          compressor: { ...DEFAULT_COMPRESSOR },
+        })),
+      }), true, 'audio/resetStore'),
+    })),
+    { name: 'AudioStore', enabled: process.env["NODE_ENV"] === 'development' },
+  )
 );
+
+// ─── Named Selectors ────────────────────────────────────────────────────────
+
+type AudioStoreState = AudioState & AudioActions;
+
+export const selectAudioTracks = (state: AudioStoreState) => state.tracks;
+export const selectMasterGain = (state: AudioStoreState) => state.masterGain;
+export const selectMasterMuted = (state: AudioStoreState) => state.masterMuted;
+export const selectSoloedTrackIds = (state: AudioStoreState) => state.soloedTrackIds;
+export const selectAudioActiveTab = (state: AudioStoreState) => state.activeTab;
+export const selectSelectedAudioTrackId = (state: AudioStoreState) => state.selectedTrackId;
+export const selectLufsTarget = (state: AudioStoreState) => state.lufsTarget;
+export const selectCurrentLUFS = (state: AudioStoreState) => state.currentLUFS;
+export const selectHasSoloedTracks = (state: AudioStoreState) => state.soloedTrackIds.length > 0;
+export const selectSelectedAudioTrack = (state: AudioStoreState) =>
+  state.tracks.find((t) => t.id === state.selectedTrackId) ?? null;
+export const selectLufsDelta = (state: AudioStoreState) =>
+  state.currentLUFS - state.lufsTarget;

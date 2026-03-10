@@ -89,7 +89,7 @@ describe('useCollabStore', () => {
     useCollabStore.getState().addActivity('Test User', 'did something', 'details');
     const state = useCollabStore.getState();
     expect(state.activityFeed.length).toBe(before + 1);
-    expect(state.activityFeed[0].user).toBe('Test User');
+    expect(state.activityFeed[0]!.user).toBe('Test User');
   });
 
   it('refreshFromEngine() syncs state from engine', () => {

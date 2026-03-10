@@ -11,15 +11,25 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
+/** Detected system capabilities for the render node. */
 export interface WorkerCapabilities {
+  /** GPU vendor name (e.g. "NVIDIA", "AMD", "Apple"). */
   gpuVendor: string;
+  /** GPU model name. */
   gpuName: string;
+  /** GPU VRAM in megabytes. */
   vramMB: number;
+  /** Number of CPU cores. */
   cpuCores: number;
+  /** System memory in gigabytes. */
   memoryGB: number;
+  /** Available FFmpeg codecs/encoders. */
   availableCodecs: string[];
+  /** FFmpeg version string. */
   ffmpegVersion: string;
+  /** Maximum recommended concurrent jobs for this hardware. */
   maxConcurrentJobs: number;
+  /** Available hardware acceleration methods. */
   hwAccel: string[];
 }
 
@@ -69,8 +79,8 @@ async function detectGPU(): Promise<GPUInfo> {
     if (parts.length >= 2) {
       return {
         vendor: 'NVIDIA',
-        name: parts[0],
-        vramMB: parseInt(parts[1], 10) || 0,
+        name: parts[0] ?? 'Unknown NVIDIA GPU',
+        vramMB: parseInt(parts[1] ?? '0', 10) || 0,
       };
     }
   } catch { /* not available */ }
@@ -79,16 +89,16 @@ async function detectGPU(): Promise<GPUInfo> {
   if (process.platform === 'darwin') {
     try {
       const { stdout } = await execFileAsync('system_profiler', ['SPDisplaysDataType', '-json']);
-      const data = JSON.parse(stdout);
-      const displays = data?.SPDisplaysDataType ?? [];
-      if (displays.length > 0) {
-        const gpu = displays[0];
-        const name = gpu.sppci_model ?? 'Unknown GPU';
+      const data = JSON.parse(stdout) as Record<string, unknown>;
+      const displays = (data['SPDisplaysDataType'] as Array<Record<string, unknown>> | undefined) ?? [];
+      const firstGpu = displays[0];
+      if (firstGpu) {
+        const name = (firstGpu['sppci_model'] as string | undefined) ?? 'Unknown GPU';
         const vendor = name.toLowerCase().includes('apple') ? 'Apple'
           : name.toLowerCase().includes('amd') ? 'AMD'
           : name.toLowerCase().includes('intel') ? 'Intel'
           : 'Unknown';
-        const vramStr = gpu.sppci_vram ?? gpu['spdisplays_vram'] ?? '0';
+        const vramStr = (firstGpu['sppci_vram'] as string | undefined) ?? (firstGpu['spdisplays_vram'] as string | undefined) ?? '0';
         const vramMB = parseInt(String(vramStr).replace(/[^\d]/g, ''), 10) || 0;
         return { vendor, name, vramMB };
       }
@@ -143,7 +153,7 @@ async function detectFFmpeg(): Promise<FFmpegInfo> {
   try {
     const { stdout } = await execFileAsync('ffmpeg', ['-version']);
     const match = stdout.match(/ffmpeg version (\S+)/);
-    if (match) version = match[1];
+    if (match?.[1]) version = match[1];
   } catch {
     return { version: 'not installed', codecs: [], hwAccel: [] };
   }
@@ -178,15 +188,19 @@ async function detectFFmpeg(): Promise<FFmpegInfo> {
 /**
  * Get available disk space in bytes for a given path.
  * Uses `df -k` to determine free space.
+ *
+ * @param dirPath - Directory path to check.
+ * @returns Available space in bytes, or 0 on failure.
  */
 export async function getAvailableDiskSpace(dirPath: string): Promise<number> {
   try {
     const { stdout } = await execFileAsync('df', ['-k', dirPath]);
     const lines = stdout.trim().split('\n');
-    if (lines.length >= 2) {
-      const parts = lines[1].split(/\s+/);
+    const dataLine = lines[1];
+    if (dataLine) {
+      const parts = dataLine.split(/\s+/);
       // df -k: Filesystem 1K-blocks Used Available Use% Mounted
-      const availableKB = parseInt(parts[3], 10);
+      const availableKB = parseInt(parts[3] ?? '0', 10);
       if (!isNaN(availableKB)) {
         return availableKB * 1024;
       }

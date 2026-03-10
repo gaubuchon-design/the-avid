@@ -92,7 +92,7 @@ function usePaletteCommands(): PaletteCommand[] {
       category: 'edit', icon: '✂', shortcut: 'S',
       action: () => {
         const s = useEditorStore.getState();
-        if (s.selectedClipIds.length > 0) s.splitClip(s.selectedClipIds[0], s.playheadTime);
+        if (s.selectedClipIds.length > 0) s.splitClip(s.selectedClipIds[0]!, s.playheadTime);
       },
     },
     {
@@ -105,7 +105,7 @@ function usePaletteCommands(): PaletteCommand[] {
       category: 'edit', icon: '⟵', shortcut: '⇧⌫',
       action: () => {
         const s = useEditorStore.getState();
-        if (s.selectedClipIds.length > 0) s.rippleDelete(s.selectedClipIds[0]);
+        if (s.selectedClipIds.length > 0) s.rippleDelete(s.selectedClipIds[0]!);
       },
     },
     {
@@ -113,7 +113,7 @@ function usePaletteCommands(): PaletteCommand[] {
       category: 'edit', icon: '📋', shortcut: '⌘D',
       action: () => {
         const s = useEditorStore.getState();
-        if (s.selectedClipIds.length > 0) s.duplicateClip(s.selectedClipIds[0]);
+        if (s.selectedClipIds.length > 0) s.duplicateClip(s.selectedClipIds[0]!);
       },
     },
     {
@@ -222,7 +222,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     const groups: Record<string, PaletteCommand[]> = {};
     for (const cmd of filtered) {
       if (!groups[cmd.category]) groups[cmd.category] = [];
-      groups[cmd.category].push(cmd);
+      groups[cmd.category]!.push(cmd);
     }
     return groups;
   }, [filtered]);

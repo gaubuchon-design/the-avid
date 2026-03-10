@@ -17,7 +17,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
   return (
     <>
       {isLocalSession && (
-        <div style={{
+        <div role="status" aria-live="polite" style={{
           background: 'rgba(245, 158, 11, 0.1)',
           borderBottom: '1px solid rgba(245, 158, 11, 0.25)',
           padding: '4px 16px',

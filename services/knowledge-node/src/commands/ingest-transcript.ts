@@ -54,8 +54,8 @@ import type { TranscriptSegmentRow } from '../db/KnowledgeDB.js';
  */
 function parseSrtTimestamp(ts: string): number {
   const [time, ms] = ts.trim().split(',');
-  const [hours, minutes, seconds] = time.split(':').map(Number);
-  return hours * 3600000 + minutes * 60000 + seconds * 1000 + Number(ms || 0);
+  const [hours, minutes, seconds] = (time ?? '').split(':').map(Number);
+  return (hours ?? 0) * 3600000 + (minutes ?? 0) * 60000 + (seconds ?? 0) * 1000 + Number(ms || 0);
 }
 
 /**
@@ -76,14 +76,14 @@ function parseSrt(content: string, assetId: string): TranscriptSegmentRow[] {
     // Line 0: sequence number (ignored)
     // Line 1: timestamps
     // Lines 2+: text content
-    const timeLine = lines[1];
+    const timeLine = lines[1]!;
     const match = timeLine.match(
       /(\d{2}:\d{2}:\d{2}[,.]?\d{0,3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,.]?\d{0,3})/,
     );
     if (!match) continue;
 
-    const startTimeMs = parseSrtTimestamp(match[1].replace('.', ','));
-    const endTimeMs = parseSrtTimestamp(match[2].replace('.', ','));
+    const startTimeMs = parseSrtTimestamp(match[1]!.replace('.', ','));
+    const endTimeMs = parseSrtTimestamp(match[2]!.replace('.', ','));
     const text = lines.slice(2).join(' ').trim();
 
     segments.push({

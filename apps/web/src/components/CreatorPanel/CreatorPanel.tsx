@@ -99,7 +99,7 @@ function StatusBadge({ status }: { status: string }) {
     published: { bg: 'rgba(34,197,94,0.15)', fg: 'var(--success)' },
     scheduled: { bg: 'rgba(139,92,246,0.15)', fg: '#8b5cf6' },
   };
-  const colors = colorMap[status.toLowerCase()] ?? colorMap.draft;
+  const colors = colorMap[status.toLowerCase()] ?? colorMap['draft'];
 
   return (
     <span
@@ -107,8 +107,8 @@ function StatusBadge({ status }: { status: string }) {
         fontSize: 9,
         padding: '2px 6px',
         borderRadius: 3,
-        background: colors.bg,
-        color: colors.fg,
+        background: colors!.bg!,
+        color: colors!.fg!,
         fontWeight: 700,
         textTransform: 'uppercase',
       }}
@@ -257,7 +257,7 @@ function ReframePresets() {
   const handleSelect = useCallback(
     (preset: AspectPreset) => {
       const [w, h] = preset.split(':').map(Number);
-      setReframeConfig({ targetAspect: { width: w, height: h, label: preset } });
+      setReframeConfig({ targetAspect: { width: w!, height: h!, label: preset } });
     },
     [setReframeConfig],
   );

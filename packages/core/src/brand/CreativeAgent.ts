@@ -275,7 +275,7 @@ export async function searchFootage(
   const seenTags = new Set<string>();
 
   for (const footage of outline.suggestedFootage) {
-    const tag = footage.tags[0];
+    const tag = footage.tags[0] ?? 'unknown';
     if (seenTags.has(tag)) continue;
     seenTags.add(tag);
 

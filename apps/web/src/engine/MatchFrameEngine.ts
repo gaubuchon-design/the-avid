@@ -310,13 +310,13 @@ export class MatchFrameEngine {
     const binId = findBinForAsset(bins, sourceAssetId);
 
     // Side-effect: park the record playhead.
-    state.setPlayhead(best.timelineTime);
+    state.setPlayhead(best!.timelineTime!);
 
     return okResult(
       sourceAssetId,
       sourcePlayhead,
-      best.clip.id,
-      best.track.id,
+      best!.clip.id!,
+      best!.track.id!,
       binId,
     );
   }

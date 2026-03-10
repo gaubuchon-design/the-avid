@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, Suspense, lazy } from 'react';
 import { LoadingSpinner } from '../components/LoadingSpinner';
-import { ErrorBoundary } from '../components/ErrorBoundary';
+import { ErrorBoundary, PanelErrorBoundary } from '../components/ErrorBoundary';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Toolbar } from '../components/Toolbar/Toolbar';
 import { BinPanel } from '../components/Bins/BinPanel';
@@ -84,29 +84,45 @@ function VerticalSidePanel({ workspace }: { workspace: WorkspacePreset }) {
   switch (workspace) {
     case 'news':
       return (
-        <Suspense fallback={<LoadingSpinner />}>
-          <RundownPanel />
-          <StoryScriptPanel />
-        </Suspense>
+        <PanelErrorBoundary panelName="News Vertical Panel">
+          <Suspense fallback={<LoadingSpinner />}>
+            <PanelErrorBoundary panelName="RundownPanel">
+              <RundownPanel />
+            </PanelErrorBoundary>
+            <PanelErrorBoundary panelName="StoryScriptPanel">
+              <StoryScriptPanel />
+            </PanelErrorBoundary>
+          </Suspense>
+        </PanelErrorBoundary>
       );
     case 'sports':
       return (
-        <Suspense fallback={<LoadingSpinner />}>
-          <SportsPanel />
-        </Suspense>
+        <PanelErrorBoundary panelName="Sports Panel">
+          <Suspense fallback={<LoadingSpinner />}>
+            <SportsPanel />
+          </Suspense>
+        </PanelErrorBoundary>
       );
     case 'creator':
       return (
-        <Suspense fallback={<LoadingSpinner />}>
-          <CreatorPanel />
-          <AccessibilityPanel />
-        </Suspense>
+        <PanelErrorBoundary panelName="Creator Vertical Panel">
+          <Suspense fallback={<LoadingSpinner />}>
+            <PanelErrorBoundary panelName="CreatorPanel">
+              <CreatorPanel />
+            </PanelErrorBoundary>
+            <PanelErrorBoundary panelName="AccessibilityPanel">
+              <AccessibilityPanel />
+            </PanelErrorBoundary>
+          </Suspense>
+        </PanelErrorBoundary>
       );
     case 'marketing':
       return (
-        <Suspense fallback={<LoadingSpinner />}>
-          <BrandPanel />
-        </Suspense>
+        <PanelErrorBoundary panelName="Brand Panel">
+          <Suspense fallback={<LoadingSpinner />}>
+            <BrandPanel />
+          </Suspense>
+        </PanelErrorBoundary>
       );
     default:
       return null;
@@ -153,11 +169,14 @@ export function EditorPage() {
   // Read from store directly to avoid stale closures in frame-stepping callbacks
   const stepForward = useCallback(() => {
     const { playheadTime, duration, setPlayhead } = useEditorStore.getState();
-    setPlayhead(Math.min(playheadTime + 1 / 24, duration));
+    const safeDuration = Number.isFinite(duration) ? duration : 0;
+    const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
+    setPlayhead(Math.min(safeTime + 1 / 24, safeDuration));
   }, []);
   const stepBackward = useCallback(() => {
     const { playheadTime, setPlayhead } = useEditorStore.getState();
-    setPlayhead(Math.max(playheadTime - 1 / 24, 0));
+    const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
+    setPlayhead(Math.max(safeTime - 1 / 24, 0));
   }, []);
 
   useKeyboardAction('transport.playForward', togglePlay, [togglePlay]);
@@ -252,23 +271,43 @@ export function EditorPage() {
           <>
             <div className={`workspace${showInspector ? '' : ' no-inspector'}`}>
               <div className="left-panels">
-                <BinPanel />
-                {showTranscriptPanel && <TranscriptPanel />}
+                <PanelErrorBoundary panelName="BinPanel">
+                  <BinPanel />
+                </PanelErrorBoundary>
+                {showTranscriptPanel && (
+                  <PanelErrorBoundary panelName="TranscriptPanel">
+                    <TranscriptPanel />
+                  </PanelErrorBoundary>
+                )}
               </div>
               <div className="canvas-area" style={{ position: 'relative' }}>
-                {showMultiCam ? (
-                  <Suspense fallback={<LoadingSpinner />}>
-                    <MultiCamPanel />
-                  </Suspense>
-                ) : (
-                  <ComposerPanel />
-                )}
+                <PanelErrorBoundary panelName="ComposerPanel">
+                  {showMultiCam ? (
+                    <Suspense fallback={<LoadingSpinner />}>
+                      <MultiCamPanel />
+                    </Suspense>
+                  ) : (
+                    <ComposerPanel />
+                  )}
+                </PanelErrorBoundary>
                 {/* Tracking ROI overlay on top of monitor canvas */}
-                {showTracker && <TrackingOverlay width={1920} height={1080} />}
-                {showAIPanel && <AIPanel />}
+                {showTracker && (
+                  <PanelErrorBoundary panelName="TrackingOverlay">
+                    <TrackingOverlay width={1920} height={1080} />
+                  </PanelErrorBoundary>
+                )}
+                {showAIPanel && (
+                  <PanelErrorBoundary panelName="AIPanel">
+                    <AIPanel />
+                  </PanelErrorBoundary>
+                )}
               </div>
               {/* Planar tracker side panel */}
-              {showTracker && <TrackerPanel />}
+              {showTracker && (
+                <PanelErrorBoundary panelName="TrackerPanel">
+                  <TrackerPanel />
+                </PanelErrorBoundary>
+              )}
               {hasVerticalPanel && (
                 <div className="vertical-panel" style={{
                   width: 340,
@@ -280,9 +319,15 @@ export function EditorPage() {
                   <VerticalSidePanel workspace={workspace} />
                 </div>
               )}
-              {showInspector && <InspectorPanel />}
+              {showInspector && (
+                <PanelErrorBoundary panelName="InspectorPanel">
+                  <InspectorPanel />
+                </PanelErrorBoundary>
+              )}
             </div>
-            <TimelinePanel />
+            <PanelErrorBoundary panelName="TimelinePanel">
+              <TimelinePanel />
+            </PanelErrorBoundary>
           </>
         )
       )}

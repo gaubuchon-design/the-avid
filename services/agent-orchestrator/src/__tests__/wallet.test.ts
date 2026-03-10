@@ -166,7 +166,7 @@ describe('TokenWallet', () => {
       // Should have a refund transaction
       const refunds = wallet.getTransactions({ type: 'refund' });
       expect(refunds.length).toBe(1);
-      expect(refunds[0].amount).toBe(50);
+      expect(refunds[0]!.amount).toBe(50);
     });
 
     it('should settle for zero and refund the entire hold', () => {
@@ -566,15 +566,15 @@ describe('MeteringService', () => {
       expect(tx.amount).toBe(20);
       expect(metering.getActiveJobs().length).toBe(0);
       expect(metering.getCompletedJobs().length).toBe(1);
-      expect(metering.getCompletedJobs()[0].status).toBe('completed');
-      expect(metering.getCompletedJobs()[0].actualTokens).toBe(20);
+      expect(metering.getCompletedJobs()[0]!.status).toBe('completed');
+      expect(metering.getCompletedJobs()[0]!.actualTokens).toBe(20);
     });
 
     it('should use estimated amount when actual is not provided', () => {
       const { quote } = metering.startJob('archive-reasoning');
       metering.completeJob(quote.jobId);
 
-      expect(metering.getCompletedJobs()[0].actualTokens).toBe(50);
+      expect(metering.getCompletedJobs()[0]!.actualTokens).toBe(50);
     });
 
     it('should throw for unknown job', () => {
@@ -599,8 +599,8 @@ describe('MeteringService', () => {
       expect(tx.type).toBe('release');
       expect(wallet.getState().held).toBe(0);
       expect(wallet.getBalance()).toBe(1000); // fully restored
-      expect(metering.getCompletedJobs()[0].status).toBe('failed');
-      expect(metering.getCompletedJobs()[0].actualTokens).toBe(0);
+      expect(metering.getCompletedJobs()[0]!.status).toBe('failed');
+      expect(metering.getCompletedJobs()[0]!.actualTokens).toBe(0);
     });
 
     it('should throw for unknown job', () => {
@@ -911,7 +911,7 @@ describe('AdminView', () => {
       expect(report.totalTokens).toBe(25);
       expect(report.jobCount).toBe(1);
       expect(report.categories['cloud-stt']).toBeDefined();
-      expect(report.categories['cloud-stt'].totalTokens).toBe(25);
+      expect(report.categories['cloud-stt']!.totalTokens).toBe(25);
     });
   });
 
@@ -922,8 +922,8 @@ describe('AdminView', () => {
 
       const log = admin.getAuditLog();
       expect(log.length).toBeGreaterThanOrEqual(2); // hold + debit (+ possible refund)
-      expect(log[0].transactionId).toBeDefined();
-      expect(log[0].timestamp).toBeDefined();
+      expect(log[0]!.transactionId).toBeDefined();
+      expect(log[0]!.timestamp).toBeDefined();
     });
   });
 
@@ -937,10 +937,10 @@ describe('AdminView', () => {
 
       const top = admin.getTopCategories(5);
       expect(top.length).toBe(2);
-      expect(top[0].category).toBe('archive-reasoning');
-      expect(top[0].totalTokens).toBe(50);
-      expect(top[1].category).toBe('cloud-stt');
-      expect(top[1].totalTokens).toBe(20);
+      expect(top[0]!.category).toBe('archive-reasoning');
+      expect(top[0]!.totalTokens).toBe(50);
+      expect(top[1]!.category).toBe('cloud-stt');
+      expect(top[1]!.totalTokens).toBe(20);
     });
   });
 

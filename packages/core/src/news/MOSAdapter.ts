@@ -287,64 +287,64 @@ export class MOSAdapter {
         break;
       }
       case 'roStoryInsert': {
-        const story = payload.story as MOSStory;
-        const afterStoryId = payload.afterStoryId as string | undefined;
+        const story = payload['story'] as MOSStory;
+        const afterStoryId = payload['afterStoryId'] as string | undefined;
         this.applyStoryInsert(roId, story, afterStoryId);
         this.handlers.roStoryInsert?.(roId, story, afterStoryId);
         break;
       }
       case 'roStoryReplace': {
-        const story = payload.story as MOSStory;
+        const story = payload['story'] as MOSStory;
         this.applyStoryReplace(roId, story);
         this.handlers.roStoryReplace?.(roId, story);
         break;
       }
       case 'roStoryDelete': {
-        const storyIds = payload.storyIds as string[];
+        const storyIds = payload['storyIds'] as string[];
         this.applyStoryDelete(roId, storyIds);
         this.handlers.roStoryDelete?.(roId, storyIds);
         break;
       }
       case 'roStoryMove': {
-        const storyId = payload.storyId as string;
-        const afterStoryId = payload.afterStoryId as string | undefined;
+        const storyId = payload['storyId'] as string;
+        const afterStoryId = payload['afterStoryId'] as string | undefined;
         this.applyStoryMove(roId, storyId, afterStoryId);
         this.handlers.roStoryMove?.(roId, storyId, afterStoryId);
         break;
       }
       case 'roStorySwap': {
-        const idA = payload.storyIdA as string;
-        const idB = payload.storyIdB as string;
+        const idA = payload['storyIdA'] as string;
+        const idB = payload['storyIdB'] as string;
         this.applyStorySwap(roId, idA, idB);
         this.handlers.roStorySwap?.(roId, idA, idB);
         break;
       }
       case 'roItemInsert': {
-        const storyId = payload.storyId as string;
-        const item = payload.item as MOSItem;
-        const afterItemId = payload.afterItemId as string | undefined;
+        const storyId = payload['storyId'] as string;
+        const item = payload['item'] as MOSItem;
+        const afterItemId = payload['afterItemId'] as string | undefined;
         this.handlers.roItemInsert?.(roId, storyId, item, afterItemId);
         break;
       }
       case 'roItemReplace': {
-        const storyId = payload.storyId as string;
-        const item = payload.item as MOSItem;
+        const storyId = payload['storyId'] as string;
+        const item = payload['item'] as MOSItem;
         this.handlers.roItemReplace?.(roId, storyId, item);
         break;
       }
       case 'roItemDelete': {
-        const storyId = payload.storyId as string;
-        const itemIds = payload.itemIds as string[];
+        const storyId = payload['storyId'] as string;
+        const itemIds = payload['itemIds'] as string[];
         this.handlers.roItemDelete?.(roId, storyId, itemIds);
         break;
       }
       case 'roReadyToAir': {
-        const storyId = payload.storyId as string;
+        const storyId = payload['storyId'] as string;
         this.handlers.roReadyToAir?.(roId, storyId);
         break;
       }
       case 'roAck': {
-        const status = payload.status as string;
+        const status = payload['status'] as string;
         this.handlers.roAck?.(roId, status);
         break;
       }
@@ -399,6 +399,7 @@ export class MOSAdapter {
     if (idx < 0) return;
 
     const [story] = ro.stories.splice(idx, 1);
+    if (!story) return;
     if (!afterStoryId) {
       ro.stories.unshift(story);
     } else {
@@ -418,7 +419,7 @@ export class MOSAdapter {
     const idxA = ro.stories.findIndex((s) => s.storyId === idA);
     const idxB = ro.stories.findIndex((s) => s.storyId === idB);
     if (idxA >= 0 && idxB >= 0) {
-      [ro.stories[idxA], ro.stories[idxB]] = [ro.stories[idxB], ro.stories[idxA]];
+      [ro.stories[idxA]!, ro.stories[idxB]!] = [ro.stories[idxB]!, ro.stories[idxA]!];
     }
   }
 
@@ -429,13 +430,13 @@ export class MOSAdapter {
       // Try JSON-based MOS messages first (modern implementations)
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       return {
-        messageId: String(parsed.messageId ?? Date.now()),
-        type: parsed.type as MOSMessageType,
-        roId: String(parsed.roId ?? ''),
-        payload: (parsed.payload as Record<string, unknown>) ?? parsed,
-        timestamp: String(parsed.timestamp ?? new Date().toISOString()),
-        ncsId: String(parsed.ncsId ?? this.ncsId),
-        mosId: String(parsed.mosId ?? this.mosId),
+        messageId: String(parsed['messageId'] ?? Date.now()),
+        type: parsed['type'] as MOSMessageType,
+        roId: String(parsed['roId'] ?? ''),
+        payload: (parsed['payload'] as Record<string, unknown>) ?? parsed,
+        timestamp: String(parsed['timestamp'] ?? new Date().toISOString()),
+        ncsId: String(parsed['ncsId'] ?? this.ncsId),
+        mosId: String(parsed['mosId'] ?? this.mosId),
       };
     } catch {
       // Fallback: try to extract from XML

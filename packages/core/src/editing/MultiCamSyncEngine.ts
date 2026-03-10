@@ -97,7 +97,7 @@ const DEFAULT_TC_TOLERANCE_FRAMES = 2;
 function timecodeToSeconds(tc: string, frameRate: number): number {
   const parts = tc.split(/[:;]/).map(Number);
   if (parts.length !== 4) return 0;
-  const [hours, minutes, seconds, frames] = parts;
+  const [hours = 0, minutes = 0, seconds = 0, frames = 0] = parts;
   if (!Number.isFinite(frameRate) || frameRate <= 0) return 0;
   return hours * 3600 + minutes * 60 + seconds + frames / frameRate;
 }
@@ -126,8 +126,8 @@ function crossCorrelate(signalA: number[], signalB: number[]): { offset: number;
   let energyA = 0;
   let energyB = 0;
   for (let i = 0; i < len; i++) {
-    energyA += signalA[i] * signalA[i];
-    energyB += signalB[i] * signalB[i];
+    energyA += (signalA[i] ?? 0) * (signalA[i] ?? 0);
+    energyB += (signalB[i] ?? 0) * (signalB[i] ?? 0);
   }
   const normFactor = Math.sqrt(energyA * energyB);
 
@@ -140,7 +140,7 @@ function crossCorrelate(signalA: number[], signalB: number[]): { offset: number;
     for (let i = 0; i < len; i++) {
       const j = i + lag;
       if (j >= 0 && j < len) {
-        sum += signalA[i] * signalB[j];
+        sum += (signalA[i] ?? 0) * (signalB[j] ?? 0);
       }
     }
     // Normalize cross-correlation to 0..1 range
@@ -450,8 +450,8 @@ export class MultiCamSyncEngine {
       const nextAngleIndex = (currentAngleIndex + 1) % group.angles.length;
       suggestions.push({
         id: `ai-switch-${suggestions.length}`,
-        fromAngleId: group.angles[currentAngleIndex].id,
-        toAngleId: group.angles[nextAngleIndex].id,
+        fromAngleId: group.angles[currentAngleIndex]!.id,
+        toAngleId: group.angles[nextAngleIndex]!.id,
         switchTimeSeconds: t,
         switchType: 'ai-suggestion',
       });

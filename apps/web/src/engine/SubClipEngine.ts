@@ -47,6 +47,7 @@ export interface Subsequence {
   sourceSequenceId: string;   // parent sequence
   inPoint: number;
   outPoint: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- clip shape varies by track type
   tracks: { trackId: string; clips: any[] }[];
   binId: string;
   createdAt: number;
@@ -72,6 +73,7 @@ function genAutoSeqId(): string {
 /**
  * Recursively search bins for an asset by ID.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- bin tree shape is recursive and loosely typed
 function findAssetInBins(bins: any[], assetId: string): MediaAsset | null {
   for (const bin of bins) {
     const found = bin.assets?.find((a: MediaAsset) => a.id === assetId);
@@ -87,6 +89,7 @@ function findAssetInBins(bins: any[], assetId: string): MediaAsset | null {
 /**
  * Collect all assets from a list of bins (including nested children).
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- bin tree shape is recursive and loosely typed
 function collectAllAssetsFromBins(bins: any[]): MediaAsset[] {
   const result: MediaAsset[] = [];
   for (const bin of bins) {
@@ -101,6 +104,7 @@ function collectAllAssetsFromBins(bins: any[]): MediaAsset[] {
 /**
  * Find a specific bin by ID, searching recursively.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- bin tree shape is recursive and loosely typed
 function findBinById(bins: any[], binId: string): any | null {
   for (const bin of bins) {
     if (bin.id === binId) return bin;
@@ -355,9 +359,11 @@ export class SubClipEngine {
     const effectiveOut = Math.max(inPoint, outPoint);
 
     // Extract clips that overlap the IN/OUT range from each track
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- clip shape varies by track type
     const tracks: { trackId: string; clips: any[] }[] = [];
 
     for (const track of state.tracks) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const overlappingClips: any[] = [];
 
       for (const clip of track.clips) {

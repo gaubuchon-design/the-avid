@@ -46,7 +46,7 @@ function parseArgs(argv: string[]): CLIArgs {
         process.exit(0);
         break;
       default:
-        if (args[i].startsWith('--')) {
+        if (args[i]!.startsWith('--')) {
           console.error(`Unknown option: ${args[i]}`);
           printUsage();
           process.exit(1);

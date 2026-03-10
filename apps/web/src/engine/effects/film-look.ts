@@ -63,10 +63,10 @@ export function applyFilmDamage(
 
           if (srcY >= 0 && srcY < height && srcX >= 0 && srcX < width) {
             const sIdx = (srcY * width + srcX) * 4;
-            data[dIdx] = src[sIdx];
-            data[dIdx + 1] = src[sIdx + 1];
-            data[dIdx + 2] = src[sIdx + 2];
-            data[dIdx + 3] = src[sIdx + 3];
+            data[dIdx] = src[sIdx]!;
+            data[dIdx + 1] = src[sIdx + 1]!;
+            data[dIdx + 2] = src[sIdx + 2]!;
+            data[dIdx + 3] = src[sIdx + 3]!;
           } else {
             data[dIdx] = 0;
             data[dIdx + 1] = 0;
@@ -84,9 +84,9 @@ export function applyFilmDamage(
     const flickerAmount = 1.0 + (rng() - 0.5) * flickerNorm * 0.3;
 
     for (let i = 0; i < data.length; i += 4) {
-      data[i] = clamp(data[i] * flickerAmount);
-      data[i + 1] = clamp(data[i + 1] * flickerAmount);
-      data[i + 2] = clamp(data[i + 2] * flickerAmount);
+      data[i] = clamp(data[i]! * flickerAmount);
+      data[i + 1] = clamp(data[i + 1]! * flickerAmount);
+      data[i + 2] = clamp(data[i + 2]! * flickerAmount);
     }
   }
 
@@ -98,9 +98,9 @@ export function applyFilmDamage(
     const bShift = (rng() - 0.5) * csNorm * 30;
 
     for (let i = 0; i < data.length; i += 4) {
-      data[i] = clamp(data[i] + rShift);
-      data[i + 1] = clamp(data[i + 1] + gShift);
-      data[i + 2] = clamp(data[i + 2] + bShift);
+      data[i] = clamp(data[i]! + rShift);
+      data[i + 1] = clamp(data[i + 1]! + gShift);
+      data[i + 2] = clamp(data[i + 2]! + bShift);
     }
   }
 
@@ -128,9 +128,9 @@ export function applyFilmDamage(
           if (wx < 0 || wx >= width) continue;
           const wIdx = (y * width + wx) * 4;
           const alpha = 0.5 * scratchNorm;
-          data[wIdx] = clamp(data[wIdx] * (1 - alpha) + scratchBrightness * alpha);
-          data[wIdx + 1] = clamp(data[wIdx + 1] * (1 - alpha) + scratchBrightness * alpha);
-          data[wIdx + 2] = clamp(data[wIdx + 2] * (1 - alpha) + scratchBrightness * alpha);
+          data[wIdx] = clamp(data[wIdx]! * (1 - alpha) + scratchBrightness * alpha);
+          data[wIdx + 1] = clamp(data[wIdx + 1]! * (1 - alpha) + scratchBrightness * alpha);
+          data[wIdx + 2] = clamp(data[wIdx + 2]! * (1 - alpha) + scratchBrightness * alpha);
         }
       }
     }
@@ -155,9 +155,9 @@ export function applyFilmDamage(
           if (px < 0 || px >= width || py < 0 || py >= height) continue;
           const idx = (py * width + px) * 4;
           const alpha = dustNorm * 0.6;
-          data[idx] = clamp(data[idx] * (1 - alpha) + dustBright * alpha);
-          data[idx + 1] = clamp(data[idx + 1] * (1 - alpha) + dustBright * alpha);
-          data[idx + 2] = clamp(data[idx + 2] * (1 - alpha) + dustBright * alpha);
+          data[idx] = clamp(data[idx]! * (1 - alpha) + dustBright * alpha);
+          data[idx + 1] = clamp(data[idx + 1]! * (1 - alpha) + dustBright * alpha);
+          data[idx + 2] = clamp(data[idx + 2]! * (1 - alpha) + dustBright * alpha);
         }
       }
     }
@@ -178,9 +178,9 @@ export function applyFilmDamage(
         if (px < 0 || px >= width || py < 0 || py >= height) continue;
         const idx = (py * width + px) * 4;
         const alpha = dustNorm * 0.4;
-        data[idx] = clamp(data[idx] * (1 - alpha) + hairBright * alpha);
-        data[idx + 1] = clamp(data[idx + 1] * (1 - alpha) + hairBright * alpha);
-        data[idx + 2] = clamp(data[idx + 2] * (1 - alpha) + hairBright * alpha);
+        data[idx] = clamp(data[idx]! * (1 - alpha) + hairBright * alpha);
+        data[idx + 1] = clamp(data[idx + 1]! * (1 - alpha) + hairBright * alpha);
+        data[idx + 2] = clamp(data[idx + 2]! * (1 - alpha) + hairBright * alpha);
       }
     }
   }
@@ -217,9 +217,9 @@ export function applyDayForNight(
     let b = data[i + 2];
 
     // Step 1: Darken
-    r = clamp(r * 0.4 + brightShift);
-    g = clamp(g * 0.35 + brightShift);
-    b = clamp(b * 0.5 + brightShift);
+    r = clamp(r! * 0.4 + brightShift);
+    g = clamp(g! * 0.35 + brightShift);
+    b = clamp(b! * 0.5 + brightShift);
 
     // Step 2: Apply blue tint
     r = clamp(r * (1.0 - blueNorm * 0.4));
@@ -284,8 +284,8 @@ export function applySCurves(
 
   const len = data.length;
   for (let i = 0; i < len; i += 4) {
-    if (affectR) data[i] = lut[data[i]];
-    if (affectG) data[i + 1] = lut[data[i + 1]];
-    if (affectB) data[i + 2] = lut[data[i + 2]];
+    if (affectR) data[i] = lut[data[i]!]!;
+    if (affectG) data[i + 1] = lut[data[i + 1]!]!;
+    if (affectB) data[i + 2] = lut[data[i + 2]!]!;
   }
 }

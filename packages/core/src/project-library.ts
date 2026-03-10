@@ -922,18 +922,89 @@ function seedTracksFromBins(tracks: EditorTrack[], bins: EditorBin[]): EditorTra
   return nextTracks;
 }
 
+/**
+ * Recursively flatten all media assets from a bin hierarchy.
+ * Handles empty bins, missing children, and missing asset arrays gracefully.
+ *
+ * Uses an iterative stack-based approach instead of recursive flatMap
+ * to avoid stack overflow on deeply nested bin hierarchies and reduce
+ * intermediate array allocations.
+ *
+ * @param bins - Array of editor bins to flatten.
+ * @returns All media assets across all bins and nested children.
+ */
 export function flattenAssets(bins: EditorBin[]): EditorMediaAsset[] {
-  return bins.flatMap((bin) => [...bin.assets, ...flattenAssets(bin.children)]);
+  if (!bins || bins.length === 0) return [];
+
+  const result: EditorMediaAsset[] = [];
+  // Use an explicit stack to avoid recursion overhead
+  const stack: EditorBin[] = [...bins];
+
+  while (stack.length > 0) {
+    const bin = stack.pop()!;
+    const assets = bin.assets;
+    if (assets && assets.length > 0) {
+      for (let i = 0; i < assets.length; i++) {
+        result.push(assets[i]!);
+      }
+    }
+    const children = bin.children;
+    if (children && children.length > 0) {
+      for (let i = children.length - 1; i >= 0; i--) {
+        stack.push(children[i]!);
+      }
+    }
+  }
+
+  return result;
 }
 
+/**
+ * Calculate the total duration of a project from its tracks and clips.
+ * Handles empty tracks, empty clips, zero-duration clips, and clips at frame 0.
+ * Returns 0 for projects with no clips.
+ *
+ * @param project - Object with a `tracks` array.
+ * @returns Duration in seconds (always >= 0).
+ */
 export function getProjectDuration(project: Pick<EditorProject, 'tracks'>): number {
-  const lastClipEnd = project.tracks.flatMap((track) => track.clips).reduce((max, clip) => {
-    return Math.max(max, clip.endTime);
-  }, 0);
-  return Math.max(lastClipEnd, 0);
+  const tracks = project.tracks ?? [];
+  if (tracks.length === 0) return 0;
+
+  // Avoid intermediate array allocation from flatMap + reduce.
+  // Iterate tracks and clips inline for O(n) with zero allocations.
+  let maxEnd = 0;
+  for (let t = 0; t < tracks.length; t++) {
+    const clips = tracks[t]!.clips ?? [];
+    for (let c = 0; c < clips.length; c++) {
+      const endTime = clips[c]!.endTime;
+      if (Number.isFinite(endTime) && endTime > maxEnd) {
+        maxEnd = endTime;
+      }
+    }
+  }
+  return maxEnd;
 }
 
 function normalizeProject(project: EditorProject): EditorProject {
+  // Clamp settings to valid ranges
+  const rawFrameRate = project.settings?.frameRate ?? 24;
+  const frameRate = Number.isFinite(rawFrameRate) && rawFrameRate > 0 ? rawFrameRate : 24;
+  const rawWidth = project.settings?.width ?? 1920;
+  const width = Number.isFinite(rawWidth) && rawWidth > 0 ? Math.round(rawWidth) : 1920;
+  const rawHeight = project.settings?.height ?? 1080;
+  const height = Number.isFinite(rawHeight) && rawHeight > 0 ? Math.round(rawHeight) : 1080;
+  const rawSampleRate = project.settings?.sampleRate ?? 48000;
+  const sampleRate = Number.isFinite(rawSampleRate) && rawSampleRate > 0 ? rawSampleRate : 48000;
+
+  // Clamp progress to 0-100
+  const rawProgress = typeof project.progress === 'number' ? project.progress : 0;
+  const progress = Number.isFinite(rawProgress) ? Math.max(0, Math.min(100, rawProgress)) : 0;
+
+  // Clamp token balance to >= 0
+  const rawTokenBalance = typeof project.tokenBalance === 'number' ? project.tokenBalance : 0;
+  const tokenBalance = Number.isFinite(rawTokenBalance) ? Math.max(0, rawTokenBalance) : 0;
+
   return {
     ...project,
     schemaVersion: typeof project.schemaVersion === 'number' ? project.schemaVersion : PROJECT_SCHEMA_VERSION,
@@ -941,12 +1012,12 @@ function normalizeProject(project: EditorProject): EditorProject {
     tags: [...(project.tags ?? [])],
     createdAt: project.createdAt ?? new Date().toISOString(),
     updatedAt: project.updatedAt ?? new Date().toISOString(),
-    progress: typeof project.progress === 'number' ? project.progress : 0,
+    progress,
     settings: {
-      frameRate: project.settings?.frameRate ?? 24,
-      width: project.settings?.width ?? 1920,
-      height: project.settings?.height ?? 1080,
-      sampleRate: project.settings?.sampleRate ?? 48000,
+      frameRate,
+      width,
+      height,
+      sampleRate,
       exportFormat: project.settings?.exportFormat ?? 'mov',
     },
     tracks: cloneValue(project.tracks ?? []),
@@ -959,7 +1030,7 @@ function normalizeProject(project: EditorProject): EditorProject {
     approvals: cloneValue(project.approvals ?? []),
     publishJobs: cloneValue(project.publishJobs ?? []),
     watchFolders: cloneValue(project.watchFolders ?? []),
-    tokenBalance: typeof project.tokenBalance === 'number' ? project.tokenBalance : 0,
+    tokenBalance,
   };
 }
 
@@ -1031,7 +1102,7 @@ export function buildProject(options: CreateProjectOptions = {}): EditorProject 
   const tracks = seedTracksFromBins(createTemplateTracks(template), bins);
   const transcript = createTranscriptCues(bins, template);
   const now = new Date().toISOString();
-  const name = options.name ?? `Untitled ${template[0].toUpperCase()}${template.slice(1)}`;
+  const name = options.name ?? `Untitled ${(template[0] ?? '').toUpperCase()}${template.slice(1)}`;
 
   return normalizeProject({
     schemaVersion: PROJECT_SCHEMA_VERSION,
@@ -1102,11 +1173,33 @@ export function listProjectSummaries(): ProjectSummary[] {
   return listProjects().map(toProjectSummary);
 }
 
+/**
+ * Retrieve a project by ID.
+ *
+ * @param id - The project ID. Must be a non-empty string.
+ * @returns The project, or null if not found.
+ * @throws {TypeError} if id is not a non-empty string.
+ */
 export function getProject(id: string): EditorProject | null {
+  if (!id || typeof id !== 'string') {
+    throw new TypeError('getProject() requires a non-empty string id');
+  }
   return listProjects().find((project) => project.id === id) ?? null;
 }
 
+/**
+ * Insert or update a project in storage.
+ *
+ * @param project - The project to upsert. Must have a valid id.
+ * @throws {TypeError} if project is null/undefined or has no id.
+ */
 export function upsertProject(project: EditorProject): EditorProject {
+  if (!project || typeof project !== 'object') {
+    throw new TypeError('upsertProject() requires a valid project object');
+  }
+  if (!project.id || typeof project.id !== 'string') {
+    throw new TypeError('upsertProject() requires a project with a non-empty string id');
+  }
   const nextProject = normalizeProject({
     ...project,
     updatedAt: new Date().toISOString(),
@@ -1124,12 +1217,31 @@ export function upsertProject(project: EditorProject): EditorProject {
   return cloneValue(nextProject);
 }
 
+/**
+ * Delete a project by ID.
+ *
+ * @param projectId - The project ID to delete. Must be a non-empty string.
+ * @throws {TypeError} if projectId is not a non-empty string.
+ */
 export function deleteProject(projectId: string): void {
+  if (!projectId || typeof projectId !== 'string') {
+    throw new TypeError('deleteProject() requires a non-empty string projectId');
+  }
   const projects = readProjects().filter((project) => project.id !== projectId);
   writeProjects(projects);
 }
 
+/**
+ * Export a project to a JSON string.
+ *
+ * @param projectOrId - Either a project object or a project ID string.
+ * @throws {Error} if the project is not found.
+ * @throws {TypeError} if projectOrId is an empty string.
+ */
 export function exportProject(projectOrId: EditorProject | string): string {
+  if (typeof projectOrId === 'string' && !projectOrId.trim()) {
+    throw new TypeError('exportProject() requires a non-empty string id');
+  }
   const project = typeof projectOrId === 'string' ? getProject(projectOrId) : projectOrId;
   if (!project) {
     throw new Error('Project not found');
@@ -1137,8 +1249,29 @@ export function exportProject(projectOrId: EditorProject | string): string {
   return JSON.stringify(normalizeProject(project), null, 2);
 }
 
+/**
+ * Import a project from a JSON string.
+ *
+ * @param serialized - JSON string representing a project.
+ * @throws {TypeError} if serialized is not a string.
+ * @throws {SyntaxError} if serialized is not valid JSON.
+ * @throws {Error} if the parsed data cannot be hydrated into a valid project.
+ */
 export function importProject(serialized: string): EditorProject {
-  const parsed = JSON.parse(serialized) as Partial<EditorProject>;
+  if (typeof serialized !== 'string' || !serialized.trim()) {
+    throw new TypeError('importProject() requires a non-empty JSON string');
+  }
+  let parsed: Partial<EditorProject>;
+  try {
+    parsed = JSON.parse(serialized) as Partial<EditorProject>;
+  } catch (err) {
+    throw new SyntaxError(
+      `importProject() failed to parse JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new TypeError('importProject() requires a JSON object, not an array or primitive');
+  }
   return upsertProject(hydrateProject(parsed));
 }
 

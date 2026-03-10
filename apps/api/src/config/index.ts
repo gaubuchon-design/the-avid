@@ -3,7 +3,8 @@ import path from 'path';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
-// ─── Helper ────────────────────────────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────────────────────
+
 function required(key: string): string {
   const val = process.env[key];
   if (!val) throw new Error(`Missing required environment variable: ${key}`);
@@ -24,11 +25,21 @@ function optionalNumber(key: string, fallback: number): number {
   return parsed;
 }
 
+function optionalBool(key: string, fallback: boolean): boolean {
+  const val = process.env[key];
+  if (!val) return fallback;
+  return val === 'true' || val === '1';
+}
+
 // ─── Config ────────────────────────────────────────────────────────────────────
+
+const env = optional('NODE_ENV', 'development') as 'development' | 'production' | 'test';
+
 export const config = {
-  env: optional('NODE_ENV', 'development') as 'development' | 'production' | 'test',
-  isDev: optional('NODE_ENV', 'development') === 'development',
-  isProd: process.env.NODE_ENV === 'production',
+  env,
+  isDev: env === 'development',
+  isProd: env === 'production',
+  isTest: env === 'test',
 
   server: {
     port: optionalNumber('PORT', 4000),
@@ -44,14 +55,16 @@ export const config = {
   },
 
   jwt: {
-    secret: process.env.NODE_ENV === 'production'
+    secret: process.env['NODE_ENV'] === 'production'
       ? required('JWT_SECRET')
       : optional('JWT_SECRET', 'dev-secret-change-in-production'),
-    refreshSecret: process.env.NODE_ENV === 'production'
+    refreshSecret: process.env['NODE_ENV'] === 'production'
       ? required('JWT_REFRESH_SECRET')
       : optional('JWT_REFRESH_SECRET', 'dev-refresh-secret-change-in-production'),
     expiresIn: optional('JWT_EXPIRES_IN', '7d'),
     refreshExpiresIn: optional('JWT_REFRESH_EXPIRES_IN', '30d'),
+    issuer: optional('JWT_ISSUER', 'avid-api'),
+    audience: optional('JWT_AUDIENCE', 'avid-app'),
   },
 
   aws: {
@@ -128,13 +141,46 @@ export const config = {
   },
 
   logging: {
-    level: optional('LOG_LEVEL', 'debug'),
+    level: optional('LOG_LEVEL', env === 'production' ? 'info' : 'debug'),
     file: optional('LOG_FILE', 'logs/app.log'),
   },
 
   cors: {
-    origins: optional('ALLOWED_ORIGINS', 'http://localhost:3000').split(','),
+    origins: optional('ALLOWED_ORIGINS', 'http://localhost:3000').split(',').map(s => s.trim()),
+  },
+
+  security: {
+    bcryptRounds: optionalNumber('BCRYPT_ROUNDS', 12),
+    maxLoginAttempts: optionalNumber('MAX_LOGIN_ATTEMPTS', 10),
+    lockoutDurationMs: optionalNumber('LOCKOUT_DURATION_MS', 15 * 60 * 1000),
   },
 } as const;
+
+// ─── Production safety checks ─────────────────────────────────────────────────
+
+if (config.isProd) {
+  if (config.jwt.secret === 'dev-secret-change-in-production') {
+    throw new Error('JWT_SECRET must be set in production');
+  }
+  if (config.jwt.secret.length < 32) {
+    throw new Error('JWT_SECRET must be at least 32 characters in production');
+  }
+  if (config.jwt.refreshSecret === 'dev-refresh-secret-change-in-production') {
+    throw new Error('JWT_REFRESH_SECRET must be set in production');
+  }
+  if (config.jwt.refreshSecret.length < 32) {
+    throw new Error('JWT_REFRESH_SECRET must be at least 32 characters in production');
+  }
+  if (!config.cors.origins.length || config.cors.origins.includes('*')) {
+    throw new Error('ALLOWED_ORIGINS must be explicitly set in production (no wildcards)');
+  }
+}
+
+// Warn in development/staging if using default secret
+if (!config.isTest && !config.isProd) {
+  if (config.jwt.secret === 'dev-secret-change-in-production') {
+    console.warn('[SECURITY] Using default JWT_SECRET -- set JWT_SECRET env var before deploying');
+  }
+}
 
 export type Config = typeof config;

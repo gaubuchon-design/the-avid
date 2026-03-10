@@ -398,7 +398,7 @@ export class EDLExporter {
       let transition: EDLTransition = 'C';
       let transitionDuration = 0;
       if (events.length > 0) {
-        const prevEvent = events[events.length - 1];
+        const prevEvent = events[events.length - 1]!;
         const prevOutFrames = Math.round(parseTimecodeToSeconds(prevEvent.recordOut, frameRate, dropFrame) * frameRate);
         const thisInFrames = Math.round(clip.startTime * frameRate);
         if (thisInFrames < prevOutFrames) {
@@ -440,7 +440,7 @@ export class EDLExporter {
 function parseTimecodeToSeconds(tc: string, frameRate: number, dropFrame: boolean): number {
   const parts = tc.split(/[:;]/);
   if (parts.length !== 4) return 0;
-  const [h, m, s, f] = parts.map(Number);
+  const [h = 0, m = 0, s = 0, f = 0] = parts.map(Number);
   const nominalRate = Math.round(frameRate);
 
   // Convert display timecode to a raw frame count

@@ -5,12 +5,13 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
+import { v4 as uuidv4 } from 'uuid';
 import { config } from './config';
-import { logger } from './utils/logger';
-import { connectDb, disconnectDb } from './db/client';
-import { errorHandler, notFoundHandler } from './middleware/errorHandler';
+import { logger, requestLogger } from './utils/logger';
+import { connectDb, disconnectDb, checkDbHealth, getQueryMetrics } from './db/client';
+import { errorHandler, notFoundHandler, requireJsonContentType, requestDuration } from './middleware/errorHandler';
 import { initWebSocket } from './websocket';
-import { requestLogger } from './utils/logger';
+import exportRoutes from './routes/export';
 
 // ─── Route Imports ─────────────────────────────────────────────────────────────
 import authRoutes from './routes/auth';
@@ -26,20 +27,60 @@ import brandRoutes from './routes/brand';
 import protoolsRoutes from './routes/protools';
 import nexisRoutes from './routes/nexis';
 import creatorRoutes from './routes/creator';
-import exportRoutes from './routes/export';
 import renderRoutes from './routes/render';
 
 // ─── App Setup ─────────────────────────────────────────────────────────────────
 const app = express();
 const httpServer = http.createServer(app);
 
+// ─── Request ID injection ──────────────────────────────────────────────────────
+app.use((req, _res, next) => {
+  req.headers['x-request-id'] = req.headers['x-request-id'] || uuidv4();
+  next();
+});
+
+// ─── Request Logging ───────────────────────────────────────────────────────────
+app.use(requestLogger());
+
 // ─── Security & Parsing ────────────────────────────────────────────────────────
 app.set('trust proxy', 1);
+app.disable('x-powered-by');
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
-  contentSecurityPolicy: false, // handled by frontend
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'none'"],
+      scriptSrc: ["'none'"],
+      styleSrc: ["'none'"],
+      imgSrc: ["'none'"],
+      connectSrc: ["'self'"],
+      fontSrc: ["'none'"],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+      formAction: ["'self'"],
+      baseUri: ["'self'"],
+    },
+  },
+  hsts: config.isProd ? { maxAge: 63072000, includeSubDomains: true, preload: true } : false,
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
 }));
+
+// ─── Permissions Policy ────────────────────────────────────────────────────
+app.use((_req, res, next) => {
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  next();
+});
+
+// ─── HTTPS enforcement in production ───────────────────────────────────────
+if (config.isProd) {
+  app.use((req, res, next) => {
+    if (req.headers['x-forwarded-proto'] !== 'https') {
+      return res.redirect(301, `https://${req.headers['host'] ?? ''}${req.url}`);
+    }
+    next();
+  });
+}
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -47,21 +88,37 @@ app.use(cors({
       callback(null, true);
     } else {
       // Do not leak the origin value in the error message
+      logger.warn(`CORS rejection: origin=${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
+  exposedHeaders: ['X-Request-ID', 'X-RateLimit-Remaining'],
   maxAge: 86400, // Cache preflight for 24h
 }));
 
-app.use(compression());
+// ─── Response Compression ────────────────────────────────────────────────────
+// Configure compression with threshold and level tuning:
+// - threshold: minimum response size to compress (1KB avoids overhead on tiny responses)
+// - level: zlib compression level (6 = good balance of speed/ratio for API JSON)
+// - filter: skip compression for already-compressed formats and event-stream
+app.use(compression({
+  threshold: 1024,
+  level: 6,
+  filter: (req, res) => {
+    const contentType = res.getHeader('Content-Type');
+    if (typeof contentType === 'string' && contentType.includes('text/event-stream')) {
+      return false;
+    }
+    return compression.filter(req, res);
+  },
+}));
+app.use(requestDuration);
+app.use(requireJsonContentType);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-
-// ─── Request Logging ──────────────────────────────────────────────────────────
-app.use(requestLogger());
 
 // ─── Rate Limiting ─────────────────────────────────────────────────────────────
 const limiter = rateLimit({
@@ -70,6 +127,7 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: { message: 'Too many requests', code: 'RATE_LIMITED' } },
+  keyGenerator: (req) => req.ip ?? req.headers['x-forwarded-for']?.toString() ?? 'unknown',
 });
 app.use(limiter);
 
@@ -77,27 +135,91 @@ app.use(limiter);
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 min
   max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
   message: { error: { message: 'Too many auth attempts', code: 'RATE_LIMITED' } },
 });
 
+// Upload-specific limiter (more generous for large media uploads)
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 200,
+  message: { error: { message: 'Too many upload requests', code: 'RATE_LIMITED' } },
+});
+
 // ─── Health Check ──────────────────────────────────────────────────────────────
+
+/** Liveness probe -- always responds if the process is running */
 app.get('/health', (_req, res) => {
+  // Cache health response for 5 seconds to avoid per-request overhead
+  res.setHeader('Cache-Control', 'no-store');
+
+  // In production, only expose minimal health info to unauthenticated callers
+  if (config.isProd) {
+    res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+    });
+    return;
+  }
+
+  const mem = process.memoryUsage();
   res.json({
     status: 'ok',
-    version: process.env.npm_package_version ?? '0.1.0',
+    version: process.env['npm_package_version'] ?? '0.1.0',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     env: config.env,
+    memoryUsage: {
+      rss: Math.round(mem.rss / 1024 / 1024),
+      heapUsed: Math.round(mem.heapUsed / 1024 / 1024),
+      heapTotal: Math.round(mem.heapTotal / 1024 / 1024),
+      external: Math.round(mem.external / 1024 / 1024),
+      arrayBuffers: Math.round(mem.arrayBuffers / 1024 / 1024),
+    },
+    queryMetrics: getQueryMetrics(),
   });
 });
 
+/** Database-specific health check */
 app.get('/health/db', async (_req, res) => {
   try {
-    const { db } = await import('./db/client');
-    await db.$queryRaw`SELECT 1`;
-    res.json({ status: 'ok', db: 'connected' });
-  } catch {
-    res.status(503).json({ status: 'error', db: 'disconnected' });
+    const dbHealth = await checkDbHealth();
+    if (dbHealth.ok) {
+      res.json({ status: 'ok', db: 'connected', latencyMs: dbHealth.latencyMs });
+    } else {
+      res.status(503).json({ status: 'error', db: 'disconnected', latencyMs: dbHealth.latencyMs });
+    }
+  } catch (err) {
+    logger.error('Health check /health/db failed', { error: err instanceof Error ? err.message : String(err) });
+    res.status(503).json({ status: 'error', db: 'error', latencyMs: -1 });
+  }
+});
+
+/** Readiness probe -- checks all critical dependencies */
+app.get('/health/ready', async (_req, res) => {
+  const checks: Record<string, { ok: boolean; latencyMs?: number; error?: string }> = {};
+
+  // Database check
+  try {
+    const dbHealth = await checkDbHealth();
+    checks['database'] = { ok: dbHealth.ok, latencyMs: dbHealth.latencyMs };
+  } catch (err) {
+    checks['database'] = { ok: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+
+  const allOk = Object.values(checks).every((c) => c.ok);
+
+  const payload = {
+    status: allOk ? 'ready' : 'not_ready',
+    timestamp: new Date().toISOString(),
+    checks,
+  };
+
+  if (allOk) {
+    res.json(payload);
+  } else {
+    res.status(503).json(payload);
   }
 });
 
@@ -110,6 +232,7 @@ api.use('/', mediaRoutes);  // /projects/:projectId/bins + /media (with mergePar
 api.use('/ai', aiRoutes);
 api.use('/marketplace', marketplaceRoutes);
 api.use('/social-connections', socialRouter);
+api.use('/', exportRoutes); // /projects/:projectId/export/*, /projects/:projectId/import/*
 
 // Project-scoped nested routes
 api.use('/projects/:projectId/timelines', timelineRouter);
@@ -123,7 +246,6 @@ api.use('/brand', brandRoutes);
 api.use('/protools', protoolsRoutes);
 api.use('/nexis', nexisRoutes);
 api.use('/creator', creatorRoutes);
-api.use('/', exportRoutes);
 api.use('/render', renderRoutes);
 
 app.use('/api/v1', api);
@@ -145,15 +267,62 @@ app.use(errorHandler);
 // ─── WebSocket ─────────────────────────────────────────────────────────────────
 const ws = initWebSocket(httpServer);
 
+// ─── Periodic Memory Monitoring ─────────────────────────────────────────────
+let memoryLogTimer: ReturnType<typeof setInterval> | null = null;
+const MEMORY_LOG_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const HEAP_WARNING_THRESHOLD = 0.85; // 85% of heap limit
+
+function startMemoryMonitoring(): void {
+  memoryLogTimer = setInterval(() => {
+    const mem = process.memoryUsage();
+    const heapUsedMB = Math.round(mem.heapUsed / 1024 / 1024);
+    const heapTotalMB = Math.round(mem.heapTotal / 1024 / 1024);
+    const rssMB = Math.round(mem.rss / 1024 / 1024);
+    const heapRatio = mem.heapUsed / mem.heapTotal;
+
+    if (heapRatio > HEAP_WARNING_THRESHOLD) {
+      logger.warn('High heap usage detected', {
+        heapUsedMB,
+        heapTotalMB,
+        rssMB,
+        heapPercent: Math.round(heapRatio * 100),
+        externalMB: Math.round(mem.external / 1024 / 1024),
+      });
+    } else {
+      logger.debug('Memory usage', {
+        heapUsedMB,
+        heapTotalMB,
+        rssMB,
+        heapPercent: Math.round(heapRatio * 100),
+      });
+    }
+  }, MEMORY_LOG_INTERVAL_MS);
+
+  // Don't keep process alive for monitoring
+  if (typeof memoryLogTimer === 'object' && 'unref' in memoryLogTimer) {
+    memoryLogTimer.unref();
+  }
+}
+
+function stopMemoryMonitoring(): void {
+  if (memoryLogTimer) {
+    clearInterval(memoryLogTimer);
+    memoryLogTimer = null;
+  }
+}
+
 // ─── Start ─────────────────────────────────────────────────────────────────────
+let isShuttingDown = false;
+
 async function start() {
   try {
     await connectDb();
+    startMemoryMonitoring();
 
     httpServer.listen(config.server.port, () => {
       logger.info(`
 ╔═══════════════════════════════════════════════════╗
-║           The Avid — API Server                   ║
+║           The Avid -- API Server                  ║
 ╠═══════════════════════════════════════════════════╣
 ║  Port   : ${String(config.server.port).padEnd(38)}║
 ║  Env    : ${config.env.padEnd(38)}║
@@ -168,21 +337,52 @@ async function start() {
 
 // ─── Graceful Shutdown ─────────────────────────────────────────────────────────
 const shutdown = async (signal: string) => {
-  logger.info(`Received ${signal}, shutting down gracefully…`);
-  const forceTimer = setTimeout(() => { logger.error('Forced shutdown'); process.exit(1); }, 10000);
-  forceTimer.unref(); // Don't keep process alive just for this timer
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  logger.info(`Received ${signal}, shutting down gracefully...`);
+
+  // Force shutdown after 15 seconds
+  const forceTimer = setTimeout(() => {
+    logger.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 15000);
+  forceTimer.unref();
+
+  // Stop accepting new connections
   httpServer.close(async () => {
-    clearTimeout(forceTimer);
-    await disconnectDb();
-    logger.info('Server closed');
-    process.exit(0);
+    try {
+      clearTimeout(forceTimer);
+      // Close WebSocket connections
+      ws.io.close();
+      // Stop memory monitoring
+      stopMemoryMonitoring();
+      // Disconnect database
+      await disconnectDb();
+      logger.info('Server closed cleanly');
+      process.exit(0);
+    } catch (err) {
+      logger.error('Error during shutdown', err);
+      process.exit(1);
+    }
   });
 };
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT',  () => shutdown('SIGINT'));
-process.on('uncaughtException', (err) => { logger.error('Uncaught exception', err); process.exit(1); });
-process.on('unhandledRejection', (reason) => { logger.error('Unhandled rejection', reason); });
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught exception', { message: err.message, stack: err.stack, name: err.name });
+  // Only exit for non-operational errors; operational errors should be handled by middleware
+  if (!('isOperational' in err) || !err.isOperational) {
+    process.exit(1);
+  }
+});
+process.on('unhandledRejection', (reason) => {
+  const msg = reason instanceof Error
+    ? { message: reason.message, stack: reason.stack, name: reason.name }
+    : { reason: String(reason) };
+  logger.error('Unhandled rejection', msg);
+});
 
 start();
 

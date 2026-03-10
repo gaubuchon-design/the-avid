@@ -109,7 +109,7 @@ function estimateBPM(
     let correlation = 0;
     const count = Math.min(energyProfile.length - lag, 1000);
     for (let i = 0; i < count; i++) {
-      correlation += energyProfile[i] * energyProfile[i + lag];
+      correlation += (energyProfile[i] ?? 0) * (energyProfile[i + lag] ?? 0);
     }
     correlation /= count;
 
@@ -146,10 +146,10 @@ function generateAutoCuts(
   let clipIndex = 0;
 
   for (let i = 0; i < filteredBeats.length; i += everyNBeats) {
-    const beat = filteredBeats[i];
+    const beat = filteredBeats[i]!;
     cuts.push({
       time: beat.time,
-      clipId: sourceClipIds[clipIndex % sourceClipIds.length],
+      clipId: sourceClipIds[clipIndex % sourceClipIds.length]!,
     });
     clipIndex++;
   }
@@ -186,7 +186,7 @@ function generateSpeedRamps(
   const filteredBeats = beats.filter((b) => b.strength >= threshold);
 
   for (let i = 0; i < filteredBeats.length; i++) {
-    const beat = filteredBeats[i];
+    const beat = filteredBeats[i]!;
     const isDownbeat = beat.type === 'downbeat';
 
     // On downbeats, ramp up speed; between beats, slow down
@@ -383,7 +383,7 @@ export class BeatSyncEngine {
   quantizeToNearestBeat(time: number): number {
     if (!this.cachedBeats || this.cachedBeats.length === 0) return time;
 
-    let nearest = this.cachedBeats[0].time;
+    let nearest = this.cachedBeats[0]!.time;
     let minDistance = Math.abs(time - nearest);
 
     for (const beat of this.cachedBeats) {

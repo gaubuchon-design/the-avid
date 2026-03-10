@@ -163,11 +163,11 @@ export class Timecode {
     const isDF = tc.includes(';') || this.dropFrame;
 
     if (isDF && supportsDropFrame(this.fps)) {
-      return this.dropFrameTCToFrames(h, m, s, f) - this.startOffset;
+      return this.dropFrameTCToFrames(h!, m!, s!, f!) - this.startOffset;
     }
 
     const fps = this.nom;
-    return h * fps * 3600 + m * fps * 60 + s * fps + f - this.startOffset;
+    return h! * fps * 3600 + m! * fps * 60 + s! * fps + f! - this.startOffset;
   }
 
   private dropFrameTCToFrames(h: number, m: number, s: number, f: number): number {

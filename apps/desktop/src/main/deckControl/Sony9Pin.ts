@@ -157,14 +157,14 @@ export class Sony9Pin {
         autoOpen: false,
       });
 
-      this.port.on('data', (chunk: Buffer) => {
+      this.port.on('data', ((chunk: Buffer) => {
         this.onData(chunk);
-      });
+      }) as any);
 
-      this.port.on('error', (err: Error) => {
+      this.port.on('error', ((err: Error) => {
         console.error(`[Sony9Pin] Port error on ${portPath}:`, err.message);
         this._isConnected = false;
-      });
+      }) as any);
 
       this.port.on('close', () => {
         this._isConnected = false;
@@ -360,7 +360,7 @@ export class Sony9Pin {
   private buildFrame(data: Buffer): Buffer {
     let sum = 0;
     for (let i = 0; i < data.length; i++) {
-      sum += data[i];
+      sum += data[i]!;
     }
     const checksum = sum & 0xFF;
     return Buffer.concat([data, Buffer.from([checksum])]);
@@ -417,7 +417,7 @@ export class Sony9Pin {
    */
   private processRxBuffer(): void {
     while (this.rxBuffer.length >= 2) {
-      const cmd1 = this.rxBuffer[0];
+      const cmd1 = this.rxBuffer[0]!;
       const dataCount = (cmd1 >> 4) & 0x0F;
       const frameLength = 2 + dataCount + 1; // CMD1 + CMD2 + data + checksum
 
@@ -429,10 +429,10 @@ export class Sony9Pin {
       // Verify checksum
       let sum = 0;
       for (let i = 0; i < frame.length - 1; i++) {
-        sum += frame[i];
+        sum += frame[i]!;
       }
       const expectedChecksum = sum & 0xFF;
-      const actualChecksum = frame[frame.length - 1];
+      const actualChecksum = frame[frame.length - 1]!;
 
       if (expectedChecksum !== actualChecksum) {
         console.warn('[Sony9Pin] Checksum mismatch — discarding frame');
@@ -462,11 +462,11 @@ export class Sony9Pin {
     }
 
     // Timecode data starts at byte 2
-    const frames  = this.decodeBCD(response[2]);
-    const seconds = this.decodeBCD(response[3]);
-    const minutes = this.decodeBCD(response[4]);
-    const hours   = this.decodeBCD(response[5]);
-    const dropFrame = (response[2] & 0x40) !== 0; // Bit 6 of frames byte = DF flag
+    const frames  = this.decodeBCD(response[2]!);
+    const seconds = this.decodeBCD(response[3]!);
+    const minutes = this.decodeBCD(response[4]!);
+    const hours   = this.decodeBCD(response[5]!);
+    const dropFrame = (response[2]! & 0x40) !== 0; // Bit 6 of frames byte = DF flag
 
     return { hours, minutes, seconds, frames: frames & 0x3F, dropFrame };
   }
@@ -479,8 +479,8 @@ export class Sony9Pin {
     const tc = this.parseTimecodeResponse(response);
 
     // Status bits from response bytes (simplified — full spec has many more bits)
-    const statusByte0 = response.length > 6 ? response[2] : 0;
-    const statusByte1 = response.length > 7 ? response[3] : 0;
+    const statusByte0 = response.length > 6 ? response[2]! : 0;
+    const statusByte1 = response.length > 7 ? response[3]! : 0;
 
     return {
       transportState: this.decodeTransportState(statusByte0, statusByte1),

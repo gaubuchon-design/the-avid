@@ -210,7 +210,7 @@ class AdminEngine {
    */
   inviteMember(email: string, role: Role): TeamMember {
     const id = `u_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    const name = email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    const name = email.split('@')[0]!.replace(/[._]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
     const member: TeamMember = {
       id,
       name,
@@ -248,7 +248,7 @@ class AdminEngine {
   removeMember(userId: string): void {
     const idx = this.members.findIndex((m) => m.id === userId);
     if (idx >= 0) {
-      const name = this.members[idx].name;
+      const name = this.members[idx]!.name;
       this.members.splice(idx, 1);
       this.logAction('u1', 'admin.access', name, `Removed team member`);
       this.notify();

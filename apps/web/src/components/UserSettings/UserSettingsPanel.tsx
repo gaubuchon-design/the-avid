@@ -28,12 +28,12 @@ export function UserSettingsPanel({ onClose }: UserSettingsPanelProps) {
   const SectionComponent = SECTIONS[activeSection];
 
   return (
-    <div style={styles.overlay} onClick={onClose}>
-      <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+    <div style={styles['overlay']} onClick={onClose}>
+      <div style={styles['modal']} onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div style={styles.header}>
-          <h2 style={styles.title}>Settings</h2>
-          <button style={styles.closeBtn} onClick={onClose} aria-label="Close settings">
+        <div style={styles['header']}>
+          <h2 style={styles['title']}>Settings</h2>
+          <button style={styles['closeBtn']} onClick={onClose} aria-label="Close settings">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
             </svg>
@@ -41,9 +41,9 @@ export function UserSettingsPanel({ onClose }: UserSettingsPanelProps) {
         </div>
 
         {/* Body */}
-        <div style={styles.body}>
+        <div style={styles['body']}>
           <SettingsSidebar active={activeSection} onChange={setActiveSection} />
-          <div style={styles.content}>
+          <div style={styles['content']}>
             <SectionComponent />
           </div>
         </div>

@@ -340,6 +340,64 @@ export class ShardManager {
     rmSync(dir, { recursive: true, force: true });
   }
 
+  // ── Compact ────────────────────────────────────────────────────────────
+
+  /**
+   * Compact a shard by vacuuming the underlying SQLite database and
+   * recomputing the manifest checksum.
+   *
+   * This reclaims free pages left behind after DELETE operations and
+   * defragments the database file on disk.
+   *
+   * @param shardId - The shard to compact.
+   * @returns An object with the database page count before and after compaction.
+   * @throws {Error} If the shard does not exist.
+   */
+  compactShard(shardId: string): { beforePages: number; afterPages: number } {
+    const handle = this.openShard(shardId);
+    let beforePages = 0;
+    let afterPages = 0;
+
+    try {
+      // SQLite page_count gives us a size proxy
+      const beforeResult = handle.db.db.pragma('page_count') as Array<{ page_count: number }>;
+      beforePages = beforeResult[0]?.page_count ?? 0;
+
+      handle.db.vacuum();
+
+      const afterResult = handle.db.db.pragma('page_count') as Array<{ page_count: number }>;
+      afterPages = afterResult[0]?.page_count ?? 0;
+
+      // Recompute and persist checksum
+      const checksum = computeChecksum(handle.db);
+      handle.db.updateShardChecksum(shardId, checksum);
+
+      handle.manifest.checksum = checksum;
+      handle.manifest.updatedAt = new Date().toISOString();
+      writeFileSync(
+        this.manifestPath(shardId),
+        serializeManifest(handle.manifest),
+        'utf-8',
+      );
+    } finally {
+      handle.db.close();
+    }
+
+    return { beforePages, afterPages };
+  }
+
+  // ── Exists ─────────────────────────────────────────────────────────────
+
+  /**
+   * Check whether a shard with the given ID exists on disk.
+   *
+   * @param shardId - The shard identifier to check.
+   * @returns `true` if the shard directory exists.
+   */
+  shardExists(shardId: string): boolean {
+    return existsSync(this.shardDir(shardId));
+  }
+
   // ── Integrity ───────────────────────────────────────────────────────────
 
   /**
@@ -429,7 +487,7 @@ export class ShardManager {
       // 7. SQLite integrity check
       try {
         const result = db.db.pragma('integrity_check') as Array<{ integrity_check: string }>;
-        const ok = result.length === 1 && result[0].integrity_check === 'ok';
+        const ok = result.length === 1 && result[0]?.integrity_check === 'ok';
         if (!ok) {
           errors.push(
             `SQLite integrity check failed: ${result.map((r) => r.integrity_check).join(', ')}`,

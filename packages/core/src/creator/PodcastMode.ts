@@ -130,7 +130,7 @@ function detectFillerWords(
   const fillers: FillerWord[] = [];
 
   for (let i = 0; i < words.length; i++) {
-    const word = words[i];
+    const word = words[i]!;
 
     for (const type of enabledTypes) {
       const pattern = FILLER_PATTERNS[type];
@@ -140,14 +140,14 @@ function detectFillerWords(
         if (
           i < words.length - 1 &&
           word.word.toLowerCase() === 'you' &&
-          words[i + 1].word.toLowerCase() === 'know'
+          words[i + 1]!.word.toLowerCase() === 'know'
         ) {
           fillers.push({
             id: generateId(),
             type,
             startTime: word.startTime,
-            endTime: words[i + 1].endTime,
-            confidence: Math.min(word.confidence, words[i + 1].confidence),
+            endTime: words[i + 1]!.endTime,
+            confidence: Math.min(word.confidence, words[i + 1]!.confidence),
             removed: false,
           });
           i++; // Skip next word
@@ -155,7 +155,7 @@ function detectFillerWords(
         }
       } else if (pattern.test(word.word)) {
         // Check context: filler words at sentence boundaries or after pauses are more likely actual fillers
-        const prevGap = i > 0 ? word.startTime - words[i - 1].endTime : 0.5;
+        const prevGap = i > 0 ? word.startTime - words[i - 1]!.endTime : 0.5;
         const isLikelyFiller = prevGap > 0.15 || word.confidence < 0.8;
 
         // "like" needs special handling -- only flag if it's actually a filler
@@ -204,8 +204,8 @@ function autoGenerateChapters(
   const minGap = Math.max(60, totalDuration / 20); // At least 1 minute between chapters
 
   for (let i = 1; i < segments.length; i++) {
-    const prev = segments[i - 1];
-    const curr = segments[i];
+    const prev = segments[i - 1]!;
+    const curr = segments[i]!;
     const timeSinceLastChapter = curr.startTime - lastChapterTime;
 
     if (timeSinceLastChapter < minGap) continue;
@@ -425,7 +425,7 @@ export class PodcastModeEngine {
         continue;
       }
 
-      const last = merged[merged.length - 1];
+      const last = merged[merged.length - 1]!;
       if (edit.startTime <= last.endTime) {
         // Overlapping -- extend the previous edit
         last.endTime = Math.max(last.endTime, edit.endTime);

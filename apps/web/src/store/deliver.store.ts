@@ -260,7 +260,7 @@ export const useDeliverStore = create<DeliverState & DeliverActions>()(
       if (!tpl) return;
       // Find the encode step's preset
       const encodeStep = tpl.steps.find((step) => step.type === 'encode');
-      const presetId = encodeStep?.config?.presetId as string | undefined;
+      const presetId = encodeStep?.config?.['presetId'] as string | undefined;
       if (presetId) {
         const preset = exportEngine.getPreset(presetId);
         if (preset) {
@@ -313,7 +313,7 @@ export const useDeliverStore = create<DeliverState & DeliverActions>()(
       const idx = s.renderQueue.findIndex((j) => j.id === jobId);
       if (idx < 0 || idx === newIndex) return;
       const [job] = s.renderQueue.splice(idx, 1);
-      s.renderQueue.splice(Math.min(newIndex, s.renderQueue.length), 0, job);
+      s.renderQueue.splice(Math.min(newIndex, s.renderQueue.length), 0, job!);
     }),
 
     setJobPriority: (jobId, priority) => set((s) => {
@@ -365,7 +365,7 @@ export const useDeliverStore = create<DeliverState & DeliverActions>()(
     completeJob: (jobId, outputPath, outputSize) => set((s) => {
       const idx = s.renderQueue.findIndex((j) => j.id === jobId);
       if (idx < 0) return;
-      const job = s.renderQueue[idx];
+      const job = s.renderQueue[idx]!;
       job.status = 'completed';
       job.progress = 100;
       job.completedAt = Date.now();

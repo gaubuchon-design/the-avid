@@ -31,28 +31,28 @@ export function GeneralSettings() {
 
   return (
     <div>
-      <div style={ss.sectionHeader}>
-        <h3 style={ss.sectionTitle}>General</h3>
-        <button style={ss.resetBtn} onClick={() => resetSection('general')}>Reset</button>
+      <div style={ss['sectionHeader']}>
+        <h3 style={ss['sectionTitle']}>General</h3>
+        <button style={ss['resetBtn']} onClick={() => resetSection('general')}>Reset</button>
       </div>
 
-      <div style={ss.field}>
-        <label style={ss.label}>Display Name</label>
+      <div style={ss['field']}>
+        <label style={ss['label']}>Display Name</label>
         <input
           type="text"
           value={settings.displayName}
           onChange={(e) => updateSetting('displayName', e.target.value)}
           placeholder="Your name"
-          style={ss.input}
+          style={ss['input']}
         />
       </div>
 
-      <div style={ss.field}>
-        <label style={ss.label}>Timezone</label>
+      <div style={ss['field']}>
+        <label style={ss['label']}>Timezone</label>
         <select
           value={settings.timezone}
           onChange={(e) => updateSetting('timezone', e.target.value)}
-          style={ss.select}
+          style={ss['select']}
         >
           {TIMEZONES.map((tz) => (
             <option key={tz} value={tz}>{tz.replace(/_/g, ' ')}</option>
@@ -60,12 +60,12 @@ export function GeneralSettings() {
         </select>
       </div>
 
-      <div style={ss.field}>
-        <label style={ss.label}>Language</label>
+      <div style={ss['field']}>
+        <label style={ss['label']}>Language</label>
         <select
           value={settings.locale}
           onChange={(e) => updateSetting('locale', e.target.value)}
-          style={ss.select}
+          style={ss['select']}
         >
           {LOCALES.map((l) => (
             <option key={l.value} value={l.value}>{l.label}</option>
@@ -73,18 +73,18 @@ export function GeneralSettings() {
         </select>
       </div>
 
-      <div style={ss.field}>
-        <label style={ss.label}>Default Workspace</label>
-        <div style={ss.radioGroup}>
+      <div style={ss['field']}>
+        <label style={ss['label']}>Default Workspace</label>
+        <div style={ss['radioGroup']}>
           {WORKSPACES.map((w) => (
-            <label key={w.value} style={ss.radioLabel}>
+            <label key={w.value} style={ss['radioLabel']}>
               <input
                 type="radio"
                 name="defaultWorkspace"
                 value={w.value}
                 checked={settings.defaultWorkspace === w.value}
                 onChange={() => updateSetting('defaultWorkspace', w.value)}
-                style={ss.radio}
+                style={ss['radio']}
               />
               {w.label}
             </label>

@@ -133,7 +133,7 @@ export async function searchAssets(
   for (const conn of connectedProviders) {
     const count = Math.min(limit, 3 + Math.floor(Math.random() * 5));
     for (let i = 0; i < count; i++) {
-      const assetType = params.type ?? (['VIDEO', 'IMAGE', 'AUDIO', 'VIDEO'] as const)[i % 4];
+      const assetType = params.type ?? (['VIDEO', 'IMAGE', 'AUDIO', 'VIDEO'] as const)[i % 4] ?? 'VIDEO';
       results.push({
         id: generateId(),
         externalId: `${conn.provider.toLowerCase()}-${generateId().slice(0, 8)}`,
@@ -179,7 +179,7 @@ export async function browseAssets(
     externalId: `browse-${i}`,
     provider: conn.provider,
     name: `${conn.displayName} Asset ${i + 1}`,
-    type: (['VIDEO', 'IMAGE', 'AUDIO', 'VIDEO'] as const)[i % 4],
+    type: (['VIDEO', 'IMAGE', 'AUDIO', 'VIDEO'] as const)[i % 4] ?? 'VIDEO',
     thumbnailUrl: `/dam-thumbnails/browse-${i + 1}.jpg`,
     downloadUrl: `/dam-downloads/browse-${i + 1}`,
     metadata: { folder: folder ?? 'root' },

@@ -103,7 +103,7 @@ export function IngestPanel() {
     setIsWorking(true);
     setActionStatus('Adding watch folder...');
     try {
-      await window.electronAPI.addWatchFolder(projectId, result.filePaths[0]);
+      await window.electronAPI.addWatchFolder(projectId, result.filePaths[0]!);
       await refreshProject();
       setActionStatus(`Watching ${result.filePaths[0]}.`);
     } catch (error) {

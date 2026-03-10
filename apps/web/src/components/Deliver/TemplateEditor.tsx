@@ -77,7 +77,7 @@ export function TemplateEditor() {
     const newIdx = idx + dir;
     if (newIdx < 0 || newIdx >= steps.length) return;
     const copy = [...steps];
-    [copy[idx], copy[newIdx]] = [copy[newIdx], copy[idx]];
+    [copy[idx], copy[newIdx]] = [copy[newIdx]!, copy[idx]!];
     setSteps(copy.map((s, i) => ({ ...s, order: i + 1 })));
   };
 

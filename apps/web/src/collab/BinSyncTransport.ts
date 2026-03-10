@@ -42,6 +42,7 @@ export interface BinDelta {
     | 'rename-asset'
     | 'update-metadata';
   assetId: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- operation data payload varies by type
   data?: any;
   timestamp: number;
   userId: string;
@@ -59,9 +60,11 @@ interface TransportMessage {
     | 'lock-denied'
     | 'presence'
     | 'bin-delta';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- transport payload is protocol-dependent
   payload: any;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic event handler
 type EventHandler = (data: any) => void;
 
 // ─── Mock WebSocket (in-memory loopback) ────────────────────────────────────
@@ -216,6 +219,7 @@ export class BinSyncTransport {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private locks = new Map<string, BinLockInfo>();
   private presence = new Map<string, PresenceUpdate>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- event data is protocol-dependent
   private listeners = new Set<(event: string, data: any) => void>();
 
   private connectionUrl = '';

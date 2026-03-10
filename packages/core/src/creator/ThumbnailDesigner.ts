@@ -160,7 +160,7 @@ function scoreFrame(
     ['#7c3aed', '#fbbf24', '#111827'],
     ['#0891b2', '#f43f5e', '#0f172a'],
   ];
-  const dominantColors = palettes[Math.floor(Math.random() * palettes.length)];
+  const dominantColors = palettes[Math.floor(Math.random() * palettes.length)]!;
 
   return {
     frameTime: time,
@@ -181,9 +181,9 @@ function applyColorBoost(
   const data = imageData.data;
 
   for (let i = 0; i < data.length; i += 4) {
-    let r = data[i];
-    let g = data[i + 1];
-    let b = data[i + 2];
+    let r = data[i]!;
+    let g = data[i + 1]!;
+    let b = data[i + 2]!;
 
     // Brightness
     r = Math.min(255, r * preset.brightness);
@@ -235,7 +235,7 @@ export class ThumbnailDesignerEngine {
       textOverlays: options?.textOverlays ?? [],
       background: options?.background ?? { type: 'frame', frameTime: options?.frameTime ?? 0 },
       colorBoost: options?.colorBoost ?? null,
-      exportSize: options?.exportSize ?? THUMBNAIL_EXPORT_SIZES[0],
+      exportSize: options?.exportSize ?? THUMBNAIL_EXPORT_SIZES[0]!,
       faceCutout: options?.faceCutout,
       createdAt: now,
       updatedAt: now,
@@ -252,12 +252,12 @@ export class ThumbnailDesignerEngine {
     const index = this.designs.findIndex((d) => d.id === id);
     if (index === -1) return null;
 
-    this.designs[index] = {
-      ...this.designs[index],
+    this.designs[index]! = {
+      ...this.designs[index]!,
       ...updates,
       updatedAt: new Date().toISOString(),
     };
-    return this.designs[index];
+    return this.designs[index]!;
   }
 
   /**

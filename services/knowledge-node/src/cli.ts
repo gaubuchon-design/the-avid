@@ -47,12 +47,12 @@ function parseArgs(argv: string[]): {
   const options: Record<string, string> = {};
 
   for (let i = command ? 1 : 0; i < args.length; i++) {
-    const arg = args[i];
+    const arg = args[i]!;
     if (!arg.startsWith('--')) continue;
 
     if (arg.includes('=')) {
       const [key, ...rest] = arg.slice(2).split('=');
-      options[key] = rest.join('=');
+      options[key!] = rest.join('=');
     } else {
       const key = arg.slice(2);
       const next = args[i + 1];

@@ -32,7 +32,7 @@ export function DeliverPage() {
   const setRightPanelTab = useDeliverStore((s) => s.setRightPanelTab);
 
   return (
-    <div style={pageStyle}>
+    <div style={pageStyle} role="region" aria-label="Deliver Page - Export and Render">
       {/* Left Panel — Template Browser */}
       <TemplatePanel />
 
@@ -42,7 +42,7 @@ export function DeliverPage() {
       {/* Right Panel — Queue / Workers / History */}
       <div style={rightPanelStyle}>
         {/* Tab header */}
-        <div style={tabBarStyle}>
+        <div style={tabBarStyle} role="tablist" aria-label="Deliver panel tabs">
           {RIGHT_TABS.map((tab) => {
             const count = tab.key === 'queue' ? renderQueue.length
               : tab.key === 'workers' ? workers.length
@@ -50,6 +50,8 @@ export function DeliverPage() {
             return (
               <button
                 key={tab.key}
+                role="tab"
+                aria-selected={rightPanelTab === tab.key}
                 onClick={() => setRightPanelTab(tab.key)}
                 style={{
                   ...tabBtnStyle,

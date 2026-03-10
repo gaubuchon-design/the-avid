@@ -4,15 +4,41 @@
     "lib": ["ES2022"],
     "module": "ESNext",
     "moduleResolution": "bundler",
+
     "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
     "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
+
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "isolatedModules": true,
+    "verbatimModuleSyntax": false,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "incremental": true,
+
+    "paths": {
+      "@mcua/core": ["./packages/core/src"],
+      "@mcua/core/*": ["./packages/core/src/*"],
+      "@mcua/ui": ["./packages/ui/src"],
+      "@mcua/ui/*": ["./packages/ui/src/*"],
+      "@mcua/render-agent": ["./packages/render-agent/src"],
+      "@mcua/render-agent/*": ["./packages/render-agent/src/*"],
+      "@mcua/contracts": ["./libs/contracts/src"],
+      "@mcua/contracts/*": ["./libs/contracts/src/*"],
+      "@mcua/adapters": ["./libs/adapters/src"],
+      "@mcua/adapters/*": ["./libs/adapters/src/*"],
+      "@mcua/ui-components": ["./libs/ui-components/src"],
+      "@mcua/ui-components/*": ["./libs/ui-components/src/*"]
+    }
   },
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "dist", "build", "out", "coverage"]
 }

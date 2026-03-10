@@ -644,7 +644,7 @@ export function MultiCamPanel() {
       const num = parseInt(e.key, 10);
       if (num >= 1 && num <= group.angles.length) {
         const idx = num - 1;
-        if (group.angles[idx].enabled) {
+        if (group.angles[idx]!.enabled) {
           handleSwitchAngle(idx);
         }
       }

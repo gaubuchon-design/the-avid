@@ -145,13 +145,13 @@ export class CaptionValidator {
    * Validates captions against the specified standard(s).
    */
   validate(cues: CaptionCue[], standard?: CaptionStandard): CaptionValidationResult {
-    const targetStandard = standard ?? this.config.standards[0];
+    const targetStandard: CaptionStandard = standard ?? this.config.standards[0] ?? 'fcc';
     const rules = STANDARD_RULES[targetStandard];
     const violations: CaptionViolation[] = [];
 
     for (let i = 0; i < cues.length; i++) {
-      const cue = cues[i];
-      const nextCue = i < cues.length - 1 ? cues[i + 1] : null;
+      const cue = cues[i]!;
+      const nextCue = i < cues.length - 1 ? cues[i + 1] ?? null : null;
 
       // Line count validation
       const lines = cue.text.split('\n');
@@ -171,7 +171,7 @@ export class CaptionValidator {
 
       // Characters per line
       for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
-        const line = lines[lineIdx];
+        const line = lines[lineIdx]!;
         if (line.length > rules.maxCharsPerLine) {
           violations.push({
             id: `v-${cue.id}-chars-${lineIdx}`,
@@ -345,15 +345,15 @@ export class CaptionValidator {
    * Auto-fixes common caption violations.
    */
   autoFix(cues: CaptionCue[], standard?: CaptionStandard): CaptionAutoFixResult {
-    const targetStandard = standard ?? this.config.standards[0];
+    const targetStandard: CaptionStandard = standard ?? this.config.standards[0] ?? 'fcc';
     const rules = STANDARD_RULES[targetStandard];
     const fixedCues: CaptionCue[] = cues.map((cue) => ({ ...cue }));
     let fixesApplied = 0;
     const unfixableViolations: CaptionViolation[] = [];
 
     for (let i = 0; i < fixedCues.length; i++) {
-      const cue = fixedCues[i];
-      const nextCue = i < fixedCues.length - 1 ? fixedCues[i + 1] : null;
+      const cue = fixedCues[i]!;
+      const nextCue = i < fixedCues.length - 1 ? fixedCues[i + 1] ?? null : null;
 
       // Fix line wrapping
       const lines = cue.text.split('\n');

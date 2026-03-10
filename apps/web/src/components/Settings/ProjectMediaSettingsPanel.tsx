@@ -42,7 +42,7 @@ export function ProjectMediaSettingsPanel() {
   };
 
   return (
-    <div className="media-settings-panel" style={{
+    <div className="media-settings-panel" role="form" aria-label="Media Management Settings" style={{
       padding: 16, background: 'var(--bg-surface)', borderRadius: 6,
       display: 'flex', flexDirection: 'column', gap: 16,
     }}>
@@ -51,10 +51,10 @@ export function ProjectMediaSettingsPanel() {
       </h3>
 
       {/* Organization Mode */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <label style={{ fontSize: 11, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: 1 }}>
+      <fieldset style={{ display: 'flex', flexDirection: 'column', gap: 8, border: 'none', margin: 0, padding: 0 }}>
+        <legend style={{ fontSize: 11, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: 1 }}>
           On Import
-        </label>
+        </legend>
         {ORG_OPTIONS.map((opt) => (
           <label
             key={opt.value}
@@ -79,7 +79,7 @@ export function ProjectMediaSettingsPanel() {
             </div>
           </label>
         ))}
-      </div>
+      </fieldset>
 
       {/* Custom Path (only for custom-location mode) */}
       {settings.organizationMode === 'custom-location' && (
@@ -92,6 +92,7 @@ export function ProjectMediaSettingsPanel() {
             value={settings.customMediaPath ?? ''}
             onChange={(e) => save({ ...settings, customMediaPath: e.target.value })}
             placeholder="/path/to/media"
+            aria-label="Custom media location path"
             style={{
               padding: '6px 10px', borderRadius: 4, fontSize: 12,
               background: 'var(--bg-base)', border: '1px solid var(--border-default)',
@@ -118,6 +119,7 @@ export function ProjectMediaSettingsPanel() {
           <select
             value={settings.proxyResolution}
             onChange={(e) => save({ ...settings, proxyResolution: e.target.value as '1/4' | '1/2' | 'full' })}
+            aria-label="Proxy resolution"
             style={{
               padding: '6px 10px', borderRadius: 4, fontSize: 12,
               background: 'var(--bg-base)', border: '1px solid var(--border-default)',
@@ -133,7 +135,7 @@ export function ProjectMediaSettingsPanel() {
 
       {/* Status */}
       {saving && (
-        <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>Saving...</div>
+        <div role="status" aria-live="polite" style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>Saving...</div>
       )}
     </div>
   );

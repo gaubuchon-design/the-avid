@@ -48,7 +48,7 @@ export function applyHalftone(
       const sx = Math.max(0, Math.min(width - 1, imgCx));
       const sy = Math.max(0, Math.min(height - 1, imgCy));
       const si = (sy * width + sx) * 4;
-      const luma = (0.299 * src[si] + 0.587 * src[si + 1] + 0.114 * src[si + 2]) / 255;
+      const luma = (0.299 * src[si]! + 0.587 * src[si + 1]! + 0.114 * src[si + 2]!) / 255;
 
       // Dot radius proportional to darkness
       const maxRadius = halfCell * 0.95;
@@ -79,7 +79,7 @@ export function applyHalftone(
         data[di + 1] = 0;
         data[di + 2] = 0;
       }
-      data[di + 3] = src[(y * width + x) * 4 + 3]; // preserve original alpha
+      data[di + 3] = src[(y * width + x) * 4 + 3]!; // preserve original alpha
     }
   }
 }

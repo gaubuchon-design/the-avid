@@ -19,12 +19,14 @@ export interface MCPMessage {
   jsonrpc: '2.0';
   id: number;
   method: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- MCP JSON-RPC params are untyped
   params?: Record<string, any>;
 }
 
 export interface MCPResponse {
   jsonrpc: '2.0';
   id: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- MCP JSON-RPC result is untyped
   result?: any;
   error?: { code: number; message: string };
 }
@@ -33,7 +35,9 @@ class MCPClient {
   private servers: Map<string, MCPServerConfig> = new Map();
   private ws: WebSocket | null = null;
   private requestId = 0;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- JSON-RPC promise resolution is untyped
   private pendingRequests: Map<number, { resolve: (value: any) => void; reject: (err: Error) => void }> = new Map();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- event data is untyped
   private listeners: Set<(event: string, data: any) => void> = new Set();
 
   addServer(config: MCPServerConfig): void {
@@ -106,6 +110,7 @@ class MCPClient {
     return this.sendRequest('tools/list', {});
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- MCP tool args and return are untyped
   async callTool(name: string, args: Record<string, any>): Promise<any> {
     return this.sendRequest('tools/call', { name, arguments: args });
   }
@@ -118,6 +123,7 @@ class MCPClient {
     return result?.content || result?.text || JSON.stringify(result);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- JSON-RPC params and result are untyped
   private sendRequest(method: string, params: Record<string, any>): Promise<any> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error('Not connected to MCP server'));
@@ -140,6 +146,7 @@ class MCPClient {
     });
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- event data is untyped
   subscribe(listener: (event: string, data: any) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -152,6 +159,7 @@ class MCPClient {
     this.pendingRequests.clear();
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- event data is untyped
   private notify(event: string, data: any): void {
     this.listeners.forEach((fn) => {
       try { fn(event, data); } catch (err) {

@@ -163,9 +163,9 @@ export class RemoveTrackCommand implements Command {
     const idx = state.tracks.findIndex((t) => t.id === trackId);
     if (idx >= 0) {
       const t = state.tracks[idx];
-      this.savedTrack = { ...t, clips: t.clips.map((c) => ({ ...c })) };
+      this.savedTrack = { ...t!, clips: t!.clips.map((c) => ({ ...c })) };
       this.savedIndex = idx;
-      this.description = `Remove track "${t.name}"`;
+      this.description = `Remove track "${t!.name!}"`;
     }
   }
   execute(): void {

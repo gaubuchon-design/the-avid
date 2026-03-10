@@ -19,14 +19,14 @@ interface SettingsSidebarProps {
 
 export function SettingsSidebar({ active, onChange }: SettingsSidebarProps) {
   return (
-    <nav style={styles.sidebar}>
+    <nav style={styles['sidebar']}>
       {SECTIONS.map((s) => (
         <button
           key={s.id}
           onClick={() => onChange(s.id)}
           style={{
-            ...styles.item,
-            ...(active === s.id ? styles.itemActive : {}),
+            ...styles['item'],
+            ...(active === s.id ? styles['itemActive'] : {}),
           }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

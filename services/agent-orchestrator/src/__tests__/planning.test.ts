@@ -301,8 +301,8 @@ describe('PlanGenerator', () => {
     );
 
     expect(plan.steps.length).toBe(2);
-    expect(plan.steps[0].toolName).toBe('detect_scene_changes');
-    expect(plan.steps[1].toolName).toBe('suggest_cuts');
+    expect(plan.steps[0]!.toolName).toBe('detect_scene_changes');
+    expect(plan.steps[1]!.toolName).toBe('suggest_cuts');
   });
 
   it('should assign sequential indices to steps', async () => {

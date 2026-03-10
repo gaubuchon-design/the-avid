@@ -1,5 +1,5 @@
 /**
- * TranscribeWorker — extracts audio from media and runs speech-to-text transcription.
+ * TranscribeWorker -- extracts audio from media and runs speech-to-text transcription.
  *
  * Uses FFmpeg to extract audio to WAV (16 kHz mono) and then calls the Whisper API
  * for transcription. Falls back to a mock transcription if the API is unavailable.
@@ -13,8 +13,11 @@ import type { WorkerJob } from '../index.js';
 
 /** Progress data for transcription jobs. */
 export interface TranscribeProgress {
+  /** Current processing stage. */
   stage: 'extracting' | 'transcribing' | 'formatting' | 'complete';
+  /** Completion percentage (0-100). */
   percent: number;
+  /** Human-readable status message. */
   message: string;
 }
 
@@ -27,8 +30,10 @@ interface TranscriptSegment {
 }
 
 export class TranscribeWorker {
-  private process: ChildProcess | null = null;
+  private childProcess: ChildProcess | null = null;
   private cancelled = false;
+  /** Track temp files for cleanup on any exit path. */
+  private tempFiles: Set<string> = new Set();
 
   /**
    * Process a transcription job.
@@ -40,62 +45,116 @@ export class TranscribeWorker {
    * @param job - The worker job with input media path and params.
    * @param onProgress - Optional progress callback.
    * @returns Path to the generated caption file.
+   * @throws {Error} if the job is missing required fields.
+   * @throws {Error} if audio extraction or transcription fails.
    */
   async process(
     job: WorkerJob,
     onProgress?: (progress: TranscribeProgress) => void,
   ): Promise<string> {
     this.cancelled = false;
-    const format = (job.params.captionFormat as string) ?? 'srt';
-    const language = (job.params.language as string) ?? 'en';
 
-    // Step 1: Extract audio to WAV
-    onProgress?.({ stage: 'extracting', percent: 0, message: 'Extracting audio...' });
-    const wavPath = await this.extractAudio(job.inputUrl);
-    if (this.cancelled) throw new Error('Transcription cancelled');
+    // Input validation
+    if (!job.id || typeof job.id !== 'string') {
+      throw new Error('Transcribe job must have a non-empty string id');
+    }
+    if (!job.inputUrl || typeof job.inputUrl !== 'string') {
+      throw new Error(`Transcribe job ${job.id}: inputUrl must be a non-empty string`);
+    }
 
-    onProgress?.({ stage: 'extracting', percent: 30, message: 'Audio extraction complete' });
+    const format = (job.params['captionFormat'] as string | undefined) ?? 'srt';
+    const language = (job.params['language'] as string | undefined) ?? 'en';
 
-    // Step 2: Transcribe
-    onProgress?.({ stage: 'transcribing', percent: 35, message: 'Running transcription...' });
-    const segments = await this.transcribe(wavPath, language);
-    if (this.cancelled) throw new Error('Transcription cancelled');
+    let wavPath: string | null = null;
 
-    onProgress?.({ stage: 'transcribing', percent: 80, message: 'Transcription complete' });
+    try {
+      // Step 1: Extract audio to WAV
+      onProgress?.({ stage: 'extracting', percent: 0, message: 'Extracting audio...' });
+      wavPath = await this.extractAudio(job.inputUrl);
+      this.tempFiles.add(wavPath);
 
-    // Step 3: Format and write caption file
-    onProgress?.({ stage: 'formatting', percent: 85, message: `Formatting ${format.toUpperCase()}...` });
-    const ext = format === 'vtt' ? '.vtt' : '.srt';
-    const outputPath =
-      job.outputPath ??
-      path.join(
-        path.dirname(job.inputUrl),
-        `${path.basename(job.inputUrl, path.extname(job.inputUrl))}${ext}`,
-      );
+      if (this.cancelled) {
+        this.cleanupTempFiles();
+        throw new Error('Transcription cancelled');
+      }
 
-    const content = format === 'vtt'
-      ? this.formatVTT(segments)
-      : this.formatSRT(segments);
+      onProgress?.({ stage: 'extracting', percent: 30, message: 'Audio extraction complete' });
 
-    fs.writeFileSync(outputPath, content, 'utf-8');
+      // Step 2: Transcribe
+      onProgress?.({ stage: 'transcribing', percent: 35, message: 'Running transcription...' });
+      const segments = await this.transcribe(wavPath, language);
+      if (this.cancelled) {
+        this.cleanupTempFiles();
+        throw new Error('Transcription cancelled');
+      }
 
-    // Cleanup temp WAV
-    try { fs.unlinkSync(wavPath); } catch { /* ignore */ }
+      onProgress?.({ stage: 'transcribing', percent: 80, message: 'Transcription complete' });
 
-    onProgress?.({ stage: 'complete', percent: 100, message: 'Transcription complete' });
-    return outputPath;
+      // Step 3: Format and write caption file
+      onProgress?.({ stage: 'formatting', percent: 85, message: `Formatting ${format.toUpperCase()}...` });
+      const ext = format === 'vtt' ? '.vtt' : '.srt';
+      const outputPath =
+        job.outputPath ??
+        path.join(
+          path.dirname(job.inputUrl),
+          `${path.basename(job.inputUrl, path.extname(job.inputUrl))}${ext}`,
+        );
+
+      const content = format === 'vtt'
+        ? this.formatVTT(segments)
+        : this.formatSRT(segments);
+
+      fs.writeFileSync(outputPath, content, 'utf-8');
+
+      // Cleanup temp WAV
+      this.cleanupTempFiles();
+
+      onProgress?.({ stage: 'complete', percent: 100, message: 'Transcription complete' });
+      return outputPath;
+    } catch (err) {
+      // Clean up on any error path
+      this.cleanupTempFiles();
+      throw err;
+    }
   }
 
   /** Cancel the running transcription process. */
   cancel(): void {
     this.cancelled = true;
-    if (this.process) {
-      this.process.kill('SIGTERM');
+    if (this.childProcess) {
+      this.childProcess.kill('SIGTERM');
+      const pid = this.childProcess.pid;
+      const cp = this.childProcess;
+      setTimeout(() => {
+        try {
+          if (pid) process.kill(pid, 0);
+          cp.kill('SIGKILL');
+        } catch {
+          // Already dead
+        }
+      }, 5000);
     }
+    this.cleanupTempFiles();
+  }
+
+  /** Clean up all tracked temporary files. */
+  private cleanupTempFiles(): void {
+    for (const filePath of this.tempFiles) {
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          console.debug(`[TranscribeWorker] Cleaned up temp file: ${filePath}`);
+        }
+      } catch (err) {
+        console.error(`[TranscribeWorker] Failed to clean up ${filePath}:`, (err as Error).message);
+      }
+    }
+    this.tempFiles.clear();
   }
 
   /**
    * Extract audio from a media file to WAV 16 kHz mono using FFmpeg.
+   * Handles OOM kills (exit code 137) and spawn failures.
    */
   private extractAudio(inputPath: string): Promise<string> {
     const wavPath = inputPath.replace(/\.[^.]+$/, '_audio.wav');
@@ -110,18 +169,36 @@ export class TranscribeWorker {
     ];
 
     return new Promise<string>((resolve, reject) => {
-      const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
-      this.process = proc;
+      let proc: ChildProcess;
+      try {
+        proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+      } catch (err) {
+        reject(new Error(`Failed to spawn FFmpeg: ${(err as Error).message}`));
+        return;
+      }
+
+      this.childProcess = proc;
 
       proc.on('close', (code) => {
-        this.process = null;
-        if (this.cancelled) reject(new Error('Audio extraction cancelled'));
-        else if (code !== 0) reject(new Error(`FFmpeg audio extraction failed with code ${code}`));
-        else resolve(wavPath);
+        this.childProcess = null;
+        if (this.cancelled) {
+          // Clean up partial WAV on cancel
+          try { if (fs.existsSync(wavPath)) fs.unlinkSync(wavPath); } catch { /* ignore */ }
+          reject(new Error('Audio extraction cancelled'));
+        } else if (code === 137) {
+          try { if (fs.existsSync(wavPath)) fs.unlinkSync(wavPath); } catch { /* ignore */ }
+          reject(new Error('FFmpeg audio extraction killed (likely OOM)'));
+        } else if (code !== 0) {
+          try { if (fs.existsSync(wavPath)) fs.unlinkSync(wavPath); } catch { /* ignore */ }
+          reject(new Error(`FFmpeg audio extraction failed with code ${code}`));
+        } else {
+          resolve(wavPath);
+        }
       });
 
       proc.on('error', (err) => {
-        this.process = null;
+        this.childProcess = null;
+        try { if (fs.existsSync(wavPath)) fs.unlinkSync(wavPath); } catch { /* ignore */ }
         reject(new Error(`Failed to spawn FFmpeg: ${err.message}`));
       });
     });
@@ -132,14 +209,18 @@ export class TranscribeWorker {
    * Falls back to a mock transcription if the API endpoint is not configured.
    */
   private async transcribe(wavPath: string, language: string): Promise<TranscriptSegment[]> {
-    const apiUrl = process.env.WHISPER_API_URL;
-    const apiKey = process.env.WHISPER_API_KEY;
+    const apiUrl = process.env['WHISPER_API_URL'];
+    const apiKey = process.env['WHISPER_API_KEY'];
 
     if (apiUrl && apiKey) {
       try {
         const audioData = fs.readFileSync(wavPath);
         const formData = new FormData();
-        formData.append('file', new Blob([audioData]), 'audio.wav');
+        // Node.js Buffer → Blob requires type gymnastics across different Node versions
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Node FormData Blob interop
+        const audioBlob: Blob = new (Blob as any)([audioData], { type: 'audio/wav' });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Node FormData append with filename
+        (formData as any).append('file', audioBlob, 'audio.wav');
         formData.append('model', 'whisper-1');
         formData.append('language', language);
         formData.append('response_format', 'verbose_json');

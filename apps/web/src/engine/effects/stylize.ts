@@ -49,9 +49,9 @@ export function applyVignette(
       const factor = 1 - Math.min(1, edge * edge) * amountNorm;
 
       const idx = (y * width + x) * 4;
-      data[idx]     = Math.round(data[idx] * factor);
-      data[idx + 1] = Math.round(data[idx + 1] * factor);
-      data[idx + 2] = Math.round(data[idx + 2] * factor);
+      data[idx]     = Math.round(data[idx]! * factor);
+      data[idx + 1] = Math.round(data[idx + 1]! * factor);
+      data[idx + 2] = Math.round(data[idx + 2]! * factor);
     }
   }
 }
@@ -88,12 +88,12 @@ export function applyFilmGrain(
     const noise = ((rng % 200) - 100) / 100 * intensity;
 
     // Apply noise with luminance-aware blending
-    const lum = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255;
+    const lum = (data[i]! * 0.299 + data[i + 1]! * 0.587 + data[i + 2]! * 0.114) / 255;
     const blend = 1 - softNorm * 0.5; // softness reduces effect
 
-    data[i]     = clamp(data[i] + noise * blend);
-    data[i + 1] = clamp(data[i + 1] + noise * blend);
-    data[i + 2] = clamp(data[i + 2] + noise * blend);
+    data[i]     = clamp(data[i]! + noise * blend);
+    data[i + 1] = clamp(data[i + 1]! + noise * blend);
+    data[i + 2] = clamp(data[i + 2]! + noise * blend);
   }
 }
 
@@ -126,11 +126,11 @@ export function applyGlow(
   // Create bright-pass copy
   const bright = new Uint8ClampedArray(data.length);
   for (let i = 0; i < data.length; i += 4) {
-    const lum = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+    const lum = data[i]! * 0.299 + data[i + 1]! * 0.587 + data[i + 2]! * 0.114;
     if (lum > threshVal) {
-      bright[i]     = data[i];
-      bright[i + 1] = data[i + 1];
-      bright[i + 2] = data[i + 2];
+      bright[i]     = data[i]!;
+      bright[i + 1] = data[i + 1]!;
+      bright[i + 2] = data[i + 2]!;
       bright[i + 3] = 255;
     }
   }
@@ -141,9 +141,9 @@ export function applyGlow(
 
   // Additive blend
   for (let i = 0; i < data.length; i += 4) {
-    data[i]     = clamp(data[i] + bright[i] * intNorm * (tint.r / 255));
-    data[i + 1] = clamp(data[i + 1] + bright[i + 1] * intNorm * (tint.g / 255));
-    data[i + 2] = clamp(data[i + 2] + bright[i + 2] * intNorm * (tint.b / 255));
+    data[i]     = clamp(data[i]! + bright[i]! * intNorm * (tint.r / 255));
+    data[i + 1] = clamp(data[i + 1]! + bright[i + 1]! * intNorm * (tint.g / 255));
+    data[i + 2] = clamp(data[i + 2]! + bright[i + 2]! * intNorm * (tint.b / 255));
   }
 }
 
@@ -188,11 +188,11 @@ export function applyDropShadow(
       const srcIdx = (srcY * width + srcX) * 4;
       const dstIdx = (y * width + x) * 4;
 
-      if (data[srcIdx + 3] > 0) {
+      if (data[srcIdx + 3]! > 0) {
         shadow[dstIdx]     = shadowColor.r;
         shadow[dstIdx + 1] = shadowColor.g;
         shadow[dstIdx + 2] = shadowColor.b;
-        shadow[dstIdx + 3] = Math.round(data[srcIdx + 3] * opNorm);
+        shadow[dstIdx + 3] = Math.round(data[srcIdx + 3]! * opNorm);
       }
     }
   }
@@ -204,14 +204,14 @@ export function applyDropShadow(
 
   // Composite: draw shadow underneath original
   for (let i = 0; i < data.length; i += 4) {
-    const origAlpha = data[i + 3] / 255;
-    const shadowAlpha = shadow[i + 3] / 255;
+    const origAlpha = data[i + 3]! / 255;
+    const shadowAlpha = shadow[i + 3]! / 255;
 
     if (shadowAlpha > 0 && origAlpha < 1) {
       const blendAlpha = shadowAlpha * (1 - origAlpha);
-      data[i]     = clamp(data[i] * origAlpha + shadow[i] * blendAlpha);
-      data[i + 1] = clamp(data[i + 1] * origAlpha + shadow[i + 1] * blendAlpha);
-      data[i + 2] = clamp(data[i + 2] * origAlpha + shadow[i + 2] * blendAlpha);
+      data[i]     = clamp(data[i]! * origAlpha + shadow[i]! * blendAlpha);
+      data[i + 1] = clamp(data[i + 1]! * origAlpha + shadow[i + 1]! * blendAlpha);
+      data[i + 2] = clamp(data[i + 2]! * origAlpha + shadow[i + 2]! * blendAlpha);
       data[i + 3] = clamp((origAlpha + blendAlpha) * 255);
     }
   }
@@ -230,7 +230,7 @@ function simpleBlur(data: Uint8ClampedArray, width: number, height: number, r: n
       for (let dx = -r; dx <= r; dx++) {
         const nx = Math.min(Math.max(x + dx, 0), width - 1);
         const idx = (y * width + nx) * 4;
-        sr += data[idx]; sg += data[idx + 1]; sb += data[idx + 2]; sa += data[idx + 3];
+        sr += data[idx]!; sg += data[idx + 1]!; sb += data[idx + 2]!; sa += data[idx + 3]!;
         count++;
       }
       const idx = (y * width + x) * 4;
@@ -248,7 +248,7 @@ function simpleBlur(data: Uint8ClampedArray, width: number, height: number, r: n
       for (let dy = -r; dy <= r; dy++) {
         const ny = Math.min(Math.max(y + dy, 0), height - 1);
         const idx = (ny * width + x) * 4;
-        sr += temp[idx]; sg += temp[idx + 1]; sb += temp[idx + 2]; sa += temp[idx + 3];
+        sr += temp[idx]!; sg += temp[idx + 1]!; sb += temp[idx + 2]!; sa += temp[idx + 3]!;
         count++;
       }
       const idx = (y * width + x) * 4;
@@ -264,9 +264,9 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
   const match = hex.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
   if (!match) return { r: 0, g: 0, b: 0 };
   return {
-    r: parseInt(match[1], 16),
-    g: parseInt(match[2], 16),
-    b: parseInt(match[3], 16),
+    r: parseInt(match[1]!, 16),
+    g: parseInt(match[2]!, 16),
+    b: parseInt(match[3]!, 16),
   };
 }
 

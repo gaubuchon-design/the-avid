@@ -74,7 +74,7 @@ export function TrackPatchPanel() {
         .filter((t) => t.type === (isVideo ? 'VIDEO' : 'AUDIO'))
         .sort((a, b) => a.sortOrder - b.sortOrder);
       if (pool.length > 0) {
-        trackPatchingEngine.patchSourceToRecord(sourceTrackId, pool[0].id);
+        trackPatchingEngine.patchSourceToRecord(sourceTrackId, pool[0]!.id);
       }
     }
   }, [tracks]);

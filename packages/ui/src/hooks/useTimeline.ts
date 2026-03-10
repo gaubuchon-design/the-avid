@@ -2,53 +2,81 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Timeline, Track, Clip } from '@mcua/core';
 import { generateId, clamp } from '@mcua/core';
 
-/** Frames-per-second for the playback tick. */
-const TICK_FPS = 60;
+// ── Types ─────────────────────────────────────────────────────────────────────
 
+/** Options for configuring timeline playback behavior. */
 export interface UseTimelineOptions {
-  /** Callback fired on each playhead tick. */
-  onPlayheadChange?: (time: number) => void;
-  /** Callback when playback reaches the end. */
+  /** Frames per second for playback tick rate. Default: 60. */
+  fps?: number;
+  /** Whether playback should loop when reaching the end. Default: false. */
+  loop?: boolean;
+  /** Callback fired on each playhead position change during playback. */
+  onPlayheadChange?: (seconds: number) => void;
+  /** Callback fired when playback reaches the end (or loops). */
   onPlaybackEnd?: () => void;
 }
 
 export interface UseTimelineReturn {
+  /** Current timeline state (tracks, duration, playhead, etc.). */
   timeline: Timeline;
+  /** Current playhead position in seconds. */
   playhead: number;
+  /** Whether the timeline is currently playing. */
   isPlaying: boolean;
+  /** Duration of the timeline in seconds. */
+  duration: number;
+  /** Start playback from current playhead position. */
   play: () => void;
+  /** Pause playback, keeping current playhead position. */
   pause: () => void;
+  /** Toggle between play and pause. */
   togglePlayback: () => void;
+  /** Stop playback and reset playhead to 0. */
+  stop: () => void;
+  /** Seek to a specific time in seconds. */
   seek: (seconds: number) => void;
+  /** Step forward by N frames (default: 1). */
+  stepForward: (frames?: number) => void;
+  /** Step backward by N frames (default: 1). */
+  stepBackward: (frames?: number) => void;
+  /** Add a new track to the timeline. */
   addTrack: (type: Track['type'], name: string) => void;
+  /** Remove a track by ID. */
   removeTrack: (trackId: string) => void;
+  /** Add a clip to a specific track. */
   addClip: (trackId: string, clip: Omit<Clip, 'id' | 'trackId'>) => void;
+  /** Remove a clip from a track. */
   removeClip: (trackId: string, clipId: string) => void;
+  /** Move a clip to a new track and/or start time. */
   moveClip: (clipId: string, newTrackId: string, newStartTime: number) => void;
+  /** Update the timeline duration (clamps playhead if needed). */
   setTimelineDuration: (duration: number) => void;
+  /** Update the entire timeline state (e.g., after external modification). */
+  setTimeline: React.Dispatch<React.SetStateAction<Timeline>>;
 }
+
+// ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useTimeline(
   initial: Timeline,
   options: UseTimelineOptions = {},
 ): UseTimelineReturn {
+  const { fps = 60, loop = false, onPlayheadChange, onPlaybackEnd } = options;
+
   const [timeline, setTimeline] = useState<Timeline>(initial);
   const [isPlaying, setIsPlaying] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const onPlayheadChangeRef = useRef(onPlayheadChange);
+  const onPlaybackEndRef = useRef(onPlaybackEnd);
 
-  // Keep callbacks in a ref so we never stale-close over them
-  const callbacksRef = useRef(options);
-  callbacksRef.current = options;
-
-  // ── Cleanup interval on unmount ──────────────────────────────────────────
+  // Keep callback refs current without re-creating interval
   useEffect(() => {
-    return () => {
-      if (intervalRef.current !== null) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    };
-  }, []);
+    onPlayheadChangeRef.current = onPlayheadChange;
+  }, [onPlayheadChange]);
+
+  useEffect(() => {
+    onPlaybackEndRef.current = onPlaybackEnd;
+  }, [onPlaybackEnd]);
 
   // ── Internal helper to stop the interval ─────────────────────────────────
   const stopInterval = useCallback(() => {
@@ -58,33 +86,44 @@ export function useTimeline(
     }
   }, []);
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      stopInterval();
+    };
+  }, [stopInterval]);
+
   // ── Transport ────────────────────────────────────────────────────────────
   const play = useCallback(() => {
     // Guard: don't start a second interval if already playing
     if (intervalRef.current !== null) return;
 
     setIsPlaying(true);
+    const frameDuration = 1 / fps;
+
     intervalRef.current = setInterval(() => {
-      setTimeline((prev: Timeline) => {
-        const step = 1 / TICK_FPS;
-        const next = prev.playhead + step;
+      setTimeline((prev) => {
+        const next = prev.playhead + frameDuration;
 
         if (next >= prev.duration) {
-          // Reached the end -- stop playback
-          if (intervalRef.current !== null) {
-            clearInterval(intervalRef.current);
-            intervalRef.current = null;
+          if (loop) {
+            const looped = next % prev.duration;
+            onPlayheadChangeRef.current?.(looped);
+            return { ...prev, playhead: looped };
           }
+
+          // End of timeline
+          stopInterval();
           setIsPlaying(false);
-          callbacksRef.current.onPlaybackEnd?.();
+          onPlaybackEndRef.current?.();
           return { ...prev, playhead: prev.duration };
         }
 
-        callbacksRef.current.onPlayheadChange?.(next);
+        onPlayheadChangeRef.current?.(next);
         return { ...prev, playhead: next };
       });
-    }, 1000 / TICK_FPS);
-  }, []);
+    }, 1000 / fps);
+  }, [fps, loop, stopInterval]);
 
   const pause = useCallback(() => {
     setIsPlaying(false);
@@ -92,8 +131,7 @@ export function useTimeline(
   }, [stopInterval]);
 
   const togglePlayback = useCallback(() => {
-    // We read isPlaying via a functional check:
-    // if the interval is running, we are playing
+    // Use intervalRef to determine play state (avoids stale closure on isPlaying)
     if (intervalRef.current !== null) {
       pause();
     } else {
@@ -101,13 +139,29 @@ export function useTimeline(
     }
   }, [play, pause]);
 
+  const stop = useCallback(() => {
+    pause();
+    setTimeline((prev) => ({ ...prev, playhead: 0 }));
+    onPlayheadChangeRef.current?.(0);
+  }, [pause]);
+
   const seek = useCallback((seconds: number) => {
     setTimeline((prev: Timeline) => {
       const clamped = clamp(seconds, 0, prev.duration);
-      callbacksRef.current.onPlayheadChange?.(clamped);
+      onPlayheadChangeRef.current?.(clamped);
       return { ...prev, playhead: clamped };
     });
   }, []);
+
+  const stepForward = useCallback((frames: number = 1) => {
+    const frameDuration = 1 / fps;
+    seek(timeline.playhead + frameDuration * frames);
+  }, [fps, timeline.playhead, seek]);
+
+  const stepBackward = useCallback((frames: number = 1) => {
+    const frameDuration = 1 / fps;
+    seek(timeline.playhead - frameDuration * frames);
+  }, [fps, timeline.playhead, seek]);
 
   // ── Track management ─────────────────────────────────────────────────────
   const addTrack = useCallback((type: Track['type'], name: string) => {
@@ -204,15 +258,20 @@ export function useTimeline(
     timeline,
     playhead: timeline.playhead,
     isPlaying,
+    duration: timeline.duration,
     play,
     pause,
     togglePlayback,
+    stop,
     seek,
+    stepForward,
+    stepBackward,
     addTrack,
     removeTrack,
     addClip,
     removeClip,
     moveClip,
     setTimelineDuration,
+    setTimeline,
   };
 }

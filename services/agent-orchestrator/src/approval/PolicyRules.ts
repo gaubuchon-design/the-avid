@@ -121,7 +121,7 @@ export const DEFAULT_RULES: PolicyRule[] = [
     description: 'Require approval for operations targeting multiple clips.',
     condition: (step) => {
       const args = step.toolArgs;
-      const clipIds = args.targetClipIds ?? args.clipIds;
+      const clipIds = args['targetClipIds'] ?? args['clipIds'];
       return Array.isArray(clipIds) && clipIds.length > 3;
     },
     action: 'require-approval',

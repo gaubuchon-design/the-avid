@@ -1,25 +1,37 @@
 import React, { lazy, Suspense } from 'react';
 import { Routes, Route } from 'react-router-dom';
-import { DashboardPage } from './pages/DashboardPage';
-import { EditorPage } from './pages/EditorPage';
-import { LoginPage } from './pages/LoginPage';
 import { AuthGuard } from './components/AuthGuard';
-import { ErrorBoundary } from './components/ErrorBoundary';
+import { ErrorBoundary, PageErrorBoundary, PanelErrorBoundary } from './components/ErrorBoundary';
+import { OfflineBanner } from './components/OfflineBanner';
 import { useSettingsEffects } from './hooks/useSettingsEffects';
 import { KeyboardProvider } from './components/KeyboardProvider';
 import { LoadingSpinner } from './components/LoadingSpinner';
-import { TimelinePanel } from './components/TimelinePanel/TimelinePanel';
-import { SourceMonitor } from './components/SourceMonitor/SourceMonitor';
-import { RecordMonitor } from './components/RecordMonitor/RecordMonitor';
-import { ColorPanel } from './components/ColorPanel/ColorPanel';
-import { AudioMixer } from './components/AudioMixer/AudioMixer';
-import { EffectsPanel } from './components/EffectsPanel/EffectsPanel';
-import { AIAssistantPanel } from './components/AIAssistant/AIAssistantPanel';
-import { ScriptPanel } from './components/ScriptPanel/ScriptPanel';
-import { CollabPanel } from './components/CollabPanel/CollabPanel';
-import { ExportPanel } from './components/ExportPanel/ExportPanel';
-import { MarketplacePanel } from './components/MarketplacePanel/MarketplacePanel';
-import { AdminDashboard } from './components/AdminDashboard/AdminDashboard';
+import { MainLayout } from './layouts/MainLayout';
+import { AuthLayout } from './layouts/AuthLayout';
+
+// ─── Route-Level Code Splitting ──────────────────────────────────────────────
+// All page components are lazy-loaded to reduce initial bundle size.
+const DashboardPage = lazy(() => import('./pages/DashboardPage').then(m => ({ default: m.DashboardPage })));
+const EditorPage = lazy(() => import('./pages/EditorPage').then(m => ({ default: m.EditorPage })));
+const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })));
+const RegisterPage = lazy(() => import('./pages/RegisterPage').then(m => ({ default: m.RegisterPage })));
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const NotFoundPage = lazy(() => import('./pages/NotFoundPage').then(m => ({ default: m.NotFoundPage })));
+
+// ─── Panel-Level Code Splitting ─────────────────────────────────────────────
+// Core editing panels used in the panel registry are lazy-loaded individually.
+const TimelinePanel = lazy(() => import('./components/TimelinePanel/TimelinePanel').then(m => ({ default: m.TimelinePanel })));
+const SourceMonitor = lazy(() => import('./components/SourceMonitor/SourceMonitor').then(m => ({ default: m.SourceMonitor })));
+const RecordMonitor = lazy(() => import('./components/RecordMonitor/RecordMonitor').then(m => ({ default: m.RecordMonitor })));
+const ColorPanel = lazy(() => import('./components/ColorPanel/ColorPanel').then(m => ({ default: m.ColorPanel })));
+const AudioMixer = lazy(() => import('./components/AudioMixer/AudioMixer').then(m => ({ default: m.AudioMixer })));
+const EffectsPanel = lazy(() => import('./components/EffectsPanel/EffectsPanel').then(m => ({ default: m.EffectsPanel })));
+const AIAssistantPanel = lazy(() => import('./components/AIAssistant/AIAssistantPanel').then(m => ({ default: m.AIAssistantPanel })));
+const ScriptPanel = lazy(() => import('./components/ScriptPanel/ScriptPanel').then(m => ({ default: m.ScriptPanel })));
+const CollabPanel = lazy(() => import('./components/CollabPanel/CollabPanel').then(m => ({ default: m.CollabPanel })));
+const ExportPanel = lazy(() => import('./components/ExportPanel/ExportPanel').then(m => ({ default: m.ExportPanel })));
+const MarketplacePanel = lazy(() => import('./components/MarketplacePanel/MarketplacePanel').then(m => ({ default: m.MarketplacePanel })));
+const AdminDashboard = lazy(() => import('./components/AdminDashboard/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
 
 // ─── Lazy-loaded Vertical Panels ─────────────────────────────────────────────
 const RundownPanel = lazy(() => import('./components/RundownPanel/RundownPanel').then(m => ({ default: m.RundownPanel })));
@@ -35,15 +47,16 @@ const BrandPanel = lazy(() => import('./components/BrandPanel/BrandPanel').then(
 const MultiCamPanel = lazy(() => import('./components/MultiCamPanel/MultiCamPanel').then(m => ({ default: m.MultiCamPanel })));
 const AccessibilityPanel = lazy(() => import('./components/AccessibilityPanel/AccessibilityPanel').then(m => ({ default: m.AccessibilityPanel })));
 
-// Suspense + ErrorBoundary wrapper for lazy panels
+// Suspense + PanelErrorBoundary wrapper for lazy panels
+// Each panel is isolated -- one failure does not cascade to the rest of the app.
 function LazyPanel(LazyComponent: React.LazyExoticComponent<React.ComponentType>, displayName?: string): React.ComponentType {
   function WrappedPanel() {
     return (
-      <ErrorBoundary>
+      <PanelErrorBoundary panelName="LazyPanel">
         <Suspense fallback={<LoadingSpinner />}>
           <LazyComponent />
         </Suspense>
-      </ErrorBoundary>
+      </PanelErrorBoundary>
     );
   }
   WrappedPanel.displayName = displayName ?? 'LazyPanel';
@@ -118,38 +131,54 @@ export default function App() {
 
   return (
     <KeyboardProvider>
-      <Routes>
-        <Route path="/login" element={<ErrorBoundary><LoginPage /></ErrorBoundary>} />
-        <Route
-          path="/"
-          element={
-            <ErrorBoundary>
-              <AuthGuard>
-                <DashboardPage />
-              </AuthGuard>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/editor/:projectId"
-          element={
-            <ErrorBoundary>
-              <AuthGuard>
-                <EditorPage />
-              </AuthGuard>
-            </ErrorBoundary>
-          }
-        />
-        <Route path="*" element={
-          <ErrorBoundary>
-            <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-void, #0a0a0f)', color: 'var(--text-primary, #e8e8ed)' }}>
-              <h1 style={{ fontSize: 48, fontWeight: 800, marginBottom: 8, color: 'var(--text-muted, #6a6a7a)' }}>404</h1>
-              <p style={{ fontSize: 14, color: 'var(--text-secondary, #a0a0b0)', marginBottom: 24 }}>Page not found</p>
-              <a href="/" style={{ fontSize: 13, color: 'var(--brand-bright, #9b7dff)', textDecoration: 'none', fontWeight: 600 }}>Back to Dashboard</a>
-            </div>
-          </ErrorBoundary>
-        } />
-      </Routes>
+      {/* Global offline banner -- renders at top when user goes offline */}
+      <OfflineBanner />
+
+      <Suspense fallback={<LoadingSpinner />}>
+        <Routes>
+          {/* ── Auth Routes (no auth required) ────────────────────────── */}
+          <Route element={<ErrorBoundary level="page"><AuthLayout /></ErrorBoundary>}>
+            <Route path="/login" element={<PageErrorBoundary pageName="Login"><LoginPage /></PageErrorBoundary>} />
+            <Route path="/register" element={<PageErrorBoundary pageName="Register"><RegisterPage /></PageErrorBoundary>} />
+          </Route>
+
+          {/* ── Authenticated Dashboard Routes ────────────────────────── */}
+          <Route element={<ErrorBoundary level="page"><AuthGuard><MainLayout /></AuthGuard></ErrorBoundary>}>
+            <Route path="/" element={<PageErrorBoundary pageName="Dashboard"><DashboardPage /></PageErrorBoundary>} />
+            <Route path="/settings" element={<PageErrorBoundary pageName="Settings"><SettingsPage /></PageErrorBoundary>} />
+          </Route>
+
+          {/* ── Editor (full-bleed, own layout) ───────────────────────── */}
+          <Route
+            path="/editor/:projectId"
+            element={
+              <ErrorBoundary level="page">
+                <AuthGuard>
+                  <PageErrorBoundary pageName="Editor">
+                    <EditorPage />
+                  </PageErrorBoundary>
+                </AuthGuard>
+              </ErrorBoundary>
+            }
+          />
+          {/* Alias: /project/:id redirects to editor */}
+          <Route
+            path="/project/:projectId"
+            element={
+              <ErrorBoundary level="page">
+                <AuthGuard>
+                  <PageErrorBoundary pageName="Editor">
+                    <EditorPage />
+                  </PageErrorBoundary>
+                </AuthGuard>
+              </ErrorBoundary>
+            }
+          />
+
+          {/* ── 404 Catch-all ─────────────────────────────────────────── */}
+          <Route path="*" element={<Suspense fallback={<LoadingSpinner />}><NotFoundPage /></Suspense>} />
+        </Routes>
+      </Suspense>
     </KeyboardProvider>
   );
 }

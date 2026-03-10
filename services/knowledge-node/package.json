@@ -9,24 +9,26 @@
     "build": "tsc --project tsconfig.json",
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
+    "lint": "eslint src --ext .ts",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
+    "test:watch": "vitest",
     "clean": "rm -rf dist"
   },
   "dependencies": {
     "@mcua/contracts": "*",
     "better-sqlite3": "^11.0.0",
-    "express": "^4.18.0",
-    "ws": "^8.16.0",
-    "uuid": "^9.0.0"
+    "express": "^4.19.0",
+    "uuid": "^10.0.0",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
-    "tsx": "^4.0.0",
-    "vitest": "^1.6.0",
     "@types/better-sqlite3": "^7.6.0",
-    "@types/express": "^4.17.0",
-    "@types/ws": "^8.5.0",
-    "@types/uuid": "^9.0.0"
+    "@types/express": "^4.17.21",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.5.12",
+    "tsx": "^4.16.0",
+    "typescript": "^5.4.0",
+    "vitest": "^2.0.0"
   }
 }

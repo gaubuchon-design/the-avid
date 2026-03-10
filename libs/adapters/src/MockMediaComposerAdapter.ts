@@ -5,6 +5,29 @@
  * playhead so that the agentic editing engine can be developed and demoed
  * without a running Media Composer instance.
  *
+ * ## State Machine
+ *
+ * The adapter follows a lifecycle state machine:
+ *
+ * ```
+ *   idle -> loading -> ready -> error
+ *            |                    |
+ *            +<------- (retry) ---+
+ * ```
+ *
+ * All operations require the adapter to be in the `ready` state. The
+ * `initialize()` method transitions from `idle` to `loading` to `ready`.
+ *
+ * ## Configuration
+ *
+ * Pass {@link MockAdapterConfig} to the constructor to control simulated
+ * delays, error rates, and initial data seeding.
+ *
+ * ## Events
+ *
+ * The adapter emits lifecycle events through the {@link onStateChange}
+ * callback, enabling consumers to react to state transitions.
+ *
  * The constructor seeds a realistic demo project:
  * - 1 sequence ("Main Assembly") with V1, V2, A1-A4 tracks
  * - 3 bins ("Interviews", "B-Roll", "Music")
@@ -22,6 +45,43 @@ import type {
   TrackKind,
   TrackSnapshot,
 } from './IMediaComposerAdapter';
+import {
+  ConflictError,
+  InvalidArgumentError,
+  NotFoundError,
+  TimeoutError,
+  UnavailableError,
+} from './AdapterError';
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+/**
+ * Lifecycle state of the mock adapter.
+ *
+ * - `idle`    -- constructed but not yet initialized
+ * - `loading` -- initialization in progress
+ * - `ready`   -- fully operational, accepting commands
+ * - `error`   -- initialization or runtime failure; must be re-initialized
+ */
+export type AdapterState = 'idle' | 'loading' | 'ready' | 'error';
+
+/**
+ * Configuration for the mock adapter's simulated behaviour.
+ */
+export interface MockAdapterConfig {
+  /** Base delay in milliseconds for simulated async operations. Default: 50. */
+  readonly baseDelayMs?: number;
+  /** Jitter range in milliseconds added to the base delay. Default: 30. */
+  readonly jitterMs?: number;
+  /** Probability (0-1) that an operation will fail with a transient error. Default: 0. */
+  readonly errorRate?: number;
+  /** Simulated initialization delay in milliseconds. Default: 100. */
+  readonly initDelayMs?: number;
+  /** Callback invoked when the adapter state changes. */
+  readonly onStateChange?: (newState: AdapterState, previousState: AdapterState) => void;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -81,6 +141,10 @@ interface MutableBin {
  *
  * All state lives in plain objects -- no persistence. Ideal for unit tests,
  * integration tests, and the demo UI.
+ *
+ * The adapter implements a state machine: `idle -> loading -> ready -> error`.
+ * Call {@link initialize} before issuing any operations. Operations on an
+ * uninitialized adapter throw {@link UnavailableError}.
  */
 export class MockMediaComposerAdapter implements IMediaComposerAdapter {
   private tracks: Map<string, MutableTrack> = new Map();
@@ -93,12 +157,122 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
   private readonly sequenceName: string;
   private readonly frameRate: number;
 
-  constructor() {
+  private _state: AdapterState = 'idle';
+  private readonly config: Required<Omit<MockAdapterConfig, 'onStateChange'>> & {
+    readonly onStateChange?: (newState: AdapterState, previousState: AdapterState) => void;
+  };
+
+  /**
+   * Construct a new mock adapter.
+   *
+   * @param config - Optional configuration for simulated behaviour.
+   */
+  constructor(config?: MockAdapterConfig) {
     this.sequenceId = 'seq_main_001';
     this.sequenceName = 'Main Assembly';
     this.frameRate = 23.976;
 
-    this.seedDemoData();
+    this.config = {
+      baseDelayMs: config?.baseDelayMs ?? 50,
+      jitterMs: config?.jitterMs ?? 30,
+      errorRate: config?.errorRate ?? 0,
+      initDelayMs: config?.initDelayMs ?? 100,
+      onStateChange: config?.onStateChange,
+    };
+  }
+
+  // -----------------------------------------------------------------------
+  // State machine
+  // -----------------------------------------------------------------------
+
+  /**
+   * Current lifecycle state of the adapter.
+   */
+  get state(): AdapterState {
+    return this._state;
+  }
+
+  /**
+   * Transition the adapter state, invoking the callback if configured.
+   */
+  private setState(newState: AdapterState): void {
+    const prev = this._state;
+    this._state = newState;
+    this.config.onStateChange?.(newState, prev);
+  }
+
+  /**
+   * Initialize the adapter, transitioning from `idle` to `ready`.
+   *
+   * Seeds demo data and simulates an initialization delay.
+   *
+   * @throws {ConflictError} If the adapter is already initialized or loading.
+   */
+  async initialize(): Promise<void> {
+    if (this._state === 'ready') {
+      throw new ConflictError('media-composer', 'Adapter is already initialized.');
+    }
+    if (this._state === 'loading') {
+      throw new ConflictError('media-composer', 'Adapter initialization is already in progress.');
+    }
+
+    this.setState('loading');
+
+    try {
+      await this.simulateDelay(this.config.initDelayMs, this.config.initDelayMs + 50);
+      this.seedDemoData();
+      this.setState('ready');
+    } catch (err) {
+      this.setState('error');
+      throw err;
+    }
+  }
+
+  /**
+   * Ensure the adapter is in the `ready` state before performing an operation.
+   *
+   * @throws {UnavailableError} If the adapter is not ready.
+   */
+  private ensureReady(): void {
+    if (this._state !== 'ready') {
+      throw new UnavailableError(
+        'media-composer',
+        `Adapter is in "${this._state}" state. Call initialize() first.`,
+      );
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Simulated delay and error injection
+  // -----------------------------------------------------------------------
+
+  /**
+   * Simulate an asynchronous operation with configurable delay.
+   *
+   * @param minMs - Minimum delay in milliseconds.
+   * @param maxMs - Maximum delay in milliseconds.
+   */
+  private simulateDelay(minMs?: number, maxMs?: number): Promise<void> {
+    const min = minMs ?? this.config.baseDelayMs;
+    const max = maxMs ?? this.config.baseDelayMs + this.config.jitterMs;
+    const ms = min + Math.random() * (max - min);
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Possibly inject a transient error based on the configured error rate.
+   *
+   * @param operation - Name of the operation, used in error messages.
+   * @throws {TimeoutError} With probability equal to `config.errorRate`.
+   */
+  private maybeInjectError(operation: string): void {
+    if (this.config.errorRate > 0 && Math.random() < this.config.errorRate) {
+      throw new TimeoutError(
+        'media-composer',
+        operation,
+        this.config.baseDelayMs + this.config.jitterMs,
+      );
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -117,7 +291,7 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
     ];
 
     for (let i = 0; i < trackDefs.length; i++) {
-      const def = trackDefs[i];
+      const def = trackDefs[i]!;
       const track: MutableTrack = {
         id: `track_${def.name.toLowerCase()}`,
         name: def.name,
@@ -311,8 +485,12 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
   // -----------------------------------------------------------------------
 
   async getTimeline(sequenceId: string): Promise<TimelineSnapshot> {
+    this.ensureReady();
+    await this.simulateDelay();
+    this.maybeInjectError('getTimeline');
+
     if (sequenceId !== this.sequenceId) {
-      throw new Error(`Sequence not found: ${sequenceId}`);
+      throw new NotFoundError('media-composer', 'Sequence', sequenceId);
     }
     return {
       sequenceId: this.sequenceId,
@@ -337,8 +515,23 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
     position: number,
     duration: number,
   ): Promise<ClipResult> {
+    this.ensureReady();
+    await this.simulateDelay();
+    this.maybeInjectError('addClip');
+
+    if (position < 0) {
+      throw new InvalidArgumentError('media-composer', 'position', 'Position must be non-negative.');
+    }
+    if (duration <= 0) {
+      throw new InvalidArgumentError('media-composer', 'duration', 'Duration must be positive.');
+    }
+
     const track = this.tracks.get(trackId);
-    if (!track) throw new Error(`Track not found: ${trackId}`);
+    if (!track) throw new NotFoundError('media-composer', 'Track', trackId);
+
+    if (track.isLocked) {
+      throw new ConflictError('media-composer', `Track "${track.name}" is locked and cannot be modified.`);
+    }
 
     const clip: MutableClip = {
       clipId: nextId('clip'),
@@ -357,11 +550,18 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
   }
 
   async removeClip(clipId: string): Promise<void> {
+    this.ensureReady();
+    await this.simulateDelay();
+    this.maybeInjectError('removeClip');
+
     const clip = this.clips.get(clipId);
-    if (!clip) throw new Error(`Clip not found: ${clipId}`);
+    if (!clip) throw new NotFoundError('media-composer', 'Clip', clipId);
 
     const track = this.tracks.get(clip.trackId);
     if (track) {
+      if (track.isLocked) {
+        throw new ConflictError('media-composer', `Track "${track.name}" is locked and cannot be modified.`);
+      }
       track.clips = track.clips.filter((c) => c.clipId !== clipId);
     }
     this.clips.delete(clipId);
@@ -372,15 +572,30 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
     targetTrackId: string,
     targetPosition: number,
   ): Promise<ClipResult> {
+    this.ensureReady();
+    await this.simulateDelay();
+    this.maybeInjectError('moveClip');
+
     const clip = this.clips.get(clipId);
-    if (!clip) throw new Error(`Clip not found: ${clipId}`);
+    if (!clip) throw new NotFoundError('media-composer', 'Clip', clipId);
+
+    if (targetPosition < 0) {
+      throw new InvalidArgumentError('media-composer', 'targetPosition', 'Position must be non-negative.');
+    }
 
     const targetTrack = this.tracks.get(targetTrackId);
-    if (!targetTrack) throw new Error(`Track not found: ${targetTrackId}`);
+    if (!targetTrack) throw new NotFoundError('media-composer', 'Track', targetTrackId);
+
+    if (targetTrack.isLocked) {
+      throw new ConflictError('media-composer', `Target track "${targetTrack.name}" is locked.`);
+    }
 
     // Remove from source track
     const sourceTrack = this.tracks.get(clip.trackId);
     if (sourceTrack) {
+      if (sourceTrack.isLocked) {
+        throw new ConflictError('media-composer', `Source track "${sourceTrack.name}" is locked.`);
+      }
       sourceTrack.clips = sourceTrack.clips.filter(
         (c) => c.clipId !== clipId,
       );
@@ -399,8 +614,17 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
     side: 'start' | 'end',
     delta: number,
   ): Promise<ClipResult> {
+    this.ensureReady();
+    await this.simulateDelay();
+    this.maybeInjectError('trimClip');
+
     const clip = this.clips.get(clipId);
-    if (!clip) throw new Error(`Clip not found: ${clipId}`);
+    if (!clip) throw new NotFoundError('media-composer', 'Clip', clipId);
+
+    const track = this.tracks.get(clip.trackId);
+    if (track?.isLocked) {
+      throw new ConflictError('media-composer', `Track "${track.name}" is locked and cannot be modified.`);
+    }
 
     if (side === 'start') {
       clip.position += delta;
@@ -422,14 +646,24 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
     clipId: string,
     position: number,
   ): Promise<[ClipResult, ClipResult]> {
+    this.ensureReady();
+    await this.simulateDelay();
+    this.maybeInjectError('splitClip');
+
     const clip = this.clips.get(clipId);
-    if (!clip) throw new Error(`Clip not found: ${clipId}`);
+    if (!clip) throw new NotFoundError('media-composer', 'Clip', clipId);
+
+    const track = this.tracks.get(clip.trackId);
+    if (track?.isLocked) {
+      throw new ConflictError('media-composer', `Track "${track.name}" is locked and cannot be modified.`);
+    }
 
     const splitOffset = position - clip.position;
     if (splitOffset <= 0 || splitOffset >= clip.duration) {
-      throw new Error(
-        `Split position ${position} is outside clip range ` +
-          `[${clip.position}, ${clip.position + clip.duration})`,
+      throw new InvalidArgumentError(
+        'media-composer',
+        'position',
+        `Split position ${position} is outside clip range [${clip.position}, ${clip.position + clip.duration})`,
       );
     }
 
@@ -453,8 +687,8 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
       effectIds: [...clip.effectIds],
     };
 
-    const track = this.tracks.get(clip.trackId)!;
-    track.clips.push(rightClip);
+    const trackRef = this.tracks.get(clip.trackId)!;
+    trackRef.clips.push(rightClip);
     this.clips.set(rightClip.clipId, rightClip);
 
     return [this.clipToResult(clip), this.clipToResult(rightClip)];
@@ -465,10 +699,19 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
   // -----------------------------------------------------------------------
 
   async setPlayhead(time: number): Promise<void> {
-    this.playhead = Math.max(0, time);
+    this.ensureReady();
+    await this.simulateDelay();
+
+    if (time < 0) {
+      throw new InvalidArgumentError('media-composer', 'time', 'Playhead time must be non-negative.');
+    }
+
+    this.playhead = time;
   }
 
   async getPlayhead(): Promise<number> {
+    this.ensureReady();
+    await this.simulateDelay();
     return this.playhead;
   }
 
@@ -477,6 +720,10 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
   // -----------------------------------------------------------------------
 
   async getBins(): Promise<BinSnapshot[]> {
+    this.ensureReady();
+    await this.simulateDelay();
+    this.maybeInjectError('getBins');
+
     return Array.from(this.bins.values()).map((b) => ({
       id: b.id,
       name: b.name,
@@ -489,8 +736,16 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
   }
 
   async createBin(name: string, parentId?: string): Promise<BinSnapshot> {
+    this.ensureReady();
+    await this.simulateDelay();
+    this.maybeInjectError('createBin');
+
+    if (!name || name.trim().length === 0) {
+      throw new InvalidArgumentError('media-composer', 'name', 'Bin name must be non-empty.');
+    }
+
     if (parentId && !this.bins.has(parentId)) {
-      throw new Error(`Parent bin not found: ${parentId}`);
+      throw new NotFoundError('media-composer', 'Bin', parentId);
     }
 
     const bin: MutableBin = {
@@ -522,8 +777,16 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
   }
 
   async moveToBin(assetIds: string[], binId: string): Promise<void> {
+    this.ensureReady();
+    await this.simulateDelay();
+    this.maybeInjectError('moveToBin');
+
+    if (assetIds.length === 0) {
+      throw new InvalidArgumentError('media-composer', 'assetIds', 'Must provide at least one asset ID.');
+    }
+
     const target = this.bins.get(binId);
-    if (!target) throw new Error(`Bin not found: ${binId}`);
+    if (!target) throw new NotFoundError('media-composer', 'Bin', binId);
 
     // Remove from current bins
     for (const bin of this.bins.values()) {
@@ -540,9 +803,12 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
   // -----------------------------------------------------------------------
 
   async getSelection(): Promise<SelectionSnapshot> {
+    this.ensureReady();
+    await this.simulateDelay();
+
     // Return a plausible default selection
     return {
-      clipIds: this.clips.size > 0 ? [Array.from(this.clips.keys())[0]] : [],
+      clipIds: this.clips.size > 0 ? [Array.from(this.clips.keys())[0]!] : [],
       trackIds: ['track_v1'],
       markIn: undefined,
       markOut: undefined,
@@ -559,20 +825,42 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
     effectType: string,
     _params: Record<string, unknown>,
   ): Promise<void> {
+    this.ensureReady();
+    await this.simulateDelay();
+    this.maybeInjectError('applyEffect');
+
+    if (!effectType || effectType.trim().length === 0) {
+      throw new InvalidArgumentError('media-composer', 'effectType', 'Effect type must be non-empty.');
+    }
+
     const clip = this.clips.get(clipId);
-    if (!clip) throw new Error(`Clip not found: ${clipId}`);
+    if (!clip) throw new NotFoundError('media-composer', 'Clip', clipId);
+
+    const track = this.tracks.get(clip.trackId);
+    if (track?.isLocked) {
+      throw new ConflictError('media-composer', `Track "${track.name}" is locked and cannot be modified.`);
+    }
 
     const effectId = nextId(`fx_${effectType}`);
     clip.effectIds.push(effectId);
   }
 
   async removeEffect(clipId: string, effectId: string): Promise<void> {
+    this.ensureReady();
+    await this.simulateDelay();
+    this.maybeInjectError('removeEffect');
+
     const clip = this.clips.get(clipId);
-    if (!clip) throw new Error(`Clip not found: ${clipId}`);
+    if (!clip) throw new NotFoundError('media-composer', 'Clip', clipId);
+
+    const track = this.tracks.get(clip.trackId);
+    if (track?.isLocked) {
+      throw new ConflictError('media-composer', `Track "${track.name}" is locked and cannot be modified.`);
+    }
 
     const idx = clip.effectIds.indexOf(effectId);
     if (idx === -1) {
-      throw new Error(`Effect ${effectId} not found on clip ${clipId}`);
+      throw new NotFoundError('media-composer', 'Effect', effectId);
     }
     clip.effectIds.splice(idx, 1);
   }
@@ -585,8 +873,12 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
     sequenceId: string,
     spec: DeliverySpec,
   ): Promise<ExportJob> {
+    this.ensureReady();
+    await this.simulateDelay();
+    this.maybeInjectError('exportSequence');
+
     if (sequenceId !== this.sequenceId) {
-      throw new Error(`Sequence not found: ${sequenceId}`);
+      throw new NotFoundError('media-composer', 'Sequence', sequenceId);
     }
 
     const job: ExportJob = {
@@ -599,7 +891,7 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
 
     this.exportJobs.set(job.jobId, job);
 
-    // Simulate async rendering progression
+    // Simulate async rendering progression with configurable timing
     this.simulateExport(job, spec);
 
     return { ...job };
@@ -608,18 +900,19 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
   /**
    * Simulates an export progressing through queued -> rendering -> completed.
    * Updates the job object in place so that callers polling getExportJob see
-   * realistic progress.
+   * realistic progress. Step intervals scale with the configured base delay.
    */
   private simulateExport(job: ExportJob, spec: DeliverySpec): void {
     const steps = 10;
     let step = 0;
+    const stepInterval = Math.max(50, this.config.baseDelayMs * 2);
 
     const tick = (): void => {
       step++;
       if (step <= steps) {
         job.status = 'rendering';
         job.progress = Math.min(100, Math.round((step / steps) * 100));
-        setTimeout(tick, 200);
+        setTimeout(tick, stepInterval);
       } else {
         job.status = 'completed';
         job.progress = 100;
@@ -628,18 +921,59 @@ export class MockMediaComposerAdapter implements IMediaComposerAdapter {
       }
     };
 
-    setTimeout(tick, 100);
+    setTimeout(tick, stepInterval);
   }
 
   // -----------------------------------------------------------------------
-  // Extra helper: retrieve an export job by ID (useful for demos).
+  // Extra helpers (mock-only, not on the interface)
   // -----------------------------------------------------------------------
 
   /**
    * Non-interface helper to poll an export job. Available on the mock only.
+   *
+   * @param jobId - The export job identifier.
+   * @returns The current export job snapshot, or `undefined` if not found.
    */
   getExportJob(jobId: string): ExportJob | undefined {
     const job = this.exportJobs.get(jobId);
     return job ? { ...job } : undefined;
+  }
+
+  /**
+   * Non-interface helper to reset the adapter back to idle state.
+   * Useful for test teardown.
+   */
+  reset(): void {
+    this.tracks.clear();
+    this.clips.clear();
+    this.bins.clear();
+    this.exportJobs.clear();
+    this.playhead = 0;
+    this.setState('idle');
+  }
+
+  /**
+   * Non-interface health check. Returns a summary of the adapter's current state.
+   *
+   * @returns An object describing the adapter's health and resource counts.
+   */
+  healthCheck(): {
+    readonly state: AdapterState;
+    readonly trackCount: number;
+    readonly clipCount: number;
+    readonly binCount: number;
+    readonly exportJobCount: number;
+    readonly sequenceId: string;
+    readonly frameRate: number;
+  } {
+    return {
+      state: this._state,
+      trackCount: this.tracks.size,
+      clipCount: this.clips.size,
+      binCount: this.bins.size,
+      exportJobCount: this.exportJobs.size,
+      sequenceId: this.sequenceId,
+      frameRate: this.frameRate,
+    };
   }
 }

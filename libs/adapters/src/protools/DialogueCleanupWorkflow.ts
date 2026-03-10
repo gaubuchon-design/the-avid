@@ -53,6 +53,8 @@ export interface DialogueCleanupResult {
   readonly warnings: string[];
 }
 
+import { InvalidArgumentError } from '../AdapterError';
+
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
@@ -128,7 +130,7 @@ export async function runDialogueCleanup(
   params: DialogueCleanupParams = {},
 ): Promise<DialogueCleanupResult> {
   if (trackIds.length === 0) {
-    throw new Error('At least one track ID is required for dialogue cleanup.');
+    throw new InvalidArgumentError('pro-tools', 'trackIds', 'At least one track ID is required for dialogue cleanup.');
   }
 
   const aggressiveness = clamp(params.aggressiveness ?? 0.5, 0, 1);

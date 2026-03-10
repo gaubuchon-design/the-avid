@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, memo } from 'react';
 import { usePlayerStore, ScopeType } from '../../store/player.store';
 import { useEditorStore } from '../../store/editor.store';
 import { videoSourceManager } from '../../engine/VideoSourceManager';
@@ -53,8 +53,22 @@ export function SourceMonitor() {
   const rafRef = useRef<number>();
   const syncRafRef = useRef<number>();
 
-  // Get the source asset from editor store
-  const sourceAsset = useEditorStore((s) => s.sourceAsset);
+  // Get the source asset from editor store (master's approach with sourceAsset + sourcePlayhead)
+  // Also support looking up by sourceClipId through bins (our hardened approach)
+  const sourceAsset = useEditorStore((s) => {
+    if (!sourceClipId) return s.sourceAsset;
+    // Search bins for the asset
+    const findInBins = (bins: typeof s.bins): typeof s.sourceAsset => {
+      for (const bin of bins) {
+        const found = bin.assets.find((a) => a.id === sourceClipId);
+        if (found) return found;
+        const childResult = findInBins(bin.children);
+        if (childResult) return childResult;
+      }
+      return null;
+    };
+    return findInBins(s.bins) ?? s.sourceAsset;
+  });
   const sourcePlayhead = useEditorStore((s) => s.sourcePlayhead);
   const setSourcePlayhead = useEditorStore((s) => s.setSourcePlayhead);
   const sourceInPoint = useEditorStore((s) => s.sourceInPoint);
@@ -364,10 +378,10 @@ export function SourceMonitor() {
   const isActive = usePlayerStore((s) => s.activeMonitor === 'source');
 
   return (
-    <div className={`monitor${isActive ? ' monitor-active' : ''}`} onClick={handleFocus}>
+    <div className={`monitor${isActive ? ' monitor-active' : ''}`} onClick={handleFocus} role="region" aria-label="Source Monitor">
       {/* Header */}
       <div className="monitor-header">
-        <span className="monitor-label source">SOURCE</span>
+        <span className="monitor-label source" aria-hidden="true">SOURCE</span>
         {sourceAsset && (
           <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 4, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {sourceAsset.name}
@@ -423,11 +437,21 @@ export function SourceMonitor() {
         </button>
 
         {/* Transport controls */}
-        <div className="transport-controls">
-          <button className="transport-btn" onClick={handleGoToIn} title="Go to In">|&laquo;</button>
-          <button className="transport-btn" onClick={handleRewind} title="Rewind (J)">&laquo;</button>
-          <button className="transport-btn" onClick={handlePrevFrame} title="Prev Frame">&lsaquo;</button>
-          <button className="transport-btn play-btn" onClick={handlePlayPause} title="Play/Pause (Space)">
+        <div className="transport-controls" role="group" aria-label="Source transport controls">
+          <button className="transport-btn" onClick={handleGoToIn} title="Go to In (Shift+I)" aria-label="Go to In point">
+            |&laquo;
+          </button>
+          <button className="transport-btn" onClick={handleRewind} title="Rewind (J)">
+            &laquo;
+          </button>
+          <button className="transport-btn" onClick={handlePrevFrame} title="Prev Frame (Left)">
+            &lsaquo;
+          </button>
+          <button
+            className="transport-btn play-btn"
+            onClick={handlePlayPause}
+            title="Play/Pause (Space)"
+          >
             {isPlaying ? '\u23F8' : '\u25B6'}
           </button>
           <button className="transport-btn" onClick={handleNextFrame} title="Next Frame">&rsaquo;</button>

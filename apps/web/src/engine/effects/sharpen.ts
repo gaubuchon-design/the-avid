@@ -32,10 +32,10 @@ export function applySharpen(
   // Apply unsharp mask: output = original + (original - blurred) * strength
   for (let i = 0; i < data.length; i += 4) {
     for (let c = 0; c < 3; c++) {
-      const diff = data[i + c] - blurred[i + c];
+      const diff = data[i + c]! - blurred[i + c]!;
       // Only sharpen if difference exceeds threshold
       if (Math.abs(diff) >= threshold) {
-        data[i + c] = clamp(data[i + c] + diff * strength);
+        data[i + c] = clamp(data[i + c]! + diff * strength);
       }
     }
   }
@@ -59,16 +59,16 @@ function simpleBoxBlur(
       for (let dx = -radius; dx <= radius; dx++) {
         const nx = Math.min(Math.max(x + dx, 0), width - 1);
         const idx = (y * width + nx) * 4;
-        sumR += data[idx];
-        sumG += data[idx + 1];
-        sumB += data[idx + 2];
+        sumR += data[idx]!;
+        sumG += data[idx + 1]!;
+        sumB += data[idx + 2]!;
         count++;
       }
       const idx = (y * width + x) * 4;
       temp[idx]     = Math.round(sumR / count);
       temp[idx + 1] = Math.round(sumG / count);
       temp[idx + 2] = Math.round(sumB / count);
-      temp[idx + 3] = data[idx + 3];
+      temp[idx + 3] = data[idx + 3]!;
     }
   }
 
@@ -79,9 +79,9 @@ function simpleBoxBlur(
       for (let dy = -radius; dy <= radius; dy++) {
         const ny = Math.min(Math.max(y + dy, 0), height - 1);
         const idx = (ny * width + x) * 4;
-        sumR += temp[idx];
-        sumG += temp[idx + 1];
-        sumB += temp[idx + 2];
+        sumR += temp[idx]!;
+        sumG += temp[idx + 1]!;
+        sumB += temp[idx + 2]!;
         count++;
       }
       const idx = (y * width + x) * 4;

@@ -41,7 +41,7 @@ export class MLXBackend implements IModelBackend {
     if (process.platform !== 'darwin') {
       return false;
     }
-    // TODO: check for mlx-swift bridge binary or Python mlx package
+    // MLX bridge is not yet shipped; always return false until bundled
     return false;
   }
 

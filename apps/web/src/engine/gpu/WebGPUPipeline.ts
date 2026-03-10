@@ -28,9 +28,9 @@ function hexToRgbFloat(hex: string): [number, number, number] {
   const match = hex.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
   if (!match) return [0, 0, 0];
   return [
-    parseInt(match[1], 16) / 255,
-    parseInt(match[2], 16) / 255,
-    parseInt(match[3], 16) / 255,
+    parseInt(match[1]!, 16) / 255,
+    parseInt(match[2]!, 16) / 255,
+    parseInt(match[3]!, 16) / 255,
   ];
 }
 
@@ -40,7 +40,7 @@ function hexToRgbFloat(hex: string): [number, number, number] {
 function parseAspectRatio(ratio: string): number {
   const parts = ratio.split(':');
   if (parts.length === 2) {
-    return parseFloat(parts[0]) / parseFloat(parts[1]);
+    return parseFloat(parts[0]!) / parseFloat(parts[1]!);
   }
   return parseFloat(ratio) || 1.78;
 }
@@ -411,6 +411,7 @@ export class WebGPUPipeline {
         return false;
       }
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- WebGPU types not in all TS lib targets
       this.adapter = await (navigator as any).gpu.requestAdapter({
         powerPreference: 'high-performance',
       });

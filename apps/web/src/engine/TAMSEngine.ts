@@ -1137,7 +1137,7 @@ export class TAMSEngine {
       (seg) => seg.timeRange.start <= timestamp && seg.timeRange.end >= timestamp,
     );
 
-    return covering?.url ?? segments[0].url;
+    return covering?.url ?? segments[0]!.url;
   }
 
   // ── Timeline Integration ───────────────────────────────────────────

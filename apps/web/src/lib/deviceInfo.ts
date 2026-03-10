@@ -9,6 +9,7 @@ export function detectDeviceType(): DeviceType {
   if (typeof window === 'undefined') return 'browser';
 
   // Electron or Tauri desktop app
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Electron/Tauri globals not in standard lib
   if ((window as any).electronAPI || (window as any).__TAURI__) return 'desktop';
 
   const width = window.innerWidth;

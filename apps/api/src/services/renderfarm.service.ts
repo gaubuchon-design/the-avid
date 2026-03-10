@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { logger } from '../utils/logger';
+import { BadRequestError, NotFoundError } from '../utils/errors';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -140,6 +141,10 @@ class RenderFarmService {
     },
     socket?: any,
   ): WorkerNode {
+    if (!nodeInfo.hostname) {
+      throw new BadRequestError('hostname is required');
+    }
+
     const id = randomUUID();
     const now = Date.now();
 
@@ -180,7 +185,7 @@ class RenderFarmService {
     this.workers.set(id, node);
     if (socket) this.agentSockets.set(id, socket);
 
-    logger.info(`Render worker registered: ${node.hostname} (${id})`);
+    logger.info('Render worker registered', { nodeId: id, hostname: node.hostname, ip: node.ip });
     this.broadcast('render:worker:registered', { node });
     this.broadcastStats();
 
@@ -192,7 +197,7 @@ class RenderFarmService {
 
   removeWorker(nodeId: string): void {
     const worker = this.workers.get(nodeId);
-    if (!worker) return;
+    if (!worker) throw new NotFoundError('Worker node');
 
     // If the worker was busy, fail its job
     if (worker.currentJobId) {
@@ -202,7 +207,7 @@ class RenderFarmService {
     this.workers.delete(nodeId);
     this.agentSockets.delete(nodeId);
 
-    logger.info(`Render worker removed: ${worker.hostname} (${nodeId})`);
+    logger.info('Render worker removed', { nodeId, hostname: worker.hostname });
     this.broadcast('render:worker:disconnected', { nodeId });
     this.broadcastStats();
   }
@@ -212,7 +217,7 @@ class RenderFarmService {
     if (!worker) return;
 
     worker.status = 'draining';
-    logger.info(`Render worker draining: ${worker.hostname} (${nodeId})`);
+    logger.info('Render worker draining', { nodeId, hostname: worker.hostname });
     this.broadcast('render:worker:updated', { nodeId, patch: { status: 'draining' } });
   }
 
@@ -253,6 +258,19 @@ class RenderFarmService {
     exportSettings?: any;
     segmentCount?: number;
   }): RenderJob {
+    if (!jobData.name) {
+      throw new BadRequestError('name is required');
+    }
+    if (!jobData.presetId) {
+      throw new BadRequestError('presetId is required');
+    }
+    if (!jobData.sourceTimelineId) {
+      throw new BadRequestError('sourceTimelineId is required');
+    }
+    if (!jobData.totalFrames || jobData.totalFrames <= 0) {
+      throw new BadRequestError('totalFrames must be a positive number');
+    }
+
     const id = randomUUID();
     const segmentCount = jobData.segmentCount ?? Math.max(1, Math.ceil(jobData.totalFrames / 1000));
     const framesPerSegment = Math.ceil(jobData.totalFrames / segmentCount);
@@ -288,7 +306,12 @@ class RenderFarmService {
     };
 
     this.jobs.set(id, job);
-    logger.info(`Render job submitted: ${job.name} (${id}) — ${segmentCount} segments, ${jobData.totalFrames} frames`);
+    logger.info('Render job submitted', {
+      jobId: id,
+      name: job.name,
+      segments: segmentCount,
+      frames: jobData.totalFrames,
+    });
     this.broadcast('render:job:queued', { job });
     this.broadcastStats();
 
@@ -300,7 +323,11 @@ class RenderFarmService {
 
   cancelJob(jobId: string): void {
     const job = this.jobs.get(jobId);
-    if (!job) return;
+    if (!job) throw new NotFoundError('Render job');
+
+    if (job.status === 'completed' || job.status === 'cancelled') {
+      throw new BadRequestError(`Job is already ${job.status}`);
+    }
 
     job.status = 'cancelled';
     job.completedAt = Date.now();
@@ -321,26 +348,34 @@ class RenderFarmService {
     this.jobs.delete(jobId);
     this.completedJobs.unshift(job);
 
-    logger.info(`Render job cancelled: ${jobId}`);
+    logger.info('Render job cancelled', { jobId });
     this.broadcast('render:job:status', { jobId, status: 'cancelled' });
     this.broadcastStats();
   }
 
   pauseJob(jobId: string): void {
     const job = this.jobs.get(jobId);
-    if (!job || job.status === 'completed' || job.status === 'failed') return;
+    if (!job) throw new NotFoundError('Render job');
+
+    if (job.status === 'completed' || job.status === 'failed') {
+      throw new BadRequestError(`Cannot pause job in "${job.status}" state`);
+    }
 
     job.status = 'paused';
-    logger.info(`Render job paused: ${jobId}`);
+    logger.info('Render job paused', { jobId });
     this.broadcast('render:job:status', { jobId, status: 'paused' });
   }
 
   resumeJob(jobId: string): void {
     const job = this.jobs.get(jobId);
-    if (!job || job.status !== 'paused') return;
+    if (!job) throw new NotFoundError('Render job');
+
+    if (job.status !== 'paused') {
+      throw new BadRequestError(`Cannot resume job in "${job.status}" state`);
+    }
 
     job.status = 'queued';
-    logger.info(`Render job resumed: ${jobId}`);
+    logger.info('Render job resumed', { jobId });
     this.broadcast('render:job:status', { jobId, status: 'queued' });
     this.scheduleNext();
   }
@@ -388,7 +423,7 @@ class RenderFarmService {
     worker.currentJobId = job.id;
     worker.progress = 0;
 
-    logger.info(`Assigned job ${job.id} to worker ${worker.hostname} (${workerId})`);
+    logger.info('Job assigned to worker', { jobId: job.id, workerId, hostname: worker.hostname });
 
     this.broadcast('render:job:status', { jobId: job.id, status: 'encoding' });
     this.broadcast('render:worker:updated', {
@@ -500,7 +535,7 @@ class RenderFarmService {
     this.completedJobs.unshift(job);
     if (this.completedJobs.length > 500) this.completedJobs.pop();
 
-    logger.info(`Render job complete: ${job.name} (${jobId})`);
+    logger.info('Render job complete', { jobId, name: job.name });
     this.broadcast('render:job:complete', { jobId, outputPath, outputSize });
     this.broadcastStats();
 
@@ -537,7 +572,7 @@ class RenderFarmService {
     this.completedJobs.unshift(job);
     if (this.completedJobs.length > 500) this.completedJobs.pop();
 
-    logger.error(`Render job failed: ${job.name} (${jobId}) — ${error}`);
+    logger.error('Render job failed', { jobId, name: job.name, error });
     this.broadcast('render:job:failed', { jobId, error });
     this.broadcastStats();
 
@@ -667,7 +702,7 @@ echo "Done."
     const now = Date.now();
     for (const [nodeId, worker] of this.workers) {
       if (worker.status !== 'offline' && now - worker.lastHeartbeat > HEARTBEAT_TIMEOUT_MS) {
-        logger.warn(`Render worker stale (no heartbeat): ${worker.hostname} (${nodeId})`);
+        logger.warn('Render worker stale (no heartbeat)', { nodeId, hostname: worker.hostname });
         worker.status = 'offline';
         this.broadcast('render:worker:updated', { nodeId, patch: { status: 'offline' } });
 

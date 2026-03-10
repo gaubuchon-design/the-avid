@@ -103,27 +103,27 @@ export class ThroughEditEngine {
         const inClip = sorted[i + 1];
 
         // 1. Timeline adjacency: the out clip's end must touch the in clip's start
-        if (Math.abs(outClip.endTime - inClip.startTime) > EPSILON) {
+        if (Math.abs(outClip!.endTime! - inClip!.startTime!) > EPSILON) {
           continue;
         }
 
         // 2. Same source asset
-        if (!outClip.assetId || !inClip.assetId || outClip.assetId !== inClip.assetId) {
+        if (!outClip!.assetId! || !inClip!.assetId! || outClip!.assetId! !== inClip!.assetId!) {
           continue;
         }
 
         // 3. Contiguous source timecode
-        const outSourceEnd = sourceEndTime(outClip);
-        if (Math.abs(outSourceEnd - inClip.trimStart) > EPSILON) {
+        const outSourceEnd = sourceEndTime(outClip!);
+        if (Math.abs(outSourceEnd - inClip!.trimStart!) > EPSILON) {
           continue;
         }
 
         result.push({
           id: genThroughEditId(),
           trackId: track.id,
-          outClipId: outClip.id,
-          inClipId: inClip.id,
-          editTime: outClip.endTime,
+          outClipId: outClip!.id!,
+          inClipId: inClip!.id!,
+          editTime: outClip!.endTime!,
         });
       }
     }
@@ -210,33 +210,33 @@ export class ThroughEditEngine {
         // Extend the clip's start to the previous edit point
         const prevClip = sortedIndex > 0 ? sorted[sortedIndex - 1] : null;
         const newStartTime = prevClip ? prevClip.endTime : 0;
-        const delta = clip.startTime - newStartTime;
+        const delta = clip!.startTime! - newStartTime;
 
         // Ensure we have enough source media to extend
-        const availableTrimStart = clip.trimStart;
+        const availableTrimStart = clip!.trimStart!;
         const actualDelta = Math.min(delta, availableTrimStart);
-        const actualNewStart = clip.startTime - actualDelta;
+        const actualNewStart = clip!.startTime! - actualDelta;
 
         newClip = {
-          ...clip,
+          ...clip!,
           startTime: actualNewStart,
-          trimStart: clip.trimStart - actualDelta,
+          trimStart: clip!.trimStart! - actualDelta,
         };
       } else {
         // Extend the clip's end to the next edit point
         const nextClip = sortedIndex < sorted.length - 1 ? sorted[sortedIndex + 1] : null;
-        const newEndTime = nextClip ? nextClip.startTime : clip.endTime + clip.trimEnd;
-        const delta = newEndTime - clip.endTime;
+        const newEndTime = nextClip ? nextClip.startTime : clip!.endTime! + clip!.trimEnd!;
+        const delta = newEndTime - clip!.endTime!;
 
         // Ensure we have enough source media to extend
-        const availableTrimEnd = clip.trimEnd;
+        const availableTrimEnd = clip!.trimEnd!;
         const actualDelta = Math.min(delta, availableTrimEnd);
-        const actualNewEnd = clip.endTime + actualDelta;
+        const actualNewEnd = clip!.endTime! + actualDelta;
 
         newClip = {
-          ...clip,
+          ...clip!,
           endTime: actualNewEnd,
-          trimEnd: clip.trimEnd - actualDelta,
+          trimEnd: clip!.trimEnd! - actualDelta,
         };
       }
 

@@ -34,7 +34,7 @@ export function rebuildIndex(shardId: string, dataDir: string): number {
 
   try {
     const builder = new IndexBuilder();
-    const index = builder.buildIndex(db);
+    const { index } = builder.buildIndex(db);
     const indexPath = join(dataDir, shardId, INDEX_FILENAME);
 
     index.save(indexPath);

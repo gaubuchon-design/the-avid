@@ -3,196 +3,123 @@
  * Handles NRCS connections, rundowns, stories, playout destinations
  */
 import { Router, Request, Response } from 'express';
-import { authenticate, requireProjectAccess } from '../../middleware/auth';
-import { db } from '../../db/client';
+import { authenticate } from '../../middleware/auth';
+import {
+  validate, validateAll, schemas, uuidParam, cursorPaginationQuery,
+} from '../../utils/validation';
 import { z } from 'zod';
+import { newsService } from '../../services/news.service';
 
 const router = Router();
 router.use(authenticate);
 
-// ─── NRCS Connections ─────────────────────────────────────────────────────────
+// ─── Param schemas ───────────────────────────────────────────────────────────
+const storyIdParam = z.object({ id: z.string().uuid() });
 
-const createNRCSSchema = z.object({
-  type: z.enum(['INEWS', 'ENPS', 'OCTOPUS', 'OPENMEDIA']),
-  host: z.string().min(1),
-  port: z.number().int().positive(),
-  username: z.string().optional(),
-  password: z.string().optional(),
-  orgId: z.string().uuid(),
+const rundownQuery = cursorPaginationQuery.extend({
+  connectionId: z.string().uuid().optional(),
+  date: z.string().optional(),
 });
 
-router.get('/nrcs-connections', async (req: Request, res: Response) => {
-  const connections = await db.nRCSConnection.findMany({
-    where: { isActive: true },
-    include: { rundowns: { take: 5, orderBy: { airDate: 'desc' } } },
-  });
+// ─── NRCS Connections ─────────────────────────────────────────────────────────
+
+router.get('/nrcs-connections', async (_req: Request, res: Response) => {
+  const connections = await newsService.listConnections();
   res.json({ connections });
 });
 
-router.post('/nrcs-connections', async (req: Request, res: Response) => {
-  const data = createNRCSSchema.parse(req.body);
-  const connection = await db.nRCSConnection.create({ data });
+router.post('/nrcs-connections', validate(schemas.createNRCSConnection), async (req: Request, res: Response) => {
+  const connection = await newsService.createConnection(req.body);
   res.status(201).json({ connection });
 });
 
-router.patch('/nrcs-connections/:id', async (req: Request, res: Response) => {
-  const allowed = ['type', 'host', 'port', 'username', 'password', 'isActive'];
-  const data: any = {};
-  allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
-
-  const connection = await db.nRCSConnection.update({
-    where: { id: req.params.id },
-    data,
-  });
+router.patch('/nrcs-connections/:id', validateAll({ params: uuidParam, body: schemas.updateNRCSConnection }), async (req: Request, res: Response) => {
+  const connection = await newsService.updateConnection(req.params['id']!, req.body);
   res.json({ connection });
 });
 
-router.delete('/nrcs-connections/:id', async (req: Request, res: Response) => {
-  await db.nRCSConnection.update({
-    where: { id: req.params.id },
-    data: { isActive: false },
-  });
-  res.json({ success: true });
+router.delete('/nrcs-connections/:id', validate(uuidParam, 'params'), async (req: Request, res: Response) => {
+  await newsService.deactivateConnection(req.params['id']!);
+  res.status(204).send();
 });
 
 // ─── Rundowns ─────────────────────────────────────────────────────────────────
 
-router.get('/rundowns', async (req: Request, res: Response) => {
-  const { connectionId, date } = req.query;
-  const where: any = {};
-  if (connectionId) where.nrcsConnectionId = connectionId;
-  if (date) {
-    const d = new Date(date as string);
-    if (!Number.isNaN(d.getTime())) {
-      where.airDate = {
-        gte: new Date(d.setHours(0, 0, 0, 0)),
-        lt: new Date(d.setHours(23, 59, 59, 999)),
-      };
-    }
-  }
-  const rundowns = await db.rundown.findMany({
-    where,
-    include: { stories: { orderBy: { sortOrder: 'asc' } } },
-    orderBy: { airDate: 'desc' },
-    take: 20,
-  });
-  res.json({ rundowns });
-});
+router.get('/rundowns', validate(rundownQuery, 'query'), async (req: Request, res: Response) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- validated by middleware
+  const { cursor, limit, order } = req.query as any;
+  const connectionId = req.query['connectionId'] as string | undefined;
+  const date = req.query['date'] as string | undefined;
 
-router.get('/rundowns/:id', async (req: Request, res: Response) => {
-  const rundown = await db.rundown.findUniqueOrThrow({
-    where: { id: req.params.id },
-    include: {
-      stories: { orderBy: { sortOrder: 'asc' } },
-      nrcsConnection: true,
+  const result = await newsService.listRundowns({ cursor, limit, order, connectionId, date });
+
+  const lastItem = result.data[result.data.length - 1];
+  const firstItem = result.data[0];
+
+  res.json({
+    rundowns: result.data,
+    pagination: {
+      nextCursor: result.hasMore && lastItem ? lastItem.id : null,
+      prevCursor: firstItem ? firstItem.id : null,
+      limit,
+      total: result.total,
+      hasMore: result.hasMore,
     },
   });
+});
+
+router.get('/rundowns/:id', validate(uuidParam, 'params'), async (req: Request, res: Response) => {
+  const rundown = await newsService.getRundown(req.params['id']!);
   res.json({ rundown });
 });
 
 // ─── Stories ──────────────────────────────────────────────────────────────────
 
-const updateStorySchema = z.object({
-  status: z.enum(['UNASSIGNED', 'IN_EDIT', 'READY', 'AIRED', 'KILLED']).optional(),
-  assignedEditorId: z.string().uuid().optional().nullable(),
-  actualDuration: z.number().optional(),
-  priority: z.number().int().min(0).max(2).optional(),
-});
-
-router.get('/stories/:id', async (req: Request, res: Response) => {
-  const story = await db.newsStory.findUniqueOrThrow({
-    where: { id: req.params.id },
-    include: { rundown: true },
-  });
+router.get('/stories/:id', validate(storyIdParam, 'params'), async (req: Request, res: Response) => {
+  const story = await newsService.getStory(req.params['id']!);
   res.json({ story });
 });
 
-router.patch('/stories/:id', async (req: Request, res: Response) => {
-  const data = updateStorySchema.parse(req.body);
-  const story = await db.newsStory.update({
-    where: { id: req.params.id },
-    data,
-  });
+router.patch('/stories/:id', validateAll({ params: storyIdParam, body: schemas.updateStory }), async (req: Request, res: Response) => {
+  const story = await newsService.updateStory(req.params['id']!, req.body);
   res.json({ story });
 });
 
-router.post('/stories/:id/assign', async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const story = await db.newsStory.update({
-    where: { id: req.params.id },
-    data: { assignedEditorId: userId, status: 'IN_EDIT' },
-  });
+router.post('/stories/:id/assign', validate(storyIdParam, 'params'), async (req: Request, res: Response) => {
+  const story = await newsService.assignStory(req.params['id']!, req.user!.id);
   res.json({ story });
 });
 
-router.post('/stories/:id/mark-ready', async (req: Request, res: Response) => {
-  const story = await db.newsStory.update({
-    where: { id: req.params.id },
-    data: { status: 'READY' },
-  });
+router.post('/stories/:id/mark-ready', validate(storyIdParam, 'params'), async (req: Request, res: Response) => {
+  const story = await newsService.markReady(req.params['id']!);
   res.json({ story });
 });
 
-router.post('/stories/:id/send-to-air', async (req: Request, res: Response) => {
-  const { destinationId } = req.body;
-  const story = await db.newsStory.findUniqueOrThrow({
-    where: { id: req.params.id },
-  });
-
-  // Get playout destination
-  const destination = await db.playoutDestination.findUniqueOrThrow({
-    where: { id: destinationId },
-  });
-
-  // In production: export MXF and FTP to playout server
-  // For now, mark story as aired
-  const updated = await db.newsStory.update({
-    where: { id: req.params.id },
-    data: { status: 'AIRED' },
-  });
-
-  res.json({
-    story: updated,
-    playout: {
-      destination: destination.name,
-      status: 'QUEUED',
-      message: `Exporting to ${destination.type} at ${destination.host}`,
-    },
-  });
-});
+router.post(
+  '/stories/:id/send-to-air',
+  validateAll({ params: storyIdParam, body: schemas.sendToAir }),
+  async (req: Request, res: Response) => {
+    const { destinationId } = req.body;
+    const result = await newsService.sendToAir(req.params['id']!, destinationId);
+    res.json(result);
+  }
+);
 
 // ─── Playout Destinations ─────────────────────────────────────────────────────
 
-const createPlayoutSchema = z.object({
-  orgId: z.string().uuid(),
-  name: z.string().min(1),
-  type: z.enum(['AIRSPEED', 'VIZ_ARK', 'ROSS_STRATUS', 'GRASS_VALLEY_K2', 'GENERIC_MXF_FTP']),
-  host: z.string().min(1),
-  port: z.number().int().optional(),
-  basePath: z.string().optional(),
-  filenamePattern: z.string().optional(),
-  outputFormat: z.string().optional(),
-});
-
-router.get('/playout-destinations', async (req: Request, res: Response) => {
-  const destinations = await db.playoutDestination.findMany({
-    where: { isActive: true },
-  });
+router.get('/playout-destinations', async (_req: Request, res: Response) => {
+  const destinations = await newsService.listDestinations();
   res.json({ destinations });
 });
 
-router.post('/playout-destinations', async (req: Request, res: Response) => {
-  const data = createPlayoutSchema.parse(req.body);
-  const destination = await db.playoutDestination.create({ data });
+router.post('/playout-destinations', validate(schemas.createPlayoutDestination), async (req: Request, res: Response) => {
+  const destination = await newsService.createDestination(req.body);
   res.status(201).json({ destination });
 });
 
-router.delete('/playout-destinations/:id', async (req: Request, res: Response) => {
-  await db.playoutDestination.update({
-    where: { id: req.params.id },
-    data: { isActive: false },
-  });
-  res.json({ success: true });
+router.delete('/playout-destinations/:id', validate(uuidParam, 'params'), async (req: Request, res: Response) => {
+  await newsService.deactivateDestination(req.params['id']!);
+  res.status(204).send();
 });
 
 export default router;

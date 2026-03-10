@@ -42,7 +42,7 @@ export class VizrtAdapter implements CGSystemAdapter {
   }
 
   formatCommand(supers: SupersData, template: CGTemplate): string {
-    const fields = this.buildPayload(supers, template).fields as Record<string, string>;
+    const fields = this.buildPayload(supers, template)['fields'] as Record<string, string>;
     const fieldStr = Object.entries(fields)
       .map(([key, val]) => `${key}=${val}`)
       .join('|');
@@ -191,13 +191,13 @@ export function extractSupersFromScript(scriptText: string): ExtractedSuper[] {
   const globalLocation = locationMatch?.[1]?.trim();
 
   while ((match = SUPER_PATTERN.exec(scriptText)) !== null) {
-    const raw = match[1].trim();
+    const raw = match[1]!.trim();
     const nameTitleMatch = NAME_TITLE_PATTERN.exec(raw);
 
     if (nameTitleMatch) {
       supers.push({
-        personName: nameTitleMatch[1].trim(),
-        title: nameTitleMatch[2].trim(),
+        personName: nameTitleMatch[1]!.trim(),
+        title: nameTitleMatch[2]!.trim(),
         location: globalLocation,
       });
     } else {
@@ -284,7 +284,7 @@ export class SupersGenerator {
     const system = options?.cgSystem ?? this.defaultSystem;
     const adapter = this.cgAdapters.get(system) ?? this.cgAdapters.get('GENERIC')!;
     const templateId = options?.templateId ?? this.selectTemplate(extracted);
-    const template = this.getTemplate(templateId) ?? DEFAULT_CG_TEMPLATES[0];
+    const template = this.getTemplate(templateId) ?? DEFAULT_CG_TEMPLATES[0]!;
     const trackTarget = options?.trackTarget ?? this.defaultTrackTarget;
 
     return extracted.map((ext, index) => {
@@ -332,7 +332,7 @@ export class SupersGenerator {
     const system = options?.cgSystem ?? this.defaultSystem;
     const adapter = this.cgAdapters.get(system) ?? this.cgAdapters.get('GENERIC')!;
     const templateId = options?.templateId ?? 'lt-standard';
-    const template = this.getTemplate(templateId) ?? DEFAULT_CG_TEMPLATES[0];
+    const template = this.getTemplate(templateId) ?? DEFAULT_CG_TEMPLATES[0]!;
     const trackTarget = options?.trackTarget ?? this.defaultTrackTarget;
 
     const supersData: SupersData = {
@@ -363,7 +363,7 @@ export class SupersGenerator {
   private selectTemplate(extracted: ExtractedSuper[]): string {
     if (extracted.length === 0) return 'lt-standard';
 
-    const first = extracted[0];
+    const first = extracted[0]!;
     if (first.location && first.title) return 'lt-location';
     if (first.title) return 'lt-standard';
     return 'fn-name-only';

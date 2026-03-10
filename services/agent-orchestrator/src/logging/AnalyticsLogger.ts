@@ -54,6 +54,26 @@ export interface AnalyticsFilter {
   readonly type?: AnalyticsEventType;
 }
 
+/** Aggregate analytics summary for a session. */
+export interface SessionSummary {
+  /** Session identifier. */
+  readonly sessionId: string;
+  /** Total number of analytics entries for this session. */
+  readonly entryCount: number;
+  /** Breakdown of entry counts by event type. */
+  readonly countsByType: Record<string, number>;
+  /** Total tokens consumed across all events. */
+  readonly totalTokens: number;
+  /** Number of execution events. */
+  readonly executionCount: number;
+  /** Number of successful execution events. */
+  readonly successCount: number;
+  /** Success rate as a ratio in [0, 1]. */
+  readonly successRate: number;
+  /** Average execution duration in milliseconds. */
+  readonly avgExecutionMs: number;
+}
+
 // ---------------------------------------------------------------------------
 // AnalyticsLogger
 // ---------------------------------------------------------------------------
@@ -248,6 +268,58 @@ export class AnalyticsLogger {
    */
   get size(): number {
     return this.entries.length;
+  }
+
+  /**
+   * Aggregate analytics for a specific session.
+   *
+   * Computes counts by event type, total tokens consumed, average execution
+   * latency, and success rate across all execution events in the session.
+   *
+   * @param sessionId - The session to aggregate.
+   * @returns Session-level analytics summary.
+   */
+  getSessionSummary(sessionId: string): SessionSummary {
+    const sessionEntries = this.entries.filter((e) => e.sessionId === sessionId);
+
+    const counts: Record<string, number> = {};
+    let totalTokens = 0;
+    let totalDurationMs = 0;
+    let executionCount = 0;
+    let successCount = 0;
+
+    for (const entry of sessionEntries) {
+      counts[entry.type] = (counts[entry.type] ?? 0) + 1;
+
+      if (entry.type === 'execution') {
+        executionCount++;
+        const dur = entry.data['durationMs'];
+        const tokens = entry.data['tokensConsumed'];
+        if (typeof dur === 'number') totalDurationMs += dur;
+        if (typeof tokens === 'number') totalTokens += tokens;
+        if (entry.data['success'] === true) successCount++;
+      }
+
+      if (entry.type === 'token-usage') {
+        const tokens = entry.data['tokens'];
+        if (typeof tokens === 'number') totalTokens += tokens;
+      }
+    }
+
+    return {
+      sessionId,
+      entryCount: sessionEntries.length,
+      countsByType: counts,
+      totalTokens,
+      executionCount,
+      successCount,
+      successRate: executionCount > 0
+        ? Math.round((successCount / executionCount) * 10_000) / 10_000
+        : 0,
+      avgExecutionMs: executionCount > 0
+        ? Math.round(totalDurationMs / executionCount)
+        : 0,
+    };
   }
 
   /**

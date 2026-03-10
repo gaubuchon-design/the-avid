@@ -5,6 +5,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { create } from 'zustand';
+import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import type {
   NRCSConnection,
@@ -174,6 +175,7 @@ const DEMO_PLAYOUT_DESTINATIONS: PlayoutDestination[] = [
     format: 'MXF_DNXHD',
     protocol: 'FTP',
     isDefault: true,
+    isOnline: true,
   },
   {
     id: 'dest-vizark',
@@ -186,6 +188,7 @@ const DEMO_PLAYOUT_DESTINATIONS: PlayoutDestination[] = [
     format: 'MXF_DNXHD',
     protocol: 'FTP',
     isDefault: false,
+    isOnline: true,
   },
 ];
 
@@ -265,6 +268,12 @@ interface NewsActions {
   clearSupersQueue: () => void;
   setCGTemplates: (templates: CGTemplate[]) => void;
 
+  // Reorder (convenience wrapper for moveStory in active rundown)
+  reorderStory: (storyId: string, newIndex: number) => void;
+
+  // Export to playout
+  exportToPlayout: (rundownId: string, destinationId: string) => void;
+
   // Polling
   setPolling: (active: boolean) => void;
   setPollInterval: (ms: number) => void;
@@ -281,12 +290,17 @@ interface NewsActions {
   getActiveStory: () => RundownEvent | null;
   getStoriesByStatus: (status: StoryStatus) => RundownEvent[];
   getUnacknowledgedAlerts: () => BreakingNewsAlert[];
+
+  // Reset
+  clearError: () => void;
+  resetStore: () => void;
 }
 
 // ─── Store ─────────────────────────────────────────────────────────────────
 
 export const useNewsStore = create<NewsState & NewsActions>()(
-  immer((set, get) => ({
+  devtools(
+    immer((set, get) => ({
     // Initial state
     nrcsConnection: {
       id: 'demo-nrcs',
@@ -296,6 +310,9 @@ export const useNewsStore = create<NewsState & NewsActions>()(
       credentials: { username: 'editor', password: '' },
       status: 'CONNECTED' as NRCSConnectionStatus,
       lastConnectedAt: new Date().toISOString(),
+      serverName: 'iNEWS Newsroom',
+      mosId: 'MOS.AVID.01',
+      lastHeartbeat: new Date().toISOString(),
     },
     rundowns: [DEMO_RUNDOWN],
     activeRundownId: DEMO_RUNDOWN.id,
@@ -396,7 +413,7 @@ export const useNewsStore = create<NewsState & NewsActions>()(
       const idx = rundown.stories.findIndex((st) => st.storyId === storyId);
       if (idx < 0) return;
       const [story] = rundown.stories.splice(idx, 1);
-      rundown.stories.splice(newIndex, 0, story);
+      rundown.stories.splice(newIndex, 0, story!);
       rundown.stories.forEach((st, i) => { st.sortOrder = i; });
     }),
 
@@ -475,6 +492,36 @@ export const useNewsStore = create<NewsState & NewsActions>()(
       s.cgTemplates = templates;
     }),
 
+    reorderStory: (storyId, newIndex) => set((s) => {
+      const rundown = s.rundowns.find((r) => r.id === s.activeRundownId);
+      if (!rundown) return;
+      const idx = rundown.stories.findIndex((st) => st.storyId === storyId);
+      if (idx < 0 || idx === newIndex) return;
+      const [story] = rundown.stories.splice(idx, 1);
+      rundown.stories.splice(newIndex, 0, story!);
+      rundown.stories.forEach((st, i) => { st.sortOrder = i; });
+    }),
+
+    exportToPlayout: (rundownId, destinationId) => set((s) => {
+      const rundown = s.rundowns.find((r) => r.id === rundownId);
+      const dest = s.playoutDestinations.find((d) => d.id === destinationId);
+      if (!rundown || !dest) return;
+
+      const readyStories = rundown.stories.filter((st) => st.status === 'READY');
+      for (const story of readyStories) {
+        const jobId = `pj-${story.storyId}-${Date.now()}`;
+        s.playoutJobs.unshift({
+          id: jobId,
+          storyId: story.storyId,
+          destinationId: dest.id,
+          destinationName: dest.name,
+          status: 'QUEUED' as PlayoutJobStatus,
+          startedAt: new Date().toISOString(),
+          progress: 0,
+        });
+      }
+    }),
+
     setPolling: (active) => set((s) => {
       s.isPolling = active;
     }),
@@ -527,5 +574,21 @@ export const useNewsStore = create<NewsState & NewsActions>()(
     getUnacknowledgedAlerts: () => {
       return get().breakingAlerts.filter((a) => !a.acknowledged);
     },
+
+    clearError: () => {
+      set((state) => {
+        state.lastError = null;
+      });
+    },
+
+    resetStore: () => {
+      set((state) => {
+        state.rundowns = [];
+        state.activeRundownId = null;
+        state.activeStoryId = null;
+        state.breakingAlerts = [];
+        state.lastError = null;
+      });
+    },
   })),
-);
+));

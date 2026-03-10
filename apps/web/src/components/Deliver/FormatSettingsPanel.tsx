@@ -178,7 +178,7 @@ function VideoTab({ settings, onChange }: { settings: ExportSettings; onChange: 
           value={`${settings.resolution.width}x${settings.resolution.height}`}
           onChange={(e) => {
             const [w, h] = e.target.value.split('x').map(Number);
-            onChange({ resolution: { width: w, height: h } });
+            onChange({ resolution: { width: w ?? 1920, height: h ?? 1080 } });
           }}
           style={selectStyle}
         >

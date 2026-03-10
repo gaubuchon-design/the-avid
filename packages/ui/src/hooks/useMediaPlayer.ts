@@ -1,34 +1,78 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+
 export interface UseMediaPlayerOptions {
+  /** Media source URL. */
   src?: string;
+  /** Auto-play on mount. Default: false. */
   autoPlay?: boolean;
+  /** Loop playback. Default: false. */
   loop?: boolean;
+  /** Initial volume (0-1). Default: 1. */
   volume?: number;
-  onTimeUpdate?: (time: number) => void;
+  /** Callback fired when the media starts playing. */
+  onPlay?: () => void;
+  /** Callback fired when the media is paused. */
+  onPause?: () => void;
+  /** Callback fired on each time update (throttled to animation frames). */
+  onTimeUpdate?: (currentTime: number) => void;
+  /** Callback fired when playback reaches the end. */
   onEnded?: () => void;
-  onError?: (error: string) => void;
+  /** Callback fired when a media error occurs. */
+  onError?: (message: string) => void;
+  /** Callback fired when the media duration is known. */
+  onDurationChange?: (duration: number) => void;
 }
 
 export interface UseMediaPlayerReturn {
+  /** Current playback position in seconds. */
   currentTime: number;
+  /** Total duration of the media in seconds. */
   duration: number;
+  /** Playback progress as a fraction (0-1). */
+  progress: number;
+  /** Whether the media is currently playing. */
   isPlaying: boolean;
+  /** Whether the media is muted. */
   isMuted: boolean;
+  /** Current volume level (0-1). */
   volume: number;
+  /** Whether the media is buffering/loading. */
   isLoading: boolean;
+  /** Whether the media has finished loading metadata. */
+  isReady: boolean;
+  /** Error message if playback failed, null otherwise. */
   error: string | null;
   /** Buffered fraction 0-1 */
   buffered: number;
+  /** Start or resume playback. */
   play: () => Promise<void>;
+  /** Pause playback. */
   pause: () => void;
+  /** Toggle between play and pause. */
+  togglePlayback: () => Promise<void>;
+  /** Stop playback and reset to beginning. */
   stop: () => void;
+  /** Seek to a specific time in seconds. */
   seek: (time: number) => void;
+  /** Seek by a relative offset in seconds (positive = forward). */
+  seekRelative: (offset: number) => void;
+  /** Set the volume (0-1). */
   setVolume: (v: number) => void;
+  /** Toggle mute on/off. */
   toggleMute: () => void;
+  /** Set playback rate (e.g. 0.5, 1, 2). */
+  setPlaybackRate: (rate: number) => void;
+  /** Current playback rate. */
+  playbackRate: number;
+  /** Clear the current error state. */
   clearError: () => void;
+  /** Ref to attach to the <video> or <audio> element. */
   mediaRef: React.RefObject<HTMLVideoElement | HTMLAudioElement | null>;
 }
+
+// ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useMediaPlayer(options: UseMediaPlayerOptions = {}): UseMediaPlayerReturn {
   const {
@@ -36,9 +80,12 @@ export function useMediaPlayer(options: UseMediaPlayerOptions = {}): UseMediaPla
     autoPlay = false,
     loop = false,
     volume: initialVolume = 1,
+    onPlay,
+    onPause,
     onTimeUpdate,
     onEnded,
     onError,
+    onDurationChange,
   } = options;
 
   const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
@@ -48,12 +95,14 @@ export function useMediaPlayer(options: UseMediaPlayerOptions = {}): UseMediaPla
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolumeState] = useState(initialVolume);
   const [isLoading, setIsLoading] = useState(false);
+  const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [buffered, setBuffered] = useState(0);
+  const [playbackRate, setPlaybackRateState] = useState(1);
 
   // Keep callback refs stable to avoid re-subscribing events
-  const callbacksRef = useRef({ onTimeUpdate, onEnded, onError });
-  callbacksRef.current = { onTimeUpdate, onEnded, onError };
+  const callbacksRef = useRef({ onPlay, onPause, onTimeUpdate, onEnded, onError, onDurationChange });
+  callbacksRef.current = { onPlay, onPause, onTimeUpdate, onEnded, onError, onDurationChange };
 
   // Track previous volume for mute/unmute restore
   const prevVolumeRef = useRef(initialVolume);
@@ -72,13 +121,25 @@ export function useMediaPlayer(options: UseMediaPlayerOptions = {}): UseMediaPla
     const handleDurationChange = () => {
       if (Number.isFinite(el.duration)) {
         setDuration(el.duration);
+        callbacksRef.current.onDurationChange?.(el.duration);
       }
     };
 
-    const handlePlay = () => setIsPlaying(true);
-    const handlePause = () => setIsPlaying(false);
+    const handlePlay = () => {
+      setIsPlaying(true);
+      callbacksRef.current.onPlay?.();
+    };
+
+    const handlePause = () => {
+      setIsPlaying(false);
+      callbacksRef.current.onPause?.();
+    };
+
     const handleWaiting = () => setIsLoading(true);
-    const handleCanPlay = () => setIsLoading(false);
+    const handleCanPlay = () => {
+      setIsLoading(false);
+      setIsReady(true);
+    };
 
     const handleError = () => {
       const mediaError = el.error;
@@ -119,6 +180,7 @@ export function useMediaPlayer(options: UseMediaPlayerOptions = {}): UseMediaPla
       if (Number.isFinite(el.duration)) {
         setDuration(el.duration);
       }
+      setIsReady(true);
     };
 
     const events: [string, EventListener][] = [
@@ -164,7 +226,7 @@ export function useMediaPlayer(options: UseMediaPlayerOptions = {}): UseMediaPla
     const el = mediaRef.current;
     if (!el || !autoPlay || !src) return;
     el.play().catch(() => {
-      // Browser may block autoplay — silently ignore
+      // Browser may block autoplay -- silently ignore
     });
   }, [autoPlay, src]);
 
@@ -187,6 +249,14 @@ export function useMediaPlayer(options: UseMediaPlayerOptions = {}): UseMediaPla
     mediaRef.current?.pause();
   }, []);
 
+  const togglePlayback = useCallback(async () => {
+    if (isPlaying) {
+      pause();
+    } else {
+      await play();
+    }
+  }, [isPlaying, play, pause]);
+
   const stop = useCallback(() => {
     const el = mediaRef.current;
     if (!el) return;
@@ -202,6 +272,12 @@ export function useMediaPlayer(options: UseMediaPlayerOptions = {}): UseMediaPla
     el.currentTime = clamped;
     setCurrentTime(clamped);
   }, []);
+
+  const seekRelative = useCallback((offset: number) => {
+    if (mediaRef.current) {
+      seek(mediaRef.current.currentTime + offset);
+    }
+  }, [seek]);
 
   const setVolume = useCallback((v: number) => {
     const clamped = Math.max(0, Math.min(1, v));
@@ -231,25 +307,39 @@ export function useMediaPlayer(options: UseMediaPlayerOptions = {}): UseMediaPla
     }
   }, []);
 
+  const setPlaybackRate = useCallback((rate: number) => {
+    const clamped = Math.max(0.1, Math.min(16, rate));
+    if (mediaRef.current) mediaRef.current.playbackRate = clamped;
+    setPlaybackRateState(clamped);
+  }, []);
+
   const clearError = useCallback(() => {
     setError(null);
   }, []);
 
+  const progress = duration > 0 ? currentTime / duration : 0;
+
   return {
     currentTime,
     duration,
+    progress,
     isPlaying,
     isMuted,
     volume,
     isLoading,
+    isReady,
     error,
     buffered,
     play,
     pause,
+    togglePlayback,
     stop,
     seek,
+    seekRelative,
     setVolume,
     toggleMute,
+    setPlaybackRate,
+    playbackRate,
     clearError,
     mediaRef,
   };

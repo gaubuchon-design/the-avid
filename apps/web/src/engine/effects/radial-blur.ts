@@ -57,10 +57,10 @@ export function applyRadialBlur(
         if (sx < 0 || sx >= width || sy < 0 || sy >= height) continue;
 
         const si = (sy * width + sx) * 4;
-        r += src[si];
-        g += src[si + 1];
-        b += src[si + 2];
-        a += src[si + 3];
+        r += src[si]!;
+        g += src[si + 1]!;
+        b += src[si + 2]!;
+        a += src[si + 3]!;
         count++;
       }
 

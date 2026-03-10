@@ -1,5 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { authenticate, requireProjectAccess } from '../../middleware/auth';
+import {
+  validate, validateAll, schemas,
+  projectIdParam, projectIdAndBinIdParams,
+} from '../../utils/validation';
 import { NotFoundError, BadRequestError } from '../../utils/errors';
 
 const router = Router();
@@ -7,11 +11,6 @@ router.use(authenticate);
 
 // =============================================================================
 //  Export API Routes (FT-01, FT-02, FT-03, FT-08)
-// =============================================================================
-//
-//  Provides REST endpoints for AAF/OMF, EDL/ALE/CSV, Relink, and Stem exports.
-//  These routes coordinate between the client-side engines and server-side
-//  encoding/file-system operations.
 // =============================================================================
 
 // ─── AAF / OMF Export (FT-01) ───────────────────────────────────────────────
@@ -23,29 +22,13 @@ router.use(authenticate);
 router.post(
   '/projects/:projectId/export/aaf',
   requireProjectAccess('EDITOR'),
+  validateAll({ params: projectIdParam, body: schemas.exportAAF }),
   async (req: Request, res: Response) => {
-    const { projectId } = req.params;
+    const projectId = req.params['projectId']!;
     const {
-      format = 'aaf',
-      embedMedia = false,
-      includeMarkers = true,
-      includeEffects = true,
-      includeMetadata = true,
-      frameRate,
-      dropFrame = false,
-      trackFilter,
+      format, embedMedia, includeMarkers, includeEffects,
+      includeMetadata, frameRate, dropFrame, trackFilter,
     } = req.body;
-
-    if (!['aaf', 'omf'].includes(format)) {
-      throw new BadRequestError('format must be "aaf" or "omf"');
-    }
-
-    // In production, this would:
-    // 1. Load project from database
-    // 2. Instantiate AAFExporter from @the-avid/core
-    // 3. Generate the composition descriptor
-    // 4. If embedMedia, package the referenced media files
-    // 5. Return the serialised AAF or a download URL
 
     const exportJob = {
       id: `aaf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -54,13 +37,8 @@ router.post(
       status: 'pending',
       createdAt: new Date().toISOString(),
       options: {
-        embedMedia,
-        includeMarkers,
-        includeEffects,
-        includeMetadata,
-        frameRate,
-        dropFrame,
-        trackFilter,
+        embedMedia, includeMarkers, includeEffects,
+        includeMetadata, frameRate, dropFrame, trackFilter,
       },
     };
 
@@ -75,18 +53,9 @@ router.post(
 router.post(
   '/projects/:projectId/import/aaf',
   requireProjectAccess('EDITOR'),
+  validateAll({ params: projectIdParam, body: schemas.importAAFComposition }),
   async (req: Request, res: Response) => {
-    const { projectId } = req.params;
-    const { composition } = req.body;
-
-    if (!composition) {
-      throw new BadRequestError('composition data is required');
-    }
-
-    // In production, this would:
-    // 1. Parse the AAF composition via AAFExporter.importFromComposition()
-    // 2. Merge the resulting tracks/markers into the project
-    // 3. Save the updated project
+    const projectId = req.params['projectId']!;
 
     const importResult = {
       projectId,
@@ -109,27 +78,13 @@ router.post(
 router.post(
   '/projects/:projectId/export/edl',
   requireProjectAccess('VIEWER'),
+  validateAll({ params: projectIdParam, body: schemas.exportEDL }),
   async (req: Request, res: Response) => {
-    const { projectId } = req.params;
+    const projectId = req.params['projectId']!;
     const {
-      format = 'edl',
-      title,
-      frameRate,
-      timecodeMode = 'non-drop',
-      includeComments = true,
-      includeSpeedChanges = true,
-      trackTypes,
+      format, title, frameRate, timecodeMode,
+      includeComments, includeSpeedChanges, trackTypes,
     } = req.body;
-
-    if (!['edl', 'ale', 'csv'].includes(format)) {
-      throw new BadRequestError('format must be "edl", "ale", or "csv"');
-    }
-
-    // In production, this would:
-    // 1. Load project from database
-    // 2. Instantiate EDLExporter
-    // 3. Call the appropriate export method
-    // 4. Return the text content
 
     const exportResult = {
       id: `edl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -139,12 +94,8 @@ router.post(
       content: '', // Would contain the actual EDL/ALE/CSV text
       createdAt: new Date().toISOString(),
       options: {
-        title,
-        frameRate,
-        timecodeMode,
-        includeComments,
-        includeSpeedChanges,
-        trackTypes,
+        title, frameRate, timecodeMode,
+        includeComments, includeSpeedChanges, trackTypes,
       },
     };
 
@@ -156,16 +107,13 @@ router.post(
 
 /**
  * GET /projects/:projectId/relink/status
- * Get the relink status and offline asset count for the project.
  */
 router.get(
   '/projects/:projectId/relink/status',
   requireProjectAccess('VIEWER'),
+  validate(projectIdParam, 'params'),
   async (req: Request, res: Response) => {
-    const { projectId } = req.params;
-
-    // In production, this would scan the project's media assets
-    // using RelinkEngine.getOfflineAssets()
+    const projectId = req.params['projectId']!;
 
     res.json({
       projectId,
@@ -178,24 +126,13 @@ router.get(
 
 /**
  * POST /projects/:projectId/relink/scan
- * Scan a directory for candidate media files to relink.
  */
 router.post(
   '/projects/:projectId/relink/scan',
   requireProjectAccess('EDITOR'),
+  validateAll({ params: projectIdParam, body: schemas.relinkScan }),
   async (req: Request, res: Response) => {
-    const { projectId } = req.params;
-    const { scanPaths } = req.body;
-
-    if (!scanPaths || !Array.isArray(scanPaths) || scanPaths.length === 0) {
-      throw new BadRequestError('scanPaths array is required');
-    }
-
-    // In production, this would:
-    // 1. Scan the directories for media files
-    // 2. Extract fingerprints and technical metadata
-    // 3. Use RelinkEngine.generateProposals() to match
-    // 4. Return the proposals
+    const projectId = req.params['projectId']!;
 
     const scanResult = {
       id: `scan_${Date.now()}`,
@@ -212,23 +149,14 @@ router.post(
 
 /**
  * POST /projects/:projectId/relink/apply
- * Apply confirmed relink proposals to the project.
  */
 router.post(
   '/projects/:projectId/relink/apply',
   requireProjectAccess('EDITOR'),
+  validateAll({ params: projectIdParam, body: schemas.relinkApply }),
   async (req: Request, res: Response) => {
-    const { projectId } = req.params;
+    const projectId = req.params['projectId']!;
     const { proposals } = req.body;
-
-    if (!proposals || !Array.isArray(proposals)) {
-      throw new BadRequestError('proposals array is required');
-    }
-
-    // In production, this would:
-    // 1. Validate the proposals
-    // 2. Use RelinkEngine.applyRelink() to update the project
-    // 3. Save the updated project
 
     const relinkResult = {
       projectId,
@@ -247,38 +175,17 @@ router.post(
 
 /**
  * POST /projects/:projectId/export/stems
- * Generate audio stem export jobs for the project.
  */
 router.post(
   '/projects/:projectId/export/stems',
   requireProjectAccess('EDITOR'),
+  validateAll({ params: projectIdParam, body: schemas.exportStems }),
   async (req: Request, res: Response) => {
-    const { projectId } = req.params;
+    const projectId = req.params['projectId']!;
     const {
-      preset = 'Film/TV Standard',
-      format = 'wav',
-      bitDepth = 24,
-      sampleRate = 48000,
-      embedTimecode = true,
-      normalize = false,
-      includeFullMix = true,
-      stemAssignments,
+      preset, format, bitDepth, sampleRate,
+      embedTimecode, normalize, includeFullMix,
     } = req.body;
-
-    if (!['wav', 'aiff'].includes(format)) {
-      throw new BadRequestError('format must be "wav" or "aiff"');
-    }
-    if (![16, 24, 32].includes(bitDepth)) {
-      throw new BadRequestError('bitDepth must be 16, 24, or 32');
-    }
-
-    // In production, this would:
-    // 1. Load project from database
-    // 2. Instantiate StemExporter
-    // 3. Apply stem assignments
-    // 4. Call StemExporter.export()
-    // 5. Queue encoding jobs
-    // 6. Return job descriptors
 
     const exportResult = {
       id: `stems_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -286,12 +193,8 @@ router.post(
       preset,
       status: 'pending',
       config: {
-        format,
-        bitDepth,
-        sampleRate,
-        embedTimecode,
-        normalize,
-        includeFullMix,
+        format, bitDepth, sampleRate,
+        embedTimecode, normalize, includeFullMix,
       },
       createdAt: new Date().toISOString(),
     };
@@ -302,11 +205,11 @@ router.post(
 
 /**
  * GET /projects/:projectId/export/stems/presets
- * Get available stem export presets.
  */
 router.get(
   '/projects/:projectId/export/stems/presets',
   requireProjectAccess('VIEWER'),
+  validate(projectIdParam, 'params'),
   async (_req: Request, res: Response) => {
     const presets = [
       'Film/TV Standard',
@@ -323,24 +226,14 @@ router.get(
 
 /**
  * POST /projects/:projectId/multicam
- * Create a new multi-cam group.
  */
 router.post(
   '/projects/:projectId/multicam',
   requireProjectAccess('EDITOR'),
+  validateAll({ params: projectIdParam, body: schemas.createMulticam }),
   async (req: Request, res: Response) => {
-    const { projectId } = req.params;
+    const projectId = req.params['projectId']!;
     const { name, syncMethod, assetIds } = req.body;
-
-    if (!name || !syncMethod || !assetIds || !Array.isArray(assetIds)) {
-      throw new BadRequestError('name, syncMethod, and assetIds are required');
-    }
-    if (assetIds.length < 2) {
-      throw new BadRequestError('At least 2 angles are required');
-    }
-    if (assetIds.length > 16) {
-      throw new BadRequestError('Maximum 16 angles allowed');
-    }
 
     const multiCamGroup = {
       id: `mcg_${Date.now()}`,
@@ -360,18 +253,18 @@ router.post(
 
 /**
  * POST /projects/:projectId/bins/:binId/lock
- * Check out (lock) a bin for editing.
  */
 router.post(
   '/projects/:projectId/bins/:binId/lock',
   requireProjectAccess('EDITOR'),
+  validateAll({ params: projectIdAndBinIdParams, body: schemas.binLockMessage }),
   async (req: Request, res: Response) => {
-    const { projectId, binId } = req.params;
+    const projectId = req.params['projectId']!;
+    const binId = req.params['binId']!;
     const { message } = req.body;
     const userId = req.user!.id;
     const displayName = req.user!.displayName;
 
-    // In production, this would use BinLockManager.checkOut()
     const lockResult = {
       acquired: true,
       lock: {
@@ -389,16 +282,14 @@ router.post(
 
 /**
  * DELETE /projects/:projectId/bins/:binId/lock
- * Check in (release) a bin lock.
  */
 router.delete(
   '/projects/:projectId/bins/:binId/lock',
   requireProjectAccess('EDITOR'),
+  validate(projectIdAndBinIdParams, 'params'),
   async (req: Request, res: Response) => {
-    const { binId } = req.params;
-    const userId = req.user!.id;
+    const binId = req.params['binId']!;
 
-    // In production, this would use BinLockManager.checkIn()
     res.status(200).json({
       released: true,
       binId,
@@ -409,13 +300,12 @@ router.delete(
 
 /**
  * GET /projects/:projectId/bins/locks
- * Get all active bin locks for the project.
  */
 router.get(
   '/projects/:projectId/bins/locks',
   requireProjectAccess('VIEWER'),
+  validate(projectIdParam, 'params'),
   async (req: Request, res: Response) => {
-    // In production, this would use BinLockManager.getAllLocks()
     res.json({ locks: [] });
   },
 );
@@ -424,19 +314,14 @@ router.get(
 
 /**
  * POST /projects/:projectId/sequences/compare
- * Compare two sequences and return a diff result.
  */
 router.post(
   '/projects/:projectId/sequences/compare',
   requireProjectAccess('VIEWER'),
+  validateAll({ params: projectIdParam, body: schemas.sequenceCompare }),
   async (req: Request, res: Response) => {
-    const { sequenceA, sequenceB, options } = req.body;
+    const { sequenceA, sequenceB } = req.body as { sequenceA: { name?: string }; sequenceB: { name?: string } };
 
-    if (!sequenceA || !sequenceB) {
-      throw new BadRequestError('sequenceA and sequenceB are required');
-    }
-
-    // In production, this would use SequenceDiff.compare()
     const diffResult = {
       nameA: sequenceA.name ?? 'Sequence A',
       nameB: sequenceB.name ?? 'Sequence B',

@@ -302,7 +302,7 @@ describe('ShardManager', () => {
       const source = manager.openShard(result.shardA);
       const sourceAssets = source.db.listAssets();
       expect(sourceAssets).toHaveLength(1);
-      expect(sourceAssets[0].id).toBe('broll-1');
+      expect(sourceAssets[0]!.id).toBe('broll-1');
       source.db.close();
 
       // Verify target shard has both interviews.
@@ -315,7 +315,7 @@ describe('ShardManager', () => {
       // Verify transcript was migrated.
       const segments = target.db.getTranscriptForAsset('interview-1');
       expect(segments).toHaveLength(1);
-      expect(segments[0].text).toBe('Hello');
+      expect(segments[0]!.text).toBe('Hello');
       target.db.close();
     });
 
@@ -426,15 +426,15 @@ describe('ANN Index integration', () => {
     // Build index.
     const { IndexBuilder } = await import('../index/IndexBuilder.js');
     const builder = new IndexBuilder();
-    const index = builder.buildIndex(db);
+    const { index } = builder.buildIndex(db);
 
     expect(index.size()).toBe(2);
 
     // Search for something similar to the first vector.
     const results = index.search([0.9, 0.1, 0.0], 2);
     expect(results).toHaveLength(2);
-    expect(results[0].id).toBe('emb-1'); // Should be the closest match.
-    expect(results[0].score).toBeGreaterThan(results[1].score);
+    expect(results[0]!.id).toBe('emb-1'); // Should be the closest match.
+    expect(results[0]!.score).toBeGreaterThan(results[1]!.score);
 
     db.close();
   });

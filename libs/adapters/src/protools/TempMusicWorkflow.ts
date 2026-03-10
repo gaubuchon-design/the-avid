@@ -127,21 +127,21 @@ export async function placeTempMusic(
     : candidates[0];
 
   const actualDuration = duration
-    ? Math.min(duration, selected.durationSec)
-    : selected.durationSec;
+    ? Math.min(duration, selected!.durationSec)
+    : selected!.durationSec;
 
   const warnings: string[] = [];
-  if (duration && duration > selected.durationSec) {
+  if (duration && duration > selected!.durationSec) {
     warnings.push(
-      `Requested duration (${duration}s) exceeds track length (${selected.durationSec}s). ` +
+      `Requested duration (${duration}s) exceeds track length (${selected!.durationSec}s). ` +
         'The clip may loop or be shorter than expected.',
     );
   }
 
   return {
     success: true,
-    trackName: selected.name,
-    libraryEntryId: selected.id,
+    trackName: selected!.name,
+    libraryEntryId: selected!.id,
     targetTrack: 'A3_Music',
     startTimeSec: startTime,
     endTimeSec: startTime + actualDuration,

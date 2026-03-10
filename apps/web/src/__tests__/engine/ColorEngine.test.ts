@@ -115,8 +115,8 @@ describe('ColorEngine', () => {
   it('getNodeChain() walks from source to output', () => {
     const chain = engine.getNodeChain();
     expect(chain.length).toBe(3);
-    expect(chain[0].type).toBe('source');
-    expect(chain[chain.length - 1].type).toBe('output');
+    expect(chain[0]!.type).toBe('source');
+    expect(chain[chain.length - 1]!.type).toBe('output');
   });
 
   // ── processFrame ──────────────────────────────────────────────────────

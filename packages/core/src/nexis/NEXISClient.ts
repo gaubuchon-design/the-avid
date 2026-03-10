@@ -300,10 +300,10 @@ export class NEXISClient {
 
     const idx = this.binLocks.findIndex((l) => l.binId === binId);
     if (idx >= 0) {
-      this.binLocks[idx].lockStatus = 'unlocked';
-      this.binLocks[idx].lockedBy = null;
-      this.binLocks[idx].lockedByDisplayName = null;
-      this.binLocks[idx].lockedAt = null;
+      this.binLocks[idx]!.lockStatus = 'unlocked';
+      this.binLocks[idx]!.lockedBy = null;
+      this.binLocks[idx]!.lockedByDisplayName = null;
+      this.binLocks[idx]!.lockedAt = null;
       this.emit('bin:unlocked', { binId });
     }
   }

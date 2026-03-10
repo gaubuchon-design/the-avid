@@ -25,6 +25,7 @@ export interface SequenceData {
   name: string;
   settings: SequenceSettings;
   tracks: Track[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- marker shape varies by context
   markers: any[];
   duration: number;
 }
@@ -224,7 +225,7 @@ export class NestingEngine {
     const compoundClipId = genCompoundClipId();
     const replacementClip: Clip = makeClip({
       id: compoundClipId,
-      trackId: firstTrack?.id ?? clips[0].trackId,
+      trackId: firstTrack?.id ?? clips[0]!.trackId,
       name: nestedSeq.name,
       startTime: earliestStart,
       endTime: latestEnd,
@@ -281,7 +282,7 @@ export class NestingEngine {
     this.sequenceStack.pop();
     const parentId = this.sequenceStack[this.sequenceStack.length - 1];
     this.notify();
-    return parentId;
+    return parentId ?? null;
   }
 
   /**
@@ -291,7 +292,7 @@ export class NestingEngine {
    */
   getActiveSequenceId(): string {
     if (this.sequenceStack.length === 0) return '';
-    return this.sequenceStack[this.sequenceStack.length - 1];
+    return this.sequenceStack[this.sequenceStack.length - 1]!;
   }
 
   // ═══════════════════════════════════════════════════════════════════════

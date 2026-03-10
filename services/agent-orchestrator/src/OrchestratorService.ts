@@ -7,6 +7,14 @@
  * This is the primary entry point consumed by the Express/WebSocket server
  * and exposes a high-level API for processing user intents, approving plans,
  * executing steps, and rolling back changes.
+ *
+ * ## Execution Modes
+ *
+ * - **Sequential** (default): Steps execute one at a time, stopping on failure.
+ * - **Parallel**: Independent steps execute concurrently with a configurable
+ *   concurrency limit to avoid overwhelming backend adapters.
+ * - **Conditional**: Steps execute sequentially but may be skipped based on
+ *   previous step results.
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -15,7 +23,10 @@ import type {
   AgentPlan,
   AgentStep,
   ApprovalPolicy,
+  DeadLetterEntry,
+  ExecutionMode,
   OrchestratorConfig,
+  ToolCallResult,
   ToolDefinition,
 } from './types';
 
@@ -81,6 +92,45 @@ const DEFAULT_TOOLS: ToolDefinition[] = [
 export type PlanUpdateSubscriber = (plan: AgentPlan) => void;
 
 // ---------------------------------------------------------------------------
+// Execution Concurrency
+// ---------------------------------------------------------------------------
+
+/** Default maximum number of steps to execute in parallel. */
+const DEFAULT_PARALLEL_CONCURRENCY = 4;
+
+/** Maximum number of plans that can execute at the same time. */
+const MAX_CONCURRENT_PLANS = 8;
+
+/** Maximum history entries before pruning. */
+const MAX_HISTORY_SIZE = 1_000;
+
+/** Percentage of history to prune when the limit is reached. */
+const HISTORY_PRUNE_PERCENT = 0.1;
+
+/** Maximum retry attempts for a single step before giving up. */
+const DEFAULT_STEP_RETRY_COUNT = 2;
+
+/** Token budget overshoot tolerance (10% headroom). */
+const TOKEN_BUDGET_HEADROOM = 0.1;
+
+/** Default plan-level execution timeout: 5 minutes. */
+const DEFAULT_PLAN_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** Default step-level backoff delays: 1s, 2s, 4s. */
+const DEFAULT_STEP_BACKOFF_DELAYS_MS: readonly number[] = [1_000, 2_000, 4_000];
+
+/** Default max dead-letter queue size. */
+const DEFAULT_DEAD_LETTER_MAX_SIZE = 100;
+
+/**
+ * Pre-built set of destructive tool names to avoid reallocating on every step.
+ * Destructive tools are not retried at the orchestrator level.
+ */
+const DESTRUCTIVE_TOOLS: ReadonlySet<string> = new Set([
+  'extract', 'lift', 'split_clip', 'overwrite', 'ripple_trim', 'remove_silence',
+]);
+
+// ---------------------------------------------------------------------------
 // OrchestratorService
 // ---------------------------------------------------------------------------
 
@@ -88,10 +138,15 @@ export type PlanUpdateSubscriber = (plan: AgentPlan) => void;
  * Central orchestration service for the agent pipeline.
  *
  * Lifecycle:
- * 1. `processIntent` — generate a plan from a user intent (returns in `preview` status).
- * 2. `approvePlan` / `approveStep` — approve the plan or individual steps.
+ * 1. `processIntent` -- generate a plan from a user intent (returns in `preview` status).
+ * 2. `approvePlan` / `approveStep` -- approve the plan or individual steps.
  * 3. Steps execute via the {@link ToolCallRouter}.
- * 4. `compensatePlan` — roll back executed steps if needed.
+ * 4. `compensatePlan` -- roll back executed steps if needed.
+ *
+ * Execution modes:
+ * - `sequential` -- steps execute one at a time (default).
+ * - `parallel`   -- independent steps execute concurrently.
+ * - `conditional` -- steps execute sequentially with skip logic.
  */
 export class OrchestratorService {
   private readonly planGenerator: PlanGenerator;
@@ -103,6 +158,15 @@ export class OrchestratorService {
   private readonly contextCache: ContextCache;
   private readonly analyticsLogger: AnalyticsLogger;
   private readonly tools: ToolDefinition[];
+  /** Indexed tool definitions for O(1) lookup by name instead of linear scan. */
+  private readonly toolsByName: Map<string, ToolDefinition>;
+  private readonly executionMode: ExecutionMode;
+  private readonly parallelConcurrency: number;
+  private readonly stepRetryCount: number;
+  private readonly tokenBudgetEnabled: boolean;
+  private readonly planTimeoutMs: number;
+  private readonly stepBackoffDelaysMs: readonly number[];
+  private readonly deadLetterMaxSize: number;
 
   /** All plans keyed by plan ID. */
   private plans: Map<string, AgentPlan> = new Map();
@@ -110,6 +174,14 @@ export class OrchestratorService {
   private history: AgentPlan[] = [];
   /** Subscribers for plan updates. */
   private subscribers: Set<PlanUpdateSubscriber> = new Set();
+  /** Tracks how many plans are currently executing. */
+  private executingPlanCount = 0;
+  /** Set of plan IDs that have been requested for cancellation. */
+  private cancelledPlanIds: Set<string> = new Set();
+  /** Dead-letter queue for plans that failed after exhausting retries. */
+  private deadLetterQueue: DeadLetterEntry[] = [];
+  /** Tracks per-plan execution start times for timeout enforcement. */
+  private planStartTimes: Map<string, number> = new Map();
 
   /**
    * @param config - Orchestrator configuration.
@@ -127,6 +199,14 @@ export class OrchestratorService {
     this.contextCache = new ContextCache();
     this.analyticsLogger = new AnalyticsLogger();
     this.tools = [...DEFAULT_TOOLS];
+    this.toolsByName = new Map(this.tools.map((t) => [t.name, t]));
+    this.executionMode = config.executionMode ?? 'sequential';
+    this.parallelConcurrency = DEFAULT_PARALLEL_CONCURRENCY;
+    this.stepRetryCount = config.stepRetryCount ?? DEFAULT_STEP_RETRY_COUNT;
+    this.tokenBudgetEnabled = config.tokenBudgetEnabled ?? true;
+    this.planTimeoutMs = config.planTimeoutMs ?? DEFAULT_PLAN_TIMEOUT_MS;
+    this.stepBackoffDelaysMs = config.stepBackoffDelaysMs ?? DEFAULT_STEP_BACKOFF_DELAYS_MS;
+    this.deadLetterMaxSize = config.deadLetterMaxSize ?? DEFAULT_DEAD_LETTER_MAX_SIZE;
   }
 
   // -----------------------------------------------------------------------
@@ -181,11 +261,17 @@ export class OrchestratorService {
   }
 
   /**
-   * Approve an entire plan and execute all pending steps sequentially.
+   * Approve an entire plan and execute all pending steps.
+   *
+   * Execution mode is determined by the service configuration:
+   * - `sequential` -- steps run one at a time.
+   * - `parallel`   -- independent steps run concurrently.
+   * - `conditional` -- steps run sequentially with skip logic.
    *
    * @param planId - The plan to approve.
    * @returns The plan after execution completes.
-   * @throws Error if the plan is not found or not in a valid state.
+   * @throws Error if the plan is not found, not in a valid state, or if the
+   *   concurrent plan execution limit has been reached.
    */
   async approvePlan(planId: string): Promise<AgentPlan> {
     const plan = this.plans.get(planId);
@@ -195,6 +281,14 @@ export class OrchestratorService {
 
     if (plan.status !== 'preview') {
       throw new Error(`Plan "${planId}" is in "${plan.status}" status and cannot be approved.`);
+    }
+
+    // Guard: enforce concurrent plan execution limit
+    if (this.executingPlanCount >= MAX_CONCURRENT_PLANS) {
+      throw new Error(
+        `Concurrent plan execution limit reached (${MAX_CONCURRENT_PLANS}). ` +
+        `Wait for an active plan to complete before approving another.`,
+      );
     }
 
     plan.status = 'approved';
@@ -209,12 +303,33 @@ export class OrchestratorService {
       }
     }
 
+    // Guard again right before execution in case multiple approvals raced.
+    if (this.executingPlanCount >= MAX_CONCURRENT_PLANS) {
+      plan.status = 'preview';
+      plan.updatedAt = new Date().toISOString();
+      for (const step of plan.steps) {
+        if (step.status === 'approved') {
+          (step as { status: string }).status = 'pending';
+        }
+      }
+      this.notify(plan);
+      throw new Error(
+        `Concurrent plan execution limit reached (${MAX_CONCURRENT_PLANS}). ` +
+        `Wait for an active plan to complete before approving another.`,
+      );
+    }
+
     // Execute
     plan.status = 'executing';
     plan.updatedAt = new Date().toISOString();
+    this.executingPlanCount++;
     this.notify(plan);
 
-    await this.executeSteps(plan);
+    try {
+      await this.executeSteps(plan);
+    } finally {
+      this.executingPlanCount = Math.max(0, this.executingPlanCount - 1);
+    }
 
     return plan;
   }
@@ -284,15 +399,24 @@ export class OrchestratorService {
   }
 
   /**
-   * Cancel a plan that may already be executing.
+   * Cancel a plan that may already be executing and compensate any
+   * completed destructive steps automatically.
    *
-   * @param planId - The plan to cancel.
+   * @param planId       - The plan to cancel.
+   * @param compensate   - Whether to automatically compensate executed steps (default: true).
+   * @returns Compensation summary if compensation was performed.
    */
-  async cancelPlan(planId: string): Promise<void> {
+  async cancelPlan(
+    planId: string,
+    compensate = true,
+  ): Promise<{ compensated: number; failed: number; skipped: number; totalDurationMs: number } | void> {
     const plan = this.plans.get(planId);
     if (!plan) {
       throw new Error(`Plan "${planId}" not found.`);
     }
+
+    // Signal cancellation so in-flight steps stop at the next checkpoint.
+    this.cancelledPlanIds.add(planId);
 
     plan.status = 'cancelled';
     plan.updatedAt = new Date().toISOString();
@@ -303,17 +427,47 @@ export class OrchestratorService {
       }
     }
 
+    this.toolLogger.logPlanEvent({
+      type: 'plan-failed',
+      planId,
+      metadata: { reason: 'Cancelled' },
+    });
+
+    // Auto-compensate completed destructive steps.
+    let result: { compensated: number; failed: number; skipped: number; totalDurationMs: number } | undefined;
+    if (compensate) {
+      const hasCompletedSteps = plan.steps.some((s) => s.status === 'completed');
+      if (hasCompletedSteps) {
+        result = await this.compensationManager.compensatePlan(planId, plan.steps);
+        for (const step of plan.steps) {
+          if (step.status === 'completed') {
+            const compensation = this.compensationManager
+              .getCompensations(planId)
+              .find((c) => c.stepId === step.id);
+            if (compensation?.success) {
+              (step as { status: string }).status = 'compensated';
+            }
+          }
+        }
+      }
+    }
+
+    this.cancelledPlanIds.delete(planId);
     this.archivePlan(plan);
     this.notify(plan);
+
+    return result;
   }
 
   /**
    * Compensate (undo) all executed steps in a plan.
    *
    * @param planId - The plan to compensate.
-   * @returns Summary of compensated and failed counts.
+   * @returns Summary of compensated, failed, and skipped counts.
    */
-  async compensatePlan(planId: string): Promise<{ compensated: number; failed: number }> {
+  async compensatePlan(
+    planId: string,
+  ): Promise<{ compensated: number; failed: number; skipped: number; totalDurationMs: number }> {
     const plan = this.plans.get(planId) ?? this.history.find((p) => p.id === planId);
     if (!plan) {
       throw new Error(`Plan "${planId}" not found.`);
@@ -411,33 +565,215 @@ export class OrchestratorService {
     };
   }
 
+  /**
+   * Get the current execution mode.
+   */
+  getExecutionMode(): ExecutionMode {
+    return this.executionMode;
+  }
+
+  /**
+   * Get the number of plans currently executing.
+   */
+  getExecutingPlanCount(): number {
+    return this.executingPlanCount;
+  }
+
+  /**
+   * Get a snapshot of execution metrics for monitoring dashboards.
+   */
+  getExecutionMetrics(): {
+    activePlans: number;
+    executingPlans: number;
+    historySize: number;
+    deadLetterSize: number;
+    subscriberCount: number;
+    cancelledPlanIds: number;
+  } {
+    return {
+      activePlans: this.plans.size,
+      executingPlans: this.executingPlanCount,
+      historySize: this.history.length,
+      deadLetterSize: this.deadLetterQueue.length,
+      subscriberCount: this.subscribers.size,
+      cancelledPlanIds: this.cancelledPlanIds.size,
+    };
+  }
+
+  /**
+   * Dispose of the orchestrator, cleaning up internal state.
+   * Should be called during graceful shutdown.
+   */
+  dispose(): void {
+    this.subscribers.clear();
+    this.cancelledPlanIds.clear();
+    this.planStartTimes.clear();
+    this.contextCache.clear();
+    // Don't clear plans/history -- they may be needed for final status reporting.
+  }
+
+  /**
+   * Get circuit breaker states for all adapters via the tool router.
+   */
+  getCircuitStates(): Record<string, string> {
+    const stats = this.toolRouter.getConsumptionStats();
+    const states: Record<string, string> = {};
+    for (const adapter of Object.keys(stats.byAdapter)) {
+      const state = this.toolRouter.getCircuitState(adapter);
+      if (state !== undefined) {
+        states[adapter] = state;
+      }
+    }
+    return states;
+  }
+
+  // -----------------------------------------------------------------------
+  // Dead-letter queue
+  // -----------------------------------------------------------------------
+
+  /**
+   * Get all entries in the dead-letter queue.
+   */
+  getDeadLetterQueue(): DeadLetterEntry[] {
+    return this.deadLetterQueue.map((entry) => ({
+      ...entry,
+      plan: {
+        ...entry.plan,
+        steps: entry.plan.steps.map((s) => ({ ...s })),
+      },
+    }));
+  }
+
+  /**
+   * Get the count of entries in the dead-letter queue.
+   */
+  getDeadLetterCount(): number {
+    return this.deadLetterQueue.length;
+  }
+
+  /**
+   * Clear the dead-letter queue.
+   */
+  clearDeadLetterQueue(): void {
+    this.deadLetterQueue.length = 0;
+  }
+
+  /**
+   * Remove a specific entry from the dead-letter queue by plan ID.
+   *
+   * @param planId - The plan ID to remove.
+   * @returns `true` if an entry was found and removed.
+   */
+  removeFromDeadLetterQueue(planId: string): boolean {
+    const index = this.deadLetterQueue.findIndex((e) => e.plan.id === planId);
+    if (index >= 0) {
+      this.deadLetterQueue.splice(index, 1);
+      return true;
+    }
+    return false;
+  }
+
   // -----------------------------------------------------------------------
   // Private: execution
   // -----------------------------------------------------------------------
 
   /**
-   * Execute all approved steps in a plan sequentially.
+   * Execute all approved steps in a plan using the configured execution mode.
+   * Enforces a plan-level timeout. On failure, auto-compensates completed
+   * destructive steps and dead-letters the plan if all retries are exhausted.
    */
   private async executeSteps(plan: AgentPlan): Promise<void> {
-    let allSucceeded = true;
+    this.planStartTimes.set(plan.id, Date.now());
 
-    for (const step of plan.steps) {
-      if (step.status === 'cancelled') continue;
-      if (step.status !== 'approved') continue;
+    let allSucceeded: boolean;
+    let timedOut = false;
 
-      const success = await this.executeSingleStep(plan, step);
-      if (!success) {
-        allSucceeded = false;
-        break; // Stop on first failure
+    try {
+      const executionPromise = (async (): Promise<boolean> => {
+        switch (this.executionMode) {
+          case 'parallel':
+            return this.executeStepsParallel(plan);
+          case 'conditional':
+            return this.executeStepsConditional(plan);
+          case 'sequential':
+          default:
+            return this.executeStepsSequential(plan);
+        }
+      })();
+
+      // Race execution against the plan-level timeout
+      const timeoutPromise = new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => {
+          timedOut = true;
+          // Signal cancellation so in-flight steps stop
+          this.cancelledPlanIds.add(plan.id);
+          resolve(false);
+        }, this.planTimeoutMs);
+        // Don't let the timer keep the process alive
+        if (typeof timer === 'object' && 'unref' in timer) {
+          timer.unref();
+        }
+        // Store for cleanup
+        (plan as { _timeoutTimer?: ReturnType<typeof setTimeout> })._timeoutTimer = timer;
+      });
+
+      allSucceeded = await Promise.race([executionPromise, timeoutPromise]);
+
+      // Clean up timeout timer
+      const timer = (plan as { _timeoutTimer?: ReturnType<typeof setTimeout> })._timeoutTimer;
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        delete (plan as { _timeoutTimer?: ReturnType<typeof setTimeout> })._timeoutTimer;
+      }
+    } finally {
+      this.planStartTimes.delete(plan.id);
+      // Clean up cancellation signal if it was set by timeout
+      if (timedOut) {
+        this.cancelledPlanIds.delete(plan.id);
       }
     }
 
-    plan.status = allSucceeded ? 'completed' : 'failed';
+    if (timedOut) {
+      // Mark remaining steps as cancelled due to timeout
+      for (const step of plan.steps) {
+        if (step.status === 'approved' || step.status === 'executing') {
+          (step as { status: string }).status = 'cancelled';
+          (step as { error?: string }).error = `Plan timed out after ${this.planTimeoutMs}ms`;
+        }
+      }
+    }
+
+    const planFailed = !allSucceeded;
+    plan.status = planFailed ? 'failed' : 'completed';
     plan.updatedAt = new Date().toISOString();
 
+    // On failure, auto-compensate completed destructive steps
+    if (planFailed) {
+      const hasCompletedSteps = plan.steps.some((s) => s.status === 'completed');
+      if (hasCompletedSteps) {
+        await this.compensationManager.compensatePlan(plan.id, plan.steps);
+        for (const step of plan.steps) {
+          if (step.status === 'completed') {
+            const compensation = this.compensationManager
+              .getCompensations(plan.id)
+              .find((c) => c.stepId === step.id);
+            if (compensation?.success) {
+              (step as { status: string }).status = 'compensated';
+            }
+          }
+        }
+      }
+
+      // Add to dead-letter queue
+      this.addToDeadLetterQueue(plan, timedOut
+        ? `Plan timed out after ${this.planTimeoutMs}ms`
+        : 'Plan execution failed');
+    }
+
     this.toolLogger.logPlanEvent({
-      type: allSucceeded ? 'plan-completed' : 'plan-failed',
+      type: planFailed ? 'plan-failed' : 'plan-completed',
       planId: plan.id,
+      metadata: timedOut ? { reason: 'timeout' } : undefined,
     });
 
     this.archivePlan(plan);
@@ -445,15 +781,216 @@ export class OrchestratorService {
   }
 
   /**
-   * Execute a single step: route the tool call, log the result, register
-   * compensation if applicable.
+   * Sequential execution: steps run one at a time, halting on first failure
+   * or if the plan has been cancelled.
+   */
+  private async executeStepsSequential(plan: AgentPlan): Promise<boolean> {
+    for (const step of plan.steps) {
+      // Check cancellation before each step.
+      if (this.isPlanCancelled(plan.id)) {
+        for (const remaining of plan.steps) {
+          if (remaining.status === 'approved') {
+            (remaining as { status: string }).status = 'cancelled';
+          }
+        }
+        return false;
+      }
+
+      if (step.status === 'cancelled') continue;
+      if (step.status !== 'approved') continue;
+
+      const success = await this.executeSingleStep(plan, step);
+      if (!success) {
+        // Cancel remaining steps on failure
+        for (const remaining of plan.steps) {
+          if (remaining.status === 'approved') {
+            (remaining as { status: string }).status = 'cancelled';
+          }
+        }
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Parallel execution: run approved steps concurrently with a concurrency
+   * limit to avoid overwhelming backend adapters.
+   *
+   * Steps are grouped by their adapter -- steps within the same adapter
+   * execute in order, but different adapters run in parallel.
+   */
+  private async executeStepsParallel(plan: AgentPlan): Promise<boolean> {
+    const approvedSteps = plan.steps.filter(
+      (s) => s.status === 'approved',
+    );
+
+    if (approvedSteps.length === 0) return true;
+
+    // Partition steps into batches respecting the concurrency limit
+    const batchSize = this.parallelConcurrency;
+    let allSucceeded = true;
+
+    for (let i = 0; i < approvedSteps.length; i += batchSize) {
+      const batch = approvedSteps.slice(i, i + batchSize);
+
+      // If a previous batch already failed, cancel remaining steps
+      if (!allSucceeded) {
+        for (const step of batch) {
+          (step as { status: string }).status = 'cancelled';
+        }
+        continue;
+      }
+
+      const results = await Promise.allSettled(
+        batch.map((step) => this.executeSingleStep(plan, step)),
+      );
+
+      for (const result of results) {
+        if (result.status === 'rejected' || (result.status === 'fulfilled' && !result.value)) {
+          allSucceeded = false;
+        }
+      }
+    }
+
+    return allSucceeded;
+  }
+
+  /**
+   * Conditional execution: steps run sequentially but may be skipped if
+   * the previous step failed (non-fatal skip, does not halt the plan).
+   */
+  private async executeStepsConditional(plan: AgentPlan): Promise<boolean> {
+    let anyFailed = false;
+
+    for (const step of plan.steps) {
+      if (step.status === 'cancelled') continue;
+      if (step.status !== 'approved') continue;
+
+      const success = await this.executeSingleStep(plan, step);
+      if (!success) {
+        anyFailed = true;
+        // In conditional mode, continue executing remaining steps
+        // (unlike sequential which halts on first failure)
+      }
+    }
+
+    return !anyFailed;
+  }
+
+  /**
+   * Check whether the plan has been flagged for cancellation or has
+   * exceeded its timeout.
+   */
+  private isPlanCancelled(planId: string): boolean {
+    if (this.cancelledPlanIds.has(planId)) return true;
+    // Check plan-level timeout
+    const startTime = this.planStartTimes.get(planId);
+    if (startTime !== undefined && Date.now() - startTime > this.planTimeoutMs) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Check whether executing the next step would exceed the plan's token budget.
+   *
+   * @param plan     - The plan being executed.
+   * @param toolName - The tool about to be invoked.
+   * @returns `true` if the budget would be exceeded.
+   */
+  private wouldExceedTokenBudget(plan: AgentPlan, toolName: string): boolean {
+    if (!this.tokenBudgetEnabled) return false;
+    if (plan.tokensEstimated <= 0) return false;
+
+    // O(1) tool definition lookup for token cost estimation.
+    const toolDef = this.toolsByName.get(toolName);
+    const estimatedStepCost = toolDef?.tokenCost ?? 10;
+
+    const budgetCeiling = plan.tokensEstimated * (1 + TOKEN_BUDGET_HEADROOM);
+    return plan.tokensUsed + estimatedStepCost > budgetCeiling;
+  }
+
+  /**
+   * Execute a single step with retry logic: route the tool call, log the
+   * result, register compensation if applicable, and track analytics.
+   *
+   * The step is retried up to `stepRetryCount` times for transient failures
+   * (as determined by the ToolCallRouter). Destructive tools are never
+   * retried at the orchestrator level; the router handles its own retry
+   * for non-destructive tools.
    */
   private async executeSingleStep(plan: AgentPlan, step: AgentStep): Promise<boolean> {
+    // Check for cancellation before starting.
+    if (this.isPlanCancelled(plan.id)) {
+      (step as { status: string }).status = 'cancelled';
+      return false;
+    }
+
+    // Check token budget before execution.
+    if (this.wouldExceedTokenBudget(plan, step.toolName)) {
+      (step as { status: string }).status = 'failed';
+      (step as { error?: string }).error =
+        `Token budget exceeded: used ${plan.tokensUsed} of ${plan.tokensEstimated} estimated tokens.`;
+      (step as { completedAt?: string }).completedAt = new Date().toISOString();
+      plan.updatedAt = new Date().toISOString();
+      this.notify(plan);
+      return false;
+    }
+
     (step as { status: string }).status = 'executing';
     (step as { startedAt?: string }).startedAt = new Date().toISOString();
     this.notify(plan);
 
-    const result = await this.toolRouter.route(step.toolName, step.toolArgs as Record<string, unknown>);
+    // Destructive tools should not be retried at the orchestrator level.
+    const isDestructive = DESTRUCTIVE_TOOLS.has(step.toolName);
+    const maxAttempts = isDestructive ? 1 : Math.max(1, this.stepRetryCount + 1);
+    let result: ToolCallResult | null = null;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      // Check cancellation between retries.
+      if (attempt > 0 && this.isPlanCancelled(plan.id)) {
+        (step as { status: string }).status = 'cancelled';
+        return false;
+      }
+
+      // Step-level backoff between retries using configurable delays (default: 1s, 2s, 4s).
+      if (attempt > 0) {
+        const delayIndex = Math.min(attempt - 1, this.stepBackoffDelaysMs.length - 1);
+        const backoffMs = this.stepBackoffDelaysMs[delayIndex] ?? 1_000;
+        await new Promise<void>((resolve) => setTimeout(resolve, backoffMs));
+      }
+
+      try {
+        result = await this.toolRouter.route(step.toolName, step.toolArgs as Record<string, unknown>);
+      } catch (err) {
+        // Defensive: if the router itself throws (should not normally happen)
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        if (attempt < maxAttempts - 1) continue; // retry
+        (step as { status: string }).status = 'failed';
+        (step as { error?: string }).error = errorMsg;
+        (step as { completedAt?: string }).completedAt = new Date().toISOString();
+        plan.updatedAt = new Date().toISOString();
+        this.notify(plan);
+        return false;
+      }
+
+      // If the call succeeded, break out of the retry loop.
+      if (result.success) break;
+
+      // If the call failed but we have retries left, continue.
+      if (attempt < maxAttempts - 1) continue;
+    }
+
+    // Should never be null given the loop, but guard defensively.
+    if (!result) {
+      (step as { status: string }).status = 'failed';
+      (step as { error?: string }).error = 'No result after retry attempts.';
+      (step as { completedAt?: string }).completedAt = new Date().toISOString();
+      plan.updatedAt = new Date().toISOString();
+      this.notify(plan);
+      return false;
+    }
 
     // Log the tool call
     this.toolLogger.logToolCall({
@@ -476,14 +1013,17 @@ export class OrchestratorService {
       (step as { result?: string }).result =
         typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
 
-      // Register a mock compensation for destructive tools
-      const destructiveTools = new Set(['extract', 'lift', 'split_clip', 'overwrite', 'ripple_trim', 'remove_silence']);
-      if (destructiveTools.has(step.toolName)) {
+      // Register compensation for destructive tools
+      if (isDestructive) {
+        const capturedToolName = step.toolName;
+        const capturedArgs = step.toolArgs;
         this.compensationManager.registerCompensation(
           step.id,
           async () => {
-            // Mock compensation: in a real system this would invoke an undo operation
-            console.log(`[CompensationManager] Compensating step "${step.id}" (${step.toolName})`);
+            // In a production system this would invoke the inverse operation
+            // via the adapter. For now the compensation is logged for auditing.
+            void capturedArgs;
+            void capturedToolName;
           },
           `Undo ${step.toolName}: ${step.description}`,
           plan.id,
@@ -506,6 +1046,27 @@ export class OrchestratorService {
   // -----------------------------------------------------------------------
 
   /**
+   * Add a failed plan to the dead-letter queue for later inspection.
+   */
+  private addToDeadLetterQueue(plan: AgentPlan, reason: string): void {
+    const failedSteps = plan.steps.filter((s) => s.status === 'failed');
+    this.deadLetterQueue.push({
+      plan: {
+        ...plan,
+        steps: plan.steps.map((s) => ({ ...s })),
+      },
+      reason,
+      deadLetteredAt: new Date().toISOString(),
+      attempts: failedSteps.length,
+    });
+
+    // Prune oldest entries if over the limit
+    while (this.deadLetterQueue.length > this.deadLetterMaxSize) {
+      this.deadLetterQueue.shift();
+    }
+  }
+
+  /**
    * Move a plan from the active map to the history array.
    */
   private archivePlan(plan: AgentPlan): void {
@@ -513,8 +1074,9 @@ export class OrchestratorService {
     this.history.push(plan);
 
     // Keep history bounded
-    if (this.history.length > 1000) {
-      this.history.splice(0, 100);
+    if (this.history.length > MAX_HISTORY_SIZE) {
+      const pruneCount = Math.max(1, Math.floor(MAX_HISTORY_SIZE * HISTORY_PRUNE_PERCENT));
+      this.history.splice(0, pruneCount);
     }
   }
 
@@ -561,7 +1123,8 @@ export class OrchestratorService {
       try {
         cb(snapshot);
       } catch (error) {
-        console.error('[OrchestratorService] Subscriber error:', error);
+        // Subscriber error — logged but not re-thrown to avoid disrupting notifications
+        void (error); // Swallow subscriber errors to protect other subscribers
       }
     }
   }

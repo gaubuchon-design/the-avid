@@ -203,10 +203,10 @@ export function RecordMonitor() {
   const isActive = usePlayerStore((s) => s.activeMonitor === 'record');
 
   return (
-    <div className={`monitor${isActive ? ' monitor-active' : ''}`} onClick={handleFocus}>
+    <div className={`monitor${isActive ? ' monitor-active' : ''}`} onClick={handleFocus} role="region" aria-label="Record Monitor">
       {/* Header */}
       <div className="monitor-header">
-        <span className="monitor-label record">RECORD</span>
+        <span className="monitor-label record" aria-hidden="true">RECORD</span>
         <span className="monitor-tc">{tc}</span>
       </div>
 
@@ -233,8 +233,8 @@ export function RecordMonitor() {
         </button>
 
         {/* Transport controls */}
-        <div className="transport-controls">
-          <button className="transport-btn" onClick={handleGoToStart} title="Go to Start (Home)">
+        <div className="transport-controls" role="group" aria-label="Record transport controls">
+          <button className="transport-btn" onClick={handleGoToStart} title="Go to Start (Home)" aria-label="Go to start">
             |&laquo;
           </button>
           <button className="transport-btn" onClick={handleRewind} title="Rewind (J)">
@@ -262,7 +262,7 @@ export function RecordMonitor() {
         </div>
 
         {/* Timecode display */}
-        <div className="timecode-display" style={{ marginLeft: 8, minWidth: 100 }}>
+        <div className="timecode-display" style={{ marginLeft: 8, minWidth: 100 }} role="status" aria-live="polite" aria-label="Current timecode">
           {tc}
         </div>
       </div>

@@ -11,7 +11,8 @@
     "type-check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "clean": "rm -rf dist"
   },
   "dependencies": {
     "@mcua/core": "*",
@@ -34,6 +35,6 @@
     "jsdom": "^28.1.0",
     "typescript": "^5.4.0",
     "vite": "^5.3.0",
-    "vitest": "^4.0.18"
+    "vitest": "^2.0.0"
   }
 }

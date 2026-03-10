@@ -137,7 +137,7 @@ function parseFrameRate(value?: string): number | undefined {
   if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
     return undefined;
   }
-  return numerator / denominator;
+  return numerator! / denominator!;
 }
 
 async function hasExecutable(name: string): Promise<boolean> {
@@ -317,8 +317,8 @@ async function probeMediaFile(filePath: string): Promise<EditorMediaTechnicalMet
       audioChannels: audioStream?.channels,
       sampleRate: audioStream?.sample_rate ? Number(audioStream.sample_rate) : undefined,
       bitRate: parsed.format?.bit_rate ? Number(parsed.format.bit_rate) : undefined,
-      timecodeStart: tags.timecode,
-      reelName: tags.reel_name ?? tags.reel,
+      timecodeStart: tags['timecode'],
+      reelName: tags['reel_name'] ?? tags['reel'],
     };
   } catch {
     return fallback;
@@ -400,7 +400,7 @@ async function extractWaveform(filePath: string, mediaType: EditorMediaAsset['ty
     let bucketSamples = 0;
     let stderr = '';
 
-    const ffmpegProcess = spawn(toolPaths.ffmpeg, [
+    const ffmpegProcess = spawn(toolPaths.ffmpeg!, [
       '-v',
       'error',
       '-i',
@@ -413,7 +413,7 @@ async function extractWaveform(filePath: string, mediaType: EditorMediaAsset['ty
       '-f',
       's16le',
       'pipe:1',
-    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    ], { stdio: ['ignore', 'pipe', 'pipe'] as ['ignore', 'pipe', 'pipe'] });
 
     ffmpegProcess.stdout.on('data', (chunk: Buffer) => {
       pendingBytes = Buffer.concat([pendingBytes, chunk]);
@@ -437,7 +437,7 @@ async function extractWaveform(filePath: string, mediaType: EditorMediaAsset['ty
       stderr += chunk.toString('utf8');
     });
 
-    ffmpegProcess.on('close', (code) => {
+    ffmpegProcess.on('close', (code: number | null) => {
       if (bucketSamples > 0) {
         peaks.push(bucketPeak);
       }
@@ -491,7 +491,7 @@ async function generateProxy(filePath: string, assetId: string, mediaType: Edito
 
     // Extract the encoder name from the hwEncodeArgs (always contains `-c:v <name>`).
     const cvIndex = hwEncodeArgs.indexOf('-c:v');
-    const encoderName = cvIndex >= 0 ? hwEncodeArgs[cvIndex + 1] : 'libx264';
+    const encoderName = cvIndex >= 0 ? hwEncodeArgs[cvIndex + 1]! : 'libx264';
     // Any args before `-c:v` are hwaccel input flags (e.g. `-hwaccel cuda`).
     const hwaccelInputFlags = cvIndex > 0 ? hwEncodeArgs.slice(0, cvIndex) : [];
     const isSoftwareEncoder = encoderName === 'libx264' || encoderName === 'libx265';
@@ -501,7 +501,7 @@ async function generateProxy(filePath: string, assetId: string, mediaType: Edito
       ? ['-preset', 'veryfast', '-crf', '22']
       : ['-b:v', '5M'];
 
-    await execFileAsync(toolPaths.ffmpeg, [
+    await execFileAsync(toolPaths.ffmpeg!, [
       '-y',
       ...hwDecodeArgs,
       ...hwaccelInputFlags,
@@ -1201,7 +1201,7 @@ async function renderTimelineScreener(project: EditorProject, exportDir: string)
   const gpu = await detectGPU();
   const hwEncodeArgs = getHWAccelFFmpegArgs(gpu, 'h264');
   const cvIdx = hwEncodeArgs.indexOf('-c:v');
-  const screenerEncoder = cvIdx >= 0 ? hwEncodeArgs[cvIdx + 1] : 'libx264';
+  const screenerEncoder = cvIdx >= 0 ? hwEncodeArgs[cvIdx + 1]! : 'libx264';
   const isSWEncoder = screenerEncoder === 'libx264' || screenerEncoder === 'libx265';
   const screenerQualityArgs = isSWEncoder
     ? ['-preset', 'veryfast', '-crf', '20']

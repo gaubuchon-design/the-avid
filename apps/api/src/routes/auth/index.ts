@@ -3,12 +3,23 @@ import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../../db/client';
 import { authenticate, generateTokens } from '../../middleware/auth';
-import { validate, schemas } from '../../utils/validation';
+import { validate, schemas, uuidParam } from '../../utils/validation';
 import { UnauthorizedError, ConflictError, NotFoundError, BadRequestError } from '../../utils/errors';
 import { config } from '../../config';
-import { z } from 'zod';
+import { logger } from '../../utils/logger';
 
 const router = Router();
+
+function recordFailedAttempt(key: string): void {
+  const entry = loginAttempts.get(key) ?? { count: 0, lastAttempt: 0, lockedUntil: 0 };
+  entry.count++;
+  entry.lastAttempt = Date.now();
+  if (entry.count >= config.security.maxLoginAttempts) {
+    entry.lockedUntil = Date.now() + config.security.lockoutDurationMs;
+    logger.warn('Account locked due to too many failed login attempts', { email: key, attempts: entry.count });
+  }
+  loginAttempts.set(key, entry);
+}
 
 // ─── POST /auth/register ───────────────────────────────────────────────────────
 router.post('/register', validate(schemas.register), async (req: Request, res: Response) => {
@@ -17,7 +28,7 @@ router.post('/register', validate(schemas.register), async (req: Request, res: R
   const existing = await db.user.findUnique({ where: { email } });
   if (existing) throw new ConflictError('Email already registered');
 
-  const passwordHash = await bcrypt.hash(password, 12);
+  const passwordHash = await bcrypt.hash(password, config.security.bcryptRounds);
 
   const user = await db.user.create({
     data: {
@@ -47,9 +58,31 @@ router.post('/register', validate(schemas.register), async (req: Request, res: R
   res.status(201).json({ user, accessToken, refreshToken });
 });
 
+// ─── In-memory login attempt tracking (use Redis in production) ─────────────
+const loginAttempts = new Map<string, { count: number; lastAttempt: number; lockedUntil: number }>();
+
+// Prune expired lockout entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of loginAttempts) {
+    if (entry.lockedUntil < now && now - entry.lastAttempt > config.security.lockoutDurationMs) {
+      loginAttempts.delete(key);
+    }
+  }
+}, 5 * 60 * 1000).unref();
+
 // ─── POST /auth/login ──────────────────────────────────────────────────────────
 router.post('/login', validate(schemas.login), async (req: Request, res: Response) => {
   const { email, password } = req.body;
+
+  // Check for account lockout
+  const attemptKey = email.toLowerCase();
+  const attempts = loginAttempts.get(attemptKey);
+  if (attempts && attempts.lockedUntil > Date.now()) {
+    const retryAfterSec = Math.ceil((attempts.lockedUntil - Date.now()) / 1000);
+    logger.warn('Login attempt on locked account', { email: attemptKey, retryAfterSec });
+    throw new UnauthorizedError(`Account temporarily locked. Try again in ${retryAfterSec} seconds.`);
+  }
 
   const user = await db.user.findUnique({
     where: { email, deletedAt: null },
@@ -63,9 +96,19 @@ router.post('/login', validate(schemas.login), async (req: Request, res: Respons
     },
   });
 
-  if (!user?.passwordHash) throw new UnauthorizedError('Invalid credentials');
+  if (!user?.passwordHash) {
+    // Track failed attempt (same timing as valid user to prevent enumeration)
+    recordFailedAttempt(attemptKey);
+    throw new UnauthorizedError('Invalid credentials');
+  }
   const valid = await bcrypt.compare(password, user.passwordHash);
-  if (!valid) throw new UnauthorizedError('Invalid credentials');
+  if (!valid) {
+    recordFailedAttempt(attemptKey);
+    throw new UnauthorizedError('Invalid credentials');
+  }
+
+  // Clear failed attempts on successful login
+  loginAttempts.delete(attemptKey);
 
   const { accessToken, refreshToken } = generateTokens(user);
 
@@ -87,9 +130,8 @@ router.post('/login', validate(schemas.login), async (req: Request, res: Respons
 });
 
 // ─── POST /auth/refresh ────────────────────────────────────────────────────────
-router.post('/refresh', async (req: Request, res: Response) => {
+router.post('/refresh', validate(schemas.refreshToken), async (req: Request, res: Response) => {
   const { refreshToken } = req.body;
-  if (!refreshToken) throw new UnauthorizedError('Refresh token required');
 
   const stored = await db.refreshToken.findUnique({
     where: { token: refreshToken },
@@ -119,7 +161,7 @@ router.post('/refresh', async (req: Request, res: Response) => {
 });
 
 // ─── POST /auth/logout ─────────────────────────────────────────────────────────
-router.post('/logout', authenticate, async (req: Request, res: Response) => {
+router.post('/logout', authenticate, validate(schemas.logoutBody), async (req: Request, res: Response) => {
   const { refreshToken } = req.body;
   if (refreshToken) {
     await db.refreshToken.updateMany({
@@ -155,15 +197,7 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
 });
 
 // ─── PATCH /auth/me ────────────────────────────────────────────────────────────
-const updateProfileSchema = z.object({
-  displayName: z.string().min(1).max(100).optional(),
-  bio: z.string().max(500).optional(),
-  timezone: z.string().max(50).optional(),
-  locale: z.string().max(10).optional(),
-  avatarUrl: z.string().url().max(2000).optional().nullable(),
-});
-
-router.patch('/me', authenticate, validate(updateProfileSchema), async (req: Request, res: Response) => {
+router.patch('/me', authenticate, validate(schemas.updateProfile), async (req: Request, res: Response) => {
   const { displayName, bio, timezone, locale, avatarUrl } = req.body;
 
   const user = await db.user.update({
@@ -177,13 +211,12 @@ router.patch('/me', authenticate, validate(updateProfileSchema), async (req: Req
 });
 
 // ─── POST /auth/change-password ────────────────────────────────────────────────
-const changePasswordSchema = z.object({
-  currentPassword: z.string().min(1),
-  newPassword: z.string().min(8).max(128),
-});
-
-router.post('/change-password', authenticate, validate(changePasswordSchema), async (req: Request, res: Response) => {
+router.post('/change-password', authenticate, validate(schemas.changePassword), async (req: Request, res: Response) => {
   const { currentPassword, newPassword } = req.body;
+
+  if (currentPassword === newPassword) {
+    throw new BadRequestError('New password must be different from current password');
+  }
 
   const user = await db.user.findUnique({
     where: { id: req.user!.id },
@@ -194,7 +227,7 @@ router.post('/change-password', authenticate, validate(changePasswordSchema), as
   const valid = await bcrypt.compare(currentPassword, user.passwordHash);
   if (!valid) throw new UnauthorizedError('Current password incorrect');
 
-  const newHash = await bcrypt.hash(newPassword, 12);
+  const newHash = await bcrypt.hash(newPassword, config.security.bcryptRounds);
   await db.user.update({ where: { id: req.user!.id }, data: { passwordHash: newHash } });
 
   // Revoke all refresh tokens
@@ -204,6 +237,31 @@ router.post('/change-password', authenticate, validate(changePasswordSchema), as
   });
 
   res.json({ message: 'Password changed successfully' });
+});
+
+// ─── GET /auth/sessions ────────────────────────────────────────────────────────
+router.get('/sessions', authenticate, async (req: Request, res: Response) => {
+  const sessions = await db.refreshToken.findMany({
+    where: { userId: req.user!.id, revokedAt: null, expiresAt: { gt: new Date() } },
+    select: {
+      id: true,
+      userAgent: true,
+      ipAddress: true,
+      createdAt: true,
+      expiresAt: true,
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+  res.json({ sessions });
+});
+
+// ─── DELETE /auth/sessions/:id ─────────────────────────────────────────────────
+router.delete('/sessions/:id', authenticate, validate(uuidParam, 'params'), async (req: Request, res: Response) => {
+  await db.refreshToken.updateMany({
+    where: { id: req.params['id'], userId: req.user!.id },
+    data: { revokedAt: new Date() },
+  });
+  res.status(204).send();
 });
 
 export default router;

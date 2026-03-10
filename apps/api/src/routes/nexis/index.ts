@@ -5,14 +5,28 @@
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { db } from '../../db/client';
+import {
+  validate, validateAll, schemas, uuidParam,
+} from '../../utils/validation';
+import { NotFoundError } from '../../utils/errors';
 import { z } from 'zod';
 
 const router = Router();
 router.use(authenticate);
 
+// ─── Query schemas ────────────────────────────────────────────────────────────
+const orgIdQuery = z.object({ orgId: z.string().uuid().optional() });
+
+// ─── Param schemas ───────────────────────────────────────────────────────────
+const workspaceIdParam = z.object({ workspaceId: z.string().uuid() });
+const workspaceAndMediaParams = z.object({
+  workspaceId: z.string().uuid(),
+  id: z.string().uuid(),
+});
+
 // ─── NEXIS Workspaces ────────────────────────────────────────────────────────
 
-router.get('/workspaces', async (req: Request, res: Response) => {
+router.get('/workspaces', validate(orgIdQuery, 'query'), async (req: Request, res: Response) => {
   const { orgId } = req.query;
   const workspaces = await db.nEXISWorkspace.findMany({
     where: orgId ? { orgId: orgId as string } : {},
@@ -22,9 +36,9 @@ router.get('/workspaces', async (req: Request, res: Response) => {
   res.json({ workspaces });
 });
 
-router.get('/workspaces/:id', async (req: Request, res: Response) => {
-  const workspace = await db.nEXISWorkspace.findUniqueOrThrow({
-    where: { id: req.params.id },
+router.get('/workspaces/:id', validate(uuidParam, 'params'), async (req: Request, res: Response) => {
+  const workspace = await db.nEXISWorkspace.findUnique({
+    where: { id: req.params['id'] },
     include: {
       mediaPaths: {
         take: 50,
@@ -32,28 +46,21 @@ router.get('/workspaces/:id', async (req: Request, res: Response) => {
       },
     },
   });
+  if (!workspace) throw new NotFoundError('NEXIS workspace');
   res.json({ workspace });
 });
 
-router.post('/workspaces', async (req: Request, res: Response) => {
+router.post('/workspaces', validate(schemas.createNEXISWorkspace), async (req: Request, res: Response) => {
   const workspace = await db.nEXISWorkspace.create({
-    data: {
-      orgId: req.body.orgId,
-      name: req.body.name,
-      host: req.body.host,
-      port: req.body.port || 443,
-      workspaceId: req.body.workspaceId,
-      storageGroupId: req.body.storageGroupId,
-      totalCapacityGB: req.body.totalCapacityGB,
-    },
+    data: req.body,
   });
   res.status(201).json({ workspace });
 });
 
-router.post('/workspaces/:id/connect', async (req: Request, res: Response) => {
+router.post('/workspaces/:id/connect', validate(uuidParam, 'params'), async (req: Request, res: Response) => {
   // In production: authenticate via Avid Connection Manager
   const workspace = await db.nEXISWorkspace.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: {
       isConnected: true,
       lastHealthCheck: new Date(),
@@ -62,18 +69,18 @@ router.post('/workspaces/:id/connect', async (req: Request, res: Response) => {
   res.json({ workspace, message: 'Connected to NEXIS workspace' });
 });
 
-router.post('/workspaces/:id/disconnect', async (req: Request, res: Response) => {
+router.post('/workspaces/:id/disconnect', validate(uuidParam, 'params'), async (req: Request, res: Response) => {
   const workspace = await db.nEXISWorkspace.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: { isConnected: false },
   });
   res.json({ workspace });
 });
 
-router.post('/workspaces/:id/health-check', async (req: Request, res: Response) => {
+router.post('/workspaces/:id/health-check', validate(uuidParam, 'params'), async (req: Request, res: Response) => {
   // In production: ping NEXIS server
   const workspace = await db.nEXISWorkspace.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: { lastHealthCheck: new Date() },
   });
   res.json({
@@ -90,56 +97,60 @@ router.post('/workspaces/:id/health-check', async (req: Request, res: Response) 
 
 // ─── NEXIS Media Paths ───────────────────────────────────────────────────────
 
-router.get('/workspaces/:workspaceId/media', async (req: Request, res: Response) => {
+router.get('/workspaces/:workspaceId/media', validate(workspaceIdParam, 'params'), async (req: Request, res: Response) => {
   const paths = await db.nEXISMediaPath.findMany({
-    where: { workspaceId: req.params.workspaceId },
+    where: { workspaceId: req.params['workspaceId'] },
     orderBy: { updatedAt: 'desc' },
   });
   res.json({ mediaPaths: paths });
 });
 
-router.post('/workspaces/:workspaceId/media', async (req: Request, res: Response) => {
-  const path = await db.nEXISMediaPath.create({
-    data: {
-      workspaceId: req.params.workspaceId,
-      mediaAssetId: req.body.mediaAssetId,
-      nexisPath: req.body.nexisPath,
-      ownerId: req.user!.id,
-    },
-  });
-  res.status(201).json({ mediaPath: path });
-});
+router.post(
+  '/workspaces/:workspaceId/media',
+  validateAll({ params: workspaceIdParam, body: schemas.createNEXISMediaPath }),
+  async (req: Request, res: Response) => {
+    const path = await db.nEXISMediaPath.create({
+      data: {
+        workspaceId: req.params['workspaceId'],
+        ...req.body,
+        ownerId: req.user!.id,
+      },
+    });
+    res.status(201).json({ mediaPath: path });
+  }
+);
 
-router.post('/workspaces/:workspaceId/media/:id/lock', async (req: Request, res: Response) => {
+router.post('/workspaces/:workspaceId/media/:id/lock', validate(workspaceAndMediaParams, 'params'), async (req: Request, res: Response) => {
   const path = await db.nEXISMediaPath.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: { isLocked: true, ownerId: req.user!.id },
   });
   res.json({ mediaPath: path });
 });
 
-router.post('/workspaces/:workspaceId/media/:id/unlock', async (req: Request, res: Response) => {
+router.post('/workspaces/:workspaceId/media/:id/unlock', validate(workspaceAndMediaParams, 'params'), async (req: Request, res: Response) => {
   const path = await db.nEXISMediaPath.update({
-    where: { id: req.params.id },
+    where: { id: req.params['id'] },
     data: { isLocked: false },
   });
   res.json({ mediaPath: path });
 });
 
-router.patch('/workspaces/:workspaceId/media/:id/cache', async (req: Request, res: Response) => {
-  const path = await db.nEXISMediaPath.update({
-    where: { id: req.params.id },
-    data: {
-      cacheStatus: req.body.cacheStatus,
-      cacheSizeMB: req.body.cacheSizeMB,
-    },
-  });
-  res.json({ mediaPath: path });
-});
+router.patch(
+  '/workspaces/:workspaceId/media/:id/cache',
+  validateAll({ params: workspaceAndMediaParams, body: schemas.updateNEXISCache }),
+  async (req: Request, res: Response) => {
+    const path = await db.nEXISMediaPath.update({
+      where: { id: req.params['id'] },
+      data: req.body,
+    });
+    res.json({ mediaPath: path });
+  }
+);
 
 // ─── Admin: Storage Overview ─────────────────────────────────────────────────
 
-router.get('/admin/overview', async (req: Request, res: Response) => {
+router.get('/admin/overview', validate(orgIdQuery, 'query'), async (req: Request, res: Response) => {
   const { orgId } = req.query;
   const workspaces = await db.nEXISWorkspace.findMany({
     where: orgId ? { orgId: orgId as string } : {},
@@ -152,9 +163,11 @@ router.get('/admin/overview', async (req: Request, res: Response) => {
     },
   });
 
-  const totalCapacity = workspaces.reduce((s, w) => s + (w.totalCapacityGB || 0), 0);
-  const totalUsed = workspaces.reduce((s, w) => s + (w.usedCapacityGB || 0), 0);
-  const lockedPaths = workspaces.flatMap(w => w.mediaPaths);
+  /* eslint-disable @typescript-eslint/no-explicit-any -- Prisma result type inference */
+  const totalCapacity = workspaces.reduce((s: number, w: any) => s + ((w.totalCapacityGB as number) || 0), 0);
+  const totalUsed = workspaces.reduce((s: number, w: any) => s + ((w.usedCapacityGB as number) || 0), 0);
+  const lockedPaths = workspaces.flatMap((w: any) => w.mediaPaths as unknown[]);
+  /* eslint-enable @typescript-eslint/no-explicit-any */
 
   res.json({
     overview: {
@@ -164,7 +177,8 @@ router.get('/admin/overview', async (req: Request, res: Response) => {
       usedPercent: totalCapacity > 0 ? (totalUsed / totalCapacity * 100).toFixed(1) : '0',
       activeLocks: lockedPaths.length,
     },
-    workspaces: workspaces.map(w => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma result mapping
+    workspaces: workspaces.map((w: any) => ({
       id: w.id,
       name: w.name,
       host: w.host,

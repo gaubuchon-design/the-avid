@@ -30,9 +30,9 @@ export function KeyCaptureBadge({ keyName, modifiers }: KeyCaptureBadgeProps) {
   const parts = [...modifiers.map(formatKey), formatKey(keyName)];
 
   return (
-    <span style={styles.wrapper}>
+    <span style={styles['wrapper']}>
       {parts.map((p, i) => (
-        <span key={i} style={styles.badge}>{p}</span>
+        <span key={i} style={styles['badge']}>{p}</span>
       ))}
     </span>
   );

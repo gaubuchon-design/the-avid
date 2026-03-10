@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { useEditorStore } from '../../store/editor.store';
 import type { Track } from '../../store/editor.store';
 
@@ -10,7 +10,11 @@ const TRACK_TYPE_COLOR: Record<string, string> = {
   GRAPHIC: 'var(--track-gfx, #fb7185)',
 };
 
-function TrackHeader({ track }: { track: Track }) {
+interface TrackHeaderProps {
+  track: Track;
+}
+
+const TrackHeader = memo(function TrackHeader({ track }: TrackHeaderProps) {
   const { selectedTrackId, selectTrack, toggleMute, toggleSolo, toggleLock } =
     useEditorStore();
   const isSelected = selectedTrackId === track.id;
@@ -21,6 +25,9 @@ function TrackHeader({ track }: { track: Track }) {
       className={`track-header${isSelected ? ' selected' : ''}`}
       style={{ height: 'var(--track-h)' }}
       onClick={() => selectTrack(track.id)}
+      role="rowheader"
+      aria-label={`Track ${track.name}`}
+      aria-selected={isSelected}
     >
       {/* Figma-style colored track badge */}
       <div className="track-badge" style={{ background: color }}>
@@ -32,10 +39,12 @@ function TrackHeader({ track }: { track: Track }) {
         {track.name}
       </span>
 
-      <div className="track-icons">
+      <div className="track-icons" role="group" aria-label={`${track.name} controls`}>
         <button
           className={`track-icon-btn${track.muted ? ' active' : ''}`}
           title={track.muted ? 'Unmute' : 'Mute'}
+          aria-label={track.muted ? `Unmute ${track.name}` : `Mute ${track.name}`}
+          aria-pressed={track.muted}
           onClick={(e) => {
             e.stopPropagation();
             toggleMute(track.id);
@@ -46,6 +55,8 @@ function TrackHeader({ track }: { track: Track }) {
         <button
           className={`track-icon-btn solo${track.solo ? ' active' : ''}`}
           title={track.solo ? 'Unsolo' : 'Solo'}
+          aria-label={track.solo ? `Unsolo ${track.name}` : `Solo ${track.name}`}
+          aria-pressed={track.solo}
           onClick={(e) => {
             e.stopPropagation();
             toggleSolo(track.id);
@@ -56,6 +67,8 @@ function TrackHeader({ track }: { track: Track }) {
         <button
           className={`track-icon-btn lock${track.locked ? ' active' : ''}`}
           title={track.locked ? 'Unlock' : 'Lock'}
+          aria-label={track.locked ? `Unlock ${track.name}` : `Lock ${track.name}`}
+          aria-pressed={track.locked}
           onClick={(e) => {
             e.stopPropagation();
             toggleLock(track.id);
@@ -66,17 +79,17 @@ function TrackHeader({ track }: { track: Track }) {
       </div>
     </div>
   );
-}
+});
 
-export function TrackHeaders() {
+export const TrackHeaders = memo(function TrackHeaders() {
   const tracks = useEditorStore((s) => s.tracks);
 
   return (
-    <div className="track-headers">
+    <div className="track-headers" role="rowgroup" aria-label="Track headers">
       <div className="ruler-spacer" />
       {tracks.map((track) => (
         <TrackHeader key={track.id} track={track} />
       ))}
     </div>
   );
-}
+});

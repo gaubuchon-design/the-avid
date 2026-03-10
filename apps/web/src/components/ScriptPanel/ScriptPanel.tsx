@@ -89,7 +89,7 @@ function parseScenes(text: string): SceneBreakdown[] {
       // If no match, estimate based on scene count
       if (seconds === 0 && scenes.length > 0) {
         const lastScene = scenes[scenes.length - 1];
-        seconds = lastScene.estimatedSeconds + 10;
+        seconds = lastScene!.estimatedSeconds! + 10;
       }
 
       scenes.push({

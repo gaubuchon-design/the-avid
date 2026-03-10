@@ -24,6 +24,7 @@ export interface ServerToClientEvents {
   'user:left': (payload: { userId: string; projectId: string }) => void;
   'lock:acquired': (payload: { resourceType: string; resourceId: string; userId: string }) => void;
   'lock:released': (payload: { resourceType: string; resourceId: string }) => void;
+  'cursor:update': (payload: { userId: string; x: number; y: number }) => void;
   error: (payload: { message: string; code: string }) => void;
 
   // Render Farm events
@@ -64,9 +65,18 @@ export interface TimelineOperation {
   timestamp?: number;
 }
 
+interface SocketUser {
+  userId: string;
+  displayName: string;
+}
+
 // ─── Active sessions ───────────────────────────────────────────────────────────
-const projectSessions = new Map<string, Set<string>>(); // projectId → Set<userId>
-const socketUsers = new Map<string, { userId: string; displayName: string }>(); // socketId → user
+const projectSessions = new Map<string, Set<string>>(); // projectId -> Set<userId>
+const socketUsers = new Map<string, SocketUser>();       // socketId -> user info
+
+// ─── Rate limiting for cursor movements ──────────────────────────────────────
+const CURSOR_RATE_LIMIT_MS = 50; // Max one cursor update per 50ms per socket
+const lastCursorUpdate = new Map<string, number>();
 
 // ─── Init ──────────────────────────────────────────────────────────────────────
 export function initWebSocket(httpServer: HttpServer) {
@@ -75,94 +85,187 @@ export function initWebSocket(httpServer: HttpServer) {
     maxHttpBufferSize: config.ws.maxPayload,
     pingInterval: config.ws.heartbeatInterval,
     pingTimeout: 10000,
+    // Connection state recovery: allows clients to reconnect without losing events
+    connectionStateRecovery: {
+      maxDisconnectionDuration: 2 * 60 * 1000, // 2 minutes
+    },
   });
 
   // ─── Auth middleware ─────────────────────────────────────────────────────────
   io.use(async (socket, next) => {
     try {
-      const token = socket.handshake.auth.token ?? socket.handshake.headers.authorization?.slice(7);
-      if (!token) return next(new Error('No token'));
+      const token = socket.handshake.auth['token'] ?? socket.handshake.headers.authorization?.slice(7);
+      if (!token) {
+        return next(new Error('Authentication required: no token provided'));
+      }
 
-      const payload = jwt.verify(token, config.jwt.secret) as JwtPayload;
+      let payload: JwtPayload;
+      try {
+        payload = jwt.verify(token, config.jwt.secret) as JwtPayload;
+      } catch (jwtErr: unknown) {
+        const message = (jwtErr as Error).name === 'TokenExpiredError' ? 'Token expired' : 'Invalid token';
+        return next(new Error(message));
+      }
+
       const user = await db.user.findUnique({
         where: { id: payload.sub, deletedAt: null },
         select: { id: true, displayName: true },
       });
       if (!user) return next(new Error('User not found'));
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- attaching user to socket for downstream handlers
       (socket as any).user = user;
       socketUsers.set(socket.id, user);
       next();
-    } catch {
+    } catch (err: unknown) {
+      logger.error('WebSocket auth failed', { error: (err as Error).message, socketId: socket.id });
       next(new Error('Authentication failed'));
     }
   });
 
   // ─── Connection ──────────────────────────────────────────────────────────────
+  const MAX_CONNECTIONS_PER_USER = 5;
+
   io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>) => {
-    const user = (socket as any).user as { id: string; displayName: string };
-    logger.debug(`WS connected: ${user.displayName} (${socket.id})`);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- user attached in auth middleware
+    const user = (socket as any).user as SocketUser;
+
+    // Limit max connections per user to prevent resource exhaustion
+    const userConnections = Array.from(socketUsers.values()).filter(
+      (u) => u.userId === user.userId
+    ).length;
+    if (userConnections >= MAX_CONNECTIONS_PER_USER) {
+      logger.warn('Max WS connections per user exceeded', { userId: user.userId, connections: userConnections });
+      socket.emit('error', { message: 'Too many connections', code: 'MAX_CONNECTIONS' });
+      socket.disconnect(true);
+      return;
+    }
+
+    logger.debug('WS connected', { userId: user.userId, displayName: user.displayName, socketId: socket.id });
 
     // Join project room
     socket.on('project:join', async (projectId, callback) => {
       try {
+        if (!projectId || typeof projectId !== 'string') {
+          return callback(false);
+        }
+
         // Verify access
         const member = await db.projectMember.findUnique({
-          where: { projectId_userId: { projectId, userId: user.id } },
+          where: { projectId_userId: { projectId, userId: user.userId } },
         });
-        if (!member) return callback(false);
+        if (!member) {
+          logger.warn('WS project join denied', { userId: user.userId, projectId });
+          return callback(false);
+        }
 
         socket.join(`project:${projectId}`);
 
         if (!projectSessions.has(projectId)) projectSessions.set(projectId, new Set());
-        projectSessions.get(projectId)!.add(user.id);
+        projectSessions.get(projectId)!.add(user.userId);
 
         // Notify room of new user
         socket.to(`project:${projectId}`).emit('user:joined', {
-          userId: user.id,
+          userId: user.userId,
           displayName: user.displayName,
           projectId,
         });
 
-        // Record collaboration event
+        // Record collaboration event (fire-and-forget)
         db.collaborationEvent.create({
-          data: { projectId, userId: user.id, sessionId: socket.id, eventType: 'JOIN', payload: {} },
-        }).catch((err) => logger.error('Failed to record JOIN event', err));
+          data: { projectId, userId: user.userId, sessionId: socket.id, eventType: 'JOIN', payload: {} },
+        }).catch((err: Error) => logger.error('Failed to record join event', { error: err.message }));
 
         callback(true);
-        logger.debug(`${user.displayName} joined project:${projectId}`);
-      } catch (err) {
+        logger.debug('User joined project', { userId: user.userId, projectId });
+      } catch (err: unknown) {
+        logger.error('Error handling project:join', { error: (err as Error).message, userId: user.userId, projectId });
         callback(false);
       }
     });
 
     // Leave project room
     socket.on('project:leave', (projectId) => {
+      if (!projectId || typeof projectId !== 'string') return;
       handleLeave(socket, projectId);
     });
 
-    // Timeline operations (OT-based — broadcast to room, skip sender)
+    // Timeline operations (OT-based -- broadcast to room, skip sender)
     socket.on('timeline:operation', (operation) => {
-      const op = { ...operation, userId: user.id, timestamp: Date.now() };
+      if (!operation?.timelineId || typeof operation.timelineId !== 'string') {
+        socket.emit('error', { message: 'timelineId is required', code: 'INVALID_PAYLOAD' });
+        return;
+      }
+
+      // Validate operation type is one of the allowed types
+      const validTypes = ['clip:add', 'clip:move', 'clip:trim', 'clip:delete', 'track:add', 'track:delete'];
+      if (!operation.type || !validTypes.includes(operation.type)) {
+        socket.emit('error', { message: 'Invalid operation type', code: 'INVALID_PAYLOAD' });
+        return;
+      }
+
+      // Verify the user is actually in a project room (cannot broadcast to arbitrary rooms)
+      const isInRoom = socket.rooms.has(`project:${operation.timelineId}`);
+      if (!isInRoom) {
+        socket.emit('error', { message: 'Not a member of this project', code: 'FORBIDDEN' });
+        return;
+      }
+
+      // Sanitize the payload -- strip any userId/timestamp from client input
+      const op: TimelineOperation = {
+        type: operation.type,
+        payload: operation.payload,
+        timelineId: operation.timelineId,
+        userId: user.userId,
+        timestamp: Date.now(),
+      };
       socket.to(`project:${operation.timelineId}`).emit('timeline:update', {
         timelineId: operation.timelineId,
         operation: op,
       });
     });
 
-    // Playhead sync
+    // Playhead sync (with input validation)
     socket.on('playhead:move', ({ timelineId, position }) => {
+      if (!timelineId || typeof timelineId !== 'string') return;
+      if (typeof position !== 'number' || !Number.isFinite(position) || position < 0) return;
+
+      // Verify user is in the project room
+      if (!socket.rooms.has(`project:${timelineId}`)) return;
+
       socket.to(`project:${timelineId}`).emit('playhead:move', {
         timelineId,
         position,
-        userId: user.id,
+        userId: user.userId,
+      });
+    });
+
+    // Cursor movement (rate-limited with input validation)
+    socket.on('cursor:move', ({ x, y }) => {
+      // Validate coordinates are finite numbers within reasonable bounds
+      if (typeof x !== 'number' || typeof y !== 'number' ||
+          !Number.isFinite(x) || !Number.isFinite(y) ||
+          x < -10000 || x > 100000 || y < -10000 || y > 100000) {
+        return;
+      }
+
+      const now = Date.now();
+      const last = lastCursorUpdate.get(socket.id) ?? 0;
+      if (now - last < CURSOR_RATE_LIMIT_MS) return;
+      lastCursorUpdate.set(socket.id, now);
+
+      // Broadcast to all rooms this socket is in
+      socket.rooms.forEach((room) => {
+        if (room.startsWith('project:')) {
+          socket.to(room).emit('cursor:update', { userId: user.userId, x, y });
+        }
       });
     });
 
     // ── Render Farm Events ─────────────────────────────────────────────────
     socket.on('render:join', (callback) => {
       socket.join('render');
-      logger.debug(`${user.displayName} joined render farm room`);
+      logger.debug('User joined render farm room', { displayName: user.displayName });
       callback(true);
     });
 
@@ -204,7 +307,7 @@ export function initWebSocket(httpServer: HttpServer) {
     });
 
     // Disconnect
-    socket.on('disconnect', () => {
+    socket.on('disconnect', (reason) => {
       // Leave all joined rooms BEFORE deleting from socketUsers map
       socket.rooms.forEach((room) => {
         if (room.startsWith('project:')) {
@@ -212,17 +315,25 @@ export function initWebSocket(httpServer: HttpServer) {
           handleLeave(socket, projectId);
         }
       });
+
       socketUsers.delete(socket.id);
-      logger.debug(`WS disconnected: ${user.displayName}`);
+      lastCursorUpdate.delete(socket.id);
+
+      logger.debug('WS disconnected', { userId: user.userId, reason });
     });
   });
 
-  function handleLeave(socket: Socket, projectId: string) {
+  function handleLeave(socket: Socket, projectId: string): void {
     const user = socketUsers.get(socket.id);
     if (!user) return;
 
     socket.leave(`project:${projectId}`);
     projectSessions.get(projectId)?.delete(user.userId);
+
+    // Clean up empty session sets
+    if (projectSessions.get(projectId)?.size === 0) {
+      projectSessions.delete(projectId);
+    }
 
     socket.to(`project:${projectId}`).emit('user:left', { userId: user.userId, projectId });
 
@@ -234,7 +345,7 @@ export function initWebSocket(httpServer: HttpServer) {
         eventType: 'LEAVE',
         payload: {},
       },
-    }).catch((err) => logger.error('Failed to record LEAVE event', err));
+    }).catch((err: Error) => logger.error('Failed to record leave event', { error: err.message }));
   }
 
   // ─── Render Farm broadcast wiring ──────────────────────────────────────────
@@ -245,12 +356,45 @@ export function initWebSocket(httpServer: HttpServer) {
   // ─── Utility: broadcast to project ──────────────────────────────────────────
   return {
     io,
+
+    /**
+     * Broadcast an event to all connected clients in a project room.
+     */
     broadcastToProject: (projectId: string, event: keyof ServerToClientEvents, payload: unknown) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic event dispatch
       io.to(`project:${projectId}`).emit(event as any, payload);
     },
-    getProjectUsers: (projectId: string) => projectSessions.get(projectId) ?? new Set<string>(),
+
+    /**
+     * Broadcast an event to all clients in the render farm room.
+     */
     broadcastToRender: (event: keyof ServerToClientEvents, payload: unknown) => {
       io.to('render').emit(event as any, payload);
     },
+
+    /**
+     * Get the set of user IDs currently connected to a project.
+     */
+    getProjectUsers: (projectId: string): Set<string> => {
+      return projectSessions.get(projectId) ?? new Set<string>();
+    },
+
+    /**
+     * Get the total number of active WebSocket connections.
+     */
+    getConnectionCount: (): number => {
+      return socketUsers.size;
+    },
+
+    /**
+     * Get connection stats for monitoring.
+     */
+    getStats: () => ({
+      totalConnections: socketUsers.size,
+      activeProjects: projectSessions.size,
+      projectSessions: Object.fromEntries(
+        Array.from(projectSessions.entries()).map(([k, v]) => [k, v.size])
+      ),
+    }),
   };
 }

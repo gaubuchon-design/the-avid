@@ -189,8 +189,8 @@ export class EventExporter {
     // Compute time period from event timestamps
     const timestamps = events.map((e) => e.timestamp).sort();
     const period = {
-      start: timestamps[0],
-      end: timestamps[timestamps.length - 1],
+      start: timestamps[0] ?? '',
+      end: timestamps[timestamps.length - 1] ?? '',
     };
 
     // Count events by type
@@ -203,7 +203,7 @@ export class EventExporter {
     const toolCounts = new Map<string, number>();
     for (const event of events) {
       if (event.type === 'plan-generated' || event.type === 'plan-approved') {
-        const toolNames = event.payload.toolNames as string[] | undefined;
+        const toolNames = event.payload['toolNames'] as string[] | undefined;
         if (toolNames) {
           for (const tool of toolNames) {
             toolCounts.set(tool, (toolCounts.get(tool) ?? 0) + 1);
@@ -211,7 +211,7 @@ export class EventExporter {
         }
       }
       if (event.type === 'step-failure' || event.type === 'step-override') {
-        const toolName = event.payload.toolName as string | undefined;
+        const toolName = event.payload['toolName'] as string | undefined;
         if (toolName) {
           toolCounts.set(toolName, (toolCounts.get(toolName) ?? 0) + 1);
         }

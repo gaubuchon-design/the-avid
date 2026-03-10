@@ -297,7 +297,7 @@ describe('EventSchema', () => {
       it(`should create a '${type}' event`, () => {
         const event = createEvent(type, 'session-1', { data: true });
         expect(event.type).toBe(type);
-        expect(event.payload.data).toBe(true);
+        expect(event.payload['data']).toBe(true);
       });
     }
   });
@@ -321,27 +321,27 @@ describe('PrivacyFilter', () => {
   describe('stripPII()', () => {
     it('should redact email addresses in string values', () => {
       const result = filter.stripPII({ msg: 'Contact jane@example.com for details' });
-      expect(result.msg).toBe('Contact [REDACTED] for details');
+      expect(result['msg']).toBe('Contact [REDACTED] for details');
     });
 
     it('should redact multiple email addresses', () => {
       const result = filter.stripPII({ msg: 'From a@b.co to c@d.org' });
-      expect(result.msg).toBe('From [REDACTED] to [REDACTED]');
+      expect(result['msg']).toBe('From [REDACTED] to [REDACTED]');
     });
 
     it('should redact IPv4 addresses', () => {
       const result = filter.stripPII({ msg: 'Server at 192.168.1.100' });
-      expect(result.msg).toBe('Server at [REDACTED]');
+      expect(result['msg']).toBe('Server at [REDACTED]');
     });
 
     it('should redact Unix file paths', () => {
       const result = filter.stripPII({ msg: 'File at /Users/jane/project/video.mov' });
-      expect(result.msg).toBe('File at [REDACTED]');
+      expect(result['msg']).toBe('File at [REDACTED]');
     });
 
     it('should redact Windows file paths', () => {
       const result = filter.stripPII({ msg: 'File at C:\\Users\\jane\\Desktop\\file.mov' });
-      expect(result.msg).toBe('File at [REDACTED]');
+      expect(result['msg']).toBe('File at [REDACTED]');
     });
 
     it('should redact known PII field names regardless of value', () => {
@@ -354,22 +354,22 @@ describe('PrivacyFilter', () => {
         apiKey: 'sk-abc123',
         toolName: 'splice_in', // should NOT be redacted
       });
-      expect(result.email).toBe('[REDACTED]');
-      expect(result.userName).toBe('[REDACTED]');
-      expect(result.displayName).toBe('[REDACTED]');
-      expect(result.phone).toBe('[REDACTED]');
-      expect(result.password).toBe('[REDACTED]');
-      expect(result.apiKey).toBe('[REDACTED]');
-      expect(result.toolName).toBe('splice_in');
+      expect(result['email']).toBe('[REDACTED]');
+      expect(result['userName']).toBe('[REDACTED]');
+      expect(result['displayName']).toBe('[REDACTED]');
+      expect(result['phone']).toBe('[REDACTED]');
+      expect(result['password']).toBe('[REDACTED]');
+      expect(result['apiKey']).toBe('[REDACTED]');
+      expect(result['toolName']).toBe('splice_in');
     });
 
     it('should recurse into nested objects', () => {
       const result = filter.stripPII({
         user: { email: 'test@test.com', role: 'admin' },
       });
-      const nested = result.user as Record<string, unknown>;
-      expect(nested.email).toBe('[REDACTED]');
-      expect(nested.role).toBe('admin');
+      const nested = result['user'] as Record<string, unknown>;
+      expect(nested['email']).toBe('[REDACTED]');
+      expect(nested['role']).toBe('admin');
     });
 
     it('should handle arrays with objects', () => {
@@ -379,29 +379,29 @@ describe('PrivacyFilter', () => {
           { email: 'c@d.com', name: 'also-safe' },
         ],
       });
-      const users = result.users as Array<Record<string, unknown>>;
-      expect(users[0].email).toBe('[REDACTED]');
-      expect(users[1].email).toBe('[REDACTED]');
-      expect(users[0].name).toBe('safe');
+      const users = result['users'] as Array<Record<string, unknown>>;
+      expect(users[0]!['email']).toBe('[REDACTED]');
+      expect(users[1]!['email']).toBe('[REDACTED]');
+      expect(users[0]!['name']).toBe('safe');
     });
 
     it('should handle arrays with strings', () => {
       const result = filter.stripPII({
         logs: ['Error from 10.0.0.1', 'OK from /Users/home/test'],
       });
-      const logs = result.logs as string[];
+      const logs = result['logs'] as string[];
       expect(logs[0]).toContain('[REDACTED]');
     });
 
     it('should pass through numbers and booleans unchanged', () => {
       const result = filter.stripPII({ count: 42, active: true });
-      expect(result.count).toBe(42);
-      expect(result.active).toBe(true);
+      expect(result['count']).toBe(42);
+      expect(result['active']).toBe(true);
     });
 
     it('should handle null values', () => {
       const result = filter.stripPII({ val: null });
-      expect(result.val).toBeNull();
+      expect(result['val']).toBeNull();
     });
   });
 
@@ -469,8 +469,8 @@ describe('PrivacyFilter', () => {
       });
       const result = filter.filter(event, 'org-internal');
       expect(result).not.toBeNull();
-      expect(result!.payload.email).toBe('[REDACTED]');
-      expect(result!.payload.tool).toBe('splice_in');
+      expect(result!.payload['email']).toBe('[REDACTED]');
+      expect(result!.payload['tool']).toBe('splice_in');
     });
   });
 
@@ -518,7 +518,7 @@ describe('PrivacyFilter', () => {
         payload: { email: 'me@test.com' },
       });
       const anon = filter.anonymize(event);
-      expect(anon.payload.email).toBe('[REDACTED]');
+      expect(anon.payload['email']).toBe('[REDACTED]');
     });
   });
 });
@@ -648,7 +648,7 @@ describe('EventQueue', () => {
       queue.enqueue(makeEvent({ id: 'e1' }));
       queue.enqueue(makeEvent({ id: 'e2' }));
       expect(queue.getQueueSize()).toBe(1);
-      expect(queue.getPending()[0].id).toBe('e2');
+      expect(queue.getPending()[0]!.id).toBe('e2');
     });
   });
 
@@ -787,8 +787,8 @@ describe('DashboardData', () => {
     it('should return the most frequent prompt patterns', () => {
       const automations = dashboard.getCommonAutomations();
       expect(automations.length).toBeGreaterThan(0);
-      expect(automations[0].pattern).toBe('remove all silence');
-      expect(automations[0].count).toBe(2);
+      expect(automations[0]!.pattern).toBe('remove all silence');
+      expect(automations[0]!.count).toBe(2);
     });
 
     it('should respect the limit parameter', () => {
@@ -809,9 +809,9 @@ describe('DashboardData', () => {
       const overrides = dashboard.getTopOverrides();
       expect(overrides.length).toBeGreaterThan(0);
       // normalize_audio / wrong level appears twice
-      expect(overrides[0].toolName).toBe('normalize_audio');
-      expect(overrides[0].reason).toBe('wrong level');
-      expect(overrides[0].count).toBe(2);
+      expect(overrides[0]!.toolName).toBe('normalize_audio');
+      expect(overrides[0]!.reason).toBe('wrong level');
+      expect(overrides[0]!.count).toBe(2);
     });
 
     it('should include all unique (tool, reason) combinations', () => {
@@ -824,13 +824,13 @@ describe('DashboardData', () => {
     it('should return missing endpoints ranked by frequency', () => {
       const missing = dashboard.getMissingEndpoints();
       expect(missing).toHaveLength(1);
-      expect(missing[0].tool).toBe('auto_subtitle');
-      expect(missing[0].frequency).toBe(2); // two events
+      expect(missing[0]!.tool).toBe('auto_subtitle');
+      expect(missing[0]!.frequency).toBe(2); // two events
     });
 
     it('should keep the most recent context', () => {
       const missing = dashboard.getMissingEndpoints();
-      expect(missing[0].context).toBe('subtitle request again');
+      expect(missing[0]!.context).toBe('subtitle request again');
     });
   });
 
@@ -839,9 +839,9 @@ describe('DashboardData', () => {
       const clusters = dashboard.getFailureClusters();
       expect(clusters.length).toBeGreaterThan(0);
       // export_sequence/timeout appears twice
-      expect(clusters[0].toolName).toBe('export_sequence');
-      expect(clusters[0].errorMessage).toBe('timeout');
-      expect(clusters[0].count).toBe(2);
+      expect(clusters[0]!.toolName).toBe('export_sequence');
+      expect(clusters[0]!.errorMessage).toBe('timeout');
+      expect(clusters[0]!.count).toBe(2);
     });
 
     it('should track the last occurrence timestamp', () => {
@@ -862,10 +862,10 @@ describe('DashboardData', () => {
   describe('getTokenUsageByWorkflow()', () => {
     it('should aggregate tokens by category', () => {
       const usage = dashboard.getTokenUsageByWorkflow();
-      expect(usage.planning).toBeDefined();
-      expect(usage.planning.total).toBe(1100); // 500 + 600
-      expect(usage.planning.count).toBe(2);
-      expect(usage.planning.avgPerJob).toBe(550);
+      expect(usage['planning']).toBeDefined();
+      expect(usage['planning']!.total).toBe(1100); // 500 + 600
+      expect(usage['planning']!.count).toBe(2);
+      expect(usage['planning']!.avgPerJob).toBe(550);
     });
 
     it('should include all categories', () => {
@@ -876,9 +876,9 @@ describe('DashboardData', () => {
 
     it('should compute correct averages', () => {
       const usage = dashboard.getTokenUsageByWorkflow();
-      expect(usage.execution.total).toBe(1200);
-      expect(usage.execution.count).toBe(1);
-      expect(usage.execution.avgPerJob).toBe(1200);
+      expect(usage['execution']!.total).toBe(1200);
+      expect(usage['execution']!.count).toBe(1);
+      expect(usage['execution']!.avgPerJob).toBe(1200);
     });
   });
 
@@ -900,9 +900,9 @@ describe('DashboardData', () => {
 
     it('should track confidence distribution', () => {
       const summary = dashboard.getTimeSavedSummary();
-      expect(summary.confidence.high).toBe(1);
-      expect(summary.confidence.medium).toBe(1);
-      expect(summary.confidence.low).toBe(0);
+      expect(summary.confidence['high']).toBe(1);
+      expect(summary.confidence['medium']).toBe(1);
+      expect(summary.confidence['low']).toBe(0);
     });
 
     it('should return zeros when no time-saved events exist', () => {
@@ -923,10 +923,10 @@ describe('DashboardData', () => {
 
     it('should include percentile values', () => {
       const stats = dashboard.getLatencyStats();
-      expect(stats['plan-generation'].p50).toBe(200);
-      expect(stats['plan-generation'].p95).toBe(400);
-      expect(stats['plan-generation'].p99).toBe(600);
-      expect(stats['plan-generation'].sampleCount).toBe(100);
+      expect(stats['plan-generation']!.p50).toBe(200);
+      expect(stats['plan-generation']!.p95).toBe(400);
+      expect(stats['plan-generation']!.p99).toBe(600);
+      expect(stats['plan-generation']!.sampleCount).toBe(100);
     });
   });
 
@@ -1040,7 +1040,7 @@ describe('EventExporter', () => {
     it('should include eventsByType breakdown', () => {
       const events = buildSampleEvents();
       const dash = exporter.exportForDashboard(events);
-      expect(dash.eventsByType.prompt).toBe(3);
+      expect(dash.eventsByType['prompt']).toBe(3);
       expect(dash.eventsByType['step-failure']).toBe(3);
     });
 

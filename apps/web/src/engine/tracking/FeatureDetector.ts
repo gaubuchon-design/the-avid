@@ -57,7 +57,7 @@ function toGrayscale(imageData: ImageData): Float32Array {
   const { data, width, height } = imageData;
   const gray = new Float32Array(width * height);
   for (let i = 0; i < data.length; i += 4) {
-    gray[i / 4] = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+    gray[i / 4] = data[i]! * 0.299 + data[i + 1]! * 0.587 + data[i + 2]! * 0.114;
   }
   return gray;
 }
@@ -76,7 +76,7 @@ function gaussianBlur(src: Float32Array, w: number, h: number): Float32Array {
       let sum = 0;
       for (let k = -2; k <= 2; k++) {
         const sx = Math.min(Math.max(x + k, 0), w - 1);
-        sum += src[y * w + sx] * GAUSS_KERNEL[k + 2];
+        sum += src[y * w + sx]! * GAUSS_KERNEL[k + 2]!;
       }
       temp[y * w + x] = sum;
     }
@@ -88,7 +88,7 @@ function gaussianBlur(src: Float32Array, w: number, h: number): Float32Array {
       let sum = 0;
       for (let k = -2; k <= 2; k++) {
         const sy = Math.min(Math.max(y + k, 0), h - 1);
-        sum += temp[sy * w + x] * GAUSS_KERNEL[k + 2];
+        sum += temp[sy * w + x]! * GAUSS_KERNEL[k + 2]!;
       }
       dst[y * w + x] = sum;
     }
@@ -129,9 +129,9 @@ function detectFASTCorners(
       // Check 16 + 16 (wrap around) pixels on the Bresenham circle
       for (let i = 0; i < 32; i++) {
         const idx = i % 16;
-        const [dx, dy] = CIRCLE_OFFSETS[idx];
+        const [dx, dy] = CIRCLE_OFFSETS[idx]!;
         const val = gray[(y + dy) * w + (x + dx)];
-        const diff = Math.abs(val - center);
+        const diff = Math.abs(val! - center!);
 
         if (diff > threshold) {
           consecutive++;
@@ -191,8 +191,8 @@ function computeOrientation(gray: Float32Array, w: number, x: number, y: number)
     for (let dx = -HALF_PATCH; dx <= HALF_PATCH; dx++) {
       if (dx * dx + dy * dy > HALF_PATCH * HALF_PATCH) continue;
       const val = gray[(y + dy) * w + (x + dx)];
-      m10 += dx * val;
-      m01 += dy * val;
+      m10 += dx * val!;
+      m01 += dy * val!;
     }
   }
   return Math.atan2(m01, m10);
@@ -214,7 +214,7 @@ function computeDescriptor(
   const sinA = Math.sin(angle);
 
   for (let i = 0; i < DESCRIPTOR_BITS; i++) {
-    const [ax, ay, bx, by] = BRIEF_PATTERN[i];
+    const [ax, ay, bx, by] = BRIEF_PATTERN[i]!;
 
     // Rotate sampling points by orientation
     const rax = Math.round(ax * cosA - ay * sinA);
@@ -225,8 +225,8 @@ function computeDescriptor(
     const valA = gray[(y + ray) * w + (x + rax)];
     const valB = gray[(y + rby) * w + (x + rbx)];
 
-    if (valA < valB) {
-      descriptor[i >> 3] |= (1 << (i & 7));
+    if (valA! < valB!) {
+      descriptor[i >> 3]! |= (1 << (i & 7));
     }
   }
 
@@ -238,7 +238,7 @@ function computeDescriptor(
 function hammingDistance(a: Uint8Array, b: Uint8Array): number {
   let dist = 0;
   for (let i = 0; i < a.length; i++) {
-    let xor = a[i] ^ b[i];
+    let xor = a[i]! ^ b[i]!;
     while (xor) {
       dist += xor & 1;
       xor >>= 1;
@@ -258,8 +258,8 @@ function solveHomographyDLT(srcPts: Point2D[], dstPts: Point2D[]): HomographyMat
   const A: number[][] = [];
 
   for (let i = 0; i < n; i++) {
-    const { x: sx, y: sy } = srcPts[i];
-    const { x: dx, y: dy } = dstPts[i];
+    const { x: sx, y: sy } = srcPts[i]!;
+    const { x: dx, y: dy } = dstPts[i]!;
 
     A.push([
       -sx, -sy, -1, 0, 0, 0, dx * sx, dx * sy, dx,
@@ -279,7 +279,7 @@ function solveHomographyDLT(srcPts: Point2D[], dstPts: Point2D[]): HomographyMat
   for (let i = 0; i < A.length; i++) {
     for (let r = 0; r < 9; r++) {
       for (let c = 0; c < 9; c++) {
-        ATA[r][c] += A[i][r] * A[i][c];
+        ATA[r]![c] += A[i]![r]! * A[i]![c]!;
       }
     }
   }
@@ -294,16 +294,16 @@ function solveHomographyDLT(srcPts: Point2D[], dstPts: Point2D[]): HomographyMat
     for (let col = 0; col < 9; col++) {
       let maxRow = col;
       for (let row = col + 1; row < 9; row++) {
-        if (Math.abs(aug[row][col]) > Math.abs(aug[maxRow][col])) maxRow = row;
+        if (Math.abs(aug[row]![col]) > Math.abs(aug[maxRow]![col])) maxRow = row;
       }
-      [aug[col], aug[maxRow]] = [aug[maxRow], aug[col]];
+      [aug[col], aug[maxRow]] = [aug[maxRow]!, aug[col]!];
 
-      if (Math.abs(aug[col][col]) < 1e-12) continue;
+      if (Math.abs(aug[col]![col]) < 1e-12) continue;
 
       for (let row = col + 1; row < 9; row++) {
-        const factor = aug[row][col] / aug[col][col];
+        const factor = aug[row]![col] / aug[col]![col];
         for (let k = col; k <= 9; k++) {
-          aug[row][k] -= factor * aug[col][k];
+          aug[row]![k] -= factor * aug[col]![k];
         }
       }
     }
@@ -311,15 +311,15 @@ function solveHomographyDLT(srcPts: Point2D[], dstPts: Point2D[]): HomographyMat
     // Back substitution
     const x = new Array(9).fill(0);
     for (let i = 8; i >= 0; i--) {
-      if (Math.abs(aug[i][i]) < 1e-12) {
+      if (Math.abs(aug[i]![i]) < 1e-12) {
         x[i] = 0;
         continue;
       }
-      x[i] = aug[i][9];
+      x[i] = aug[i]![9];
       for (let j = i + 1; j < 9; j++) {
-        x[i] -= aug[i][j] * x[j];
+        x[i] -= aug[i]![j] * x[j];
       }
-      x[i] /= aug[i][i];
+      x[i] /= aug[i]![i];
     }
 
     // Normalize
@@ -332,8 +332,8 @@ function solveHomographyDLT(srcPts: Point2D[], dstPts: Point2D[]): HomographyMat
   }
 
   // Normalize so h[8] = 1
-  if (Math.abs(h[8]) < 1e-12) return null;
-  const scale = 1 / h[8];
+  if (Math.abs(h[8]!) < 1e-12) return null;
+  const scale = 1 / h[8]!;
   return h.map(v => v * scale) as HomographyMatrix;
 }
 
@@ -401,7 +401,7 @@ export class FeatureDetector {
       let bestIdx = -1;
       let bestDist = Infinity;
       for (let j = 0; j < features2.length; j++) {
-        const dist = hammingDistance(features1[i].descriptor, features2[j].descriptor);
+        const dist = hammingDistance(features1[i]!.descriptor, features2[j]!.descriptor);
         if (dist < bestDist) {
           bestDist = dist;
           bestIdx = j;
@@ -416,7 +416,7 @@ export class FeatureDetector {
       let bestIdx = -1;
       let bestDist = Infinity;
       for (let i = 0; i < features1.length; i++) {
-        const dist = hammingDistance(features1[i].descriptor, features2[j].descriptor);
+        const dist = hammingDistance(features1[i]!.descriptor, features2[j]!.descriptor);
         if (dist < bestDist) {
           bestDist = dist;
           bestIdx = i;
@@ -433,8 +433,8 @@ export class FeatureDetector {
       if (dist > maxDist) continue;
       if (backward.get(j) === i) {
         matches.push({
-          src: features1[i],
-          dst: features2[j],
+          src: features1[i]!,
+          dst: features2[j]!,
           distance: dist,
         });
       }
@@ -511,7 +511,7 @@ export class FeatureDetector {
       const idx = Math.floor(Math.random() * arr.length);
       if (!indices.has(idx)) {
         indices.add(idx);
-        result.push(arr[idx]);
+        result.push(arr[idx]!);
       }
     }
     return result;

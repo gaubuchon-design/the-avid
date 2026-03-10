@@ -79,7 +79,7 @@ class ONNXInferenceEngine {
       this.ort.env.wasm.simd = true;
 
       this.initialized = true;
-      console.log('[ONNXInference] Initialized ONNX Runtime Web');
+      console.debug('[ONNXInference] Initialized ONNX Runtime Web');
     } catch (err) {
       console.warn('[ONNXInference] ONNX Runtime not available, using fallback:', err);
       this.initialized = true; // Mark as initialized to prevent repeated attempts
@@ -97,7 +97,7 @@ class ONNXInferenceEngine {
     if (!config) return null;
 
     try {
-      console.log(`[ONNXInference] Loading model: ${config.name}`);
+      console.debug(`[ONNXInference] Loading model: ${config.name}`);
       const session = await this.ort.InferenceSession.create(config.url, {
         executionProviders: ['webgpu', 'wasm'],
         graphOptimizationLevel: 'all',
@@ -105,7 +105,7 @@ class ONNXInferenceEngine {
 
       this.sessions.set(modelKey, session as unknown as InferenceSession);
       config.loaded = true;
-      console.log(`[ONNXInference] Model loaded: ${config.name}`);
+      console.debug(`[ONNXInference] Model loaded: ${config.name}`);
       return session as unknown as InferenceSession;
     } catch (err) {
       console.error(`[ONNXInference] Failed to load ${config.name}:`, err);
@@ -132,7 +132,7 @@ class ONNXInferenceEngine {
 
     try {
       const { width, height } = imageData;
-      const inputSize = MODELS.sam_encoder.inputSize;
+      const inputSize = MODELS['sam_encoder']!.inputSize;
 
       // Preprocess: resize and normalize to model input
       const inputTensor = this.preprocessImage(imageData, inputSize.width, inputSize.height);
@@ -142,7 +142,7 @@ class ONNXInferenceEngine {
         image: new this.ort.Tensor('float32', inputTensor, [1, 3, inputSize.height, inputSize.width]),
       };
       const encoderResult = await encoder.run(encoderFeeds);
-      this.samEmbedding = encoderResult['image_embeddings'].data;
+      this.samEmbedding = encoderResult['image_embeddings']!.data;
 
       // Prepare point prompt (center of image if not specified)
       const px = pointPrompt?.x ?? width / 2;
@@ -163,11 +163,11 @@ class ONNXInferenceEngine {
       };
 
       const decoderResult = await decoder.run(decoderFeeds);
-      const maskData = decoderResult['masks'].data;
-      const maskDims = decoderResult['masks'].dims;
+      const maskData = decoderResult['masks']!.data;
+      const maskDims = decoderResult['masks']!.dims;
 
       // Convert mask to ImageData
-      const mask = this.maskToImageData(maskData, maskDims[3], maskDims[2], width, height);
+      const mask = this.maskToImageData(maskData, maskDims[3]!, maskDims[2]!, width, height);
       const bbox = this.computeBBox(mask);
 
       return {
@@ -199,7 +199,7 @@ class ONNXInferenceEngine {
 
     try {
       const { width, height } = currentFrame;
-      const inputSize = MODELS.sam_encoder.inputSize;
+      const inputSize = MODELS['sam_encoder']!.inputSize;
 
       // Encode current frame
       const inputTensor = this.preprocessImage(currentFrame, inputSize.width, inputSize.height);
@@ -207,7 +207,7 @@ class ONNXInferenceEngine {
         image: new this.ort.Tensor('float32', inputTensor, [1, 3, inputSize.height, inputSize.width]),
       };
       const encoderResult = await encoder.run(encoderFeeds);
-      const embedding = encoderResult['image_embeddings'].data;
+      const embedding = encoderResult['image_embeddings']!.data;
 
       // Resize previous mask to 256x256 for decoder input
       const prevMaskResized = this.resizeMask(previousMask, 256, 256);
@@ -227,10 +227,10 @@ class ONNXInferenceEngine {
       };
 
       const decoderResult = await decoder.run(decoderFeeds);
-      const maskData = decoderResult['masks'].data;
-      const maskDims = decoderResult['masks'].dims;
+      const maskData = decoderResult['masks']!.data;
+      const maskDims = decoderResult['masks']!.dims;
 
-      return this.maskToImageData(maskData, maskDims[3], maskDims[2], width, height);
+      return this.maskToImageData(maskData, maskDims[3]!, maskDims[2]!, width, height);
     } catch {
       return previousMask;
     }
@@ -250,7 +250,7 @@ class ONNXInferenceEngine {
     }
 
     try {
-      const inputSize = MODELS.lama.inputSize;
+      const inputSize = MODELS['lama']!.inputSize;
       const { width, height } = imageData;
 
       // Preprocess image and mask
@@ -263,7 +263,7 @@ class ONNXInferenceEngine {
       };
 
       const result = await session.run(feeds);
-      const outputData = result['output'].data;
+      const outputData = result['output']!.data;
 
       // Convert output back to ImageData at original resolution
       const outputImage = this.postprocessImage(outputData, inputSize.width, inputSize.height, width, height);
@@ -289,7 +289,7 @@ class ONNXInferenceEngine {
     }
 
     try {
-      const inputSize = MODELS.sky_seg.inputSize;
+      const inputSize = MODELS['sky_seg']!.inputSize;
       const { width, height } = imageData;
 
       const inputTensor = this.preprocessImage(imageData, inputSize.width, inputSize.height);
@@ -298,7 +298,7 @@ class ONNXInferenceEngine {
       };
 
       const result = await session.run(feeds);
-      const maskData = result['output'].data;
+      const maskData = result['output']!.data;
 
       return this.maskToImageData(maskData, inputSize.width, inputSize.height, width, height);
     } catch {
@@ -332,9 +332,9 @@ class ONNXInferenceEngine {
         const dstIdx = y * targetW + x;
 
         // Normalize to [0, 1]
-        tensor[dstIdx] = data[srcIdx] / 255;                    // R
-        tensor[channelSize + dstIdx] = data[srcIdx + 1] / 255;  // G
-        tensor[2 * channelSize + dstIdx] = data[srcIdx + 2] / 255; // B
+        tensor[dstIdx] = data[srcIdx]! / 255;                    // R
+        tensor[channelSize + dstIdx] = data[srcIdx + 1]! / 255;  // G
+        tensor[2 * channelSize + dstIdx] = data[srcIdx + 2]! / 255; // B
       }
     }
 
@@ -349,7 +349,7 @@ class ONNXInferenceEngine {
       for (let x = 0; x < targetW; x++) {
         const sx = Math.min(Math.floor((x / targetW) * width), width - 1);
         const sy = Math.min(Math.floor((y / targetH) * height), height - 1);
-        tensor[y * targetW + x] = data[(sy * width + sx) * 4] / 255;
+        tensor[y * targetW + x] = data[(sy * width + sx) * 4]! / 255;
       }
     }
 
@@ -374,9 +374,9 @@ class ONNXInferenceEngine {
         const srcIdx = sy * tensorW + sx;
         const dstIdx = (y * outputW + x) * 4;
 
-        out[dstIdx] = Math.round(Math.max(0, Math.min(255, tensor[srcIdx] * 255)));
-        out[dstIdx + 1] = Math.round(Math.max(0, Math.min(255, tensor[channelSize + srcIdx] * 255)));
-        out[dstIdx + 2] = Math.round(Math.max(0, Math.min(255, tensor[2 * channelSize + srcIdx] * 255)));
+        out[dstIdx] = Math.round(Math.max(0, Math.min(255, tensor[srcIdx]! * 255)));
+        out[dstIdx + 1] = Math.round(Math.max(0, Math.min(255, tensor[channelSize + srcIdx]! * 255)));
+        out[dstIdx + 2] = Math.round(Math.max(0, Math.min(255, tensor[2 * channelSize + srcIdx]! * 255)));
         out[dstIdx + 3] = 255;
       }
     }
@@ -398,7 +398,7 @@ class ONNXInferenceEngine {
       for (let x = 0; x < outputW; x++) {
         const sx = Math.min(Math.floor((x / outputW) * maskW), maskW - 1);
         const sy = Math.min(Math.floor((y / outputH) * maskH), maskH - 1);
-        const val = maskData[sy * maskW + sx] > 0 ? 255 : 0;
+        const val = maskData[sy * maskW + sx]! > 0 ? 255 : 0;
         const idx = (y * outputW + x) * 4;
         out[idx] = val;
         out[idx + 1] = val;
@@ -418,7 +418,7 @@ class ONNXInferenceEngine {
       for (let x = 0; x < targetW; x++) {
         const sx = Math.min(Math.floor((x / targetW) * width), width - 1);
         const sy = Math.min(Math.floor((y / targetH) * height), height - 1);
-        result[y * targetW + x] = data[(sy * width + sx) * 4] > 127 ? 1 : 0;
+        result[y * targetW + x] = data[(sy * width + sx) * 4]! > 127 ? 1 : 0;
       }
     }
 
@@ -431,7 +431,7 @@ class ONNXInferenceEngine {
 
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        if (data[(y * width + x) * 4] > 127) {
+        if (data[(y * width + x) * 4]! > 127) {
           sumX += x;
           sumY += y;
           count++;
@@ -450,7 +450,7 @@ class ONNXInferenceEngine {
 
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        if (data[(y * width + x) * 4] > 127) {
+        if (data[(y * width + x) * 4]! > 127) {
           if (x < minX) minX = x;
           if (x > maxX) maxX = x;
           if (y < minY) minY = y;
@@ -468,10 +468,10 @@ class ONNXInferenceEngine {
     const out = result.data;
 
     for (let i = 0; i < out.length; i += 4) {
-      const alpha = mask.data[i] / 255; // mask intensity
-      out[i] = Math.round(original.data[i] * (1 - alpha) + inpainted.data[i] * alpha);
-      out[i + 1] = Math.round(original.data[i + 1] * (1 - alpha) + inpainted.data[i + 1] * alpha);
-      out[i + 2] = Math.round(original.data[i + 2] * (1 - alpha) + inpainted.data[i + 2] * alpha);
+      const alpha = mask.data[i]! / 255; // mask intensity
+      out[i] = Math.round(original.data[i]! * (1 - alpha) + inpainted.data[i]! * alpha);
+      out[i + 1] = Math.round(original.data[i + 1]! * (1 - alpha) + inpainted.data[i + 1]! * alpha);
+      out[i + 2] = Math.round(original.data[i + 2]! * (1 - alpha) + inpainted.data[i + 2]! * alpha);
       out[i + 3] = 255;
     }
 
@@ -518,7 +518,7 @@ class ONNXInferenceEngine {
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const idx = (y * width + x) * 4;
-        if (mask.data[idx] < 128) continue; // Not masked
+        if (mask.data[idx]! < 128) continue; // Not masked
 
         let sumR = 0, sumG = 0, sumB = 0, count = 0;
         for (let dy = -radius; dy <= radius; dy++) {
@@ -526,10 +526,10 @@ class ONNXInferenceEngine {
             const ny = y + dy, nx = x + dx;
             if (ny < 0 || ny >= height || nx < 0 || nx >= width) continue;
             const nIdx = (ny * width + nx) * 4;
-            if (mask.data[nIdx] >= 128) continue; // Skip masked pixels
-            sumR += imageData.data[nIdx];
-            sumG += imageData.data[nIdx + 1];
-            sumB += imageData.data[nIdx + 2];
+            if (mask.data[nIdx]! >= 128) continue; // Skip masked pixels
+            sumR += imageData.data[nIdx]!;
+            sumG += imageData.data[nIdx + 1]!;
+            sumB += imageData.data[nIdx + 2]!;
             count++;
           }
         }
@@ -556,8 +556,8 @@ class ONNXInferenceEngine {
         const r = data[idx], g = data[idx + 1], b = data[idx + 2];
 
         // Sky detection heuristic: blue-ish, bright, upper half
-        const brightness = (r + g + b) / 3;
-        const isBlueish = b > r && b > g * 0.8;
+        const brightness = (r! + g! + b!) / 3;
+        const isBlueish = b! > r! && b! > g! * 0.8;
         const isBright = brightness > 120;
         const heightFactor = 1 - (y / height); // Stronger for upper pixels
 

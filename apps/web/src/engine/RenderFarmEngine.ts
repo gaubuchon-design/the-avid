@@ -538,7 +538,7 @@ class RenderFarmEngine {
         this.splitAndAssign(job, matchingWorkers);
       } else {
         // Single-worker assignment
-        this.assignJobToWorker(job, matchingWorkers[0]);
+        this.assignJobToWorker(job, matchingWorkers[0]!);
       }
 
       // Remove assigned workers from idle pool
@@ -611,7 +611,7 @@ class RenderFarmEngine {
       // Clamp to total frames
       endFrame = Math.min(endFrame, (job.outFrame ?? job.totalFrames - 1));
 
-      const worker = workers[i % workers.length];
+      const worker = workers[i % workers.length]!;
       const segment: RenderJobSegment = {
         id: `${job.id}_seg_${i}`,
         jobId: job.id,

@@ -247,8 +247,8 @@ describe('ReplicationManager', () => {
 
     const since1 = rm.getEventsSince('s1', 1);
     expect(since1).toHaveLength(2);
-    expect(since1[0].sequence).toBe(2);
-    expect(since1[1].sequence).toBe(3);
+    expect(since1[0]!.sequence).toBe(2);
+    expect(since1[1]!.sequence).toBe(3);
   });
 
   it('should compute replication lag', () => {
@@ -312,8 +312,8 @@ describe('ConflictHandler', () => {
     expect(ch.getUnresolved()).toHaveLength(2);
 
     const all = ch.getAll();
-    expect(all[0].resolved).toBe(true);
-    expect(all[0].resolution).toBe('Re-acquired lease after retry');
+    expect(all[0]!.resolved).toBe(true);
+    expect(all[0]!.resolution).toBe('Re-acquired lease after retry');
   });
 
   it('should throw on out-of-bounds resolution', () => {
@@ -348,7 +348,7 @@ describe('ResultRanker', () => {
 
     // Scores should be normalised and sorted descending.
     for (let i = 1; i < merged.length; i++) {
-      expect(merged[i - 1].score).toBeGreaterThanOrEqual(merged[i].score);
+      expect(merged[i - 1]!.score).toBeGreaterThanOrEqual(merged[i]!.score);
     }
   });
 

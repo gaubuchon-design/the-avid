@@ -393,14 +393,14 @@ export class MediaManagementEngine {
         await simulateAsync(options.runInBackground ? 20 : 100);
 
         // Update media status.
-        const status = this.getMediaStatus(assetId);
+        const status = this.getMediaStatus(assetId!);
         const ext = options.codec.startsWith('prores') ? 'mov' : 'mxf';
         status.mediaPath = `${options.targetPath}/${assetId}_${options.codec}.${ext}`;
         status.codec = options.codec;
         status.resolution = resStr;
         status.online = true;
         status.isProxy = isProxyCodec(options.codec);
-        this.mediaStatusCache.set(assetId, status);
+        this.mediaStatusCache.set(assetId!, status);
 
         // Update job progress.
         job.progress = Math.round(((i + 1) / assetIds.length) * 100);

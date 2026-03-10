@@ -149,7 +149,7 @@ export function bakeCurveToLUT(points: Point[], size = 256): Float32Array {
 
   // If only one point, constant value
   if (pts.length === 1) {
-    lut.fill(Math.max(0, Math.min(1, pts[0].y)));
+    lut.fill(Math.max(0, Math.min(1, pts[0]!.y)));
     return lut;
   }
 
@@ -160,36 +160,36 @@ export function bakeCurveToLUT(points: Point[], size = 256): Float32Array {
   const m: number[] = [];
 
   for (let i = 0; i < n - 1; i++) {
-    dx.push(pts[i + 1].x - pts[i].x);
-    dy.push(pts[i + 1].y - pts[i].y);
-    m.push(dy[i] / (dx[i] || 1e-10));
+    dx.push(pts[i + 1]!.x - pts[i]!.x);
+    dy.push(pts[i + 1]!.y - pts[i]!.y);
+    m.push(dy[i]! / (dx[i] || 1e-10));
   }
 
   const tangents = new Float32Array(n);
-  tangents[0] = m[0];
-  tangents[n - 1] = m[n - 2];
+  tangents[0] = m[0]!;
+  tangents[n - 1] = m[n - 2]!;
 
   for (let i = 1; i < n - 1; i++) {
-    if (m[i - 1] * m[i] <= 0) {
+    if (m[i - 1]! * m[i]! <= 0) {
       tangents[i] = 0;
     } else {
-      tangents[i] = (m[i - 1] + m[i]) / 2;
+      tangents[i] = (m[i - 1]! + m[i]!) / 2;
     }
   }
 
   // Fritsch-Carlson monotonicity constraint
   for (let i = 0; i < n - 1; i++) {
-    if (Math.abs(m[i]) < 1e-10) {
+    if (Math.abs(m[i]!) < 1e-10) {
       tangents[i] = 0;
       tangents[i + 1] = 0;
     } else {
-      const alpha = tangents[i] / m[i];
-      const beta = tangents[i + 1] / m[i];
+      const alpha = tangents[i]! / m[i]!;
+      const beta = tangents[i + 1]! / m[i]!;
       const s = alpha * alpha + beta * beta;
       if (s > 9) {
         const tau = 3 / Math.sqrt(s);
-        tangents[i] = tau * alpha * m[i];
-        tangents[i + 1] = tau * beta * m[i];
+        tangents[i] = tau * alpha * m[i]!;
+        tangents[i + 1] = tau * beta * m[i]!;
       }
     }
   }
@@ -199,26 +199,26 @@ export function bakeCurveToLUT(points: Point[], size = 256): Float32Array {
     const x = i / (size - 1);
 
     // Clamp to endpoints
-    if (x <= pts[0].x) {
-      lut[i] = pts[0].y;
+    if (x <= pts[0]!.x) {
+      lut[i] = pts[0]!.y;
       continue;
     }
-    if (x >= pts[n - 1].x) {
-      lut[i] = pts[n - 1].y;
+    if (x >= pts[n - 1]!.x) {
+      lut[i] = pts[n - 1]!.y;
       continue;
     }
 
     // Find segment
     let seg = 0;
     for (let j = 0; j < n - 1; j++) {
-      if (x >= pts[j].x && x < pts[j + 1].x) {
+      if (x >= pts[j]!.x && x < pts[j + 1]!.x) {
         seg = j;
         break;
       }
     }
 
     const h = dx[seg] || 1e-10;
-    const t = (x - pts[seg].x) / h;
+    const t = (x - pts[seg]!.x) / h;
     const t2 = t * t;
     const t3 = t2 * t;
 
@@ -229,8 +229,8 @@ export function bakeCurveToLUT(points: Point[], size = 256): Float32Array {
     const h11 = t3 - t2;
 
     lut[i] = Math.max(0, Math.min(1,
-      h00 * pts[seg].y + h10 * h * tangents[seg] +
-      h01 * pts[seg + 1].y + h11 * h * tangents[seg + 1]
+      h00 * pts[seg]!.y + h10 * h * tangents[seg]! +
+      h01 * pts[seg + 1]!.y + h11 * h * tangents[seg + 1]!
     ));
   }
 

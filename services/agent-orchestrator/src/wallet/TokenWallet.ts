@@ -77,6 +77,17 @@ export interface Transaction {
 }
 
 // ---------------------------------------------------------------------------
+// Tier-based monthly allocations
+// ---------------------------------------------------------------------------
+
+/** Default monthly token allocations per tier. */
+const TIER_ALLOCATIONS: Readonly<Record<WalletTier, number>> = {
+  free: 1_000,
+  pro: 50_000,
+  enterprise: 500_000,
+};
+
+// ---------------------------------------------------------------------------
 // Internal hold tracking
 // ---------------------------------------------------------------------------
 
@@ -86,7 +97,14 @@ interface ActiveHold {
   readonly amount: number;
   readonly category: string;
   readonly transactionId: string;
+  readonly createdAt: number;
 }
+
+/** Maximum number of transactions to keep in the ledger before pruning. */
+const MAX_TRANSACTIONS = 50_000;
+
+/** Percentage of transactions to prune when the limit is reached. */
+const TRANSACTION_PRUNE_PERCENT = 0.2;
 
 // ---------------------------------------------------------------------------
 // TokenWallet
@@ -227,6 +245,7 @@ export class TokenWallet {
       amount,
       category,
       transactionId: tx.id,
+      createdAt: Date.now(),
     });
 
     return tx;
@@ -411,12 +430,86 @@ export class TokenWallet {
     return Math.max(0, this._monthlyAllocation - this._usedThisMonth);
   }
 
+  /**
+   * Reset the monthly allocation for a new billing cycle.
+   *
+   * @param newResetDate - ISO-8601 date of the next reset.
+   * @param allocationOverride - Optional new allocation (otherwise uses tier default).
+   */
+  resetMonthly(newResetDate: string, allocationOverride?: number): void {
+    this._usedThisMonth = 0;
+    this._resetDate = newResetDate;
+    if (allocationOverride !== undefined) {
+      this._monthlyAllocation = allocationOverride;
+    } else {
+      this._monthlyAllocation = TIER_ALLOCATIONS[this._tier];
+    }
+  }
+
+  /**
+   * Upgrade or downgrade the wallet tier.
+   *
+   * The monthly allocation is updated to match the new tier's default
+   * unless a custom allocation was set.
+   *
+   * @param newTier - The new subscription tier.
+   */
+  setTier(newTier: WalletTier): void {
+    this._tier = newTier;
+    this._monthlyAllocation = TIER_ALLOCATIONS[newTier];
+  }
+
+  /**
+   * Get the number of active holds.
+   */
+  getActiveHoldCount(): number {
+    return this._holds.size;
+  }
+
+  /**
+   * Check for stale holds (older than the given threshold) and release them.
+   *
+   * @param maxAgeMs - Maximum age in milliseconds before a hold is considered stale.
+   * @returns Array of job IDs that were released.
+   */
+  releaseStaleHolds(maxAgeMs: number): string[] {
+    const now = Date.now();
+    const released: string[] = [];
+
+    for (const [jobId, hold] of this._holds) {
+      if (now - hold.createdAt > maxAgeMs) {
+        this._held -= hold.amount;
+        this._holds.delete(jobId);
+        this.recordTransaction({
+          type: 'release',
+          amount: hold.amount,
+          jobId,
+          category: hold.category,
+          description: `Auto-released stale hold for job ${jobId} (age exceeded ${maxAgeMs}ms)`,
+        });
+        released.push(jobId);
+      }
+    }
+
+    return released;
+  }
+
+  /**
+   * Get the total number of transactions in the ledger.
+   */
+  getTransactionCount(): number {
+    return this._transactions.length;
+  }
+
   // -----------------------------------------------------------------------
   // Private helpers
   // -----------------------------------------------------------------------
 
   /**
    * Create and append a transaction to the ledger.
+   *
+   * Prunes old transactions when the ledger exceeds the maximum size
+   * to prevent unbounded memory growth.
    */
   private recordTransaction(params: {
     type: TransactionType;
@@ -425,6 +518,12 @@ export class TokenWallet {
     category?: string;
     description: string;
   }): Transaction {
+    // Prune old transactions if the ledger is too large
+    if (this._transactions.length >= MAX_TRANSACTIONS) {
+      const pruneCount = Math.max(1, Math.floor(MAX_TRANSACTIONS * TRANSACTION_PRUNE_PERCENT));
+      this._transactions.splice(0, pruneCount);
+    }
+
     const tx: Transaction = {
       id: uuidv4(),
       walletId: this._id,

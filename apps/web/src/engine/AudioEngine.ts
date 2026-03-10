@@ -109,7 +109,7 @@ class AudioEngine {
     const eq: BiquadFilterNode[] = eqTypes.map((type, i) => {
       const filter = ctx.createBiquadFilter();
       filter.type = type;
-      filter.frequency.value = eqFreqs[i];
+      filter.frequency.value = eqFreqs[i]!;
       filter.gain.value = 0;
       filter.Q.value = 1;
       return filter;
@@ -278,9 +278,9 @@ class AudioEngine {
     const routing = this.getOrCreateTrack(trackId);
     if (band < 0 || band >= routing.eq.length) return;
     const filter = routing.eq[band];
-    filter.frequency.value = params.frequency;
-    filter.gain.value = params.gain;
-    filter.Q.value = params.Q;
+    filter!.frequency.value! = params.frequency;
+    filter!.gain.value! = params.gain;
+    filter!.Q.value! = params.Q;
     this.notify();
   }
 
@@ -340,9 +340,9 @@ class AudioEngine {
     let peak = 0;
     let sumSq = 0;
     for (let i = 0; i < data.length; i++) {
-      const abs = Math.abs(data[i]);
+      const abs = Math.abs(data[i]!);
       if (abs > peak) peak = abs;
-      sumSq += data[i] * data[i];
+      sumSq += data[i]! * data[i]!;
     }
     const rms = Math.sqrt(sumSq / data.length);
 
@@ -368,9 +368,9 @@ class AudioEngine {
     let peak = 0;
     let sumSq = 0;
     for (let i = 0; i < data.length; i++) {
-      const abs = Math.abs(data[i]);
+      const abs = Math.abs(data[i]!);
       if (abs > peak) peak = abs;
-      sumSq += data[i] * data[i];
+      sumSq += data[i]! * data[i]!;
     }
     const rms = Math.sqrt(sumSq / data.length);
 

@@ -101,18 +101,18 @@ export function interpolateSpeed(
 export function evaluateSpeedRamp(config: SpeedRampConfig, time: number): number {
   const { keyframes } = config;
   if (keyframes.length === 0) return 100;
-  if (keyframes.length === 1) return keyframes[0].speed;
+  if (keyframes.length === 1) return keyframes[0]!.speed;
 
   // Before first keyframe
-  if (time <= keyframes[0].time) return keyframes[0].speed;
+  if (time <= keyframes[0]!.time) return keyframes[0]!.speed;
 
   // After last keyframe
-  if (time >= keyframes[keyframes.length - 1].time) return keyframes[keyframes.length - 1].speed;
+  if (time >= keyframes[keyframes.length - 1]!.time) return keyframes[keyframes.length - 1]!.speed;
 
   // Find surrounding keyframes
   for (let i = 0; i < keyframes.length - 1; i++) {
-    const current = keyframes[i];
-    const next = keyframes[i + 1];
+    const current = keyframes[i]!;
+    const next = keyframes[i + 1]!;
 
     if (time >= current.time && time <= next.time) {
       const segmentDuration = next.time - current.time;
@@ -128,7 +128,7 @@ export function evaluateSpeedRamp(config: SpeedRampConfig, time: number): number
     }
   }
 
-  return keyframes[keyframes.length - 1].speed;
+  return keyframes[keyframes.length - 1]!.speed;
 }
 
 // ─── Events ───────────────────────────────────────────────────────────────────
