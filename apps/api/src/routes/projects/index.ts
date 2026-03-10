@@ -29,6 +29,7 @@ function generateETag(data: unknown): string {
 
 // ─── GET /projects ─────────────────────────────────────────────────────────────
 router.get('/', validate(projectListQuery, 'query'), async (req: Request, res: Response) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- validated by middleware
   const { cursor, limit, sort, order } = req.query as any;
   const search = req.query['search'] as string | undefined;
   const status = req.query['status'] as string | undefined;

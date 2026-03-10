@@ -157,22 +157,23 @@ class AIService {
       });
 
       logger.info('AI job completed', { jobId: job.id, type: job.type, summary: result.summary, durationMs });
-    } catch (err: any) {
+    } catch (err: unknown) {
       jobMetrics.totalFailed++;
-      logger.error('AI job failed', { jobId: job.id, type: job.type, error: err.message });
+      const errMsg = (err as Error).message ?? String(err);
+      logger.error('AI job failed', { jobId: job.id, type: job.type, error: errMsg });
       await db.aIJob.update({
         where: { id: job.id },
         data: {
           status: 'FAILED',
           completedAt: new Date(),
-          errorMessage: err.message?.slice(0, 2000),
+          errorMessage: errMsg.slice(0, 2000),
         },
       }).catch((dbErr: Error) => logger.error('Failed to update AI job status', { jobId: job.id, error: dbErr.message }));
     }
   }
 
   private async dispatchJob(job: QueuedAIJob): Promise<JobResult> {
-    const params = (job.inputParams ?? {}) as Record<string, any>;
+    const params = (job.inputParams ?? {}) as Record<string, unknown>;
 
     switch (job.type) {
       case 'TRANSCRIPTION':
@@ -204,7 +205,7 @@ class AIService {
   }
 
   // ─── Transcription (Whisper) ─────────────────────────────────────────────────
-  private async runTranscription(job: QueuedAIJob, params: Record<string, any>): Promise<JobResult> {
+  private async runTranscription(job: QueuedAIJob, params: Record<string, unknown>): Promise<JobResult> {
     logger.info('Transcribing asset', { jobId: job.id, assetId: job.mediaAssetId });
 
     if (!openai || !job.mediaAssetId) {
@@ -240,7 +241,7 @@ class AIService {
   }
 
   // ─── Agentic Assembly (GPT-4o) ───────────────────────────────────────────────
-  private async runAssembly(job: QueuedAIJob, params: Record<string, any>): Promise<JobResult> {
+  private async runAssembly(job: QueuedAIJob, params: Record<string, unknown>): Promise<JobResult> {
     logger.info('Running agentic assembly', { jobId: job.id, projectId: job.projectId });
 
     if (!openai) {
@@ -255,7 +256,7 @@ class AIService {
       where: {
         bin: { projectId: job.projectId! },
         transcript: { not: null },
-        ...(params['mediaAssetIds']?.length ? { id: { in: params['mediaAssetIds'] } } : {}),
+        ...((params['mediaAssetIds'] as string[] | undefined)?.length ? { id: { in: params['mediaAssetIds'] as string[] } } : {}),
       },
       select: { id: true, name: true, duration: true, transcript: true, autoTags: true },
       take: 50,
@@ -298,35 +299,35 @@ ${params['prompt'] ? `Additional direction: ${params['prompt']}` : ''}`;
         summary: `Assembly: ${assembly.clips?.length ?? 0} clips arranged. ${assembly.narrative ?? ''}`.trim(),
         url: `assemblies/${job.projectId}/${job.id}.json`,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof AIServiceError) throw err;
-      throw new AIServiceError('Assembly generation failed', err.message);
+      throw new AIServiceError('Assembly generation failed', (err as Error).message);
     }
   }
 
   // ─── Auto-Captions ───────────────────────────────────────────────────────────
-  private async runCaptions(job: QueuedAIJob, _params: Record<string, any>): Promise<JobResult> {
+  private async runCaptions(job: QueuedAIJob, _params: Record<string, unknown>): Promise<JobResult> {
     logger.info('Generating captions', { jobId: job.id, target: job.mediaAssetId ?? job.projectId });
     // In production: use Whisper word-level timestamps to generate SRT/VTT
     return { summary: 'Auto-captions generated with word-level timing' };
   }
 
   // ─── Highlights Detection ────────────────────────────────────────────────────
-  private async runHighlights(job: QueuedAIJob, params: Record<string, any>): Promise<JobResult> {
+  private async runHighlights(job: QueuedAIJob, params: Record<string, unknown>): Promise<JobResult> {
     logger.info('Detecting highlights', { jobId: job.id, projectId: job.projectId });
     // In production: analyze visual + audio features to detect key moments
     return { summary: `Detected highlights: 5 moments (${params['criteria'] ?? 'action,emotion'})` };
   }
 
   // ─── Scene Detection ─────────────────────────────────────────────────────────
-  private async runSceneDetection(job: QueuedAIJob, _params: Record<string, any>): Promise<JobResult> {
+  private async runSceneDetection(job: QueuedAIJob, _params: Record<string, unknown>): Promise<JobResult> {
     logger.info('Detecting scenes', { jobId: job.id, assetId: job.mediaAssetId });
     // In production: analyze frame differences to detect cuts/transitions
     return { summary: 'Detected 14 scene cuts' };
   }
 
   // ─── Compliance Scan ─────────────────────────────────────────────────────────
-  private async runComplianceScan(job: QueuedAIJob, _params: Record<string, any>): Promise<JobResult> {
+  private async runComplianceScan(job: QueuedAIJob, _params: Record<string, unknown>): Promise<JobResult> {
     logger.info('Running compliance scan', { jobId: job.id, projectId: job.projectId });
     // In production: check loudness (EBU R128/ATSC A/85), color gamut, safe area
     return {
@@ -335,35 +336,35 @@ ${params['prompt'] ? `Additional direction: ${params['prompt']}` : ''}`;
   }
 
   // ─── Smart Reframe ───────────────────────────────────────────────────────────
-  private async runSmartReframe(job: QueuedAIJob, params: Record<string, any>): Promise<JobResult> {
+  private async runSmartReframe(job: QueuedAIJob, params: Record<string, unknown>): Promise<JobResult> {
     logger.info('Running smart reframe', { jobId: job.id, assetId: job.mediaAssetId });
     // In production: detect subject/speaker, apply crop for target aspect ratio
     return { summary: `Smart reframe applied to ${params['aspectRatio'] ?? '9:16'}` };
   }
 
   // ─── Voice Isolation ─────────────────────────────────────────────────────────
-  private async runVoiceIsolation(job: QueuedAIJob, _params: Record<string, any>): Promise<JobResult> {
+  private async runVoiceIsolation(job: QueuedAIJob, _params: Record<string, unknown>): Promise<JobResult> {
     logger.info('Running voice isolation', { jobId: job.id, assetId: job.mediaAssetId });
     // In production: use source separation model (e.g. Demucs)
     return { summary: 'Voice isolation complete: dialogue + ambient tracks separated' };
   }
 
   // ─── Object Mask ─────────────────────────────────────────────────────────────
-  private async runObjectMask(job: QueuedAIJob, _params: Record<string, any>): Promise<JobResult> {
+  private async runObjectMask(job: QueuedAIJob, _params: Record<string, unknown>): Promise<JobResult> {
     logger.info('Running object mask', { jobId: job.id, assetId: job.mediaAssetId });
     // In production: generate per-frame segmentation masks (SAM2)
     return { summary: 'Object mask generated across 240 frames' };
   }
 
   // ─── Music Beat Detection ────────────────────────────────────────────────────
-  private async runMusicBeats(job: QueuedAIJob, _params: Record<string, any>): Promise<JobResult> {
+  private async runMusicBeats(job: QueuedAIJob, _params: Record<string, unknown>): Promise<JobResult> {
     logger.info('Detecting music beats', { jobId: job.id, assetId: job.mediaAssetId });
     // In production: analyze audio waveform for BPM/beat/bar markers
     return { summary: 'Detected 120 BPM, 48 beats marked' };
   }
 
   // ─── Script Sync ─────────────────────────────────────────────────────────────
-  private async runScriptSync(job: QueuedAIJob, params: Record<string, any>): Promise<JobResult> {
+  private async runScriptSync(job: QueuedAIJob, params: Record<string, unknown>): Promise<JobResult> {
     logger.info('Running script sync', { jobId: job.id, projectId: job.projectId });
     // In production: align script text to transcribed audio via forced alignment
     const wordCount = (params['scriptText'] as string)?.split(/\s+/).length ?? 0;

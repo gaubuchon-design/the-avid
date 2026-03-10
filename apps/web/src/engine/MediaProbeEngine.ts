@@ -165,6 +165,7 @@ async function detectColorSpace(file: File): Promise<string> {
     try {
       const bitmap = await createImageBitmap(file.slice(0, 1024 * 1024));
       const frame = new VideoFrame(bitmap, { timestamp: 0 });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- VideoFrame.colorSpace not in all TS lib targets
       const cs = (frame as any).colorSpace;
       frame.close();
       bitmap.close();
@@ -355,6 +356,7 @@ class MediaProbeEngineClass {
         const blob = file.slice(0, 2 * 1024 * 1024); // Read first 2MB
         const bitmap = await createImageBitmap(blob);
         const frame = new VideoFrame(bitmap, { timestamp: 0 });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- VideoFrame.format not in all TS lib targets
         const format = (frame as any).format as string | undefined;
         frame.close();
         bitmap.close();

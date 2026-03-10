@@ -80,8 +80,8 @@ export function initWebSocket(httpServer: HttpServer) {
       let payload: JwtPayload;
       try {
         payload = jwt.verify(token, config.jwt.secret) as JwtPayload;
-      } catch (jwtErr: any) {
-        const message = jwtErr.name === 'TokenExpiredError' ? 'Token expired' : 'Invalid token';
+      } catch (jwtErr: unknown) {
+        const message = (jwtErr as Error).name === 'TokenExpiredError' ? 'Token expired' : 'Invalid token';
         return next(new Error(message));
       }
 
@@ -91,17 +91,19 @@ export function initWebSocket(httpServer: HttpServer) {
       });
       if (!user) return next(new Error('User not found'));
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- attaching user to socket for downstream handlers
       (socket as any).user = user;
       socketUsers.set(socket.id, user);
       next();
-    } catch (err: any) {
-      logger.error('WebSocket auth failed', { error: err.message, socketId: socket.id });
+    } catch (err: unknown) {
+      logger.error('WebSocket auth failed', { error: (err as Error).message, socketId: socket.id });
       next(new Error('Authentication failed'));
     }
   });
 
   // ─── Connection ──────────────────────────────────────────────────────────────
   io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- user attached in auth middleware
     const user = (socket as any).user as SocketUser;
     logger.debug('WS connected', { userId: user.userId, displayName: user.displayName, socketId: socket.id });
 
@@ -140,8 +142,8 @@ export function initWebSocket(httpServer: HttpServer) {
 
         callback(true);
         logger.debug('User joined project', { userId: user.userId, projectId });
-      } catch (err: any) {
-        logger.error('Error handling project:join', { error: err.message, userId: user.userId, projectId });
+      } catch (err: unknown) {
+        logger.error('Error handling project:join', { error: (err as Error).message, userId: user.userId, projectId });
         callback(false);
       }
     });
@@ -244,6 +246,7 @@ export function initWebSocket(httpServer: HttpServer) {
      * Broadcast an event to all connected clients in a project room.
      */
     broadcastToProject: (projectId: string, event: keyof ServerToClientEvents, payload: unknown) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic event dispatch
       io.to(`project:${projectId}`).emit(event as any, payload);
     },
 

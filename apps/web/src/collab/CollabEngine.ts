@@ -41,6 +41,7 @@ export interface ProjectVersion {
   createdAt: number;
   createdBy: string;
   description: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- snapshot is an opaque serialized project blob
   snapshotData: any;
 }
 
@@ -333,7 +334,8 @@ export class CollabEngine {
     const version = this.versions.find(v => v.id === versionId);
     if (version) {
       // In production, this would restore the timeline state from the snapshot
-      console.log(`[CollabEngine] Restoring version: ${version.name}`);
+      // Intentional debug-level log for version restoration tracking
+      console.debug(`[CollabEngine] Restoring version: ${version.name}`);
       this.notify();
     }
   }

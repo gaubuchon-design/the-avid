@@ -479,7 +479,9 @@ export class TransitionEngine {
           }
         } else {
           // all-in-out: all edit points within in/out range (or entire timeline)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inPoint/outPoint may not be on all state shapes
           const inPoint = (state as any).inPoint ?? 0;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const outPoint = (state as any).outPoint ?? state.duration;
           if (editTime >= inPoint - epsilon && editTime <= outPoint + epsilon) {
             results.push({ trackId: track.id, editPointTime: editTime });
@@ -704,6 +706,7 @@ export class TransitionEngine {
    * @param paramName     The parameter name to change.
    * @param value         The new parameter value.
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- transition params are heterogeneous
   updateTransitionParam(transitionId: string, paramName: string, value: any): void {
     const inst = this.instances.get(transitionId);
     if (!inst) {

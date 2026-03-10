@@ -49,7 +49,7 @@ export class WebGPUPipeline {
       });
 
       this.initialized = true;
-      console.log('[WebGPU] Pipeline initialized');
+      console.debug('[WebGPU] Pipeline initialized');
       return true;
     } catch (err) {
       console.warn('[WebGPU] Initialization failed:', err);

@@ -93,12 +93,13 @@ export const db: PrismaClient =
 // ─── Query logging & metrics (dev only for detailed, all envs for slow) ─────
 const SLOW_QUERY_THRESHOLD_MS = config.isDev ? 200 : 500;
 
+/* eslint-disable @typescript-eslint/no-explicit-any -- Prisma event types require runtime string keys */
 if (config.isDev) {
-  db.$on('query' as any, (e: any) => {
+  db.$on('query' as any, (e: { duration?: number; query?: string; params?: string }) => {
     queryMetrics.totalQueries++;
     queryMetrics.totalDurationMs += (e.duration ?? 0);
 
-    if (e.duration > SLOW_QUERY_THRESHOLD_MS) {
+    if ((e.duration ?? 0) > SLOW_QUERY_THRESHOLD_MS) {
       queryMetrics.slowQueries++;
       logger.warn('Slow query detected', {
         query: e.query?.slice(0, 500),
@@ -111,13 +112,14 @@ if (config.isDev) {
 }
 
 // ─── Warning and error logging (all environments) ────────────────────────────
-db.$on('warn' as any, (e: any) => {
+db.$on('warn' as any, (e: { message: string }) => {
   logger.warn('Prisma warning', { message: e.message });
 });
 
-db.$on('error' as any, (e: any) => {
+db.$on('error' as any, (e: { message: string; target?: string }) => {
   logger.error('Prisma error', { message: e.message, target: e.target });
 });
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 /**
  * Connect to the database with retry logic. Should be called during server startup.
@@ -128,16 +130,17 @@ export async function connectDb(maxRetries = 3, delayMs = 2000): Promise<void> {
       await db.$connect();
       logger.info('Database connected', { attempt });
       return;
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = (err as Error).message ?? String(err);
       logger.error(`Database connection failed (attempt ${attempt}/${maxRetries})`, {
-        error: err.message,
+        error: errMsg,
         attempt,
         maxRetries,
       });
 
       if (attempt === maxRetries) {
         throw new DatabaseConnectionError(
-          `Failed to connect to database after ${maxRetries} attempts: ${err.message}`
+          `Failed to connect to database after ${maxRetries} attempts: ${errMsg}`
         );
       }
 
@@ -156,8 +159,8 @@ export async function disconnectDb(): Promise<void> {
   try {
     await db.$disconnect();
     logger.info('Database disconnected');
-  } catch (err: any) {
-    logger.error('Database disconnect error', { error: err.message });
+  } catch (err: unknown) {
+    logger.error('Database disconnect error', { error: (err as Error).message });
   }
 }
 

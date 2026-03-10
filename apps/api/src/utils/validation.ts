@@ -16,6 +16,7 @@ export function validate<T>(schema: ZodSchema<T>, target: ValidateTarget = 'body
       }));
       return next(new BadRequestError('Validation failed', details));
     }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Express req[target] is typed as any
     req[target] = result.data as any;
     next();
   };
@@ -36,6 +37,7 @@ export function validateAll(schemaMap: Partial<Record<ValidateTarget, ZodSchema>
           allDetails.push({ target, path: e.path.join('.'), message: e.message });
         });
       } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Express req[target] is typed as any
         req[target] = result.data as any;
       }
     }

@@ -1247,7 +1247,7 @@ export class OFXMessageSuiteImpl {
         console.warn(`[OFX:${pluginId}]`, format);
         break;
       default:
-        console.log(`[OFX:${pluginId}]`, format);
+        console.debug(`[OFX:${pluginId}]`, format);
         break;
     }
 
@@ -1575,7 +1575,7 @@ export class OFXIPCBridge {
       }
     }) as (...args: unknown[]) => void);
 
-    console.log('[OFXIPCBridge] Initialized');
+    console.debug('[OFXIPCBridge] Initialized');
     return true;
   }
 
@@ -1841,14 +1841,14 @@ export async function initializeOFXPlugins(paths?: string[]): Promise<EffectDefi
       const def = registerOFXPlugin(plugin);
       if (def) {
         definitions.push(def);
-        console.log(`[OpenFXBridge] Registered plugin: ${def.name} (${def.id})`);
+        console.debug(`[OpenFXBridge] Registered plugin: ${def.name} (${def.id})`);
       }
     } catch (err) {
       console.error(`[OpenFXBridge] Failed to load plugin at "${bundle.path}":`, err);
     }
   }
 
-  console.log(`[OpenFXBridge] Initialized ${definitions.length} OFX plugin(s)`);
+  console.debug(`[OpenFXBridge] Initialized ${definitions.length} OFX plugin(s)`);
   return definitions;
 }
 
@@ -1890,5 +1890,5 @@ export async function shutdownOFXPlugins(): Promise<void> {
   // Dispose bridge.
   ofxBridge.dispose();
 
-  console.log('[OpenFXBridge] Shutdown complete');
+  console.debug('[OpenFXBridge] Shutdown complete');
 }

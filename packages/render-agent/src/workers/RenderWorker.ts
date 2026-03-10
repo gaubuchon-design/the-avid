@@ -392,7 +392,7 @@ export class RenderWorker {
           );
           const jitter = delay * 0.2 * Math.random();
           await this.sleep(Math.round(delay + jitter));
-          console.log(`[RenderWorker] Retry ${attempt}/${this.config.maxRetries} for job ${job.id}`);
+          console.info(`[RenderWorker] Retry ${attempt}/${this.config.maxRetries} for job ${job.id}`);
 
           // Check resources again before retry
           try {
@@ -599,7 +599,7 @@ export class RenderWorker {
     try {
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
-        console.log(`[RenderWorker] Cleaned up temp file: ${filePath}`);
+        console.debug(`[RenderWorker] Cleaned up temp file: ${filePath}`);
       }
     } catch (err) {
       console.error(`[RenderWorker] Failed to clean up temp file ${filePath}:`, (err as Error).message);

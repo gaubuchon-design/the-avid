@@ -9,6 +9,9 @@ import { immer } from 'zustand/middleware/immer';
 import type { TrackRegion, TrackingData, FrameTrackingResult } from '../engine/tracking/PlanarTracker';
 import { planarTracker } from '../engine/tracking/PlanarTracker';
 import type { Point2D } from '../engine/tracking/PlanarTracker';
+import { createLogger } from '../lib/logger';
+
+const logger = createLogger('Tracker');
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -254,7 +257,7 @@ export const useTrackingStore = create<TrackingStoreState>()(
       const keyframes = planarTracker.exportAsCornerPin(session.data, imageWidth, imageHeight);
       // Store keyframes — the effects system will pick these up.
       // In practice: create or update a corner-pin effect on targetClipId with these keyframes.
-      console.log(`[Tracker] Exported ${keyframes.length} corner-pin keyframes for region ${regionId}`);
+      logger.info(`Exported ${keyframes.length} corner-pin keyframes for region ${regionId}`);
     },
 
     applyToStabilizer: (regionId, _targetClipId) => {
@@ -267,7 +270,7 @@ export const useTrackingStore = create<TrackingStoreState>()(
         ...kf,
         value: typeof kf.value === 'number' ? -kf.value : kf.value,
       }));
-      console.log(`[Tracker] Exported ${stabilizedKeyframes.length} stabilization keyframes for region ${regionId}`);
+      logger.info(`Exported ${stabilizedKeyframes.length} stabilization keyframes for region ${regionId}`);
     },
 
     setShowOverlay: (show) => set((s) => { s.showOverlay = show; }),

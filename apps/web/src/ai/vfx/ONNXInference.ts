@@ -79,7 +79,7 @@ class ONNXInferenceEngine {
       this.ort.env.wasm.simd = true;
 
       this.initialized = true;
-      console.log('[ONNXInference] Initialized ONNX Runtime Web');
+      console.debug('[ONNXInference] Initialized ONNX Runtime Web');
     } catch (err) {
       console.warn('[ONNXInference] ONNX Runtime not available, using fallback:', err);
       this.initialized = true; // Mark as initialized to prevent repeated attempts
@@ -97,7 +97,7 @@ class ONNXInferenceEngine {
     if (!config) return null;
 
     try {
-      console.log(`[ONNXInference] Loading model: ${config.name}`);
+      console.debug(`[ONNXInference] Loading model: ${config.name}`);
       const session = await this.ort.InferenceSession.create(config.url, {
         executionProviders: ['webgpu', 'wasm'],
         graphOptimizationLevel: 'all',
@@ -105,7 +105,7 @@ class ONNXInferenceEngine {
 
       this.sessions.set(modelKey, session as unknown as InferenceSession);
       config.loaded = true;
-      console.log(`[ONNXInference] Model loaded: ${config.name}`);
+      console.debug(`[ONNXInference] Model loaded: ${config.name}`);
       return session as unknown as InferenceSession;
     } catch (err) {
       console.error(`[ONNXInference] Failed to load ${config.name}:`, err);

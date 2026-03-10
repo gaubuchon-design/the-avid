@@ -158,9 +158,11 @@ router.get('/admin/overview', async (req: Request, res: Response) => {
     },
   });
 
-  const totalCapacity = workspaces.reduce((s: any, w: any) => s + (w.totalCapacityGB || 0), 0);
-  const totalUsed = workspaces.reduce((s: any, w: any) => s + (w.usedCapacityGB || 0), 0);
-  const lockedPaths = workspaces.flatMap((w: any) => w.mediaPaths);
+  /* eslint-disable @typescript-eslint/no-explicit-any -- Prisma result type inference */
+  const totalCapacity = workspaces.reduce((s: number, w: any) => s + ((w.totalCapacityGB as number) || 0), 0);
+  const totalUsed = workspaces.reduce((s: number, w: any) => s + ((w.usedCapacityGB as number) || 0), 0);
+  const lockedPaths = workspaces.flatMap((w: any) => w.mediaPaths as unknown[]);
+  /* eslint-enable @typescript-eslint/no-explicit-any */
 
   res.json({
     overview: {
@@ -170,6 +172,7 @@ router.get('/admin/overview', async (req: Request, res: Response) => {
       usedPercent: totalCapacity > 0 ? (totalUsed / totalCapacity * 100).toFixed(1) : '0',
       activeLocks: lockedPaths.length,
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma result mapping
     workspaces: workspaces.map((w: any) => ({
       id: w.id,
       name: w.name,

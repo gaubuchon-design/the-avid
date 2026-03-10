@@ -1639,6 +1639,7 @@ export class EditOperationsEngine {
             const newId = createId('clip');
             const trimDelta = splitTime - clip!.startTime!;
 
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- spread clip merges optional fields
             const rightClip = makeClip({
               ...clip!,
               id: newId,
@@ -1872,6 +1873,7 @@ export class EditOperationsEngine {
    */
   private findAssetInBins(assetId: string): { duration?: number } | null {
     const state = useEditorStore.getState();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- recursive bin tree children are loosely typed
     const search = (bins: { assets: { id: string; duration?: number }[]; children: any[] }[]): { duration?: number } | null => {
       for (const bin of bins) {
         const asset = bin.assets.find((a: { id: string }) => a.id === assetId);

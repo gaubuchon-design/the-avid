@@ -1898,6 +1898,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         set((s) => {
           s.showAlphaImportDialog = true;
           s.alphaDialogAssetId = assetId;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- promise resolve stored for deferred dialog pattern
           s.alphaDialogResolve = resolve as any;
         });
       });

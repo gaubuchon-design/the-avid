@@ -61,9 +61,11 @@ router.post('/jobs', validate(schemas.createAIJob), async (req: Request, res: Re
 
 // ─── GET /ai/jobs -- list user's jobs ──────────────────────────────────────────
 router.get('/jobs', validate(schemas.aiJobQuery, 'query'), async (req: Request, res: Response) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- validated by middleware
   const { page, limit, sortOrder, type, status, projectId } = req.query as any;
   const skip = (page - 1) * limit;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma dynamic where clause
   const where: any = {
     userId: req.user!.id,
     ...(type ? { type } : {}),

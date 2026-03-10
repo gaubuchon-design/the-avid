@@ -77,7 +77,7 @@ export class ColorGradingPipeline {
 
   private async _init(): Promise<void> {
     if (typeof navigator === 'undefined' || !navigator.gpu) {
-      console.log('[ColorGradingPipeline] WebGPU not available, using CPU fallback');
+      console.debug('[ColorGradingPipeline] WebGPU not available, using CPU fallback');
       this.mode = 'cpu';
       this._isReady = true;
       return;
@@ -126,7 +126,7 @@ export class ColorGradingPipeline {
 
       this.mode = 'gpu';
       this._isReady = true;
-      console.log('[ColorGradingPipeline] GPU initialised');
+      console.debug('[ColorGradingPipeline] GPU initialised');
     } catch (err) {
       console.warn('[ColorGradingPipeline] GPU init failed, using CPU fallback:', err);
       this.mode = 'cpu';

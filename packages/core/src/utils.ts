@@ -158,7 +158,9 @@ export function clamp(value: number, min: number, max: number): number {
  * falls back to JSON round-trip for simple objects.
  */
 export function deepClone<T>(obj: T): T {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- structuredClone not in all TS lib targets
   if (typeof globalThis !== 'undefined' && typeof (globalThis as any).structuredClone === 'function') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (globalThis as any).structuredClone(obj);
   }
   return JSON.parse(JSON.stringify(obj));

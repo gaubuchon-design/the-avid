@@ -157,11 +157,12 @@ export class TranscriptEngine {
 
     const segment: TranscriptSegment = {
       clipId,
-      words: result.words.map(w => ({
-        text: (w as any).word ?? (w as any).text ?? '',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Gemini response shape may include 'word' or 'text'
+      words: result.words.map((w: any) => ({
+        text: w.word ?? w.text ?? '',
         startTime: w.startTime,
         endTime: w.endTime,
-        confidence: (w as any).confidence ?? 0.90 + Math.random() * 0.09,
+        confidence: w.confidence ?? 0.90 + Math.random() * 0.09,
         speaker: 'Speaker A',
       })),
       language: 'en',

@@ -29,6 +29,7 @@ function generateETag(data: unknown): string {
 
 // ─── GET /marketplace -- public listing ────────────────────────────────────────
 router.get('/', validate(marketplaceListQuery, 'query'), async (req: Request, res: Response) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- validated by middleware
   const { cursor, limit, sort, order } = req.query as any;
   const type = req.query['type'] as string | undefined;
   const featured = req.query['featured'] as string | undefined;
@@ -135,6 +136,7 @@ router.post('/:id/purchase', authenticate, validate(uuidParam, 'params'), async 
 
   // Free items
   if (item.priceTokens === 0 && item.priceCents === 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma transaction client
     const purchase = await db.$transaction(async (tx: any) => {
       const p = await tx.marketplacePurchase.create({
         data: { userId, itemId: item.id, paidTokens: 0, paidCents: 0 },
@@ -153,6 +155,7 @@ router.post('/:id/purchase', authenticate, validate(uuidParam, 'params'), async 
     await tokenService.debit(userId, item.priceTokens, 'marketplace_purchase', item.id);
   }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma transaction client
   const purchase = await db.$transaction(async (tx: any) => {
     const p = await tx.marketplacePurchase.create({
       data: { userId, itemId: item.id, paidTokens: item.priceTokens, paidCents: item.priceCents },

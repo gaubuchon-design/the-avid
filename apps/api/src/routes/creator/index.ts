@@ -162,6 +162,7 @@ router.delete('/agent-memory/:key', validate(keyParam, 'params'), async (req: Re
 
 router.get('/playbooks', async (req: Request, res: Response) => {
   const { vertical } = req.query;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma dynamic where clause
   const where: any = { isPublished: true };
   if (vertical) where.vertical = vertical;
 

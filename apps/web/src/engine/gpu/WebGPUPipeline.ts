@@ -411,6 +411,7 @@ export class WebGPUPipeline {
         return false;
       }
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- WebGPU types not in all TS lib targets
       this.adapter = await (navigator as any).gpu.requestAdapter({
         powerPreference: 'high-performance',
       });

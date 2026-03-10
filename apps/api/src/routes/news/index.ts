@@ -46,6 +46,7 @@ router.delete('/nrcs-connections/:id', validate(uuidParam, 'params'), async (req
 // ─── Rundowns ─────────────────────────────────────────────────────────────────
 
 router.get('/', validate(rundownQuery, 'query'), async (req: Request, res: Response) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- validated by middleware
   const { cursor, limit, order } = req.query as any;
   const connectionId = req.query['connectionId'] as string | undefined;
   const date = req.query['date'] as string | undefined;

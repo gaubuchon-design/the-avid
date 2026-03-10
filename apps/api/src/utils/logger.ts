@@ -1,5 +1,6 @@
 import winston from 'winston';
 import path from 'path';
+import type { Request, Response, NextFunction } from 'express';
 import { config } from '../config';
 
 const { combine, timestamp, errors, json, colorize, printf } = winston.format;
@@ -45,7 +46,7 @@ export const logger = winston.createLogger({
 // ─── Request logging middleware ───────────────────────────────────────────────
 
 export function requestLogger() {
-  return (req: any, res: any, next: any) => {
+  return (req: Request, res: Response, next: NextFunction) => {
     const start = Date.now();
     const requestId = req.headers['x-request-id'];
 

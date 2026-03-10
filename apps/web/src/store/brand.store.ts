@@ -414,6 +414,7 @@ export const useBrandStore = create<BrandState & BrandActions>()(
 
       validateForPlatform: (video, platform) => set((s) => {
         s.isValidatingAds = true;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- store platform type widened for flexibility
         s.adValidationResults = AdUnitValidator.validateForPlatform(video, platform as any);
         s.isValidatingAds = false;
       }, false, 'brand/validateForPlatform'),

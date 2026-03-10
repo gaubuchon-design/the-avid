@@ -329,7 +329,7 @@ process.on('SIGINT',  () => shutdown('SIGINT'));
 process.on('uncaughtException', (err) => {
   logger.error('Uncaught exception', { message: err.message, stack: err.stack, name: err.name });
   // Only exit for non-operational errors; operational errors should be handled by middleware
-  if (!(err as any).isOperational) {
+  if (!('isOperational' in err) || !err.isOperational) {
     process.exit(1);
   }
 });

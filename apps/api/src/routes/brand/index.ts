@@ -123,9 +123,11 @@ router.patch(
 // ─── Campaigns ───────────────────────────────────────────────────────────────
 
 router.get('/campaigns', validate(campaignQuery, 'query'), async (req: Request, res: Response) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- validated by middleware
   const { page, limit, sortBy, sortOrder, orgId, status } = req.query as any;
   const skip = (page - 1) * limit;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma dynamic where clause
   const where: any = {};
   if (orgId) where['orgId'] = orgId;
   if (status) where['status'] = status;
@@ -181,6 +183,7 @@ router.patch('/campaigns/:id', validateAll({ params: campaignIdParam, body: sche
   const existing = await db.campaign.findUnique({ where: { id: req.params['id'] } });
   if (!existing) throw new NotFoundError('Campaign');
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma dynamic data payload
   const data: any = { ...req.body };
   if (data['startDate']) data['startDate'] = new Date(data['startDate']);
   if (data['endDate']) data['endDate'] = new Date(data['endDate']);
@@ -312,6 +315,7 @@ router.post(
 
 router.get('/dam-connections', async (req: Request, res: Response) => {
   const { orgId } = req.query as { orgId?: string };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma dynamic where clause
   const where: any = { isActive: true };
   if (orgId) where['orgId'] = orgId;
 

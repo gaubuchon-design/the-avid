@@ -59,6 +59,7 @@ class PlatformCapabilities {
     let maxTextureSize = 4096;
     if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
       try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- WebGPU types not in all TS lib targets
         const adapter = await (navigator as any).gpu.requestAdapter();
         if (adapter) {
           hasWebGPU = true;
@@ -73,15 +74,18 @@ class PlatformCapabilities {
     const hasOffscreenCanvas = typeof OffscreenCanvas !== 'undefined';
 
     // WebCodecs
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- WebCodecs API not in all TS lib targets
     const hasWebCodecs = typeof (globalThis as any).VideoDecoder !== 'undefined';
 
     // PWA
     const hasPWA =
       typeof window !== 'undefined' &&
       (window.matchMedia?.('(display-mode: standalone)').matches ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Safari-specific PWA detection
         (window.navigator as any).standalone === true);
 
     // Hardware
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Navigator.deviceMemory not in all TS lib targets
     const deviceMemoryGB = (navigator as any).deviceMemory ?? 4;
     const hardwareConcurrency = navigator.hardwareConcurrency ?? 4;
 
@@ -171,7 +175,9 @@ class PlatformCapabilities {
   get(): Capabilities {
     if (!this.caps) {
       const hasOffscreenCanvas = typeof OffscreenCanvas !== 'undefined';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- WebCodecs/deviceMemory not in all TS lib targets
       const hasWebCodecs = typeof (globalThis as any).VideoDecoder !== 'undefined';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const deviceMemoryGB = (navigator as any)?.deviceMemory ?? 4;
       const hardwareConcurrency = navigator?.hardwareConcurrency ?? 4;
 
@@ -313,6 +319,7 @@ class PlatformCapabilities {
     if (!root) return;
     try {
       const fileHandle = await root.getFileHandle(name, { create: true });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- FileSystemWritable API not in all TS lib targets
       const writable = await (fileHandle as any).createWritable();
       await writable.write(data);
       await writable.close();
@@ -345,6 +352,7 @@ class PlatformCapabilities {
     const root = await this.initOPFS();
     if (!root) return;
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- OPFS entries() not in all TS lib targets
       for await (const [name] of (root as any).entries()) {
         await root.removeEntry(name);
       }

@@ -592,6 +592,7 @@ export class MarkerEngine {
 
     switch (format) {
       case 'json': {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- parsed JSON markers are untyped
         let parsed: any[];
         try {
           parsed = JSON.parse(data);

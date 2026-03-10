@@ -95,6 +95,7 @@ export interface MulticamState {
 
 type MulticamEventType = 'enter' | 'exit' | 'cut' | 'angleSwitch' | 'bankChange';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- event callback args vary by event type
 type MulticamEventCallback = (...args: any[]) => void;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -1158,6 +1159,7 @@ export class MulticamEngine {
    */
   on(
     event: 'enter' | 'exit' | 'cut' | 'angleSwitch' | 'bankChange',
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- event callback args vary by event type
     cb: (...args: any[]) => void,
   ): () => void {
     const set = this.eventListeners.get(event);
@@ -1227,6 +1229,7 @@ export class MulticamEngine {
   }
 
   /** Emit a typed event to registered listeners. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- event args vary by event type
   private emitEvent(event: MulticamEventType, ...args: any[]): void {
     const set = this.eventListeners.get(event);
     if (!set) return;

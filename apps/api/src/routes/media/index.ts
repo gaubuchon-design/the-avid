@@ -133,10 +133,12 @@ router.get(
   validate(schemas.mediaQuery, 'query'),
   validate(projectIdParam, 'params'),
   async (req: Request, res: Response) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- validated by middleware
     const { page, limit, sortBy, sortOrder } = req.query as any;
     const { binId, type, search, isFavorite, status } = req.query as Record<string, string>;
-    const skip = (page - 1) * limit;
+    const skip = ((page as number) - 1) * (limit as number);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma where clause is dynamic
     const where: any = {
       bin: { projectId: req.params['projectId']! },
       ...(binId ? { binId } : {}),

@@ -200,8 +200,8 @@ class MediaService {
             ContentType: file.mimetype,
           }).promise()
         );
-      } catch (err: any) {
-        logger.error('S3 upload failed', { s3Key, error: err.message });
+      } catch (err: unknown) {
+        logger.error('S3 upload failed', { s3Key, error: (err as Error).message });
         throw new MediaProcessingError('Failed to upload file to storage');
       }
     }
@@ -275,8 +275,8 @@ class MediaService {
           data: { status: 'READY' },
         });
         logger.info('Asset processing complete', { assetId });
-      } catch (e: any) {
-        logger.error('Asset processing failed', { assetId, error: e.message });
+      } catch (e: unknown) {
+        logger.error('Asset processing failed', { assetId, error: (e as Error).message });
         await db.mediaAsset.update({ where: { id: assetId }, data: { status: 'ERROR' } }).catch(() => {});
       }
     }, 2000);
@@ -320,8 +320,8 @@ class MediaService {
           }).promise()
         );
         return JSON.parse(obj.Body?.toString() ?? '[]');
-      } catch (e: any) {
-        logger.warn('Waveform fetch failed, returning fallback data', { assetId, error: e.message });
+      } catch (e: unknown) {
+        logger.warn('Waveform fetch failed, returning fallback data', { assetId, error: (e as Error).message });
       }
     }
 
@@ -354,9 +354,9 @@ class MediaService {
           }).promise()
         );
         logger.info('S3 objects deleted', { assetId, keyCount: keys.length });
-      } catch (err: any) {
+      } catch (err: unknown) {
         // Log but don't fail the DB delete -- S3 cleanup can be retried
-        logger.error('Failed to delete S3 objects', { assetId, error: err.message });
+        logger.error('Failed to delete S3 objects', { assetId, error: (err as Error).message });
       }
     }
 

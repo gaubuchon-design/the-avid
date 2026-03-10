@@ -39,6 +39,7 @@ router.post('/sessions', validate(schemas.createProToolsSession), async (req: Re
 });
 
 router.patch('/sessions/:id', validateAll({ params: sessionIdParam, body: schemas.updateProToolsSession }), async (req: Request, res: Response) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma dynamic data payload
   const data: any = { ...req.body };
   if (data.lastSyncAt) data.lastSyncAt = new Date(data.lastSyncAt);
 

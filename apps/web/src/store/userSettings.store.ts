@@ -166,6 +166,7 @@ export const useUserSettingsStore = create<UserSettingsState & UserSettingsActio
 
       updateSetting: (key, value) => {
         set((s) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic key-value assignment
           (s.settings as any)[key] = value;
         });
       },
@@ -189,6 +190,7 @@ export const useUserSettingsStore = create<UserSettingsState & UserSettingsActio
         if (!keys) return;
         set((s) => {
           for (const key of keys) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic key reset from defaults
             (s.settings as any)[key] = (DEFAULT_USER_SETTINGS as any)[key];
           }
         });

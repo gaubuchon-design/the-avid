@@ -100,12 +100,13 @@ class PublishService {
         externalUrl,
         durationMs,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       const durationMs = Date.now() - startTime;
+      const errMsg = (err as Error).message ?? String(err);
       logger.error('Publish job failed', {
         jobId: job.id,
         platform: job.platform,
-        error: err.message,
+        error: errMsg,
         durationMs,
       });
 
@@ -113,7 +114,7 @@ class PublishService {
         where: { id: job.id },
         data: {
           status: 'FAILED',
-          errorMessage: err.message?.slice(0, 2000),
+          errorMessage: errMsg.slice(0, 2000),
         },
       }).catch((dbErr: Error) =>
         logger.error('Failed to update publish job status', { jobId: job.id, error: dbErr.message })

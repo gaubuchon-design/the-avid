@@ -1,4 +1,5 @@
 import rateLimit from 'express-rate-limit';
+import type { Request } from 'express';
 import { logger } from '../utils/logger';
 import { config } from '../config';
 
@@ -11,7 +12,7 @@ function createLimiter(opts: {
   code?: string;
   /** If true, 5xx responses won't count towards the rate limit */
   skipFailedRequests?: boolean;
-  keyGenerator?: (req: any) => string;
+  keyGenerator?: (req: Request) => string;
 }) {
   return rateLimit({
     windowMs: opts.windowMs,
@@ -33,7 +34,7 @@ function createLimiter(opts: {
         code: opts.code ?? 'RATE_LIMITED',
         ip: _req.ip,
         path: _req.path,
-        userId: (_req as any).user?.id,
+        userId: (_req.user?.id as string | undefined),
       });
     },
     keyGenerator:

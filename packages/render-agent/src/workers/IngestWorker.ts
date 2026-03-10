@@ -207,7 +207,7 @@ export class IngestWorker {
     try {
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
-        console.log(`[IngestWorker] Cleaned up partial output: ${filePath}`);
+        console.debug(`[IngestWorker] Cleaned up partial output: ${filePath}`);
       }
     } catch (err) {
       console.error(`[IngestWorker] Failed to clean up ${filePath}:`, (err as Error).message);

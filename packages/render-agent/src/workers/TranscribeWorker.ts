@@ -143,7 +143,7 @@ export class TranscribeWorker {
       try {
         if (fs.existsSync(filePath)) {
           fs.unlinkSync(filePath);
-          console.log(`[TranscribeWorker] Cleaned up temp file: ${filePath}`);
+          console.debug(`[TranscribeWorker] Cleaned up temp file: ${filePath}`);
         }
       } catch (err) {
         console.error(`[TranscribeWorker] Failed to clean up ${filePath}:`, (err as Error).message);

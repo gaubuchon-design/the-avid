@@ -25,6 +25,7 @@ export interface SequenceData {
   name: string;
   settings: SequenceSettings;
   tracks: Track[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- marker shape varies by context
   markers: any[];
   duration: number;
 }

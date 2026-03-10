@@ -24,6 +24,7 @@ export type BinOp =
       type: 'add-asset';
       assetId: string;
       position: number;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- asset data is an opaque serialized blob
       assetData: any;
       hlc: HLC;
     }
@@ -58,6 +59,7 @@ interface AssetState {
   assetId: string;
   position: number;
   name?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRDT asset data is opaque
   data?: any;
   metadata: Record<string, unknown>;
   removed: boolean;
@@ -205,6 +207,7 @@ export class BinCRDT {
   /**
    * Compute current bin state by replaying the ordered op log.
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- return type includes opaque asset data
   getState(): { assetId: string; position: number; name?: string; data?: any }[] {
     const assets = new Map<string, AssetState>();
 

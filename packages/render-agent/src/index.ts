@@ -375,11 +375,11 @@ export class RenderAgent extends EventEmitter {
    */
   private registerSignalHandlers(): void {
     const handleShutdown = (signal: string) => {
-      console.log(`[RenderAgent] Received ${signal}, initiating graceful shutdown...`);
+      console.info(`[RenderAgent] Received ${signal}, initiating graceful shutdown...`);
       this.emit('shutdown', signal);
 
       void this.disconnect().then(() => {
-        console.log('[RenderAgent] Graceful shutdown complete.');
+        console.info('[RenderAgent] Graceful shutdown complete.');
         this.removeSignalHandlers();
       }).catch((err) => {
         console.error('[RenderAgent] Error during shutdown:', (err as Error).message);
@@ -529,7 +529,7 @@ export class RenderAgent extends EventEmitter {
 
     // Cancel any stragglers
     if (this.activeJobs.size > 0) {
-      console.log(`[RenderAgent] Force-cancelling ${this.activeJobs.size} active job(s)`);
+      console.warn(`[RenderAgent] Force-cancelling ${this.activeJobs.size} active job(s)`);
       this.router.cancelAll();
     }
 
@@ -636,7 +636,7 @@ export class RenderAgent extends EventEmitter {
     const actualDelay = Math.round(delay + jitter);
 
     this.reconnectAttempts++;
-    console.log(`[RenderAgent] Reconnecting in ${actualDelay}ms (attempt ${this.reconnectAttempts})...`);
+    console.info(`[RenderAgent] Reconnecting in ${actualDelay}ms (attempt ${this.reconnectAttempts})...`);
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
@@ -1014,7 +1014,7 @@ export class RenderAgent extends EventEmitter {
   private cancelJob(jobId: string, reason = 'Cancelled'): void {
     if (!this.activeJobs.has(jobId)) return;
 
-    console.log(`[RenderAgent] Cancelling job ${jobId}: ${reason}`);
+    console.info(`[RenderAgent] Cancelling job ${jobId}: ${reason}`);
     this.router.cancelJob(jobId);
   }
 

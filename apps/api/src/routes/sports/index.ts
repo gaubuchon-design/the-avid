@@ -74,6 +74,7 @@ router.patch(
   async (req: Request, res: Response) => {
     await findProductionByProjectId(req.params['projectId']!);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma dynamic data payload
     const data: any = { ...req.body };
     if (data['gameDate']) data['gameDate'] = new Date(data['gameDate']);
 
@@ -95,6 +96,7 @@ router.get(
     const production = await findProductionByProjectId(req.params['projectId']!);
 
     const { eventType, minConfidence } = req.query as { eventType?: string; minConfidence?: string };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma dynamic where clause
     const where: any = { productionId: production.id };
     if (eventType) where['eventType'] = eventType;
     if (minConfidence) {
@@ -170,6 +172,7 @@ router.patch(
     const existing = await db.growingFile.findUnique({ where: { id: req.params['id'] } });
     if (!existing) throw new NotFoundError('Growing file');
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma dynamic data payload
     const data: any = { ...req.body };
     if (data['lastFrameAt']) data['lastFrameAt'] = new Date(data['lastFrameAt']);
 

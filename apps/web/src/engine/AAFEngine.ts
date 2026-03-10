@@ -1316,7 +1316,7 @@ function parseSimplifiedAAF(
   const decoder = new TextDecoder('utf-8');
   const jsonString = decoder.decode(payloadBytes);
 
-  let parsed: any;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(jsonString);
   } catch (err) {
@@ -1400,6 +1400,7 @@ function parseOLEStructuredStorage(
  * Validate and normalise a parsed JSON object into a well-typed AAFDocument.
  * Fills in missing fields with sensible defaults.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- raw parsed JSON needs runtime validation
 function validateAAFDocument(raw: any): AAFDocument {
   if (!raw || typeof raw !== 'object') {
     throw new AAFParseError('Parsed AAF content is not an object.');

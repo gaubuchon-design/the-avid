@@ -364,7 +364,7 @@ class PluginRegistry {
     return {
       postMessage: (msg: unknown) => {
         if (destroyed) return;
-        console.log(`[PluginSandbox:${pluginId}] message:`, msg);
+        console.debug(`[PluginSandbox:${pluginId}] message:`, msg);
       },
       destroy: () => {
         destroyed = true;
