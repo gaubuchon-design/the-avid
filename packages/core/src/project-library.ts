@@ -310,6 +310,7 @@ export interface EditorProjectCollaborationPanelPreferences {
   commentsComposerVisible: boolean;
   commentsComposerDraft: string;
   commentsActiveReplyCommentId: string | null;
+  commentsReplyDrafts: Record<string, string>;
 }
 
 export interface EditorProjectSettings {
@@ -1267,6 +1268,7 @@ function normalizeProject(project: EditorProject): EditorProject {
       commentsComposerVisible: false,
       commentsComposerDraft: '',
       commentsActiveReplyCommentId: null,
+      commentsReplyDrafts: {},
     }),
     tokenBalance,
     editorialState: {

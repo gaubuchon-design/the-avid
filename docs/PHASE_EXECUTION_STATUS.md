@@ -141,10 +141,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Added store and phase-1 UI coverage asserting persisted composer draft and active reply focus round-trip through panel preference hydration/persistence.
 - Surfaced restored comments composer context indicators in the Comments tab header with summary chips for draft preview and active reply-thread focus.
 - Added phase-1 UI coverage asserting hydrated composer draft/active-reply state renders expected comments composer-context summary chips.
+- Persisted and hydrated per-thread reply draft text state via `collaborationPanelPreferences.commentsReplyDrafts`, including reconnect-time filtering to existing comment threads.
+- Replaced local per-thread reply draft state with collab-store-backed drafts so in-progress replies survive reconnect/reopen, and added store/UI coverage for reply draft round-trip behavior.
 
 ## Next Execution Slices
 
-1. Persist and hydrate per-thread reply draft text state so in-progress replies survive reconnect/reopen for the active thread.
+1. Surface restored reply-draft context indicators directly on comment cards (draft badge/text preview) so active in-thread drafts are visible without opening reply editor.
 
 ## Exit Signals For These Early Phases
 

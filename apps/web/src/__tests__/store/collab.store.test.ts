@@ -231,6 +231,10 @@ describe('useCollabStore', () => {
       commentsComposerVisible: true,
       commentsComposerDraft: 'Persisted draft',
       commentsActiveReplyCommentId: 'persisted-comment-1',
+      commentsReplyDrafts: {
+        'persisted-comment-1': 'Persisted reply draft',
+        'stale-comment': 'Should be filtered',
+      },
     };
     repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
 
@@ -249,6 +253,8 @@ describe('useCollabStore', () => {
     expect(state.commentsComposerVisible).toBe(true);
     expect(state.commentsComposerDraft).toBe('Persisted draft');
     expect(state.commentsActiveReplyCommentId).toBe('persisted-comment-1');
+    expect(state.commentsReplyDrafts['persisted-comment-1']).toBe('Persisted reply draft');
+    expect(state.commentsReplyDrafts['stale-comment']).toBeUndefined();
     expect(useEditorStore.getState().versionHistoryRetentionPreference).toBe('session');
     expect(useEditorStore.getState().versionHistoryCompareMode).toBe('details');
   });
@@ -290,6 +296,10 @@ describe('useCollabStore', () => {
       commentsComposerVisible: true,
       commentsComposerDraft: 'Needs notes',
       commentsActiveReplyCommentId: 'missing-comment',
+      commentsReplyDrafts: {
+        'missing-comment': 'Draft for missing comment',
+        'existing-comment': 'Draft to keep',
+      },
     };
     project.collaborationComments = [
       {
@@ -311,6 +321,8 @@ describe('useCollabStore', () => {
 
     expect(useCollabStore.getState().selectedCommentId).toBeNull();
     expect(useCollabStore.getState().commentsActiveReplyCommentId).toBeNull();
+    expect(useCollabStore.getState().commentsReplyDrafts['missing-comment']).toBeUndefined();
+    expect(useCollabStore.getState().commentsReplyDrafts['existing-comment']).toBe('Draft to keep');
   });
 
   it('addComment() adds a comment and updates activity feed', () => {
@@ -465,6 +477,7 @@ describe('useCollabStore', () => {
       commentsComposerDraft: 'Composer draft',
       commentsActiveReplyCommentId: 'persisted-comment-1',
     });
+    useCollabStore.getState().setCommentReplyDraft('persisted-comment-1', 'Reply draft');
     await flushAsyncTasks();
 
     const savedProject = repositoryMocks.saveProjectToRepository.mock.calls.at(-1)?.[0] as EditorProject;
@@ -485,6 +498,7 @@ describe('useCollabStore', () => {
     expect(savedProject.collaborationPanelPreferences?.commentsComposerVisible).toBe(true);
     expect(savedProject.collaborationPanelPreferences?.commentsComposerDraft).toBe('Composer draft');
     expect(savedProject.collaborationPanelPreferences?.commentsActiveReplyCommentId).toBe('persisted-comment-1');
+    expect(savedProject.collaborationPanelPreferences?.commentsReplyDrafts?.['persisted-comment-1']).toBe('Reply draft');
   });
 
   it('persistPanelPreferences() persists version history review controls', async () => {
@@ -569,6 +583,32 @@ describe('useCollabStore', () => {
     expect(savedProject.collaborationPanelPreferences?.commentsComposerVisible).toBe(true);
     expect(savedProject.collaborationPanelPreferences?.commentsComposerDraft).toBe('Follow-up note');
     expect(savedProject.collaborationPanelPreferences?.commentsActiveReplyCommentId).toBe('composer-reply-comment');
+  });
+
+  it('setCommentReplyDraft() persists per-thread reply draft state', async () => {
+    const project = buildRepositoryProject('project_reply_draft_persist');
+    project.collaborationComments = [
+      {
+        id: 'reply-comment',
+        userId: 'user-reviewer',
+        userName: 'Jordan Reviewer',
+        frame: 220,
+        text: 'Reply target comment',
+        timestamp: Date.now() - 500,
+        resolved: false,
+        replies: [],
+        reactions: [],
+      },
+    ];
+    repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
+    useCollabStore.getState().connect(project.id, 'user_1');
+    await flushAsyncTasks();
+
+    useCollabStore.getState().setCommentReplyDraft('reply-comment', 'Reply draft text');
+    await flushAsyncTasks();
+
+    const savedProject = repositoryMocks.saveProjectToRepository.mock.calls.at(-1)?.[0] as EditorProject;
+    expect(savedProject.collaborationPanelPreferences?.commentsReplyDrafts?.['reply-comment']).toBe('Reply draft text');
   });
 
   it('setActivityRetentionPreferences() prunes feed and persists preference', () => {

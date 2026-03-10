@@ -283,6 +283,8 @@ function CommentsTab() {
     commentsComposerDraft,
     commentsActiveReplyCommentId,
     setCommentsComposerContext,
+    commentsReplyDrafts,
+    setCommentReplyDraft,
     resolveComment,
     reopenComment,
     replyToComment,
@@ -293,7 +295,6 @@ function CommentsTab() {
     identityProfiles,
   } = useCollabStore();
   const { setPlayhead, playheadTime } = useEditorStore();
-  const [replyTexts, setReplyTexts] = useState<Record<string, string>>({});
 
   const filteredComments = comments.filter((c) => {
     if (commentFilter === 'open') return !c.resolved;
@@ -316,12 +317,12 @@ function CommentsTab() {
   }, [addComment, commentsComposerDraft, playheadTime, setCommentsComposerContext]);
 
   const handleReply = useCallback((commentId: string) => {
-    const text = replyTexts[commentId]?.trim();
+    const text = commentsReplyDrafts[commentId]?.trim();
     if (!text) return;
     replyToComment(commentId, text);
-    setReplyTexts((prev) => ({ ...prev, [commentId]: '' }));
+    setCommentReplyDraft(commentId, '');
     setCommentsComposerContext({ commentsActiveReplyCommentId: null });
-  }, [replyTexts, replyToComment, setCommentsComposerContext]);
+  }, [commentsReplyDrafts, replyToComment, setCommentReplyDraft, setCommentsComposerContext]);
 
   return (
     <div>
@@ -575,8 +576,8 @@ function CommentsTab() {
           onToggleReply={() => setCommentsComposerContext({
             commentsActiveReplyCommentId: commentsActiveReplyCommentId === comment.id ? null : comment.id,
           })}
-          replyText={replyTexts[comment.id] ?? ''}
-          onReplyTextChange={(text) => setReplyTexts((prev) => ({ ...prev, [comment.id]: text }))}
+          replyText={commentsReplyDrafts[comment.id] ?? ''}
+          onReplyTextChange={(text) => setCommentReplyDraft(comment.id, text)}
           onSubmitReply={() => handleReply(comment.id)}
         />
       ))}
