@@ -307,4 +307,58 @@ describe('phase 1 collab identity UI', () => {
     });
     container.remove();
   });
+
+  it('renders reaction actor identity labels for non-current collaborators', async () => {
+    useCollabStore.setState({
+      activeTab: 'comments',
+      currentUserName: 'Alex Editor',
+      currentUserAvatar: 'avatar://alex',
+      identityProfiles: {
+        'id:user-jordan': {
+          userId: 'user-jordan',
+          displayName: 'Jordan Reviewer',
+          avatarUrl: 'avatar://jordan',
+          color: '#118ab2',
+        },
+      },
+      comments: [
+        {
+          id: 'comment-reaction',
+          userId: 'user-alex',
+          userName: 'Alex Editor',
+          frame: 64,
+          text: 'Looks good.',
+          timestamp: Date.now(),
+          resolved: false,
+          reactions: [
+            {
+              emoji: '👍',
+              userIds: ['user-jordan'],
+            },
+          ],
+          replies: [],
+        },
+      ],
+    });
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<CollabPanel />);
+    });
+
+    const reactionButton = Array
+      .from(container.querySelectorAll('button'))
+      .find((button) => button.textContent?.includes('👍'));
+    expect(reactionButton).toBeTruthy();
+    expect(reactionButton?.getAttribute('title')).toContain('Jordan Reviewer');
+    expect(reactionButton?.textContent).toContain('👍');
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
 });

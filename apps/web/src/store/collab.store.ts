@@ -11,6 +11,7 @@ import {
   type CollabIdentityProfile,
   DEFAULT_VERSION_RETENTION_PREFERENCES,
   type CollabComment,
+  type CollabReaction,
   type CollabUser,
   type ProjectVersion,
   type VersionRetentionPreferences,
@@ -299,6 +300,51 @@ function buildIdentityProfilesFromOnlineUsers(users: CollabUser[]): Record<strin
   }, {});
 }
 
+function buildIdentityProfilesFromReactions(
+  reactions: CollabReaction[],
+  existingProfiles: Record<string, CollaboratorIdentityProfile>,
+): Record<string, CollaboratorIdentityProfile> {
+  return reactions.reduce<Record<string, CollaboratorIdentityProfile>>((profiles, reaction) => {
+    const profilesFromMetadata = (reaction.actorProfiles ?? []).reduce<Record<string, CollaboratorIdentityProfile>>(
+      (reactionProfiles, actorProfile) => mergeIdentityProfile(reactionProfiles, actorProfile),
+      profiles,
+    );
+
+    return reaction.userIds.reduce<Record<string, CollaboratorIdentityProfile>>((reactionProfiles, userId) => {
+      if (reactionProfiles[`id:${userId}`]) {
+        return reactionProfiles;
+      }
+      const fallbackProfile = existingProfiles[`id:${userId}`];
+      if (!fallbackProfile) {
+        return reactionProfiles;
+      }
+      return mergeIdentityProfile(reactionProfiles, fallbackProfile);
+    }, profilesFromMetadata);
+  }, existingProfiles);
+}
+
+function buildIdentityProfilesFromComments(
+  comments: CollabComment[],
+  existingProfiles: Record<string, CollaboratorIdentityProfile>,
+): Record<string, CollaboratorIdentityProfile> {
+  return comments.reduce<Record<string, CollaboratorIdentityProfile>>((profiles, comment) => {
+    const withCommentAuthor = mergeIdentityProfile(profiles, {
+      userId: comment.userId,
+      displayName: comment.userName,
+    });
+
+    const withReplyAuthors = comment.replies.reduce<Record<string, CollaboratorIdentityProfile>>(
+      (replyProfiles, reply) => mergeIdentityProfile(replyProfiles, {
+        userId: reply.userId,
+        displayName: reply.userName,
+      }),
+      withCommentAuthor,
+    );
+
+    return buildIdentityProfilesFromReactions(comment.reactions, withReplyAuthors);
+  }, existingProfiles);
+}
+
 async function persistVersionsToRepository(projectId: string | null): Promise<void> {
   if (!projectId) return;
   const project = await getProjectFromRepository(projectId);
@@ -314,15 +360,21 @@ const initialVersionRetentionPreferences = loadVersionRetentionPreferences();
 collabEngine.setVersionRetentionPreferences(initialVersionRetentionPreferences);
 // ─── Initial State ──────────────────────────────────────────────────────────
 
+const initialComments = collabEngine.getComments();
+const initialIdentityProfiles = buildIdentityProfilesFromComments(
+  initialComments,
+  buildIdentityProfilesFromOnlineUsers(collabEngine.getOnlineUsers()),
+);
+
 const INITIAL_STATE: CollabState = {
   projectId: null,
   connected: false,
   currentUserId: 'u_self',
   currentUserName: 'You',
   currentUserAvatar: undefined,
-  identityProfiles: buildIdentityProfilesFromOnlineUsers(collabEngine.getOnlineUsers()),
+  identityProfiles: initialIdentityProfiles,
   onlineUsers: collabEngine.getOnlineUsers(),
-  comments: collabEngine.getComments(),
+  comments: initialComments,
   versions: collabEngine.getVersions(),
   activeTab: 'comments',
   selectedCommentId: null,
@@ -345,6 +397,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
         collabEngine.connect(projectId, userId, profile);
         set((s) => {
           const onlineUsers = collabEngine.getOnlineUsers();
+          const comments = collabEngine.getComments();
           const connectedUser = onlineUsers.find((candidate) => candidate.id === userId);
           const profileDisplayName = profile?.name?.trim() || connectedUser?.name || s.currentUserName;
           const profileAvatar = profile?.avatar || connectedUser?.avatar;
@@ -354,11 +407,15 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           s.currentUserName = profileDisplayName;
           s.currentUserAvatar = profileAvatar;
           s.onlineUsers = onlineUsers;
+          s.comments = comments;
           s.identityProfiles = mergeIdentityProfile(
-            {
-              ...s.identityProfiles,
-              ...buildIdentityProfilesFromOnlineUsers(onlineUsers),
-            },
+            buildIdentityProfilesFromComments(
+              comments,
+              {
+                ...s.identityProfiles,
+                ...buildIdentityProfilesFromOnlineUsers(onlineUsers),
+              },
+            ),
             {
               userId,
               displayName: profileDisplayName,
@@ -413,7 +470,9 @@ export const useCollabStore = create<CollabState & CollabActions>()(
       addComment: (frame, trackId, text) => {
         collabEngine.addComment(frame, trackId, text);
         set((s) => {
-          s.comments = collabEngine.getComments();
+          const comments = collabEngine.getComments();
+          s.comments = comments;
+          s.identityProfiles = buildIdentityProfilesFromComments(comments, s.identityProfiles);
         }, false, 'collab/addComment');
         get().addActivity(get().currentUserName, 'added comment', `"${text.slice(0, 40)}${text.length > 40 ? '...' : ''}"`, get().currentUserId);
       },
@@ -421,7 +480,9 @@ export const useCollabStore = create<CollabState & CollabActions>()(
       replyToComment: (commentId, text) => {
         collabEngine.replyToComment(commentId, text);
         set((s) => {
-          s.comments = collabEngine.getComments();
+          const comments = collabEngine.getComments();
+          s.comments = comments;
+          s.identityProfiles = buildIdentityProfilesFromComments(comments, s.identityProfiles);
         }, false, 'collab/replyToComment');
         get().addActivity(get().currentUserName, 'replied to comment', `"${text.slice(0, 40)}${text.length > 40 ? '...' : ''}"`, get().currentUserId);
       },
@@ -429,7 +490,9 @@ export const useCollabStore = create<CollabState & CollabActions>()(
       resolveComment: (commentId) => {
         collabEngine.resolveComment(commentId);
         set((s) => {
-          s.comments = collabEngine.getComments();
+          const comments = collabEngine.getComments();
+          s.comments = comments;
+          s.identityProfiles = buildIdentityProfilesFromComments(comments, s.identityProfiles);
         }, false, 'collab/resolveComment');
         get().addActivity(get().currentUserName, 'resolved comment', `Comment ${commentId}`, get().currentUserId);
       },
@@ -437,7 +500,9 @@ export const useCollabStore = create<CollabState & CollabActions>()(
       reopenComment: (commentId) => {
         collabEngine.reopenComment(commentId);
         set((s) => {
-          s.comments = collabEngine.getComments();
+          const comments = collabEngine.getComments();
+          s.comments = comments;
+          s.identityProfiles = buildIdentityProfilesFromComments(comments, s.identityProfiles);
         }, false, 'collab/reopenComment');
         get().addActivity(get().currentUserName, 'reopened comment', `Comment ${commentId}`, get().currentUserId);
       },
@@ -445,7 +510,9 @@ export const useCollabStore = create<CollabState & CollabActions>()(
       addReaction: (commentId, emoji) => {
         collabEngine.addReaction(commentId, emoji);
         set((s) => {
-          s.comments = collabEngine.getComments();
+          const comments = collabEngine.getComments();
+          s.comments = comments;
+          s.identityProfiles = buildIdentityProfilesFromComments(comments, s.identityProfiles);
         }, false, 'collab/addReaction');
       },
 
@@ -544,11 +611,12 @@ export const useCollabStore = create<CollabState & CollabActions>()(
       // Sync
       refreshFromEngine: () => set((s) => {
         const onlineUsers = collabEngine.getOnlineUsers();
+        const comments = collabEngine.getComments();
         s.onlineUsers = onlineUsers;
-        s.comments = collabEngine.getComments();
+        s.comments = comments;
         s.versions = collabEngine.getVersions();
         s.identityProfiles = {
-          ...s.identityProfiles,
+          ...buildIdentityProfilesFromComments(comments, s.identityProfiles),
           ...buildIdentityProfilesFromOnlineUsers(onlineUsers),
           ...buildIdentityProfilesFromVersions(s.versions),
         };

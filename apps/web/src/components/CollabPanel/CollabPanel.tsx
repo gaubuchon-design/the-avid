@@ -61,6 +61,20 @@ function resolveIdentityProfile(
   return null;
 }
 
+function getReactionActorNames(
+  reaction: CollabComment['reactions'][number],
+  identityProfiles: Record<string, CollaboratorIdentityProfile>,
+): string[] {
+  if (reaction.actorProfiles && reaction.actorProfiles.length > 0) {
+    return reaction.actorProfiles.map((profile) => profile.displayName);
+  }
+
+  return reaction.userIds.map((userId) => {
+    const identity = resolveIdentityProfile(identityProfiles, userId);
+    return identity?.displayName || userId;
+  });
+}
+
 function IdentityAvatar({
   name,
   avatarUrl,
@@ -547,10 +561,17 @@ function CommentCard({
       {/* Reactions */}
       {comment.reactions.length > 0 && (
         <div style={{ display: 'flex', gap: 4, marginBottom: 6, flexWrap: 'wrap' }}>
-          {comment.reactions.map((reaction) => (
+          {comment.reactions.map((reaction) => {
+            const reactionActorNames = getReactionActorNames(reaction, identityProfiles);
+            const reactionTitle = reactionActorNames.length > 0
+              ? `${reactionActorNames.join(', ')} reacted with ${reaction.emoji}`
+              : `React with ${reaction.emoji}`;
+            return (
             <button
               key={reaction.emoji}
               onClick={() => onReaction(reaction.emoji)}
+              title={reactionTitle}
+              aria-label={reactionTitle}
               style={{
                 padding: '2px 6px',
                 borderRadius: 'var(--radius-sm)',
@@ -566,7 +587,8 @@ function CommentCard({
               <span>{reaction.emoji}</span>
               <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{reaction.userIds.length}</span>
             </button>
-          ))}
+            );
+          })}
         </div>
       )}
 

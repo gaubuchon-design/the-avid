@@ -100,10 +100,13 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Persisted collaborator identity metadata in collab store state (keyed by user id/name), hydrated those profiles from repository-backed version history and live presence, and threaded activity entries with `userId` metadata.
 - Updated comment/reply and activity-feed avatar resolution to use hydrated collaborator identity profiles so reopened projects keep non-current collaborator avatars beyond version cards.
 - Expanded Phase-1 coverage for activity `userId` metadata persistence and non-current collaborator avatar rendering in comment/reply threads plus activity rows via hydrated identity profiles.
+- Added explicit reaction-actor profile metadata (`userId`/display name/avatar/color) to collaboration reactions and synchronized that metadata through reaction add/remove flows.
+- Hydrated collab identity profiles from reaction actor metadata (with `userIds` fallback) so non-current reaction participants can still resolve identity across reconnect/reopen flows where full live presence is unavailable.
+- Extended reaction UI tooling with actor-name-aware reaction labels/tooltips and added Phase-1 coverage for reaction actor identity rendering and store-level reaction actor metadata capture.
 
 ## Next Execution Slices
 
-1. Persist and hydrate collaborator identity metadata for comment reaction actors so reopened projects can resolve non-current participant identity in reaction UI/tooling beyond thread headers.
+1. Persist and hydrate collaboration comment threads (including reactions) in the project repository so reopen/reconnect cycles retain review context, not just version history and identity metadata.
 
 ## Exit Signals For These Early Phases
 

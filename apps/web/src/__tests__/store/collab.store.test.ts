@@ -149,6 +149,23 @@ describe('useCollabStore', () => {
     expect(useCollabStore.getState().activityFeed.length).toBeGreaterThan(actBefore);
   });
 
+  it('addReaction() stores reaction actor profile metadata for current user', () => {
+    useCollabStore.getState().connect('project_reaction_identity', 'user_reaction', {
+      name: 'Riley Mixer',
+      avatar: 'avatar://riley',
+    });
+    useCollabStore.getState().addComment(90, 't1', 'Reaction identity test');
+    const commentId = useCollabStore.getState().comments[0]?.id;
+    expect(commentId).toBeDefined();
+
+    useCollabStore.getState().addReaction(commentId!, '🔥');
+    const reaction = useCollabStore.getState().comments[0]?.reactions.find((entry) => entry.emoji === '🔥');
+    expect(reaction?.userIds).toContain('user_reaction');
+    expect(reaction?.actorProfiles?.[0]?.userId).toBe('user_reaction');
+    expect(reaction?.actorProfiles?.[0]?.displayName).toBe('Riley Mixer');
+    expect(reaction?.actorProfiles?.[0]?.avatarUrl).toBe('avatar://riley');
+  });
+
   it('resolveComment() works on a standalone CollabEngine', () => {
     // Test resolve/reopen on a fresh engine instance to avoid the
     // Immer freeze bug that affects the singleton shared with the store.

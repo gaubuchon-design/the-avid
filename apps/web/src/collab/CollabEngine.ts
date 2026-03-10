@@ -34,7 +34,20 @@ export interface CollabComment {
   timestamp: number;
   resolved: boolean;
   replies: CollabReply[];
-  reactions: { emoji: string; userIds: string[] }[];
+  reactions: CollabReaction[];
+}
+
+export interface CollabReactionActorProfile {
+  userId: string;
+  displayName: string;
+  avatarUrl?: string;
+  color?: string;
+}
+
+export interface CollabReaction {
+  emoji: string;
+  userIds: string[];
+  actorProfiles?: CollabReactionActorProfile[];
 }
 
 export interface ProjectVersion {
@@ -144,7 +157,13 @@ const DEMO_COMMENTS: CollabComment[] = [
       },
     ],
     reactions: [
-      { emoji: '👍', userIds: ['u2'] },
+      {
+        emoji: '👍',
+        userIds: ['u2'],
+        actorProfiles: [
+          { userId: 'u2', displayName: 'Marcus T.', color: '#2bb672' },
+        ],
+      },
     ],
   },
   {
@@ -178,8 +197,21 @@ const DEMO_COMMENTS: CollabComment[] = [
       },
     ],
     reactions: [
-      { emoji: '❤️', userIds: ['u1', 'u2'] },
-      { emoji: '✨', userIds: ['u1'] },
+      {
+        emoji: '❤️',
+        userIds: ['u1', 'u2'],
+        actorProfiles: [
+          { userId: 'u1', displayName: 'Sarah K.', color: '#7c5cfc' },
+          { userId: 'u2', displayName: 'Marcus T.', color: '#2bb672' },
+        ],
+      },
+      {
+        emoji: '✨',
+        userIds: ['u1'],
+        actorProfiles: [
+          { userId: 'u1', displayName: 'Sarah K.', color: '#7c5cfc' },
+        ],
+      },
     ],
   },
 ];
@@ -438,6 +470,14 @@ function cloneVersion(version: ProjectVersion): ProjectVersion {
   };
 }
 
+function cloneReaction(reaction: CollabReaction): CollabReaction {
+  return {
+    ...reaction,
+    userIds: [...reaction.userIds],
+    actorProfiles: reaction.actorProfiles?.map((profile) => ({ ...profile })),
+  };
+}
+
 // ─── Engine ─────────────────────────────────────────────────────────────────
 
 export class CollabEngine {
@@ -457,7 +497,7 @@ export class CollabEngine {
     this.comments = DEMO_COMMENTS.map(c => ({
       ...c,
       replies: c.replies.map(r => ({ ...r })),
-      reactions: c.reactions.map(r => ({ ...r, userIds: [...r.userIds] })),
+      reactions: c.reactions.map((reaction) => cloneReaction(reaction)),
     }));
     this.versions = DEMO_VERSIONS.map(cloneVersion);
   }
@@ -593,24 +633,49 @@ export class CollabEngine {
     if (!comment) return;
 
     const existing = comment.reactions.find(r => r.emoji === emoji);
+    const currentUser = this.users.get(this.currentUserId);
+    const currentActorProfile: CollabReactionActorProfile = {
+      userId: this.currentUserId,
+      displayName: currentUser?.name || this.currentUserName,
+      avatarUrl: currentUser?.avatar,
+      color: currentUser?.color,
+    };
     if (existing) {
       if (existing.userIds.includes(this.currentUserId)) {
         // Remove reaction
         existing.userIds = existing.userIds.filter(id => id !== this.currentUserId);
+        if (existing.actorProfiles) {
+          existing.actorProfiles = existing.actorProfiles.filter((profile) => profile.userId !== this.currentUserId);
+          if (existing.actorProfiles.length === 0) {
+            existing.actorProfiles = undefined;
+          }
+        }
         if (existing.userIds.length === 0) {
           comment.reactions = comment.reactions.filter(r => r.emoji !== emoji);
         }
       } else {
         existing.userIds.push(this.currentUserId);
+        existing.actorProfiles = [
+          ...(existing.actorProfiles ?? []),
+          currentActorProfile,
+        ];
       }
     } else {
-      comment.reactions.push({ emoji, userIds: [this.currentUserId] });
+      comment.reactions.push({
+        emoji,
+        userIds: [this.currentUserId],
+        actorProfiles: [currentActorProfile],
+      });
     }
     this.notify();
   }
 
   getComments(): CollabComment[] {
-    return [...this.comments];
+    return this.comments.map((comment) => ({
+      ...comment,
+      replies: comment.replies.map((reply) => ({ ...reply })),
+      reactions: comment.reactions.map((reaction) => cloneReaction(reaction)),
+    }));
   }
 
   getCommentsAtFrame(frame: number): CollabComment[] {
