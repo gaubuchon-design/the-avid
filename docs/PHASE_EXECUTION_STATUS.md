@@ -147,10 +147,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Extended phase-1 UI coverage to assert hydrated reply drafts render expected in-card draft indicators.
 - Persisted and hydrated comment-card reaction-picker visibility context (`commentsActiveReactionPickerCommentId`) so interrupted reaction selection can resume on reconnect/reopen when the comment still exists.
 - Replaced local reaction-picker visibility state with collab-store-backed context and added store/UI coverage for reaction-picker visibility round-trip behavior.
+- Surfaced restored reaction-picker context indicators in the Comments tab header with a focus chip showing which comment currently has reaction selection open.
+- Extended phase-1 UI coverage to assert hydrated reaction-picker context renders expected comments reaction-focus summary indicators.
 
 ## Next Execution Slices
 
-1. Surface restored reaction-picker context indicators in the Comments tab header so reopened emoji-selection focus is immediately visible.
+1. Persist and hydrate comment-card inline reaction-picker filter/search context (if introduced) or add bounded cleanup slice to consolidate repeated panel-preference persistence calls into a shared helper.
 
 ## Exit Signals For These Early Phases
 

@@ -304,6 +304,7 @@ function CommentsTab() {
   });
   const selectedComment = comments.find((comment) => comment.id === selectedCommentId) ?? null;
   const activeReplyComment = comments.find((comment) => comment.id === commentsActiveReplyCommentId) ?? null;
+  const activeReactionPickerComment = comments.find((comment) => comment.id === commentsActiveReactionPickerCommentId) ?? null;
   const hasActiveContext = commentFilter !== 'all';
   const hasComposerContext = commentsComposerDraft.trim().length > 0 || activeReplyComment !== null;
 
@@ -472,6 +473,32 @@ function CommentsTab() {
               Replying to: {activeReplyComment.id}
             </span>
           )}
+        </div>
+      )}
+      {activeReactionPickerComment && (
+        <div
+          aria-label="Comments reaction context summary"
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 4,
+            padding: '0 0 8px',
+          }}
+        >
+          <span
+            style={{
+              padding: '2px 6px',
+              borderRadius: 999,
+              fontSize: 9,
+              fontWeight: 600,
+              letterSpacing: '0.03em',
+              background: 'var(--bg-elevated)',
+              color: 'var(--text-secondary)',
+              border: '1px solid var(--border-default)',
+            }}
+          >
+            Reactions open: {activeReactionPickerComment.id}
+          </span>
         </div>
       )}
 

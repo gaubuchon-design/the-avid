@@ -371,12 +371,15 @@ describe('phase 1 collab identity UI', () => {
     const composerTextarea = container.querySelector('textarea[placeholder="Type your comment..."]') as HTMLTextAreaElement | null;
     const replyInput = container.querySelector('input[placeholder="Write a reply..."]') as HTMLInputElement | null;
     const composerSummary = container.querySelector('[aria-label="Comments composer context summary"]');
+    const reactionSummary = container.querySelector('[aria-label="Comments reaction context summary"]');
     expect(composerTextarea?.value).toBe('Need alt b-roll after this line.');
     expect(replyInput).toBeTruthy();
     expect(replyInput?.value).toBe('This beat needs a tighter response.');
     expect(composerSummary).toBeTruthy();
     expect(composerSummary?.textContent).toContain('Draft: Need alt b-roll after this line.');
     expect(composerSummary?.textContent).toContain('Replying to: comment-reply-target');
+    expect(reactionSummary).toBeTruthy();
+    expect(reactionSummary?.textContent).toContain('Reactions open: comment-reply-target');
     expect(container.textContent).toContain('Draft reply: This beat needs a tighter response.');
     expect(container.textContent).toContain('❤️');
 
