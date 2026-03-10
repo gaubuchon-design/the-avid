@@ -2,10 +2,13 @@
 // Zustand store for collaboration state: online users, comments, versions,
 // and activity feed. Initialized with demo data from CollabEngine.
 
+import type { EditorProjectVersionHistoryEntry } from '@mcua/core';
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { collabEngine, type CollabUser, type CollabComment, type ProjectVersion } from '../collab/CollabEngine';
+import { captureEditorVersionSnapshot, applyEditorVersionSnapshot } from '../collab/versionSnapshots';
+import { getProjectFromRepository, saveProjectToRepository } from '../lib/projectRepository';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -18,6 +21,7 @@ export interface ActivityEntry {
 }
 
 interface CollabState {
+  projectId: string | null;
   connected: boolean;
   currentUserId: string;
   onlineUsers: CollabUser[];
@@ -78,6 +82,7 @@ const DEMO_ACTIVITY: ActivityEntry[] = [
 // ─── Initial State ──────────────────────────────────────────────────────────
 
 const INITIAL_STATE: CollabState = {
+  projectId: null,
   connected: false,
   currentUserId: 'u_self',
   onlineUsers: collabEngine.getOnlineUsers(),
@@ -88,6 +93,59 @@ const INITIAL_STATE: CollabState = {
   commentFilter: 'all',
   activityFeed: DEMO_ACTIVITY,
 };
+
+function toProjectVersionHistory(versions: ProjectVersion[]): EditorProjectVersionHistoryEntry[] {
+  return versions.map((version) => ({
+    id: version.id,
+    name: version.name,
+    createdAt: version.createdAt,
+    createdBy: version.createdBy,
+    description: version.description,
+    snapshotData: version.snapshotData,
+    isRestorePoint: version.isRestorePoint,
+  }));
+}
+
+function toCollabVersions(entries: EditorProjectVersionHistoryEntry[]): ProjectVersion[] {
+  return entries.map((entry) => ({
+    id: entry.id,
+    name: entry.name,
+    createdAt: Number.isFinite(Number(entry.createdAt)) ? Number(entry.createdAt) : Date.now(),
+    createdBy: entry.createdBy,
+    description: entry.description,
+    snapshotData: entry.snapshotData,
+    isRestorePoint: entry.isRestorePoint,
+  }));
+}
+
+async function persistVersionHistory(projectId: string, versions: ProjectVersion[]): Promise<void> {
+  try {
+    const project = await getProjectFromRepository(projectId);
+    if (!project) {
+      return;
+    }
+    await saveProjectToRepository({
+      ...project,
+      versionHistory: toProjectVersionHistory(versions),
+    });
+  } catch (error) {
+    console.warn('[CollabStore] Failed to persist version history', error);
+  }
+}
+
+async function hydrateVersionHistory(projectId: string): Promise<ProjectVersion[] | null> {
+  try {
+    const project = await getProjectFromRepository(projectId);
+    const entries = project?.versionHistory;
+    if (!entries || entries.length === 0) {
+      return null;
+    }
+    return toCollabVersions(entries);
+  } catch (error) {
+    console.warn('[CollabStore] Failed to hydrate version history', error);
+    return null;
+  }
+}
 
 // ─── Store ──────────────────────────────────────────────────────────────────
 
@@ -101,15 +159,31 @@ export const useCollabStore = create<CollabState & CollabActions>()(
       connect: (projectId, userId) => {
         collabEngine.connect(projectId, userId);
         set((s) => {
+          s.projectId = projectId;
           s.connected = true;
           s.currentUserId = userId;
           s.onlineUsers = collabEngine.getOnlineUsers();
         }, false, 'collab/connect');
+
+        void hydrateVersionHistory(projectId).then((versions) => {
+          if (!versions || versions.length === 0) {
+            return;
+          }
+          collabEngine.hydrateVersions(versions);
+          set((s) => {
+            if (s.projectId === projectId) {
+              s.versions = collabEngine.getVersions();
+            }
+          }, false, 'collab/hydrateVersionHistory');
+        });
       },
 
       disconnect: () => {
         collabEngine.disconnect();
-        set((s) => { s.connected = false; }, false, 'collab/disconnect');
+        set((s) => {
+          s.connected = false;
+          s.projectId = null;
+        }, false, 'collab/disconnect');
       },
 
       // UI
@@ -159,18 +233,51 @@ export const useCollabStore = create<CollabState & CollabActions>()(
 
       // Versions
       saveVersion: (name, description) => {
-        collabEngine.saveVersion(name, description);
+        const snapshotData = captureEditorVersionSnapshot();
+        collabEngine.saveVersion(name, description, snapshotData);
+        const versions = collabEngine.getVersions();
         set((s) => {
-          s.versions = collabEngine.getVersions();
+          s.versions = versions;
         }, false, 'collab/saveVersion');
         get().addActivity('You', 'saved version', `"${name}"`);
+        const projectId = get().projectId;
+        if (projectId) {
+          void persistVersionHistory(projectId, versions);
+        }
       },
 
       restoreVersion: (versionId) => {
-        collabEngine.restoreVersion(versionId);
-        const version = collabEngine.getVersions().find(v => v.id === versionId);
-        if (version) {
-          get().addActivity('You', 'restored version', `"${version.name}"`);
+        const currentSnapshot = captureEditorVersionSnapshot();
+        const requestedVersion = collabEngine.getVersions().find((version) => version.id === versionId);
+        if (!requestedVersion) {
+          return;
+        }
+
+        collabEngine.saveVersion(
+          `Restore Point: ${requestedVersion.name}`,
+          `Automatic restore point created before restoring "${requestedVersion.name}".`,
+          currentSnapshot,
+          true,
+        );
+
+        const restoredVersion = collabEngine.restoreVersion(versionId);
+        const restored = restoredVersion ? applyEditorVersionSnapshot(restoredVersion.snapshotData) : false;
+
+        const versions = collabEngine.getVersions();
+        set((s) => {
+          s.versions = versions;
+        }, false, 'collab/restoreVersion');
+
+        if (restoredVersion) {
+          get().addActivity('You', 'restored version', `"${restoredVersion.name}"`);
+        }
+        if (!restored) {
+          get().addActivity('System', 'restore warning', `Version "${requestedVersion.name}" had no restorable snapshot payload`);
+        }
+
+        const projectId = get().projectId;
+        if (projectId) {
+          void persistVersionHistory(projectId, versions);
         }
       },
 

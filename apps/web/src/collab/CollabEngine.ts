@@ -41,8 +41,8 @@ export interface ProjectVersion {
   createdAt: number;
   createdBy: string;
   description: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- snapshot is an opaque serialized project blob
-  snapshotData: any;
+  snapshotData: unknown;
+  isRestorePoint?: boolean;
 }
 
 type Subscriber = () => void;
@@ -149,6 +149,14 @@ const DEMO_VERSIONS: ProjectVersion[] = [
   },
 ];
 
+function cloneVersion(version: ProjectVersion): ProjectVersion {
+  const serializedSnapshot = JSON.stringify(version.snapshotData ?? null);
+  return {
+    ...version,
+    snapshotData: serializedSnapshot ? JSON.parse(serializedSnapshot) : null,
+  };
+}
+
 // ─── Engine ─────────────────────────────────────────────────────────────────
 
 export class CollabEngine {
@@ -167,7 +175,7 @@ export class CollabEngine {
       replies: c.replies.map(r => ({ ...r })),
       reactions: c.reactions.map(r => ({ ...r, userIds: [...r.userIds] })),
     }));
-    this.versions = DEMO_VERSIONS.map(v => ({ ...v }));
+    this.versions = DEMO_VERSIONS.map(cloneVersion);
   }
 
   // ── Connection ──────────────────────────────────────────────────────────
@@ -312,14 +320,15 @@ export class CollabEngine {
 
   // ── Versions ────────────────────────────────────────────────────────────
 
-  saveVersion(name: string, description: string): ProjectVersion {
+  saveVersion(name: string, description: string, snapshotData?: unknown, isRestorePoint = false): ProjectVersion {
     const version: ProjectVersion = {
       id: `v_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       name,
       createdAt: Date.now(),
       createdBy: this.currentUserName,
       description,
-      snapshotData: { tracks: 6, clips: 8, duration: 34, timestamp: Date.now() },
+      snapshotData: snapshotData ?? { tracks: 6, clips: 8, duration: 34, timestamp: Date.now() },
+      isRestorePoint,
     };
     this.versions.unshift(version);
     this.notify();
@@ -327,17 +336,24 @@ export class CollabEngine {
   }
 
   getVersions(): ProjectVersion[] {
-    return [...this.versions];
+    return this.versions.map(cloneVersion);
   }
 
-  restoreVersion(versionId: string): void {
+  hydrateVersions(versions: ProjectVersion[]): void {
+    this.versions = versions.map(cloneVersion);
+    this.notify();
+  }
+
+  restoreVersion(versionId: string): ProjectVersion | null {
     const version = this.versions.find(v => v.id === versionId);
     if (version) {
       // In production, this would restore the timeline state from the snapshot
       // Intentional debug-level log for version restoration tracking
       console.debug(`[CollabEngine] Restoring version: ${version.name}`);
       this.notify();
+      return cloneVersion(version);
     }
+    return null;
   }
 
   // ── Subscriptions ───────────────────────────────────────────────────────
