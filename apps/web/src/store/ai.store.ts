@@ -167,7 +167,7 @@ export const useAIStore = create<AIState & AIActions>()(
         }],
       }), true, 'ai/resetStore'),
     })),
-    { name: 'AIStore', enabled: process.env["NODE_ENV"] === 'development' },
+    { name: 'AIStore', enabled: import.meta.env.DEV },
   )
 );
 
