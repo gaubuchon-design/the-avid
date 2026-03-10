@@ -29,6 +29,7 @@ export interface ActivityEntry {
 }
 
 interface CollabState {
+  projectId: string | null;
   connected: boolean;
   currentUserId: string;
   onlineUsers: CollabUser[];
@@ -93,9 +94,16 @@ const DEMO_ACTIVITY: ActivityEntry[] = [
   { id: 'act8', user: 'Marcus T.', action: 'normalized audio', timestamp: now - 5400000, detail: 'Normalized A1 and A2 to -23 LUFS' },
 ];
 
-function buildCurrentProjectVersionSnapshot(): EditorProject | null {
+function buildCurrentProjectVersionSnapshot(): (EditorProject & { playheadTime: number }) | null {
   const snapshot = buildProjectPersistenceSnapshot(useEditorStore.getState());
-  return snapshot ? buildProjectFromEditorState(snapshot) : null;
+  if (!snapshot) {
+    return null;
+  }
+
+  return {
+    ...buildProjectFromEditorState(snapshot),
+    playheadTime: useEditorStore.getState().playheadTime,
+  };
 }
 
 function isEditorProjectSnapshot(value: unknown): value is EditorProject {
@@ -157,6 +165,7 @@ collabEngine.setVersionRetentionPreferences(initialVersionRetentionPreferences);
 // ─── Initial State ──────────────────────────────────────────────────────────
 
 const INITIAL_STATE: CollabState = {
+  projectId: null,
   connected: false,
   currentUserId: 'u_self',
   onlineUsers: collabEngine.getOnlineUsers(),
@@ -181,6 +190,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
       connect: (projectId, userId) => {
         collabEngine.connect(projectId, userId);
         set((s) => {
+          s.projectId = projectId;
           s.connected = true;
           s.currentUserId = userId;
           s.onlineUsers = collabEngine.getOnlineUsers();
@@ -189,7 +199,10 @@ export const useCollabStore = create<CollabState & CollabActions>()(
 
       disconnect: () => {
         collabEngine.disconnect();
-        set((s) => { s.connected = false; }, false, 'collab/disconnect');
+        set((s) => {
+          s.connected = false;
+          s.projectId = null;
+        }, false, 'collab/disconnect');
       },
 
       // UI
@@ -252,13 +265,35 @@ export const useCollabStore = create<CollabState & CollabActions>()(
       },
 
       restoreVersion: (versionId) => {
+        const currentSnapshot = buildCurrentProjectVersionSnapshot();
+        const versionToRestore = collabEngine.getVersions().find((version) => version.id === versionId) ?? null;
+        if (currentSnapshot && versionToRestore) {
+          collabEngine.saveVersion(
+            `Restore Point · Before ${versionToRestore.name}`,
+            `Auto-created before restoring ${versionToRestore.name}.`,
+            currentSnapshot,
+            { retentionPolicy: 'session' },
+          );
+        }
+
         const version = collabEngine.restoreVersion(versionId);
         if (!version) {
           return;
         }
 
+        set((s) => {
+          s.versions = collabEngine.getVersions();
+        }, false, 'collab/restoreVersion');
+
         if (isEditorProjectSnapshot(version.snapshotData)) {
           useEditorStore.getState().restoreProjectSnapshot(version.snapshotData);
+          const savedPlayheadTime = (version.snapshotData as { playheadTime?: unknown }).playheadTime;
+          if (typeof savedPlayheadTime === 'number') {
+            useEditorStore.setState((state) => ({
+              ...state,
+              playheadTime: savedPlayheadTime,
+            }));
+          }
           get().addActivity('You', 'restored version', `"${version.name}"`);
           return;
         }

@@ -232,6 +232,16 @@ export interface EditorPublishJob {
   outputSummary?: string;
 }
 
+export interface EditorProjectVersionHistoryEntry {
+  id: string;
+  name: string;
+  createdAt: number;
+  createdBy: string;
+  description: string;
+  snapshotData: unknown;
+  isRestorePoint?: boolean;
+}
+
 export interface EditorProjectSettings {
   frameRate: number;
   width: number;
@@ -362,6 +372,7 @@ export interface EditorProject {
   approvals: EditorApproval[];
   publishJobs: EditorPublishJob[];
   watchFolders: EditorWatchFolder[];
+  versionHistory?: EditorProjectVersionHistoryEntry[];
   tokenBalance: number;
   editorialState: EditorProjectEditorialState;
   workstationState: EditorProjectWorkstationState;
@@ -1160,6 +1171,7 @@ function normalizeProject(project: EditorProject): EditorProject {
     approvals: cloneValue(project.approvals ?? []),
     publishJobs: cloneValue(project.publishJobs ?? []),
     watchFolders: cloneValue(project.watchFolders ?? []),
+    versionHistory: cloneValue(project.versionHistory ?? []),
     tokenBalance,
     editorialState: {
       selectedBinId: editorialState.selectedBinId ?? null,
@@ -1279,6 +1291,7 @@ export function hydrateProject(project: Partial<EditorProject>): EditorProject {
     approvals: project.approvals ?? createApprovals(),
     publishJobs: project.publishJobs ?? createPublishJobs(template),
     watchFolders: project.watchFolders ?? [],
+    versionHistory: project.versionHistory ?? [],
     tokenBalance: project.tokenBalance ?? 0,
     editorialState: project.editorialState ?? {
       selectedBinId: bins[0]?.id ?? null,
@@ -1350,6 +1363,7 @@ export function buildProject(options: CreateProjectOptions = {}): EditorProject 
     approvals: createApprovals(),
     publishJobs: createPublishJobs(template),
     watchFolders: [],
+    versionHistory: [],
     tokenBalance: template === 'sports' ? 620 : 487,
     editorialState: {
       selectedBinId: bins[0]?.id ?? null,

@@ -44,6 +44,7 @@ export interface ProjectVersion {
   createdBy: string;
   description: string;
   kind: 'demo' | 'restore-point';
+  isRestorePoint?: boolean;
   retentionPolicy: 'fixture' | 'manual' | 'session';
   snapshotSummary: ProjectVersionSnapshotSummary | null;
   compareSummary: ProjectVersionCompareSummary | null;
@@ -403,6 +404,16 @@ function buildVersionCompareMetrics(
   return metrics;
 }
 
+function cloneVersion(version: ProjectVersion): ProjectVersion {
+  return {
+    ...version,
+    compareSummary: version.compareSummary ? { ...version.compareSummary } : null,
+    compareMetrics: version.compareMetrics.map((metric) => ({ ...metric })),
+    snapshotSummary: version.snapshotSummary ? { ...version.snapshotSummary } : null,
+    snapshotData: version.snapshotData ? JSON.parse(JSON.stringify(version.snapshotData)) : version.snapshotData,
+  };
+}
+
 // ─── Engine ─────────────────────────────────────────────────────────────────
 
 export class CollabEngine {
@@ -424,7 +435,7 @@ export class CollabEngine {
       replies: c.replies.map(r => ({ ...r })),
       reactions: c.reactions.map(r => ({ ...r, userIds: [...r.userIds] })),
     }));
-    this.versions = DEMO_VERSIONS.map(v => ({ ...v, compareMetrics: [...v.compareMetrics] }));
+    this.versions = DEMO_VERSIONS.map(cloneVersion);
   }
 
   // ── Connection ──────────────────────────────────────────────────────────
@@ -586,6 +597,7 @@ export class CollabEngine {
       createdBy: this.currentUserName,
       description,
       kind: 'restore-point',
+      isRestorePoint: true,
       retentionPolicy: options?.retentionPolicy ?? 'manual',
       snapshotSummary,
       compareSummary: buildVersionCompareSummary(snapshotSummary, previousSummary),
@@ -600,10 +612,12 @@ export class CollabEngine {
   }
 
   getVersions(): ProjectVersion[] {
-    return this.versions.map((version) => ({
-      ...version,
-      compareMetrics: [...version.compareMetrics],
-    }));
+    return this.versions.map(cloneVersion);
+  }
+
+  hydrateVersions(versions: ProjectVersion[]): void {
+    this.versions = versions.map(cloneVersion);
+    this.notify();
   }
 
   getVersionRetentionPreferences(): VersionRetentionPreferences {
@@ -623,7 +637,7 @@ export class CollabEngine {
       // the selected version and emits a change for the collaboration UI.
       console.debug(`[CollabEngine] Restoring version: ${version.name}`);
       this.notify();
-      return { ...version, compareMetrics: [...version.compareMetrics] };
+      return cloneVersion(version);
     }
     return null;
   }

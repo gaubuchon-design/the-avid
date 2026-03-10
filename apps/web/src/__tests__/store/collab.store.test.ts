@@ -1,16 +1,18 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useCollabStore } from '../../store/collab.store';
-import { CollabEngine } from '../../collab/CollabEngine';
+import { CollabEngine, collabEngine } from '../../collab/CollabEngine';
+import { useEditorStore } from '../../store/editor.store';
+
+const initialCollabState = useCollabStore.getState();
+const initialEditorState = useEditorStore.getState();
+const seedVersions = new CollabEngine().getVersions();
 
 describe('useCollabStore', () => {
   beforeEach(() => {
-    // Reset only UI state; keep engine-provided data intact
-    useCollabStore.setState({
-      connected: false,
-      activeTab: 'comments',
-      selectedCommentId: null,
-      commentFilter: 'all',
-    });
+    collabEngine.hydrateVersions(seedVersions);
+    useCollabStore.setState(initialCollabState, true);
+    useCollabStore.getState().refreshFromEngine();
+    useEditorStore.setState(initialEditorState, true);
   });
 
   it('initial state has demo data', () => {
@@ -24,6 +26,7 @@ describe('useCollabStore', () => {
   it('connect() sets connected to true', () => {
     useCollabStore.getState().connect('project_1', 'user_1');
     expect(useCollabStore.getState().connected).toBe(true);
+    expect(useCollabStore.getState().projectId).toBe('project_1');
     expect(useCollabStore.getState().currentUserId).toBe('user_1');
   });
 
@@ -80,8 +83,27 @@ describe('useCollabStore', () => {
 
   it('saveVersion() adds a version and activity entry', () => {
     const before = useCollabStore.getState().versions.length;
+    useEditorStore.setState({ projectId: 'project-save-version', playheadTime: 12 });
     useCollabStore.getState().saveVersion('Test Version', 'Test description');
-    expect(useCollabStore.getState().versions.length).toBeGreaterThan(before);
+    const state = useCollabStore.getState();
+    expect(state.versions.length).toBeGreaterThan(before);
+    const savedSnapshot = state.versions[0]?.snapshotData as { playheadTime?: number } | undefined;
+    expect(savedSnapshot?.playheadTime).toBe(12);
+  });
+
+  it('restoreVersion() creates restore point and applies snapshot', () => {
+    useEditorStore.setState({ projectId: 'project-restore-version', duration: 60, playheadTime: 5 });
+    useCollabStore.getState().saveVersion('Pre-change', 'capture playhead at five');
+    const targetVersionId = useCollabStore.getState().versions[0]?.id;
+    expect(targetVersionId).toBeDefined();
+
+    useEditorStore.setState({ duration: 60, playheadTime: 42 });
+    useCollabStore.getState().restoreVersion(targetVersionId!);
+
+    expect(useEditorStore.getState().playheadTime).toBe(5);
+    const versions = useCollabStore.getState().versions;
+    expect(versions[0]?.isRestorePoint).toBe(true);
+    expect(versions[0]?.name).toContain('Restore Point');
   });
 
   it('setVersionRetentionPreferences() persists preference and prunes list', () => {
