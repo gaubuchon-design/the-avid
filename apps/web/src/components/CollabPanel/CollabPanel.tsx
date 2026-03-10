@@ -844,6 +844,23 @@ function VersionsTab() {
     if (!compareTargetVersion || !compareBaseline) return null;
     return buildVersionComparison(compareTargetVersion, compareBaseline);
   }, [compareBaseline, compareTargetVersion]);
+  const hasActiveCompareContext = (
+    versionCompareTargetVersionId.trim().length > 0
+    || versionCompareBaselineMode !== 'previous'
+    || versionCompareCustomBaselineId.trim().length > 0
+  );
+  const compareContextBaselineLabel = useMemo(() => {
+    if (versionCompareBaselineMode === 'latest') {
+      return 'Latest saved restore point';
+    }
+    if (versionCompareBaselineMode === 'custom') {
+      if (compareBaseline) {
+        return compareBaseline.name;
+      }
+      return 'Custom baseline (not selected)';
+    }
+    return 'Previous restore point';
+  }, [compareBaseline, versionCompareBaselineMode]);
   const hasActiveReviewContext = (
     versionHistoryRetentionPreference !== 'manual'
     || versionHistoryCompareMode !== 'summary'
@@ -1122,6 +1139,46 @@ function VersionsTab() {
           <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
             Compare Restore Points
           </div>
+          {hasActiveCompareContext && (
+            <div
+              aria-label="Version compare context summary"
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 4,
+                marginBottom: 8,
+              }}
+            >
+              <span
+                style={{
+                  padding: '2px 6px',
+                  borderRadius: 999,
+                  fontSize: 9,
+                  fontWeight: 600,
+                  letterSpacing: '0.03em',
+                  background: 'var(--bg-elevated)',
+                  color: 'var(--text-secondary)',
+                  border: '1px solid var(--border-default)',
+                }}
+              >
+                Target: {compareTargetVersion?.name ?? 'Not selected'}
+              </span>
+              <span
+                style={{
+                  padding: '2px 6px',
+                  borderRadius: 999,
+                  fontSize: 9,
+                  fontWeight: 600,
+                  letterSpacing: '0.03em',
+                  background: 'var(--bg-elevated)',
+                  color: 'var(--text-muted)',
+                  border: '1px solid var(--border-default)',
+                }}
+              >
+                Baseline: {compareContextBaselineLabel}
+              </span>
+            </div>
+          )}
           <div style={{ display: 'grid', gap: 6, marginBottom: 8 }}>
             <label style={{ display: 'grid', gap: 4, fontSize: 10, color: 'var(--text-muted)' }}>
               Target version

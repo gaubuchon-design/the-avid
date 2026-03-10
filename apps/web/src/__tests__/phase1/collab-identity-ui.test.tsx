@@ -356,9 +356,13 @@ describe('phase 1 collab identity UI', () => {
     const targetSelect = container.querySelector('select[aria-label="Version compare target"]') as HTMLSelectElement | null;
     const baselineModeSelect = container.querySelector('select[aria-label="Version compare baseline mode"]') as HTMLSelectElement | null;
     const customBaselineSelect = container.querySelector('select[aria-label="Version compare custom baseline"]') as HTMLSelectElement | null;
+    const compareContextSummary = container.querySelector('[aria-label="Version compare context summary"]');
     expect(targetSelect?.value).toBe('version-target');
     expect(baselineModeSelect?.value).toBe('custom');
     expect(customBaselineSelect?.value).toBe('version-baseline');
+    expect(compareContextSummary).toBeTruthy();
+    expect(compareContextSummary?.textContent).toContain('Target: Target Version');
+    expect(compareContextSummary?.textContent).toContain('Baseline: Baseline Version');
 
     await act(async () => {
       root.unmount();

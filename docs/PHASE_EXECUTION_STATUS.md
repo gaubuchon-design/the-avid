@@ -130,10 +130,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Extended `collaborationPanelPreferences` to persist version-compare setup state (`versionCompareTargetVersionId`, `versionCompareBaselineMode`, `versionCompareCustomBaselineId`) and hydrated that state on reconnect/reopen.
 - Replaced local-only version-compare selection state in the Versions tab with collab-store-backed panel preferences so compare target/baseline selection survives reopen cycles.
 - Added store and phase-1 UI coverage verifying persisted version-compare panel selections round-trip through repository hydration and restore selected compare controls in UI.
+- Surfaced restored version-compare context indicators near compare controls with summary chips for selected target and resolved baseline labels.
+- Added phase-1 UI coverage asserting hydrated version-compare selections render compare-context summary indicators (`Target`/`Baseline`) with restored labels.
 
 ## Next Execution Slices
 
-1. Surface restored version-compare target/baseline summary indicators (selected target + baseline labels) near compare controls so reopened diff context is immediately visible.
+1. Persist and hydrate selected comment thread context (`selectedCommentId`) so comment focus survives reconnect/reopen when the thread still exists.
 
 ## Exit Signals For These Early Phases
 
