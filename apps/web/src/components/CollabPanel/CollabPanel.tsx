@@ -179,22 +179,13 @@ function UsersTab() {
         >
           {/* Avatar circle */}
           <div style={{ position: 'relative', flexShrink: 0 }}>
-            <div
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: '50%',
-                background: user.color,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 11,
-                fontWeight: 700,
-                color: '#fff',
-              }}
-            >
-              {user.name.charAt(0)}
-            </div>
+            <IdentityAvatar
+              name={user.name}
+              avatarUrl={user.avatar}
+              color={user.color}
+              size={28}
+              fontSize={11}
+            />
             {/* Online dot */}
             <div
               style={{
@@ -244,7 +235,20 @@ function UsersTab() {
 // ─── Comments Tab ───────────────────────────────────────────────────────────
 
 function CommentsTab() {
-  const { comments, commentFilter, setCommentFilter, selectedCommentId, selectComment, resolveComment, reopenComment, replyToComment, addComment, addReaction } = useCollabStore();
+  const {
+    comments,
+    commentFilter,
+    setCommentFilter,
+    selectedCommentId,
+    selectComment,
+    resolveComment,
+    reopenComment,
+    replyToComment,
+    addComment,
+    addReaction,
+    currentUserName,
+    currentUserAvatar,
+  } = useCollabStore();
   const { setPlayhead, playheadTime } = useEditorStore();
   const [newCommentText, setNewCommentText] = useState('');
   const [replyTexts, setReplyTexts] = useState<Record<string, string>>({});
@@ -384,6 +388,8 @@ function CommentsTab() {
         <CommentCard
           key={comment.id}
           comment={comment}
+          currentUserName={currentUserName}
+          currentUserAvatar={currentUserAvatar}
           isSelected={selectedCommentId === comment.id}
           onSelect={() => selectComment(comment.id === selectedCommentId ? null : comment.id)}
           onSeek={() => setPlayhead(comment.frame / 23.976)}
@@ -408,6 +414,8 @@ function CommentsTab() {
 
 function CommentCard({
   comment,
+  currentUserName,
+  currentUserAvatar,
   isSelected,
   onSelect,
   onSeek,
@@ -420,6 +428,8 @@ function CommentCard({
   onSubmitReply,
 }: {
   comment: CollabComment;
+  currentUserName: string;
+  currentUserAvatar?: string;
   isSelected: boolean;
   onSelect: () => void;
   onSeek: () => void;
@@ -433,8 +443,8 @@ function CommentCard({
 }) {
   const [showReactionPicker, setShowReactionPicker] = useState(false);
 
-  // User color lookup
-  const userColor = comment.userName === 'Sarah K.' ? '#7c5cfc' : comment.userName === 'Marcus T.' ? '#2bb672' : '#f59e0b';
+  const userColor = getDisplayColorForUser(comment.userName);
+  const commentAvatar = comment.userName === currentUserName ? currentUserAvatar : undefined;
 
   return (
     <div
@@ -449,24 +459,13 @@ function CommentCard({
     >
       {/* Header row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-        {/* Avatar */}
-        <div
-          style={{
-            width: 20,
-            height: 20,
-            borderRadius: '50%',
-            background: userColor,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 9,
-            fontWeight: 700,
-            color: '#fff',
-            flexShrink: 0,
-          }}
-        >
-          {comment.userName.charAt(0)}
-        </div>
+        <IdentityAvatar
+          name={comment.userName}
+          avatarUrl={commentAvatar}
+          color={userColor}
+          size={20}
+          fontSize={9}
+        />
         <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>
           {comment.userName}
         </span>
@@ -628,26 +627,18 @@ function CommentCard({
       {comment.replies.length > 0 && (
         <div style={{ marginTop: 8, paddingLeft: 16, borderLeft: '2px solid var(--border-default)' }}>
           {comment.replies.map((reply) => {
-            const replyColor = reply.userName === 'Sarah K.' ? '#7c5cfc' : reply.userName === 'Marcus T.' ? '#2bb672' : '#f59e0b';
+            const replyColor = getDisplayColorForUser(reply.userName);
+            const replyAvatar = reply.userName === currentUserName ? currentUserAvatar : undefined;
             return (
               <div key={reply.id} style={{ marginBottom: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                  <div
-                    style={{
-                      width: 14,
-                      height: 14,
-                      borderRadius: '50%',
-                      background: replyColor,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: 7,
-                      fontWeight: 700,
-                      color: '#fff',
-                    }}
-                  >
-                    {reply.userName.charAt(0)}
-                  </div>
+                  <IdentityAvatar
+                    name={reply.userName}
+                    avatarUrl={replyAvatar}
+                    color={replyColor}
+                    size={14}
+                    fontSize={7}
+                  />
                   <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-primary)' }}>{reply.userName}</span>
                   <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{timeAgo(reply.timestamp)}</span>
                 </div>

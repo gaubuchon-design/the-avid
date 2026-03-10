@@ -93,10 +93,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Hardened collaboration user presence updates to avoid mutating frozen state references by replacing in-place user mutations with immutable map writes.
 - Surfaced authenticated collaboration identity in UI affordances that previously used placeholder initials by rendering avatar-aware identity chips in version cards, activity feed rows, and panel header online-user stacks.
 - Added phase-1 UI coverage that asserts authenticated avatar rendering in version and activity views.
+- Extended authenticated identity avatar rendering into users-tab rows and comment/reply threads so all major collaboration surfaces now show consistent profile identity instead of placeholder initials.
+- Expanded phase-1 UI coverage with users-tab and comment-thread avatar assertions for authenticated identity paths.
 
 ## Next Execution Slices
 
-1. Extend authenticated identity avatar rendering into remaining collaboration views (users tab rows + comment/reply threads) so all collaboration surfaces share consistent profile presentation.
+1. Persist and hydrate richer collaborator profile metadata (avatar/display name/color) alongside version history entries so non-current users render stable identity after reopen.
 
 ## Exit Signals For These Early Phases
 
