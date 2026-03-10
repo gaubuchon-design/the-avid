@@ -45,6 +45,18 @@ export interface ProjectVersion {
   snapshotData: any;
 }
 
+export type VersionRetentionPreset = 'keep-all' | 'last-10' | 'last-25' | 'last-50';
+
+export interface VersionRetentionPreferences {
+  preset: VersionRetentionPreset;
+  autoPrune: boolean;
+}
+
+export const DEFAULT_VERSION_RETENTION_PREFERENCES: VersionRetentionPreferences = {
+  preset: 'last-25',
+  autoPrune: true,
+};
+
 type Subscriber = () => void;
 
 // ─── Demo data ──────────────────────────────────────────────────────────────
@@ -159,6 +171,9 @@ export class CollabEngine {
   private currentUserName = 'You';
   private subscribers: Set<Subscriber> = new Set();
   private connected = false;
+  private versionRetentionPreferences: VersionRetentionPreferences = {
+    ...DEFAULT_VERSION_RETENTION_PREFERENCES,
+  };
 
   constructor() {
     this.users = new Map(DEMO_USERS.map(u => [u.id, { ...u }]));
@@ -322,12 +337,23 @@ export class CollabEngine {
       snapshotData: { tracks: 6, clips: 8, duration: 34, timestamp: Date.now() },
     };
     this.versions.unshift(version);
+    this.applyVersionRetention();
     this.notify();
     return version;
   }
 
   getVersions(): ProjectVersion[] {
     return [...this.versions];
+  }
+
+  getVersionRetentionPreferences(): VersionRetentionPreferences {
+    return { ...this.versionRetentionPreferences };
+  }
+
+  setVersionRetentionPreferences(preferences: VersionRetentionPreferences): void {
+    this.versionRetentionPreferences = { ...preferences };
+    this.applyVersionRetention();
+    this.notify();
   }
 
   restoreVersion(versionId: string): void {
@@ -353,6 +379,19 @@ export class CollabEngine {
         console.error('[CollabEngine] Listener error:', err);
       }
     });
+  }
+
+  private applyVersionRetention(): void {
+    if (!this.versionRetentionPreferences.autoPrune) return;
+    const maxVersionCountByPreset: Record<Exclude<VersionRetentionPreset, 'keep-all'>, number> = {
+      'last-10': 10,
+      'last-25': 25,
+      'last-50': 50,
+    };
+    if (this.versionRetentionPreferences.preset === 'keep-all') return;
+    const maxVersionCount = maxVersionCountByPreset[this.versionRetentionPreferences.preset];
+    if (this.versions.length <= maxVersionCount) return;
+    this.versions = this.versions.slice(0, maxVersionCount);
   }
 }
 

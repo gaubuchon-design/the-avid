@@ -5,7 +5,15 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
-import { collabEngine, type CollabUser, type CollabComment, type ProjectVersion } from '../collab/CollabEngine';
+import {
+  collabEngine,
+  DEFAULT_VERSION_RETENTION_PREFERENCES,
+  type CollabUser,
+  type CollabComment,
+  type ProjectVersion,
+  type VersionRetentionPreferences,
+  type VersionRetentionPreset,
+} from '../collab/CollabEngine';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -26,6 +34,7 @@ interface CollabState {
   activeTab: 'users' | 'comments' | 'versions' | 'activity';
   selectedCommentId: string | null;
   commentFilter: 'all' | 'open' | 'resolved';
+  versionRetentionPreferences: VersionRetentionPreferences;
   activityFeed: ActivityEntry[];
 }
 
@@ -49,6 +58,7 @@ interface CollabActions {
   // Versions
   saveVersion: (name: string, description: string) => void;
   restoreVersion: (versionId: string) => void;
+  setVersionRetentionPreferences: (preferences: Partial<VersionRetentionPreferences>) => void;
 
   // Sync
   refreshFromEngine: () => void;
@@ -75,6 +85,45 @@ const DEMO_ACTIVITY: ActivityEntry[] = [
   { id: 'act8', user: 'Marcus T.', action: 'normalized audio', timestamp: now - 5400000, detail: 'Normalized A1 and A2 to -23 LUFS' },
 ];
 
+const VERSION_RETENTION_STORAGE_KEY = 'avid:version-retention-preferences';
+
+function isVersionRetentionPreset(value: unknown): value is VersionRetentionPreset {
+  return value === 'keep-all' || value === 'last-10' || value === 'last-25' || value === 'last-50';
+}
+
+function loadVersionRetentionPreferences(): VersionRetentionPreferences {
+  if (typeof window === 'undefined') {
+    return { ...DEFAULT_VERSION_RETENTION_PREFERENCES };
+  }
+  try {
+    const raw = window.localStorage.getItem(VERSION_RETENTION_STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_VERSION_RETENTION_PREFERENCES };
+    const parsed = JSON.parse(raw) as Partial<VersionRetentionPreferences>;
+    return {
+      preset: isVersionRetentionPreset(parsed.preset)
+        ? parsed.preset
+        : DEFAULT_VERSION_RETENTION_PREFERENCES.preset,
+      autoPrune: typeof parsed.autoPrune === 'boolean'
+        ? parsed.autoPrune
+        : DEFAULT_VERSION_RETENTION_PREFERENCES.autoPrune,
+    };
+  } catch {
+    return { ...DEFAULT_VERSION_RETENTION_PREFERENCES };
+  }
+}
+
+function persistVersionRetentionPreferences(preferences: VersionRetentionPreferences): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(VERSION_RETENTION_STORAGE_KEY, JSON.stringify(preferences));
+  } catch {
+    // ignore localStorage persistence failures in private/incognito contexts
+  }
+}
+
+const initialVersionRetentionPreferences = loadVersionRetentionPreferences();
+collabEngine.setVersionRetentionPreferences(initialVersionRetentionPreferences);
+
 // ─── Initial State ──────────────────────────────────────────────────────────
 
 const INITIAL_STATE: CollabState = {
@@ -86,6 +135,7 @@ const INITIAL_STATE: CollabState = {
   activeTab: 'comments',
   selectedCommentId: null,
   commentFilter: 'all',
+  versionRetentionPreferences: initialVersionRetentionPreferences,
   activityFeed: DEMO_ACTIVITY,
 };
 
@@ -174,6 +224,19 @@ export const useCollabStore = create<CollabState & CollabActions>()(
         }
       },
 
+      setVersionRetentionPreferences: (preferences) => {
+        const mergedPreferences = {
+          ...get().versionRetentionPreferences,
+          ...preferences,
+        };
+        collabEngine.setVersionRetentionPreferences(mergedPreferences);
+        persistVersionRetentionPreferences(mergedPreferences);
+        set((s) => {
+          s.versionRetentionPreferences = mergedPreferences;
+          s.versions = collabEngine.getVersions();
+        }, false, 'collab/setVersionRetentionPreferences');
+      },
+
       // Sync
       refreshFromEngine: () => set((s) => {
         s.onlineUsers = collabEngine.getOnlineUsers();
@@ -204,6 +267,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           onlineUsers: collabEngine.getOnlineUsers(),
           comments: collabEngine.getComments(),
           versions: collabEngine.getVersions(),
+          versionRetentionPreferences: get().versionRetentionPreferences,
         }), true, 'collab/resetStore');
       },
     })),
@@ -222,6 +286,7 @@ export const selectCollabVersions = (state: CollabStoreState) => state.versions;
 export const selectCollabActiveTab = (state: CollabStoreState) => state.activeTab;
 export const selectSelectedCommentId = (state: CollabStoreState) => state.selectedCommentId;
 export const selectCommentFilter = (state: CollabStoreState) => state.commentFilter;
+export const selectVersionRetentionPreferences = (state: CollabStoreState) => state.versionRetentionPreferences;
 export const selectActivityFeed = (state: CollabStoreState) => state.activityFeed;
 export const selectOnlineUserCount = (state: CollabStoreState) => state.onlineUsers.length;
 export const selectOpenComments = (state: CollabStoreState) =>
