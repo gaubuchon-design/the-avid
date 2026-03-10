@@ -115,10 +115,13 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Surfaced collaboration activity retention controls directly in the collaboration panel activity tab (preset selector + auto-prune toggle) so editors can manage history policy from UI without direct store/API calls.
 - Wired activity-tab retention controls to live store updates via `setActivityRetentionPreferences(...)`, including immediate feed-prune feedback and current-entry count visibility in the panel.
 - Expanded phase-1 UI coverage to assert activity-tab retention control interactions update store retention preferences and prune activity entries as expected.
+- Added project-scoped collaboration panel preference persistence (`collaborationPanelPreferences`) covering active tab, comment filter, activity action filter, and activity search query.
+- Hydrated collaboration panel review-context preferences on connect/reopen and wired tab/filter/search UI actions to persist those preferences immediately via repository-backed collab state saves.
+- Expanded store and phase-1 UI coverage for collaboration panel preference hydration/persistence and activity action-filter control behavior so reopen cycles restore the same review context.
 
 ## Next Execution Slices
 
-1. Persist and hydrate active collaboration tab + activity filter/search preferences per project so reopen cycles restore the same collaboration review context.
+1. Surface persistent activity-search and action-filter summaries (active chips/count indicators) in the collaboration panel header to make restored review context immediately visible after reopen.
 
 ## Exit Signals For These Early Phases
 

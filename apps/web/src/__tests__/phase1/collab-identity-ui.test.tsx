@@ -184,8 +184,17 @@ describe('phase 1 collab identity UI', () => {
       autoPruneToggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
+    const actionFilterSelect = container.querySelector('select[aria-label="Activity action filter"]') as HTMLSelectElement | null;
+    expect(actionFilterSelect).toBeTruthy();
+    await act(async () => {
+      if (!actionFilterSelect) return;
+      actionFilterSelect.value = 'versions';
+      actionFilterSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
     expect(useCollabStore.getState().activityRetentionPreferences.preset).toBe('last-25');
     expect(useCollabStore.getState().activityRetentionPreferences.autoPrune).toBe(false);
+    expect(useCollabStore.getState().activityActionFilter).toBe('versions');
     expect(useCollabStore.getState().activityFeed.length).toBe(25);
 
     await act(async () => {

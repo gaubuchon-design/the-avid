@@ -1166,6 +1166,17 @@ function formatVersionDuration(duration: number): string {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}:${String(frames).padStart(2, '0')}`;
 }
 
+function getActivityCategory(action: string): 'comments' | 'versions' | 'other' {
+  const normalizedAction = action.toLowerCase();
+  if (normalizedAction.includes('comment')) {
+    return 'comments';
+  }
+  if (normalizedAction.includes('version')) {
+    return 'versions';
+  }
+  return 'other';
+}
+
 function VersionCard({
   version,
   compareMode,
@@ -1338,12 +1349,35 @@ function VersionCard({
 function ActivityTab() {
   const {
     activityFeed,
+    activityActionFilter,
+    activitySearchQuery,
     activityRetentionPreferences,
+    setActivityActionFilter,
+    setActivitySearchQuery,
     setActivityRetentionPreferences,
     currentUserName,
     currentUserAvatar,
     identityProfiles,
   } = useCollabStore();
+
+  const filteredActivityFeed = useMemo(() => {
+    const normalizedQuery = activitySearchQuery.trim().toLowerCase();
+    return activityFeed.filter((entry) => {
+      const matchesActionFilter = activityActionFilter === 'all'
+        || getActivityCategory(entry.action) === activityActionFilter;
+      if (!matchesActionFilter) {
+        return false;
+      }
+      if (!normalizedQuery) {
+        return true;
+      }
+      return (
+        entry.user.toLowerCase().includes(normalizedQuery)
+        || entry.action.toLowerCase().includes(normalizedQuery)
+        || entry.detail.toLowerCase().includes(normalizedQuery)
+      );
+    });
+  }, [activityActionFilter, activityFeed, activitySearchQuery]);
 
   return (
     <div>
@@ -1379,6 +1413,52 @@ function ActivityTab() {
               <option value="last-100">Last 100 entries</option>
             </select>
           </label>
+          <label style={{ display: 'grid', gap: 4, fontSize: 10, color: 'var(--text-muted)' }}>
+            Filter
+            <select
+              aria-label="Activity action filter"
+              value={activityActionFilter}
+              onChange={(event) => setActivityActionFilter(event.target.value as typeof activityActionFilter)}
+              style={{
+                width: '100%',
+                padding: '6px 8px',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-default)',
+                background: 'var(--bg-void)',
+                color: 'var(--text-primary)',
+                fontSize: 10,
+                fontFamily: 'var(--font-ui)',
+                outline: 'none',
+              }}
+            >
+              <option value="all">All activity</option>
+              <option value="comments">Comment actions</option>
+              <option value="versions">Version actions</option>
+              <option value="other">Other actions</option>
+            </select>
+          </label>
+          <label style={{ display: 'grid', gap: 4, fontSize: 10, color: 'var(--text-muted)' }}>
+            Search
+            <input
+              aria-label="Activity search query"
+              type="text"
+              value={activitySearchQuery}
+              onChange={(event) => setActivitySearchQuery(event.target.value)}
+              placeholder="Filter by user/action/detail"
+              style={{
+                width: '100%',
+                padding: '6px 8px',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-default)',
+                background: 'var(--bg-void)',
+                color: 'var(--text-primary)',
+                fontSize: 10,
+                fontFamily: 'var(--font-ui)',
+                outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+          </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'var(--text-muted)', cursor: 'pointer' }}>
             <input
               aria-label="Activity retention auto prune"
@@ -1389,11 +1469,11 @@ function ActivityTab() {
             Auto-prune old activity entries
           </label>
           <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-            Showing {activityFeed.length} entries
+            Showing {filteredActivityFeed.length} of {activityFeed.length} entries
           </div>
         </div>
       </div>
-      {activityFeed.map((entry) => {
+      {filteredActivityFeed.map((entry) => {
         const entryIdentity = resolveIdentityProfile(identityProfiles, entry.userId, entry.user);
         const userColor = entryIdentity?.color || getDisplayColorForUser(entry.user);
         const userAvatar = entryIdentity?.avatarUrl
@@ -1434,9 +1514,9 @@ function ActivityTab() {
         );
       })}
 
-      {activityFeed.length === 0 && (
+      {filteredActivityFeed.length === 0 && (
         <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)', fontSize: 11 }}>
-          No activity yet.
+          No matching activity.
         </div>
       )}
     </div>

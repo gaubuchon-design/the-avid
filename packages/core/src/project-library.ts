@@ -296,6 +296,13 @@ export interface EditorProjectCollaborationActivityRetentionPreferences {
   autoPrune: boolean;
 }
 
+export interface EditorProjectCollaborationPanelPreferences {
+  activeTab: 'users' | 'comments' | 'versions' | 'activity';
+  commentFilter: 'all' | 'open' | 'resolved';
+  activityActionFilter: 'all' | 'comments' | 'versions' | 'other';
+  activitySearchQuery: string;
+}
+
 export interface EditorProjectSettings {
   frameRate: number;
   width: number;
@@ -430,6 +437,7 @@ export interface EditorProject {
   collaborationComments?: EditorProjectCollaborationCommentEntry[];
   collaborationActivityFeed?: EditorProjectCollaborationActivityEntry[];
   collaborationActivityRetentionPreferences?: EditorProjectCollaborationActivityRetentionPreferences;
+  collaborationPanelPreferences?: EditorProjectCollaborationPanelPreferences;
   tokenBalance: number;
   editorialState: EditorProjectEditorialState;
   workstationState: EditorProjectWorkstationState;
@@ -1235,6 +1243,12 @@ function normalizeProject(project: EditorProject): EditorProject {
     collaborationActivityRetentionPreferences: cloneValue(project.collaborationActivityRetentionPreferences ?? {
       preset: 'last-50',
       autoPrune: true,
+    }),
+    collaborationPanelPreferences: cloneValue(project.collaborationPanelPreferences ?? {
+      activeTab: 'comments',
+      commentFilter: 'all',
+      activityActionFilter: 'all',
+      activitySearchQuery: '',
     }),
     tokenBalance,
     editorialState: {
