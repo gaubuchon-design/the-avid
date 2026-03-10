@@ -248,6 +248,46 @@ export interface EditorProjectVersionHistoryEntry {
   isRestorePoint?: boolean;
 }
 
+export interface EditorProjectCollabReaction {
+  emoji: string;
+  userIds: string[];
+}
+
+export interface EditorProjectCollabReply {
+  id: string;
+  userId: string;
+  userName: string;
+  text: string;
+  timestamp: number;
+}
+
+export interface EditorProjectCollabComment {
+  id: string;
+  userId: string;
+  userName: string;
+  frame: number;
+  trackId?: string;
+  text: string;
+  timestamp: number;
+  resolved: boolean;
+  replies: EditorProjectCollabReply[];
+  reactions: EditorProjectCollabReaction[];
+}
+
+export interface EditorProjectCollabActivityEntry {
+  id: string;
+  userId?: string;
+  user: string;
+  action: string;
+  timestamp: number;
+  detail: string;
+}
+
+export interface EditorProjectCollaborationState {
+  comments: EditorProjectCollabComment[];
+  activityFeed: EditorProjectCollabActivityEntry[];
+}
+
 export interface EditorProjectSettings {
   frameRate: number;
   width: number;
@@ -379,6 +419,7 @@ export interface EditorProject {
   publishJobs: EditorPublishJob[];
   watchFolders: EditorWatchFolder[];
   versionHistory?: EditorProjectVersionHistoryEntry[];
+  collaboration?: EditorProjectCollaborationState;
   tokenBalance: number;
   editorialState: EditorProjectEditorialState;
   workstationState: EditorProjectWorkstationState;
@@ -1179,6 +1220,10 @@ function normalizeProject(project: EditorProject): EditorProject {
     publishJobs: cloneValue(project.publishJobs ?? []),
     watchFolders: cloneValue(project.watchFolders ?? []),
     versionHistory: cloneValue(project.versionHistory ?? []),
+    collaboration: {
+      comments: cloneValue(project.collaboration?.comments ?? []),
+      activityFeed: cloneValue(project.collaboration?.activityFeed ?? []),
+    },
     tokenBalance,
     editorialState: {
       selectedBinId: editorialState.selectedBinId ?? null,
@@ -1299,6 +1344,10 @@ export function hydrateProject(project: Partial<EditorProject>): EditorProject {
     publishJobs: project.publishJobs ?? createPublishJobs(template),
     watchFolders: project.watchFolders ?? [],
     versionHistory: project.versionHistory ?? [],
+    collaboration: {
+      comments: project.collaboration?.comments ?? [],
+      activityFeed: project.collaboration?.activityFeed ?? [],
+    },
     tokenBalance: project.tokenBalance ?? 0,
     editorialState: project.editorialState ?? {
       selectedBinId: bins[0]?.id ?? null,
@@ -1380,6 +1429,10 @@ export function buildProject(options: CreateProjectOptions = {}): EditorProject 
     publishJobs: seedContent ? createPublishJobs(template) : [],
     watchFolders: [],
     versionHistory: [],
+    collaboration: {
+      comments: [],
+      activityFeed: [],
+    },
     tokenBalance: seedContent ? (template === 'sports' ? 620 : 487) : 0,
     editorialState: {
       selectedBinId: bins[0]?.id ?? null,

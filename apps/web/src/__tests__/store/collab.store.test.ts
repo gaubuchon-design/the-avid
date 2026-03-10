@@ -32,6 +32,10 @@ function buildRepositoryProject(projectId: string): EditorProject {
     ...project,
     id: projectId,
     versionHistory: [],
+    collaboration: {
+      comments: [],
+      activityFeed: [],
+    },
   };
 }
 
@@ -117,6 +121,56 @@ describe('useCollabStore', () => {
     expect(repositoryMocks.getProjectFromRepository).toHaveBeenCalledWith(project.id);
   });
 
+  it('connect() hydrates persisted collaboration comments and activity feed from repository', async () => {
+    const project = buildRepositoryProject('project_hydrate_collab_data');
+    project.collaboration = {
+      comments: [
+        {
+          id: 'comment-persisted-1',
+          userId: 'user-robin',
+          userName: 'Robin Producer',
+          frame: 220,
+          trackId: 'v1',
+          text: 'Keep this reaction shot longer.',
+          timestamp: Date.now() - 5000,
+          resolved: false,
+          replies: [
+            {
+              id: 'reply-persisted-1',
+              userId: 'user-taylor',
+              userName: 'Taylor Editor',
+              text: 'Applying now.',
+              timestamp: Date.now() - 4000,
+            },
+          ],
+          reactions: [
+            { emoji: '👍', userIds: ['user-taylor'] },
+          ],
+        },
+      ],
+      activityFeed: [
+        {
+          id: 'activity-persisted-1',
+          userId: 'user-robin',
+          user: 'Robin Producer',
+          action: 'left review note',
+          timestamp: Date.now() - 3000,
+          detail: 'Requested hold on reaction shot.',
+        },
+      ],
+    };
+    repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
+
+    useCollabStore.getState().connect(project.id, 'user_1');
+    await flushAsyncTasks();
+
+    const state = useCollabStore.getState();
+    expect(state.comments[0]?.id).toBe('comment-persisted-1');
+    expect(state.comments[0]?.replies[0]?.text).toBe('Applying now.');
+    expect(state.activityFeed[0]?.id).toBe('activity-persisted-1');
+    expect(state.activityFeed[0]?.action).toBe('left review note');
+  });
+
   it('connect() hydrates identity profiles from persisted collaborators for comment/activity authors', async () => {
     const project = buildRepositoryProject('project_hydrate_collaborators');
     project.collaborators = [
@@ -194,6 +248,27 @@ describe('useCollabStore', () => {
     expect(useCollabStore.getState().activityFeed.length).toBeGreaterThan(actBefore);
   });
 
+  it('comment and activity mutations persist collaboration data to repository', async () => {
+    const project = buildRepositoryProject('project_persist_collab_data');
+    repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
+
+    useCollabStore.getState().connect(project.id, 'user_1');
+    await flushAsyncTasks();
+
+    useCollabStore.getState().addComment(100, 't1', 'Persist this comment');
+    useCollabStore.getState().addActivity('Test User', 'flagged shot', 'Persist this activity', 'user_1');
+    await flushAsyncTasks();
+
+    const savedProjects = repositoryMocks.saveProjectToRepository.mock.calls.map(
+      (call) => call[0] as EditorProject,
+    );
+    const withCollaboration = savedProjects.find((candidate) =>
+      candidate.collaboration?.comments.some((comment) => comment.text === 'Persist this comment')
+      && candidate.collaboration?.activityFeed.some((entry) => entry.detail === 'Persist this activity'));
+
+    expect(withCollaboration).toBeDefined();
+  });
+
   it('resolveComment() works on a standalone CollabEngine', () => {
     // Test resolve/reopen on a fresh engine instance to avoid the
     // Immer freeze bug that affects the singleton shared with the store.
@@ -237,8 +312,14 @@ describe('useCollabStore', () => {
     useCollabStore.getState().saveVersion('Persisted Cut', 'Should survive reconnect');
     await flushAsyncTasks();
 
-    expect(repositoryMocks.saveProjectToRepository).toHaveBeenCalledTimes(1);
-    const savedProject = repositoryMocks.saveProjectToRepository.mock.calls[0]?.[0] as EditorProject;
+    expect(repositoryMocks.saveProjectToRepository).toHaveBeenCalled();
+    const savedProject = repositoryMocks.saveProjectToRepository.mock.calls
+      .map((call) => call[0] as EditorProject)
+      .find((candidate) => candidate.versionHistory?.[0]?.name === 'Persisted Cut');
+    expect(savedProject).toBeDefined();
+    if (!savedProject) {
+      throw new Error('Expected persisted version history payload');
+    }
     expect(savedProject.versionHistory?.[0]?.name).toBe('Persisted Cut');
     expect(savedProject.versionHistory?.[0]?.createdByProfile?.displayName).toBe('You');
     expect(savedProject.versionHistory?.[0]?.createdByProfile?.userId).toBe('user_1');

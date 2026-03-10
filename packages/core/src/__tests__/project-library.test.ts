@@ -264,6 +264,10 @@ describe('hydrateProject editorialState', () => {
       versionHistoryRetentionPreference: 'manual',
       versionHistoryCompareMode: 'summary',
     });
+    expect(hydrated.collaboration).toEqual({
+      comments: [],
+      activityFeed: [],
+    });
   });
 
   it('preserves provided editorial state for valid tracks', () => {
@@ -309,6 +313,45 @@ describe('hydrateProject editorialState', () => {
         versionHistoryRetentionPreference: 'session',
         versionHistoryCompareMode: 'details',
       },
+      collaboration: {
+        comments: [
+          {
+            id: 'comment-1',
+            userId: 'user-1',
+            userName: 'Robin Producer',
+            frame: 120,
+            trackId: 'v2',
+            text: 'Tighten this transition.',
+            timestamp: 1000,
+            resolved: false,
+            replies: [
+              {
+                id: 'reply-1',
+                userId: 'user-2',
+                userName: 'Taylor Editor',
+                text: 'Will do.',
+                timestamp: 1100,
+              },
+            ],
+            reactions: [
+              {
+                emoji: '👍',
+                userIds: ['user-2'],
+              },
+            ],
+          },
+        ],
+        activityFeed: [
+          {
+            id: 'activity-1',
+            userId: 'user-1',
+            user: 'Robin Producer',
+            action: 'reviewed',
+            timestamp: 1200,
+            detail: 'Captured new notes.',
+          },
+        ],
+      },
     });
 
     expect(hydrated.editorialState).toEqual({
@@ -333,6 +376,8 @@ describe('hydrateProject editorialState', () => {
     });
     expect(hydrated.workstationState.versionHistoryRetentionPreference).toBe('session');
     expect(hydrated.workstationState.versionHistoryCompareMode).toBe('details');
+    expect(hydrated.collaboration?.comments[0]?.text).toBe('Tighten this transition.');
+    expect(hydrated.collaboration?.activityFeed[0]?.action).toBe('reviewed');
   });
 });
 

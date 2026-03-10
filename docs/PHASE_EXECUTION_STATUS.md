@@ -100,10 +100,11 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Added explicit collab `identityProfiles` hydration/merge in the collaboration store so identity metadata now resolves from online users, threaded comment/reply authors, activity authors, version author profiles, and persisted project collaborators.
 - Propagated `userId` into collaboration activity entries and updated Comments/Activity avatar resolution to prefer hydrated identity profiles over current-user-only fallbacks.
 - Added store/UI coverage that asserts persisted collaborator identity profiles hydrate non-current comment/activity authorship paths and render stable avatars/colors.
+- Persisted and hydrated collaboration threaded comments and activity-feed entries in repository project schema (`project.collaboration`), with connect-time restoration and mutation-time saves for reconnect/reopen continuity.
 
 ## Next Execution Slices
 
-1. Persist and hydrate collaboration threaded comments and activity-feed entries in repository project schema so identity-backed review context survives reconnect/reopen cycles.
+1. Persist and hydrate collaboration presence snapshots (online users + cursor/playhead metadata) in repository project schema so reconnect/reopen cycles retain participant context.
 
 ## Exit Signals For These Early Phases
 

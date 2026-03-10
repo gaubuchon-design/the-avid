@@ -438,6 +438,18 @@ function cloneVersion(version: ProjectVersion): ProjectVersion {
   };
 }
 
+function cloneComment(comment: CollabComment): CollabComment {
+  return {
+    ...comment,
+    replies: comment.replies.map((reply) => ({ ...reply })),
+    reactions: comment.reactions.map((reaction) => ({ ...reaction, userIds: [...reaction.userIds] })),
+  };
+}
+
+function cloneComments(comments: CollabComment[]): CollabComment[] {
+  return comments.map(cloneComment);
+}
+
 // ─── Engine ─────────────────────────────────────────────────────────────────
 
 export class CollabEngine {
@@ -454,11 +466,7 @@ export class CollabEngine {
 
   constructor() {
     this.users = new Map(DEMO_USERS.map(u => [u.id, { ...u }]));
-    this.comments = DEMO_COMMENTS.map(c => ({
-      ...c,
-      replies: c.replies.map(r => ({ ...r })),
-      reactions: c.reactions.map(r => ({ ...r, userIds: [...r.userIds] })),
-    }));
+    this.comments = cloneComments(DEMO_COMMENTS);
     this.versions = DEMO_VERSIONS.map(cloneVersion);
   }
 
@@ -610,7 +618,12 @@ export class CollabEngine {
   }
 
   getComments(): CollabComment[] {
-    return [...this.comments];
+    return cloneComments(this.comments);
+  }
+
+  setComments(comments: CollabComment[]): void {
+    this.comments = cloneComments(comments);
+    this.notify();
   }
 
   getCommentsAtFrame(frame: number): CollabComment[] {
