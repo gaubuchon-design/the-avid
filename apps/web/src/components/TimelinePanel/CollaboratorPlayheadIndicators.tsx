@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import { toTimecode } from '../../lib/timecode';
 import { useCollabStore } from '../../store/collab.store';
+import { useEditorStore } from '../../store/editor.store';
 
 interface CollaboratorPlayheadIndicatorsProps {
   zoom: number;
@@ -27,6 +28,8 @@ export const CollaboratorPlayheadIndicators = memo(function CollaboratorPlayhead
 }: CollaboratorPlayheadIndicatorsProps) {
   const onlineUsers = useCollabStore((state) => state.onlineUsers);
   const currentUserId = useCollabStore((state) => state.currentUserId);
+  const setPlayhead = useEditorStore((state) => state.setPlayhead);
+  const selectTrack = useEditorStore((state) => state.selectTrack);
 
   const collaborators = onlineUsers
     .filter((user) => user.id !== currentUserId)
@@ -47,7 +50,7 @@ export const CollaboratorPlayheadIndicators = memo(function CollaboratorPlayhead
   }
 
   return (
-    <div className="collab-playhead-layer" aria-hidden="true">
+    <div className="collab-playhead-layer" role="group" aria-label="Collaborator playhead indicators">
       {collaborators.map((user) => {
         const left = user.playheadTime * zoom - scrollLeft;
         const style: React.CSSProperties & { '--collab-playhead-color'?: string } = {
@@ -56,16 +59,22 @@ export const CollaboratorPlayheadIndicators = memo(function CollaboratorPlayhead
         };
 
         return (
-          <div
+          <button
+            type="button"
             key={user.id}
             className={`collab-playhead${user.isOnline ? '' : ' offline'}`}
             style={style}
-            role="img"
-            aria-label={`Collaborator playhead ${user.name} at ${toTimecode(user.playheadTime, fps)}`}
+            aria-label={`Follow ${user.name} at ${toTimecode(user.playheadTime, fps)}`}
             title={`${user.name}${user.isOnline ? '' : ' (offline)'} \u2022 ${toTimecode(user.playheadTime, fps)}`}
+            onClick={() => {
+              setPlayhead(user.playheadTime);
+              if (user.cursorTrackId) {
+                selectTrack(user.cursorTrackId);
+              }
+            }}
           >
             <span className="collab-playhead-tag">{getInitials(user.name)}</span>
-          </div>
+          </button>
         );
       })}
     </div>

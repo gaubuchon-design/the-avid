@@ -640,6 +640,9 @@ describe('phase 1 project persistence', () => {
       },
       zoom: 30,
       scrollLeft: 12,
+      duration: 20,
+      playheadTime: 0,
+      selectedTrackId: null,
     });
     useCollabStore.setState({
       connected: true,
@@ -685,15 +688,22 @@ describe('phase 1 project persistence', () => {
       );
     });
 
-    const robinIndicator = container.querySelector('[aria-label="Collaborator playhead Robin Producer at 00:00:04:00"]');
-    const caseyIndicator = container.querySelector('[aria-label="Collaborator playhead Casey Mixer at 00:00:02:00"]');
+    const robinIndicator = container.querySelector('[aria-label="Follow Robin Producer at 00:00:04:00"]');
+    const caseyIndicator = container.querySelector('[aria-label="Follow Casey Mixer at 00:00:02:00"]');
 
-    expect(robinIndicator).toBeInstanceOf(HTMLDivElement);
-    expect(caseyIndicator).toBeInstanceOf(HTMLDivElement);
+    expect(robinIndicator).toBeInstanceOf(HTMLButtonElement);
+    expect(caseyIndicator).toBeInstanceOf(HTMLButtonElement);
     expect(robinIndicator).toHaveTextContent('RP');
     expect(caseyIndicator).toHaveTextContent('CM');
     expect(robinIndicator).toHaveStyle({ left: '108px' });
     expect(caseyIndicator).toHaveStyle({ left: '48px' });
+
+    await act(async () => {
+      caseyIndicator?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(useEditorStore.getState().playheadTime).toBe(2);
+    expect(useEditorStore.getState().selectedTrackId).toBe('t-a1');
 
     await act(async () => {
       root.unmount();
@@ -962,6 +972,8 @@ describe('phase 1 project persistence', () => {
   });
 
   it('restores a version through the rendered collaboration panel flow', async () => {
+    repositoryMocks.saveProjectToRepository.mockImplementation(async (project: EditorProject) => project);
+
     useEditorStore.setState({
       projectId: 'project-collab',
       projectName: 'Collab Restore',
@@ -1053,7 +1065,7 @@ describe('phase 1 project persistence', () => {
 
     expect(useEditorStore.getState().projectName).toBe('Collab Restore');
     expect(useEditorStore.getState().tracks[0]?.clips.map((clip) => clip.id)).toEqual(['clip-collab']);
-    expect(container.textContent).toContain('Unsaved changes');
+    expect(container.textContent).toContain('Saved');
 
     await act(async () => {
       root.unmount();

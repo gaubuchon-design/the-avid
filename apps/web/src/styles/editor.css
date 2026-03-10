@@ -2712,10 +2712,23 @@
   width: 1px;
   background: var(--collab-playhead-color, #5b6af5);
   opacity: 0.85;
+  pointer-events: auto;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
 }
 
 .collab-playhead.offline {
   opacity: 0.45;
+}
+
+.collab-playhead:focus-visible {
+  outline: none;
+}
+
+.collab-playhead:hover .collab-playhead-tag,
+.collab-playhead:focus-visible .collab-playhead-tag {
+  box-shadow: 0 0 0 2px var(--bg-void), 0 0 0 3px var(--collab-playhead-color, #5b6af5);
 }
 
 .collab-playhead-tag {
