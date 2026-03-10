@@ -103,10 +103,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Persisted and hydrated collaboration threaded comments and activity-feed entries in repository project schema (`project.collaboration`), with connect-time restoration and mutation-time saves for reconnect/reopen continuity.
 - Persisted and hydrated collaboration presence snapshots in repository project schema (`project.collaboration.presenceSnapshots`), including online/offline state plus cursor/playhead metadata for reconnect/reopen continuity.
 - Wired active editor navigation into collaboration presence snapshots by syncing current-user playhead and selected track focus through the collaboration store, with throttled editor-state subscription updates and repository persistence coverage.
+- Surfaced collaborator track-focus badges directly in timeline track headers from hydrated presence snapshots, including playhead timecode context and online/offline badge state.
+- Added rendered phase-1 coverage that asserts timeline track headers show collaborator presence badges for hydrated track-focus snapshots.
 
 ## Next Execution Slices
 
-1. Surface collaborator playhead/track-focus badges in the timeline UI from hydrated presence snapshots so editors can see persisted collaborator navigation context directly in-track.
+1. Render collaborator playhead indicators in the timeline ruler/canvas from hydrated presence snapshots so editors can see remote playhead positions relative to the local playhead.
 
 ## Exit Signals For These Early Phases
 

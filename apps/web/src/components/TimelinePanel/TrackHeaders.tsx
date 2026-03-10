@@ -1,4 +1,6 @@
 import React, { memo } from 'react';
+import { toTimecode } from '../../lib/timecode';
+import { useCollabStore } from '../../store/collab.store';
 import { useEditorStore } from '../../store/editor.store';
 import type { Track } from '../../store/editor.store';
 
@@ -14,13 +16,32 @@ interface TrackHeaderProps {
   track: Track;
 }
 
+function getInitials(name: string): string {
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return `${parts[0]![0] ?? ''}${parts[1]![0] ?? ''}`.toUpperCase();
+}
+
 const TrackHeader = memo(function TrackHeader({ track }: TrackHeaderProps) {
   const { selectedTrackId, selectTrack, toggleMute, toggleSolo, toggleLock, videoMonitorTrackId, setVideoMonitorTrack } =
     useEditorStore();
+  const fps = useEditorStore((state) => state.sequenceSettings.fps || state.projectSettings.frameRate || 24);
+  const onlineUsers = useCollabStore((state) => state.onlineUsers);
+  const currentUserId = useCollabStore((state) => state.currentUserId);
   const isSelected = selectedTrackId === track.id;
   const isVideoTrack = track.type === 'VIDEO' || track.type === 'GRAPHIC';
   const isMonitored = videoMonitorTrackId === track.id;
   const color = TRACK_TYPE_COLOR[track.type] ?? 'var(--text-muted)';
+  const collaboratorsOnTrack = onlineUsers.filter((user) => user.id !== currentUserId && user.cursorTrackId === track.id);
+  const visibleCollaborators = collaboratorsOnTrack.slice(0, 2);
+  const overflowCollaboratorCount = Math.max(0, collaboratorsOnTrack.length - visibleCollaborators.length);
+  const leadCollaborator = visibleCollaborators[0];
+  const leadPlayheadTime = leadCollaborator?.playheadTime
+    ?? (typeof leadCollaborator?.cursorFrame === 'number' ? leadCollaborator.cursorFrame / fps : null);
 
   return (
     <div
@@ -40,6 +61,33 @@ const TrackHeader = memo(function TrackHeader({ track }: TrackHeaderProps) {
       <span className="track-name" title={track.name} style={{ color }}>
         {track.name}
       </span>
+
+      {visibleCollaborators.length > 0 && (
+        <div className="track-presence" role="group" aria-label={`${track.name} collaborator presence`}>
+          <div className="track-presence-badges" aria-hidden="true">
+            {visibleCollaborators.map((user) => (
+              <span
+                key={user.id}
+                className={`track-presence-badge${user.isOnline ? '' : ' offline'}`}
+                style={{
+                  background: user.color,
+                }}
+                title={`${user.name}${user.isOnline ? '' : ' (offline)'}${typeof user.playheadTime === 'number' ? ` • ${toTimecode(user.playheadTime, fps)}` : ''}`}
+              >
+                {getInitials(user.name)}
+              </span>
+            ))}
+            {overflowCollaboratorCount > 0 && (
+              <span className="track-presence-overflow">+{overflowCollaboratorCount}</span>
+            )}
+          </div>
+          {typeof leadPlayheadTime === 'number' && (
+            <span className="track-presence-time" title={`${leadCollaborator?.name} playhead`}>
+              {toTimecode(leadPlayheadTime, fps)}
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="track-icons" role="group" aria-label={`${track.name} controls`}>
         {isVideoTrack && (

@@ -543,6 +543,94 @@ describe('phase 1 project persistence', () => {
     });
   });
 
+  it('renders collaborator track-focus badges with playhead context in track headers', async () => {
+    useEditorStore.setState({
+      sequenceSettings: {
+        ...useEditorStore.getState().sequenceSettings,
+        fps: 24,
+      },
+      tracks: [
+        {
+          id: 't-v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [],
+        },
+        {
+          id: 't-a1',
+          name: 'A1',
+          type: 'AUDIO',
+          sortOrder: 1,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#2bb672',
+          clips: [],
+        },
+      ],
+    });
+    useCollabStore.setState({
+      connected: true,
+      currentUserId: 'u-self',
+      onlineUsers: [
+        {
+          id: 'u-self',
+          name: 'You',
+          color: '#5b6af5',
+          cursorFrame: 0,
+          cursorTrackId: 't-v1',
+          playheadTime: 0,
+          isOnline: true,
+        },
+        {
+          id: 'u-producer',
+          name: 'Robin Producer',
+          color: '#1f9de8',
+          cursorFrame: 96,
+          cursorTrackId: 't-v1',
+          playheadTime: 4,
+          isOnline: true,
+        },
+        {
+          id: 'u-mixer',
+          name: 'Casey Mixer',
+          color: '#f59e0b',
+          cursorFrame: 240,
+          cursorTrackId: 't-v1',
+          playheadTime: 10,
+          isOnline: false,
+        },
+      ],
+    });
+
+    const container = document.createElement('div');
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<TrackHeaders />);
+    });
+
+    const v1PresenceGroup = container.querySelector('[aria-label="V1 collaborator presence"]');
+    expect(v1PresenceGroup).toBeInstanceOf(HTMLDivElement);
+    expect(v1PresenceGroup?.textContent).toContain('00:00:04:00');
+    expect(v1PresenceGroup?.textContent).toContain('RP');
+    expect(v1PresenceGroup?.textContent).toContain('CM');
+
+    const a1PresenceGroup = container.querySelector('[aria-label="A1 collaborator presence"]');
+    expect(a1PresenceGroup).toBeNull();
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it('renders save and checkpoint affordances in the workbench shell', async () => {
     repositoryMocks.saveProjectToRepository.mockImplementation(async (project: EditorProject) => project);
     useEditorStore.setState({
