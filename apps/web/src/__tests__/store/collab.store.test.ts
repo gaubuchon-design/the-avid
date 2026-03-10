@@ -631,6 +631,44 @@ describe('useCollabStore', () => {
     expect(localStorage.getItem('avid:activity-retention-preferences')).toContain('"preset":"last-25"');
   });
 
+  it('setActivityRetentionPreferences() persists merged override preferences through state helper', async () => {
+    const project = buildRepositoryProject('project_activity_retention_override_persist');
+    repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
+    useCollabStore.getState().connect(project.id, 'user_1');
+    await flushAsyncTasks();
+
+    useCollabStore.getState().setActivityRetentionPreferences({ preset: 'last-100', autoPrune: false });
+    await flushAsyncTasks();
+
+    const savedProject = repositoryMocks.saveProjectToRepository.mock.calls.at(-1)?.[0] as EditorProject;
+    expect(savedProject.collaborationActivityRetentionPreferences?.preset).toBe('last-100');
+    expect(savedProject.collaborationActivityRetentionPreferences?.autoPrune).toBe(false);
+  });
+
+  it('logs standardized persistence errors for typed non-panel helper domains', async () => {
+    const project = buildRepositoryProject('project_persistence_error_boundaries');
+    repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
+    repositoryMocks.saveProjectToRepository.mockRejectedValue(new Error('persistence failed'));
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    useCollabStore.getState().connect(project.id, 'user_1');
+    await flushAsyncTasks();
+
+    useCollabStore.getState().addComment(88, 't1', 'Should trigger comments persistence error');
+    await flushAsyncTasks();
+    useCollabStore.getState().setActivityRetentionPreferences({ preset: 'last-25', autoPrune: true });
+    await flushAsyncTasks();
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'Failed to persist collaboration comments',
+      expect.any(Error),
+    );
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'Failed to persist collaboration state',
+      expect.any(Error),
+    );
+    consoleErrorSpy.mockRestore();
+  });
+
   it('addActivity() adds entry to front of feed', () => {
     const before = useCollabStore.getState().activityFeed.length;
     useCollabStore.getState().addActivity('Test User', 'did something', 'details');

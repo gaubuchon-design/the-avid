@@ -151,10 +151,11 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Extended phase-1 UI coverage to assert hydrated reaction-picker context renders expected comments reaction-focus summary indicators.
 - Consolidated repeated panel-preference persistence call sites in collab UI actions behind a shared store helper so tab/filter/comment/compare/composer updates route through one persistence path and error boundary.
 - Consolidated non-panel collaboration-state persistence call sites behind typed store helpers (`persistCommentsSnapshot` / `persistStateSnapshot`) so comment/version/retention mutation paths share standardized repository-save wiring and failure logging.
+- Added focused collab-store coverage asserting typed non-panel persistence helpers preserve `setActivityRetentionPreferences(...)` retention-override persistence behavior and emit standardized `comments`/`state` persistence error logs when repository saves fail.
 
 ## Next Execution Slices
 
-1. Add focused collab-store coverage asserting typed non-panel persistence helpers keep activity-retention override behavior (`setActivityRetentionPreferences`) while preserving standardized persistence-error boundaries.
+1. Add focused collab-store coverage for panel-preference helper error boundaries (`persistPanelPreferencesSnapshot`) to complete standardized persistence-domain logging checks across panel and non-panel persistence paths.
 
 ## Exit Signals For These Early Phases
 
