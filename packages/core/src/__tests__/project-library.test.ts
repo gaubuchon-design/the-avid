@@ -265,6 +265,7 @@ describe('hydrateProject editorialState', () => {
       versionHistoryCompareMode: 'summary',
     });
     expect(hydrated.collaboration).toEqual({
+      presenceSnapshots: [],
       comments: [],
       activityFeed: [],
     });
@@ -314,6 +315,18 @@ describe('hydrateProject editorialState', () => {
         versionHistoryCompareMode: 'details',
       },
       collaboration: {
+        presenceSnapshots: [
+          {
+            userId: 'user-1',
+            displayName: 'Robin Producer',
+            avatarUrl: 'avatar://robin',
+            color: '#1f9de8',
+            isOnline: true,
+            cursorFrame: 120,
+            cursorTrackId: 'v2',
+            playheadTime: 5,
+          },
+        ],
         comments: [
           {
             id: 'comment-1',
@@ -376,6 +389,7 @@ describe('hydrateProject editorialState', () => {
     });
     expect(hydrated.workstationState.versionHistoryRetentionPreference).toBe('session');
     expect(hydrated.workstationState.versionHistoryCompareMode).toBe('details');
+    expect(hydrated.collaboration?.presenceSnapshots[0]?.userId).toBe('user-1');
     expect(hydrated.collaboration?.comments[0]?.text).toBe('Tighten this transition.');
     expect(hydrated.collaboration?.activityFeed[0]?.action).toBe('reviewed');
   });

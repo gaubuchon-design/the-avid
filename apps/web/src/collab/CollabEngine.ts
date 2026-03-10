@@ -13,6 +13,7 @@ export interface CollabUser {
   color: string;
   cursorFrame: number;
   cursorTrackId: string | null;
+  playheadTime?: number;
   isOnline: boolean;
 }
 
@@ -110,6 +111,7 @@ const DEMO_USERS: CollabUser[] = [
     color: '#7c5cfc',
     cursorFrame: 120,
     cursorTrackId: 't1',
+    playheadTime: 5.005,
     isOnline: true,
   },
   {
@@ -118,6 +120,7 @@ const DEMO_USERS: CollabUser[] = [
     color: '#2bb672',
     cursorFrame: 456,
     cursorTrackId: 't3',
+    playheadTime: 19.019,
     isOnline: true,
   },
 ];
@@ -450,6 +453,14 @@ function cloneComments(comments: CollabComment[]): CollabComment[] {
   return comments.map(cloneComment);
 }
 
+function cloneUser(user: CollabUser): CollabUser {
+  return { ...user };
+}
+
+function cloneUsers(users: Iterable<CollabUser>): CollabUser[] {
+  return Array.from(users, cloneUser);
+}
+
 // ─── Engine ─────────────────────────────────────────────────────────────────
 
 export class CollabEngine {
@@ -488,6 +499,7 @@ export class CollabEngine {
         color: '#f59e0b',
         cursorFrame: 0,
         cursorTrackId: null,
+        playheadTime: 0,
         isOnline: true,
       });
     } else {
@@ -524,24 +536,37 @@ export class CollabEngine {
 
   // ── Presence ────────────────────────────────────────────────────────────
 
-  updateCursor(frame: number, trackId: string | null): void {
+  updateCursor(frame: number, trackId: string | null, playheadTime?: number): void {
     const self = this.users.get(this.currentUserId);
     if (self) {
       this.users.set(this.currentUserId, {
         ...self,
         cursorFrame: frame,
         cursorTrackId: trackId,
+        playheadTime: playheadTime ?? self.playheadTime,
       });
       this.notify();
     }
   }
 
   getOnlineUsers(): CollabUser[] {
-    return Array.from(this.users.values()).filter(u => u.isOnline);
+    return cloneUsers(this.users.values()).filter((user) => user.isOnline);
   }
 
   getAllUsers(): CollabUser[] {
-    return Array.from(this.users.values());
+    return cloneUsers(this.users.values());
+  }
+
+  hydratePresence(users: CollabUser[]): void {
+    this.users = new Map(users.map((user) => [user.id, cloneUser(user)]));
+    const self = this.users.get(this.currentUserId);
+    if (self && this.connected) {
+      this.users.set(this.currentUserId, {
+        ...self,
+        isOnline: true,
+      });
+    }
+    this.notify();
   }
 
   // ── Comments ────────────────────────────────────────────────────────────

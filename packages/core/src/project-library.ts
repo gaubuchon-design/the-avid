@@ -283,7 +283,19 @@ export interface EditorProjectCollabActivityEntry {
   detail: string;
 }
 
+export interface EditorProjectCollabPresenceSnapshot {
+  userId: string;
+  displayName: string;
+  avatarUrl?: string;
+  color: string;
+  isOnline: boolean;
+  cursorFrame: number;
+  cursorTrackId: string | null;
+  playheadTime?: number;
+}
+
 export interface EditorProjectCollaborationState {
+  presenceSnapshots: EditorProjectCollabPresenceSnapshot[];
   comments: EditorProjectCollabComment[];
   activityFeed: EditorProjectCollabActivityEntry[];
 }
@@ -1221,6 +1233,7 @@ function normalizeProject(project: EditorProject): EditorProject {
     watchFolders: cloneValue(project.watchFolders ?? []),
     versionHistory: cloneValue(project.versionHistory ?? []),
     collaboration: {
+      presenceSnapshots: cloneValue(project.collaboration?.presenceSnapshots ?? []),
       comments: cloneValue(project.collaboration?.comments ?? []),
       activityFeed: cloneValue(project.collaboration?.activityFeed ?? []),
     },
@@ -1345,6 +1358,7 @@ export function hydrateProject(project: Partial<EditorProject>): EditorProject {
     watchFolders: project.watchFolders ?? [],
     versionHistory: project.versionHistory ?? [],
     collaboration: {
+      presenceSnapshots: project.collaboration?.presenceSnapshots ?? [],
       comments: project.collaboration?.comments ?? [],
       activityFeed: project.collaboration?.activityFeed ?? [],
     },
@@ -1430,6 +1444,7 @@ export function buildProject(options: CreateProjectOptions = {}): EditorProject 
     watchFolders: [],
     versionHistory: [],
     collaboration: {
+      presenceSnapshots: [],
       comments: [],
       activityFeed: [],
     },

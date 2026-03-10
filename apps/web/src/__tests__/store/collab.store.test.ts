@@ -33,6 +33,7 @@ function buildRepositoryProject(projectId: string): EditorProject {
     id: projectId,
     versionHistory: [],
     collaboration: {
+      presenceSnapshots: [],
       comments: [],
       activityFeed: [],
     },
@@ -124,6 +125,18 @@ describe('useCollabStore', () => {
   it('connect() hydrates persisted collaboration comments and activity feed from repository', async () => {
     const project = buildRepositoryProject('project_hydrate_collab_data');
     project.collaboration = {
+      presenceSnapshots: [
+        {
+          userId: 'user-robin',
+          displayName: 'Robin Producer',
+          avatarUrl: 'avatar://robin',
+          color: '#1f9de8',
+          isOnline: true,
+          cursorFrame: 220,
+          cursorTrackId: 'v1',
+          playheadTime: 9.175,
+        },
+      ],
       comments: [
         {
           id: 'comment-persisted-1',
@@ -165,6 +178,12 @@ describe('useCollabStore', () => {
     await flushAsyncTasks();
 
     const state = useCollabStore.getState();
+    expect(state.onlineUsers.some((user) => (
+      user.id === 'user-robin'
+      && user.cursorFrame === 220
+      && user.cursorTrackId === 'v1'
+      && user.playheadTime === 9.175
+    ))).toBe(true);
     expect(state.comments[0]?.id).toBe('comment-persisted-1');
     expect(state.comments[0]?.replies[0]?.text).toBe('Applying now.');
     expect(state.activityFeed[0]?.id).toBe('activity-persisted-1');
@@ -263,7 +282,9 @@ describe('useCollabStore', () => {
       (call) => call[0] as EditorProject,
     );
     const withCollaboration = savedProjects.find((candidate) =>
-      candidate.collaboration?.comments.some((comment) => comment.text === 'Persist this comment')
+      candidate.collaboration?.presenceSnapshots.some((snapshot) => snapshot.userId === 'user_1')
+      && candidate.collaboration?.presenceSnapshots.some((snapshot) => snapshot.isOnline)
+      && candidate.collaboration?.comments.some((comment) => comment.text === 'Persist this comment')
       && candidate.collaboration?.activityFeed.some((entry) => entry.detail === 'Persist this activity'));
 
     expect(withCollaboration).toBeDefined();
