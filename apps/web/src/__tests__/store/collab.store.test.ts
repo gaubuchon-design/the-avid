@@ -204,8 +204,22 @@ describe('useCollabStore', () => {
 
   it('connect() hydrates persisted collaboration panel preferences from repository', async () => {
     const project = buildRepositoryProject('project_hydrate_panel_preferences');
+    project.collaborationComments = [
+      {
+        id: 'persisted-comment-1',
+        userId: 'user-reviewer',
+        userName: 'Jordan Reviewer',
+        frame: 120,
+        text: 'Persisted comment for focus hydration',
+        timestamp: Date.now() - 500,
+        resolved: false,
+        replies: [],
+        reactions: [],
+      },
+    ];
     project.collaborationPanelPreferences = {
       activeTab: 'activity',
+      selectedCommentId: 'persisted-comment-1',
       commentFilter: 'resolved',
       activityActionFilter: 'versions',
       activitySearchQuery: 'cut',
@@ -222,6 +236,7 @@ describe('useCollabStore', () => {
 
     const state = useCollabStore.getState();
     expect(state.activeTab).toBe('activity');
+    expect(state.selectedCommentId).toBe('persisted-comment-1');
     expect(state.commentFilter).toBe('resolved');
     expect(state.activityActionFilter).toBe('versions');
     expect(state.activitySearchQuery).toBe('cut');
@@ -251,6 +266,41 @@ describe('useCollabStore', () => {
   it('selectComment() sets selected comment ID', () => {
     useCollabStore.getState().selectComment('cmt1');
     expect(useCollabStore.getState().selectedCommentId).toBe('cmt1');
+  });
+
+  it('connect() clears selected comment when persisted thread is missing', async () => {
+    const project = buildRepositoryProject('project_hydrate_missing_selected_comment');
+    project.collaborationPanelPreferences = {
+      activeTab: 'comments',
+      selectedCommentId: 'missing-comment',
+      commentFilter: 'all',
+      activityActionFilter: 'all',
+      activitySearchQuery: '',
+      versionHistoryRetentionPreference: 'manual',
+      versionHistoryCompareMode: 'summary',
+      versionCompareTargetVersionId: '',
+      versionCompareBaselineMode: 'previous',
+      versionCompareCustomBaselineId: '',
+    };
+    project.collaborationComments = [
+      {
+        id: 'existing-comment',
+        userId: 'user-reviewer',
+        userName: 'Jordan Reviewer',
+        frame: 100,
+        text: 'Existing persisted comment',
+        timestamp: Date.now() - 500,
+        resolved: false,
+        replies: [],
+        reactions: [],
+      },
+    ];
+    repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
+
+    useCollabStore.getState().connect(project.id, 'user_1');
+    await flushAsyncTasks();
+
+    expect(useCollabStore.getState().selectedCommentId).toBeNull();
   });
 
   it('addComment() adds a comment and updates activity feed', () => {
@@ -404,6 +454,7 @@ describe('useCollabStore', () => {
 
     const savedProject = repositoryMocks.saveProjectToRepository.mock.calls.at(-1)?.[0] as EditorProject;
     expect(savedProject.collaborationPanelPreferences?.activeTab).toBe('activity');
+    expect(savedProject.collaborationPanelPreferences?.selectedCommentId).toBeNull();
     expect(savedProject.collaborationPanelPreferences?.commentFilter).toBe('resolved');
     expect(savedProject.collaborationPanelPreferences?.activityActionFilter).toBe('comments');
     expect(savedProject.collaborationPanelPreferences?.activitySearchQuery).toBe('review');
@@ -440,6 +491,34 @@ describe('useCollabStore', () => {
     expect(savedProject.collaborationPanelPreferences?.versionCompareTargetVersionId).toBe('version-target');
     expect(savedProject.collaborationPanelPreferences?.versionCompareBaselineMode).toBe('custom');
     expect(savedProject.collaborationPanelPreferences?.versionCompareCustomBaselineId).toBe('version-baseline');
+  });
+
+  it('selectComment() persists selected comment id in panel preferences', async () => {
+    const project = buildRepositoryProject('project_selected_comment_persist');
+    project.collaborationComments = [
+      {
+        id: 'persisted-comment-for-select',
+        userId: 'user-reviewer',
+        userName: 'Jordan Reviewer',
+        frame: 144,
+        text: 'Persisted focus thread',
+        timestamp: Date.now() - 500,
+        resolved: false,
+        replies: [],
+        reactions: [],
+      },
+    ];
+    repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
+    useCollabStore.getState().connect(project.id, 'user_1');
+    await flushAsyncTasks();
+
+    const commentId = useCollabStore.getState().comments[0]?.id;
+    expect(commentId).toBeDefined();
+    useCollabStore.getState().selectComment(commentId!);
+    await flushAsyncTasks();
+
+    const savedProject = repositoryMocks.saveProjectToRepository.mock.calls.at(-1)?.[0] as EditorProject;
+    expect(savedProject.collaborationPanelPreferences?.selectedCommentId).toBe(commentId);
   });
 
   it('setActivityRetentionPreferences() prunes feed and persists preference', () => {

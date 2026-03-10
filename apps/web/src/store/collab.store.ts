@@ -455,6 +455,7 @@ function isVersionHistoryCompareMode(value: unknown): value is 'summary' | 'deta
 function toPersistedPanelPreferences(state: Pick<
   CollabState,
   | 'activeTab'
+  | 'selectedCommentId'
   | 'commentFilter'
   | 'activityActionFilter'
   | 'activitySearchQuery'
@@ -465,6 +466,7 @@ function toPersistedPanelPreferences(state: Pick<
   const editorState = useEditorStore.getState();
   return {
     activeTab: state.activeTab,
+    selectedCommentId: state.selectedCommentId,
     commentFilter: state.commentFilter,
     activityActionFilter: state.activityActionFilter,
     activitySearchQuery: state.activitySearchQuery,
@@ -481,6 +483,7 @@ function toPanelPreferencesFromPersistedEntry(
 ): Pick<
   CollabState,
   | 'activeTab'
+  | 'selectedCommentId'
   | 'commentFilter'
   | 'activityActionFilter'
   | 'activitySearchQuery'
@@ -493,6 +496,7 @@ function toPanelPreferencesFromPersistedEntry(
 } {
   return {
     activeTab: isCollabActiveTab(entry?.activeTab) ? entry.activeTab : 'comments',
+    selectedCommentId: typeof entry?.selectedCommentId === 'string' ? entry.selectedCommentId : null,
     commentFilter: isCommentFilter(entry?.commentFilter) ? entry.commentFilter : 'all',
     activityActionFilter: isActivityActionFilter(entry?.activityActionFilter) ? entry.activityActionFilter : 'all',
     activitySearchQuery: typeof entry?.activitySearchQuery === 'string' ? entry.activitySearchQuery : '',
@@ -642,6 +646,7 @@ async function persistCollaborationStateToRepository(
   panelPreferences: Pick<
     CollabState,
     | 'activeTab'
+    | 'selectedCommentId'
     | 'commentFilter'
     | 'activityActionFilter'
     | 'activitySearchQuery'
@@ -774,7 +779,12 @@ export const useCollabStore = create<CollabState & CollabActions>()(
               const comments = collabEngine.getComments();
               s.versions = versions;
               s.comments = comments;
+              const persistedSelectedCommentId = persistedPanelPreferences.selectedCommentId;
               s.activeTab = persistedPanelPreferences.activeTab;
+              s.selectedCommentId = persistedSelectedCommentId
+                && comments.some((comment) => comment.id === persistedSelectedCommentId)
+                ? persistedSelectedCommentId
+                : null;
               s.commentFilter = persistedPanelPreferences.commentFilter;
               s.activityActionFilter = persistedPanelPreferences.activityActionFilter;
               s.activitySearchQuery = persistedPanelPreferences.activitySearchQuery;
@@ -880,7 +890,17 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           console.error('Failed to persist collaboration panel preferences', error);
         });
       },
-      selectComment: (id) => set((s) => { s.selectedCommentId = id; }, false, 'collab/selectComment'),
+      selectComment: (id) => {
+        set((s) => { s.selectedCommentId = id; }, false, 'collab/selectComment');
+        void persistCollaborationStateToRepository(
+          get().projectId,
+          get().activityFeed,
+          get().activityRetentionPreferences,
+          get(),
+        ).catch((error) => {
+          console.error('Failed to persist collaboration panel preferences', error);
+        });
+      },
 
       // Comments
       addComment: (frame, trackId, text) => {

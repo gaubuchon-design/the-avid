@@ -306,6 +306,7 @@ export interface EditorProjectCollaborationPanelPreferences {
   versionCompareTargetVersionId: string;
   versionCompareBaselineMode: 'previous' | 'latest' | 'custom';
   versionCompareCustomBaselineId: string;
+  selectedCommentId: string | null;
 }
 
 export interface EditorProjectSettings {
@@ -1259,6 +1260,7 @@ function normalizeProject(project: EditorProject): EditorProject {
       versionCompareTargetVersionId: '',
       versionCompareBaselineMode: 'previous',
       versionCompareCustomBaselineId: '',
+      selectedCommentId: null,
     }),
     tokenBalance,
     editorialState: {

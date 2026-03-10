@@ -132,10 +132,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Added store and phase-1 UI coverage verifying persisted version-compare panel selections round-trip through repository hydration and restore selected compare controls in UI.
 - Surfaced restored version-compare context indicators near compare controls with summary chips for selected target and resolved baseline labels.
 - Added phase-1 UI coverage asserting hydrated version-compare selections render compare-context summary indicators (`Target`/`Baseline`) with restored labels.
+- Persisted selected comment focus in `collaborationPanelPreferences.selectedCommentId` and hydrated it on reconnect/reopen only when the corresponding persisted comment thread still exists.
+- Wired `selectComment(...)` to persist panel preferences immediately, and added store coverage for selected-comment hydration validity checks plus selected-thread persistence round-trip behavior.
 
 ## Next Execution Slices
 
-1. Persist and hydrate selected comment thread context (`selectedCommentId`) so comment focus survives reconnect/reopen when the thread still exists.
+1. Surface restored selected-comment focus indicator in the Comments tab header (selected thread id/timecode chip) so reopened discussion context is immediately visible.
 
 ## Exit Signals For These Early Phases
 
