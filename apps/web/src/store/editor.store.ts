@@ -1,10 +1,25 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
+import { PROJECT_SCHEMA_VERSION, type EditorProject, type ProjectTemplate } from '@mcua/core';
 import { mediaProbeEngine } from '../engine/MediaProbeEngine';
 import { mediaDatabaseEngine } from '../engine/MediaDatabaseEngine';
 import { videoSourceManager } from '../engine/VideoSourceManager';
 import { playbackEngine } from '../engine/PlaybackEngine';
-import { trackPatchingEngine } from '../engine/TrackPatchingEngine';
+import { smartToolEngine } from '../engine/SmartToolEngine';
+import {
+  trackPatchingEngine,
+  type SourceTrackDescriptor,
+  type TrackPatch,
+} from '../engine/TrackPatchingEngine';
+import { editEngine } from '../engine/EditEngine';
+import {
+  buildProjectFromEditorState,
+  buildProjectPersistenceSnapshot,
+  getActiveBinAssets,
+  getProjectPersistenceHash,
+  hydrateEditorStateFromProject,
+} from '../lib/editorProjectState';
+import { getProjectFromRepository, saveProjectToRepository } from '../lib/projectRepository';
 import { usePlayerStore } from './player.store';
 import type { ProjectMediaSettings } from '../engine/MediaDatabaseEngine';
 export type { ProjectMediaSettings } from '../engine/MediaDatabaseEngine';
@@ -137,6 +152,7 @@ export interface MediaAsset {
   hasAlpha?: boolean;
   alphaMode?: AlphaMode;
   audioChannels?: number;
+  audioChannelLayout?: string;
   sampleRate?: number;
   fileSize?: number;
   startTimecode?: string;
@@ -332,10 +348,17 @@ interface EditorState {
   // Project
   projectId: string | null;
   projectName: string;
+  projectTemplate: ProjectTemplate;
+  projectDescription: string;
+  projectTags: string[];
+  projectSchemaVersion: number;
+  projectCreatedAt: string | null;
   projectSettings: ProjectSettings;
   projectMediaSettings: ProjectMediaSettings;
   lastSavedAt: string | null;
   saveStatus: SaveStatus;
+  persistedProjectHash: string | null;
+  hasUnsavedChanges: boolean;
   ingestProgress: Record<string, number>; // assetId → 0-1 progress
 
   // Timeline
@@ -438,10 +461,16 @@ interface EditorState {
   // Track Patching State
   enabledTrackIds: string[];
   syncLockedTrackIds: string[];
+  videoMonitorTrackId: string | null;
+  trackPatchLabels: string[];
 
   // Trim Mode State
   trimMode: 'off' | 'roll' | 'ripple' | 'slip' | 'slide' | 'asymmetric';
   trimActive: boolean;
+  trimCounterFrames: number;
+  trimASideFrames: number;
+  trimBSideFrames: number;
+  trimSelectionLabel: 'OFF' | 'A' | 'B' | 'AB' | 'ASYM';
 
   // Smart Tool State
   smartToolLiftOverwrite: boolean;
@@ -466,6 +495,8 @@ interface EditorState {
   composerLayout: 'source-record' | 'full-frame';
   showTrackingInfo: boolean;
   trackingInfoFields: string[];
+  versionHistoryRetentionPreference: 'manual' | 'session';
+  versionHistoryCompareMode: 'summary' | 'details';
 
   // Audio (extended)
   audioScrubEnabled: boolean;
@@ -631,6 +662,7 @@ interface EditorActions {
   // Sync Lock
   toggleSyncLock: (trackId: string) => void;
   isSyncLocked: (trackId: string) => boolean;
+  setVideoMonitorTrack: (trackId: string | null) => void;
 
   // Trim Mode
   setTrimMode: (mode: EditorState['trimMode']) => void;
@@ -661,6 +693,8 @@ interface EditorActions {
   // Composer
   setComposerLayout: (layout: EditorState['composerLayout']) => void;
   toggleTrackingInfo: () => void;
+  setVersionHistoryRetentionPreference: (preference: EditorState['versionHistoryRetentionPreference']) => void;
+  setVersionHistoryCompareMode: (mode: EditorState['versionHistoryCompareMode']) => void;
 
   // Audio (extended)
   toggleAudioScrub: () => void;
@@ -676,7 +710,10 @@ interface EditorActions {
   goToEnd: () => void;
 
   // Init
-  loadProject: (projectId: string) => void;
+  applyProjectSnapshot: (project: EditorProject, options?: { markDirty?: boolean; lastSavedAt?: string | null }) => void;
+  loadProject: (projectId: string) => Promise<void>;
+  saveProject: () => Promise<void>;
+  restoreProjectSnapshot: (project: EditorProject) => void;
 }
 
 // Waveform generator (random for demo)
@@ -790,6 +827,30 @@ function getPreferredTrack(state: Pick<EditorState, 'tracks' | 'selectedTrackId'
   return matchingTrack ?? state.tracks.find((track) => !track.locked) ?? null;
 }
 
+function hydrateTrackPatchingEngineFromProjectState(
+  tracks: Track[],
+  enabledTrackIds: string[],
+  syncLockedTrackIds: string[],
+  videoMonitorTrackId: string | null,
+  sourceAssetId: string | null,
+  sourceTrackDescriptors: SourceTrackDescriptor[],
+  trackPatches: TrackPatch[],
+): void {
+  trackPatchingEngine.restoreState({
+    sourceAssetId,
+    sourceTracks: sourceTrackDescriptors,
+    patches: trackPatches,
+    monitor: {
+      videoMonitorTrackId,
+      enabledRecordTracks: new Set(enabledTrackIds),
+      soloTracks: new Set(tracks.filter((track) => track.solo).map((track) => track.id)),
+      mutedTracks: new Set(tracks.filter((track) => track.muted).map((track) => track.id)),
+      syncLocks: new Set(syncLockedTrackIds),
+      lockedTracks: new Set(tracks.filter((track) => track.locked).map((track) => track.id)),
+    },
+  });
+}
+
 // Module-level holder for the alpha dialog resolve callback.
 // Functions are not compatible with Immer proxies, so we store
 // the resolve callback outside of the store state.
@@ -865,13 +926,127 @@ const DEMO_SMART_BINS: SmartBin[] = [
 // ─── Store creation ────────────────────────────────────────────────────────────
 export const useEditorStore = create<EditorState & EditorActions>()(
   immer((set, get) => ({
+    applyProjectSnapshot(project: EditorProject, options?: { markDirty?: boolean; lastSavedAt?: string | null }) {
+      const hydrated = hydrateEditorStateFromProject(project);
+      playbackEngine.pause();
+      editEngine.clear();
+      usePlayerStore.setState({
+        isPlaying: false,
+        speed: 1,
+        currentFrame: 0,
+        inPoint: null,
+        outPoint: null,
+        loopPlayback: false,
+        sourceClipId: null,
+        activeMonitor: 'source',
+        showSafeZones: false,
+        activeScope: null,
+      });
+      hydrateTrackPatchingEngineFromProjectState(
+        hydrated.tracks,
+        hydrated.enabledTrackIds,
+        hydrated.syncLockedTrackIds,
+        hydrated.videoMonitorTrackId,
+        hydrated.sourceAsset?.id ?? null,
+        hydrated.sourceTrackDescriptors,
+        hydrated.trackPatches,
+      );
+
+      set((s) => {
+        s.projectId = hydrated.projectId;
+        s.projectName = hydrated.projectName;
+        s.projectTemplate = hydrated.projectTemplate;
+        s.projectDescription = hydrated.projectDescription;
+        s.projectTags = hydrated.projectTags;
+        s.projectSchemaVersion = hydrated.projectSchemaVersion;
+        s.projectCreatedAt = hydrated.projectCreatedAt;
+        s.projectSettings = hydrated.projectSettings;
+        s.lastSavedAt = options?.lastSavedAt ?? project.updatedAt;
+        s.saveStatus = 'saved';
+        s.persistedProjectHash = null;
+        s.hasUnsavedChanges = Boolean(options?.markDirty);
+        s.timelineId = hydrated.projectId;
+        s.tracks = hydrated.tracks;
+        s.markers = hydrated.markers;
+        s.playheadTime = 0;
+        s.isPlaying = false;
+        s.scrollLeft = 0;
+        s.duration = hydrated.duration;
+        s.selectedClipIds = [];
+        s.selectedTrackId = null;
+        s.inspectedClipId = null;
+        s.bins = hydrated.bins;
+        s.selectedBinId = hydrated.selectedBinId;
+        s.activeBinAssets = hydrated.activeBinAssets;
+        s.sequenceSettings = hydrated.sequenceSettings;
+        s.subtitleTracks = hydrated.subtitleTracks;
+        s.titleClips = hydrated.titleClips;
+        s.sourceAsset = hydrated.sourceAsset;
+        s.inPoint = null;
+        s.outPoint = null;
+        s.collabUsers = hydrated.collabUsers;
+        s.aiJobs = hydrated.aiJobs;
+        s.transcript = hydrated.transcript;
+        s.reviewComments = hydrated.reviewComments;
+        s.approvals = hydrated.approvals;
+        s.publishJobs = hydrated.publishJobs;
+        s.desktopJobs = [];
+        s.watchFolders = hydrated.watchFolders;
+        s.tokenBalance = hydrated.tokenBalance;
+        s.trackHeights = hydrated.trackHeights;
+        s.clipTextDisplay = hydrated.clipTextDisplay;
+        s.composerLayout = hydrated.composerLayout;
+        s.showTrackingInfo = hydrated.showTrackingInfo;
+        s.trackingInfoFields = hydrated.trackingInfoFields;
+        s.versionHistoryRetentionPreference = hydrated.versionHistoryRetentionPreference;
+        s.versionHistoryCompareMode = hydrated.versionHistoryCompareMode;
+        s.dupeDetectionEnabled = hydrated.dupeDetectionEnabled;
+        s.activeWorkspaceId = hydrated.activeWorkspaceId;
+        s.sourceInPoint = null;
+        s.sourceOutPoint = null;
+        s.sourcePlayhead = 0;
+        s.recordInPoint = null;
+        s.recordOutPoint = null;
+        s.enabledTrackIds = hydrated.enabledTrackIds;
+        s.syncLockedTrackIds = hydrated.syncLockedTrackIds;
+        s.videoMonitorTrackId = hydrated.videoMonitorTrackId;
+        s.trackPatchLabels = [];
+        s.trimMode = 'off';
+        s.trimActive = false;
+        s.trimCounterFrames = 0;
+        s.trimASideFrames = 0;
+        s.trimBSideFrames = 0;
+        s.trimSelectionLabel = 'OFF';
+      });
+
+      get().setSourceAsset(hydrated.sourceAsset);
+      usePlayerStore.getState().setActiveMonitor('record');
+
+      const snapshot = buildProjectPersistenceSnapshot(get());
+      set((s) => {
+        s.persistedProjectHash = options?.markDirty
+          ? null
+          : snapshot
+            ? getProjectPersistenceHash(snapshot)
+            : null;
+        s.hasUnsavedChanges = Boolean(options?.markDirty);
+      });
+    },
+
     // Initial state
     projectId: null,
     projectName: 'Untitled Project',
+    projectTemplate: 'film' as ProjectTemplate,
+    projectDescription: '',
+    projectTags: [],
+    projectSchemaVersion: PROJECT_SCHEMA_VERSION,
+    projectCreatedAt: null,
     projectSettings: DEFAULT_PROJECT_SETTINGS,
     projectMediaSettings: { organizationMode: 'keep-in-place', generateProxies: false, proxyResolution: '1/2' as const },
     lastSavedAt: null,
     saveStatus: 'idle' as SaveStatus,
+    persistedProjectHash: null,
+    hasUnsavedChanges: false,
     ingestProgress: {},
     timelineId: null,
     tracks: INITIAL_TRACKS,
@@ -955,10 +1130,16 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     // Track Patching State
     enabledTrackIds: INITIAL_TRACKS.map(t => t.id),
     syncLockedTrackIds: [],
+    videoMonitorTrackId: null,
+    trackPatchLabels: [],
 
     // Trim Mode State
     trimMode: 'off' as EditorState['trimMode'],
     trimActive: false,
+    trimCounterFrames: 0,
+    trimASideFrames: 0,
+    trimBSideFrames: 0,
+    trimSelectionLabel: 'OFF' as EditorState['trimSelectionLabel'],
 
     // Smart Tool State
     smartToolLiftOverwrite: true,
@@ -983,6 +1164,8 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     composerLayout: 'source-record' as EditorState['composerLayout'],
     showTrackingInfo: true,
     trackingInfoFields: ['master-tc', 'duration'],
+    versionHistoryRetentionPreference: 'manual' as EditorState['versionHistoryRetentionPreference'],
+    versionHistoryCompareMode: 'summary' as EditorState['versionHistoryCompareMode'],
 
     // Audio (extended)
     audioScrubEnabled: false,
@@ -1013,12 +1196,15 @@ export const useEditorStore = create<EditorState & EditorActions>()(
 
     toggleMute: (id) => set((s) => {
       const t = s.tracks.find(t => t.id === id); if (t) t.muted = !t.muted;
+      trackPatchingEngine.toggleMute(id);
     }),
     toggleSolo: (id) => set((s) => {
       const t = s.tracks.find(t => t.id === id); if (t) t.solo = !t.solo;
+      trackPatchingEngine.toggleSolo(id);
     }),
     toggleLock: (id) => set((s) => {
       const t = s.tracks.find(t => t.id === id); if (t) t.locked = !t.locked;
+      trackPatchingEngine.toggleTrackLock(id);
     }),
     setTrackVolume: (id, v) => set((s) => {
       const t = s.tracks.find(t => t.id === id); if (t) t.volume = v;
@@ -1321,39 +1507,55 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       const newClipIds: string[] = [];
 
       for (const targetTrack of targetTracks) {
-        // Remove or trim overlapping clips in the target range
-        targetTrack.clips = targetTrack.clips.filter((c) => {
-          if (c.endTime <= startTime || c.startTime >= endTime) return true;
-          if (c.startTime >= startTime && c.endTime <= endTime) return false;
-          if (c.startTime < startTime && c.endTime > startTime && c.endTime <= endTime) {
-            c.endTime = startTime;
-            return true;
+        // Remove or trim overlapping clips in the target range.
+        // Build the next clip list explicitly so clips spanning the overwrite
+        // region can be split into preserved head/tail segments.
+        const nextClips: Clip[] = [];
+        for (const clip of targetTrack.clips) {
+          if (clip.endTime <= startTime || clip.startTime >= endTime) {
+            nextClips.push(clip);
+            continue;
           }
-          if (c.startTime >= startTime && c.startTime < endTime && c.endTime > endTime) {
-            c.trimStart += (endTime - c.startTime);
-            c.startTime = endTime;
-            return true;
+
+          if (clip.startTime >= startTime && clip.endTime <= endTime) {
+            continue;
           }
-          if (c.startTime < startTime && c.endTime > endTime) {
-            const tailClip: Clip = makeClip({
+
+          if (clip.startTime < startTime && clip.endTime > startTime && clip.endTime <= endTime) {
+            clip.endTime = startTime;
+            nextClips.push(clip);
+            continue;
+          }
+
+          if (clip.startTime >= startTime && clip.startTime < endTime && clip.endTime > endTime) {
+            clip.trimStart += (endTime - clip.startTime);
+            clip.startTime = endTime;
+            nextClips.push(clip);
+            continue;
+          }
+
+          if (clip.startTime < startTime && clip.endTime > endTime) {
+            const originalEnd = clip.endTime;
+            const originalTrimEnd = clip.trimEnd;
+
+            clip.endTime = startTime;
+            nextClips.push(clip);
+            nextClips.push(makeClip({
               id: createId('clip'),
               trackId: targetTrack.id,
-              name: c.name,
+              name: clip.name,
               startTime: endTime,
-              endTime: c.endTime,
-              trimStart: c.trimStart + (endTime - c.startTime),
-              trimEnd: c.trimEnd,
-              type: c.type,
-              assetId: c.assetId,
-              color: c.color,
-              waveformData: c.waveformData,
-            });
-            c.endTime = startTime;
-            targetTrack.clips.push(tailClip);
-            return true;
+              endTime: originalEnd,
+              trimStart: clip.trimStart + (endTime - clip.startTime),
+              trimEnd: originalTrimEnd,
+              type: clip.type,
+              assetId: clip.assetId,
+              color: clip.color,
+              waveformData: clip.waveformData,
+            }));
           }
-          return true;
-        });
+        }
+        targetTrack.clips = nextClips;
 
         // Insert the new clip
         const newClip: Clip = makeClip({
@@ -1778,47 +1980,71 @@ export const useEditorStore = create<EditorState & EditorActions>()(
 
     // ─── Track Enable/Disable ─────────────────────────────────────────────────
     enableTrack: (trackId) => set((s) => {
-      if (!s.enabledTrackIds.includes(trackId)) {
-        s.enabledTrackIds.push(trackId);
-      }
+      trackPatchingEngine.enableRecordTrack(trackId);
+      s.enabledTrackIds = trackPatchingEngine.getEnabledRecordTracks();
     }),
     disableTrack: (trackId) => set((s) => {
-      s.enabledTrackIds = s.enabledTrackIds.filter(id => id !== trackId);
+      trackPatchingEngine.disableRecordTrack(trackId);
+      s.enabledTrackIds = trackPatchingEngine.getEnabledRecordTracks();
     }),
     toggleTrackEnabled: (trackId) => set((s) => {
-      const idx = s.enabledTrackIds.indexOf(trackId);
-      if (idx >= 0) {
-        s.enabledTrackIds.splice(idx, 1);
-      } else {
-        s.enabledTrackIds.push(trackId);
-      }
+      trackPatchingEngine.toggleRecordTrack(trackId);
+      s.enabledTrackIds = trackPatchingEngine.getEnabledRecordTracks();
     }),
     isTrackEnabled: (trackId) => {
-      return get().enabledTrackIds.includes(trackId);
+      return trackPatchingEngine.isRecordTrackEnabled(trackId);
     },
 
     // ─── Sync Lock ────────────────────────────────────────────────────────────
     toggleSyncLock: (trackId) => set((s) => {
-      const idx = s.syncLockedTrackIds.indexOf(trackId);
-      if (idx >= 0) {
-        s.syncLockedTrackIds.splice(idx, 1);
-      } else {
-        s.syncLockedTrackIds.push(trackId);
-      }
+      trackPatchingEngine.toggleSyncLock(trackId);
+      s.syncLockedTrackIds = trackPatchingEngine.getSyncLockedTracks();
     }),
     isSyncLocked: (trackId) => {
-      return get().syncLockedTrackIds.includes(trackId);
+      return trackPatchingEngine.isSyncLocked(trackId);
     },
+    setVideoMonitorTrack: (trackId) => set((s) => {
+      trackPatchingEngine.setVideoMonitorTrack(trackId);
+      s.videoMonitorTrackId = trackPatchingEngine.getVideoMonitorTrack();
+    }),
 
     // ─── Trim Mode ────────────────────────────────────────────────────────────
     setTrimMode: (mode) => set((s) => { s.trimMode = mode; }),
     setTrimActive: (active) => set((s) => { s.trimActive = active; }),
 
     // ─── Smart Tool ───────────────────────────────────────────────────────────
-    toggleSmartToolLiftOverwrite: () => set((s) => { s.smartToolLiftOverwrite = !s.smartToolLiftOverwrite; }),
-    toggleSmartToolExtractSplice: () => set((s) => { s.smartToolExtractSplice = !s.smartToolExtractSplice; }),
-    toggleSmartToolOverwriteTrim: () => set((s) => { s.smartToolOverwriteTrim = !s.smartToolOverwriteTrim; }),
-    toggleSmartToolRippleTrim: () => set((s) => { s.smartToolRippleTrim = !s.smartToolRippleTrim; }),
+    toggleSmartToolLiftOverwrite: () => set((s) => {
+      smartToolEngine.toggleLiftOverwriteSegment();
+      const state = smartToolEngine.getState();
+      s.smartToolLiftOverwrite = state.liftOverwriteSegment;
+      s.smartToolExtractSplice = state.extractSpliceSegment;
+      s.smartToolOverwriteTrim = state.overwriteTrim;
+      s.smartToolRippleTrim = state.rippleTrim;
+    }),
+    toggleSmartToolExtractSplice: () => set((s) => {
+      smartToolEngine.toggleExtractSpliceSegment();
+      const state = smartToolEngine.getState();
+      s.smartToolLiftOverwrite = state.liftOverwriteSegment;
+      s.smartToolExtractSplice = state.extractSpliceSegment;
+      s.smartToolOverwriteTrim = state.overwriteTrim;
+      s.smartToolRippleTrim = state.rippleTrim;
+    }),
+    toggleSmartToolOverwriteTrim: () => set((s) => {
+      smartToolEngine.toggleOverwriteTrim();
+      const state = smartToolEngine.getState();
+      s.smartToolLiftOverwrite = state.liftOverwriteSegment;
+      s.smartToolExtractSplice = state.extractSpliceSegment;
+      s.smartToolOverwriteTrim = state.overwriteTrim;
+      s.smartToolRippleTrim = state.rippleTrim;
+    }),
+    toggleSmartToolRippleTrim: () => set((s) => {
+      smartToolEngine.toggleRippleTrim();
+      const state = smartToolEngine.getState();
+      s.smartToolLiftOverwrite = state.liftOverwriteSegment;
+      s.smartToolExtractSplice = state.extractSpliceSegment;
+      s.smartToolOverwriteTrim = state.overwriteTrim;
+      s.smartToolRippleTrim = state.rippleTrim;
+    }),
 
     // ─── Multicam ─────────────────────────────────────────────────────────────
     setMulticamActive: (active) => set((s) => { s.multicamActive = active; }),
@@ -1847,6 +2073,12 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     // ─── Composer ─────────────────────────────────────────────────────────────
     setComposerLayout: (layout) => set((s) => { s.composerLayout = layout; }),
     toggleTrackingInfo: () => set((s) => { s.showTrackingInfo = !s.showTrackingInfo; }),
+    setVersionHistoryRetentionPreference: (preference) => set((s) => {
+      s.versionHistoryRetentionPreference = preference;
+    }),
+    setVersionHistoryCompareMode: (mode) => set((s) => {
+      s.versionHistoryCompareMode = mode;
+    }),
 
     // ─── Audio (extended) ─────────────────────────────────────────────────────
     toggleAudioScrub: () => set((s) => { s.audioScrubEnabled = !s.audioScrubEnabled; }),
@@ -1858,9 +2090,12 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     // ─── Navigation (Avid parity) ─────────────────────────────────────────────
     goToNextEditPoint: () => set((s) => {
       const current = s.playheadTime;
+      const activeTrackIds = s.enabledTrackIds.length > 0
+        ? s.enabledTrackIds
+        : s.tracks.map((track) => track.id);
       let nearest = Infinity;
       for (const track of s.tracks) {
-        if (!s.enabledTrackIds.includes(track.id)) continue;
+        if (!activeTrackIds.includes(track.id)) continue;
         for (const clip of track.clips) {
           if (clip.startTime > current + 0.001 && clip.startTime < nearest) {
             nearest = clip.startTime;
@@ -1876,9 +2111,12 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     }),
     goToPrevEditPoint: () => set((s) => {
       const current = s.playheadTime;
+      const activeTrackIds = s.enabledTrackIds.length > 0
+        ? s.enabledTrackIds
+        : s.tracks.map((track) => track.id);
       let nearest = -Infinity;
       for (const track of s.tracks) {
-        if (!s.enabledTrackIds.includes(track.id)) continue;
+        if (!activeTrackIds.includes(track.id)) continue;
         for (const clip of track.clips) {
           if (clip.startTime < current - 0.001 && clip.startTime > nearest) {
             nearest = clip.startTime;
@@ -1895,7 +2133,79 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     goToStart: () => set((s) => { s.playheadTime = 0; }),
     goToEnd: () => set((s) => { s.playheadTime = s.duration; }),
 
-    loadProject: (id) => set((s) => { s.projectId = id; }),
+    loadProject: async (id) => {
+      set((s) => {
+        s.projectId = id;
+        s.saveStatus = 'saving';
+      });
+
+      try {
+        const project = await getProjectFromRepository(id);
+        if (!project) {
+          set((s) => {
+            s.saveStatus = 'error';
+          });
+          return;
+        }
+        get().applyProjectSnapshot(project, { markDirty: false, lastSavedAt: project.updatedAt });
+      } catch (error) {
+        console.error('Failed to load project', error);
+        set((s) => {
+          s.saveStatus = 'error';
+        });
+      }
+    },
+    saveProject: async () => {
+      const snapshot = buildProjectPersistenceSnapshot(get());
+      if (!snapshot) {
+        return;
+      }
+
+      set((s) => {
+        s.saveStatus = 'saving';
+      });
+
+      try {
+        const savedProject = await saveProjectToRepository(buildProjectFromEditorState(snapshot));
+        set((s) => {
+          s.projectId = savedProject.id;
+          s.projectName = savedProject.name;
+          s.projectTemplate = savedProject.template;
+          s.projectDescription = savedProject.description;
+          s.projectTags = [...savedProject.tags];
+          s.projectSchemaVersion = savedProject.schemaVersion;
+          s.projectCreatedAt = savedProject.createdAt;
+          s.lastSavedAt = savedProject.updatedAt;
+          s.saveStatus = 'saved';
+          s.persistedProjectHash = getProjectPersistenceHash(snapshot);
+          s.hasUnsavedChanges = false;
+        });
+      } catch (error) {
+        console.error('Failed to save project', error);
+        set((s) => {
+          s.saveStatus = 'error';
+        });
+      }
+    },
+    restoreProjectSnapshot: (project) => {
+      const state = get();
+      const restoredAt = new Date().toISOString();
+      const effectiveProject = state.projectId
+        ? {
+            ...project,
+            id: state.projectId,
+            updatedAt: restoredAt,
+          }
+        : {
+            ...project,
+            updatedAt: restoredAt,
+          };
+
+      get().applyProjectSnapshot(effectiveProject, {
+        markDirty: true,
+        lastSavedAt: state.lastSavedAt,
+      });
+    },
 
     // Sequence settings
     updateSequenceSettings: (settings) => set((s) => {
@@ -2007,6 +2317,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
               asset.hasAlpha = metadata.hasAlpha;
               // Alpha mode will be set after dialog resolves (see below)
               asset.audioChannels = metadata.audioChannels;
+              asset.audioChannelLayout = metadata.audioChannelLayout;
               asset.sampleRate = metadata.sampleRate;
               asset.fileSize = metadata.fileSize;
               asset.startTimecode = metadata.startTimecode;

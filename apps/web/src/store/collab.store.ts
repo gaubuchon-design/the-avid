@@ -2,10 +2,13 @@
 // Zustand store for collaboration state: online users, comments, versions,
 // and activity feed. Initialized with demo data from CollabEngine.
 
+import type { EditorProject } from '@mcua/core';
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { collabEngine, type CollabUser, type CollabComment, type ProjectVersion } from '../collab/CollabEngine';
+import { buildProjectFromEditorState, buildProjectPersistenceSnapshot } from '../lib/editorProjectState';
+import { useEditorStore } from './editor.store';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -47,7 +50,12 @@ interface CollabActions {
   addReaction: (commentId: string, emoji: string) => void;
 
   // Versions
-  saveVersion: (name: string, description: string) => void;
+  saveVersion: (
+    name: string,
+    description: string,
+    snapshotData?: unknown,
+    options?: { retentionPolicy?: 'manual' | 'session' },
+  ) => void;
   restoreVersion: (versionId: string) => void;
 
   // Sync
@@ -74,6 +82,29 @@ const DEMO_ACTIVITY: ActivityEntry[] = [
   { id: 'act7', user: 'Sarah K.', action: 'added B-roll', timestamp: now - 3600000, detail: "Placed 'City Timelapse' on V2 at 00:00:04:00" },
   { id: 'act8', user: 'Marcus T.', action: 'normalized audio', timestamp: now - 5400000, detail: 'Normalized A1 and A2 to -23 LUFS' },
 ];
+
+function buildCurrentProjectVersionSnapshot(): EditorProject | null {
+  const snapshot = buildProjectPersistenceSnapshot(useEditorStore.getState());
+  return snapshot ? buildProjectFromEditorState(snapshot) : null;
+}
+
+function isEditorProjectSnapshot(value: unknown): value is EditorProject {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<EditorProject>;
+  return (
+    typeof candidate.id === 'string'
+    && typeof candidate.name === 'string'
+    && Array.isArray(candidate.tracks)
+    && Array.isArray(candidate.bins)
+    && typeof candidate.editorialState === 'object'
+    && candidate.editorialState !== null
+    && typeof candidate.workstationState === 'object'
+    && candidate.workstationState !== null
+  );
+}
 
 // ─── Initial State ──────────────────────────────────────────────────────────
 
@@ -158,8 +189,13 @@ export const useCollabStore = create<CollabState & CollabActions>()(
       },
 
       // Versions
-      saveVersion: (name, description) => {
-        collabEngine.saveVersion(name, description);
+      saveVersion: (name, description, snapshotData, options) => {
+        collabEngine.saveVersion(
+          name,
+          description,
+          snapshotData ?? buildCurrentProjectVersionSnapshot() ?? undefined,
+          options,
+        );
         set((s) => {
           s.versions = collabEngine.getVersions();
         }, false, 'collab/saveVersion');
@@ -167,11 +203,18 @@ export const useCollabStore = create<CollabState & CollabActions>()(
       },
 
       restoreVersion: (versionId) => {
-        collabEngine.restoreVersion(versionId);
-        const version = collabEngine.getVersions().find(v => v.id === versionId);
-        if (version) {
-          get().addActivity('You', 'restored version', `"${version.name}"`);
+        const version = collabEngine.restoreVersion(versionId);
+        if (!version) {
+          return;
         }
+
+        if (isEditorProjectSnapshot(version.snapshotData)) {
+          useEditorStore.getState().restoreProjectSnapshot(version.snapshotData);
+          get().addActivity('You', 'restored version', `"${version.name}"`);
+          return;
+        }
+
+        get().addActivity('You', 'restore unavailable', `"${version.name}" does not contain a restorable project snapshot.`);
       },
 
       // Sync

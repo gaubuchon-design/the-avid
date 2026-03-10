@@ -2,8 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useEditorStore } from '../../store/editor.store';
 import { usePlayerStore } from '../../store/player.store';
 import { useTitleStore } from '../../store/title.store';
+import { TrimStatusOverlay } from '../Editor/TrimStatusOverlay';
+import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
+import { renderPlaybackSnapshotFrame } from '../../engine/playbackSnapshotFrame';
 import {
-  compositeRecordFrame,
+  compositePlaybackSnapshot,
   findActiveClip,
   getSourceTime,
   syncVideoPlayback,
@@ -85,10 +88,24 @@ export function RecordMonitor() {
 
       // Read latest state (non-reactive inside RAF)
       const state = useEditorStore.getState();
+      const playerState = usePlayerStore.getState();
       const titleState = useTitleStore.getState();
+      const snapshot = buildPlaybackSnapshot({
+        tracks: state.tracks,
+        subtitleTracks: state.subtitleTracks,
+        titleClips: state.titleClips,
+        playheadTime: state.playheadTime,
+        duration: state.duration,
+        isPlaying: state.isPlaying,
+        showSafeZones: state.showSafeZones,
+        activeMonitor: playerState.activeMonitor,
+        activeScope: playerState.activeScope,
+        sequenceSettings: state.sequenceSettings,
+        projectSettings: state.projectSettings,
+      }, 'record-monitor');
 
       // Sync video playback for the active clip
-      const activeClip = findActiveClip(state.tracks, state.playheadTime);
+      const activeClip = snapshot.primaryVideoLayer?.clip ?? null;
 
       // Handle clip transitions: pause old clip, start new
       if (activeClip?.assetId !== lastClipIdRef.current) {
@@ -108,22 +125,27 @@ export function RecordMonitor() {
         tryLoadClipSource(activeClip.assetId, state.bins as any);
       }
 
-      // Composite the full frame
-      compositeRecordFrame({
-        ctx,
-        canvasW: w,
-        canvasH: h,
-        playheadTime: state.playheadTime,
-        tracks: state.tracks,
-        fps: state.sequenceSettings.fps,
-        aspectRatio: 16 / 9,
-        showSafeZones: state.showSafeZones,
-        isPlaying: state.isPlaying,
-        titleClips: state.titleClips,
-        subtitleTracks: state.subtitleTracks,
-        currentTitle: titleState.currentTitle,
-        isTitleEditing: titleState.isEditing,
-      });
+      if (state.isPlaying) {
+        compositePlaybackSnapshot({
+          ctx,
+          canvasW: w,
+          canvasH: h,
+          snapshot,
+          currentTitle: titleState.currentTitle,
+          isTitleEditing: titleState.isEditing,
+        });
+      } else {
+        renderPlaybackSnapshotFrame({
+          snapshot,
+          width: w,
+          height: h,
+          canvas,
+          currentTitle: titleState.currentTitle,
+          isTitleEditing: titleState.isEditing,
+          colorProcessing: 'post',
+          useCache: true,
+        });
+      }
 
       rafRef.current = requestAnimationFrame(render);
     };
@@ -201,12 +223,21 @@ export function RecordMonitor() {
 
   const tc = timeToTimecode(playheadTime, fps);
   const isActive = usePlayerStore((s) => s.activeMonitor === 'record');
+  const trimActive = useEditorStore((s) => s.trimActive);
+  const trimMode = useEditorStore((s) => s.trimMode);
+  const trimSelectionLabel = useEditorStore((s) => s.trimSelectionLabel);
+  const trimCounterFrames = useEditorStore((s) => s.trimCounterFrames);
 
   return (
     <div className={`monitor${isActive ? ' monitor-active' : ''}`} onClick={handleFocus} role="region" aria-label="Record Monitor">
       {/* Header */}
       <div className="monitor-header">
         <span className="monitor-label record" aria-hidden="true">RECORD</span>
+        {trimActive && (
+          <span className="monitor-trim-summary">
+            {trimMode.toUpperCase()} {trimSelectionLabel} {trimCounterFrames > 0 ? '+' : ''}{trimCounterFrames}f
+          </span>
+        )}
         <span className="monitor-tc">{tc}</span>
       </div>
 
@@ -218,6 +249,7 @@ export function RecordMonitor() {
           height={canvasSize.h}
           style={{ width: '100%', height: '100%', objectFit: 'contain' }}
         />
+        <TrimStatusOverlay />
       </div>
 
       {/* Footer / Transport */}

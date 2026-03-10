@@ -1,9 +1,13 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react';
 import { useEditorStore } from '../../store/editor.store';
+import { usePlayerStore } from '../../store/player.store';
 import { useTitleStore } from '../../store/title.store';
 import { Timecode } from '../../lib/timecode';
+import { TrimStatusOverlay } from '../Editor/TrimStatusOverlay';
+import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
+import { renderPlaybackSnapshotFrame } from '../../engine/playbackSnapshotFrame';
 import {
-  compositeRecordFrame,
+  compositePlaybackSnapshot,
   findActiveClip,
   syncVideoPlayback,
   pauseVideoSource,
@@ -27,6 +31,10 @@ export function MonitorArea() {
   const tc = new Timecode({ fps: projectSettings?.frameRate || 24 });
   const aspectRatio = projectSettings ? projectSettings.width / projectSettings.height : 16 / 9;
   const totalClips = tracks.reduce((n, t) => n + t.clips.length, 0);
+  const trimActive = useEditorStore((s) => s.trimActive);
+  const trimMode = useEditorStore((s) => s.trimMode);
+  const trimSelectionLabel = useEditorStore((s) => s.trimSelectionLabel);
+  const trimCounterFrames = useEditorStore((s) => s.trimCounterFrames);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -84,10 +92,24 @@ export function MonitorArea() {
 
       // Read latest state (non-reactive inside RAF)
       const state = useEditorStore.getState();
+      const playerState = usePlayerStore.getState();
       const titleState = useTitleStore.getState();
+      const snapshot = buildPlaybackSnapshot({
+        tracks: state.tracks,
+        subtitleTracks: state.subtitleTracks,
+        titleClips: state.titleClips,
+        playheadTime: state.playheadTime,
+        duration: state.duration,
+        isPlaying: state.isPlaying,
+        showSafeZones: state.showSafeZones,
+        activeMonitor: playerState.activeMonitor,
+        activeScope: playerState.activeScope,
+        sequenceSettings: state.sequenceSettings,
+        projectSettings: state.projectSettings,
+      }, 'program-monitor');
 
       // Sync video playback for the active clip
-      const activeClip = findActiveClip(state.tracks, state.playheadTime);
+      const activeClip = snapshot.primaryVideoLayer?.clip ?? null;
 
       // Handle clip transitions: pause old clip, start new
       if (activeClip?.assetId !== lastClipIdRef.current) {
@@ -107,22 +129,27 @@ export function MonitorArea() {
         tryLoadClipSource(activeClip.assetId, state.bins as any);
       }
 
-      // Composite the full frame
-      compositeRecordFrame({
-        ctx,
-        canvasW: w,
-        canvasH: h,
-        playheadTime: state.playheadTime,
-        tracks: state.tracks,
-        fps: state.sequenceSettings.fps,
-        aspectRatio: 16 / 9,
-        showSafeZones: state.showSafeZones,
-        isPlaying: state.isPlaying,
-        titleClips: state.titleClips,
-        subtitleTracks: state.subtitleTracks,
-        currentTitle: titleState.currentTitle,
-        isTitleEditing: titleState.isEditing,
-      });
+      if (state.isPlaying) {
+        compositePlaybackSnapshot({
+          ctx,
+          canvasW: w,
+          canvasH: h,
+          snapshot,
+          currentTitle: titleState.currentTitle,
+          isTitleEditing: titleState.isEditing,
+        });
+      } else {
+        renderPlaybackSnapshotFrame({
+          snapshot,
+          width: w,
+          height: h,
+          canvas,
+          currentTitle: titleState.currentTitle,
+          isTitleEditing: titleState.isEditing,
+          colorProcessing: 'post',
+          useCache: true,
+        });
+      }
 
       rafRef.current = requestAnimationFrame(render);
     };
@@ -220,6 +247,8 @@ export function MonitorArea() {
           {tc.secondsToTC(playheadTime)}
         </div>
 
+        <TrimStatusOverlay />
+
         {/* Controls overlay — top right */}
         <div className="composer-controls-overlay">
           <button className="composer-ctrl-btn" title="Toggle Fullscreen" aria-label="Toggle Fullscreen" onClick={handleFullscreen}>
@@ -282,6 +311,7 @@ export function MonitorArea() {
         <span>Selected: {selectedClipIds.length}</span>
         <span>Duration: {tc.secondsToTC(duration)}</span>
         <span>Viewing: {totalClips > 0 ? `${projectSettings?.width}×${projectSettings?.height}` : '--'}</span>
+        <span>Trim: {trimActive ? `${trimMode.toUpperCase()} ${trimSelectionLabel} ${trimCounterFrames > 0 ? '+' : ''}${trimCounterFrames}f` : 'OFF'}</span>
       </div>
     </div>
   );

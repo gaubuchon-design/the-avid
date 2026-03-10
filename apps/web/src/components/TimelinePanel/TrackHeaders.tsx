@@ -15,9 +15,11 @@ interface TrackHeaderProps {
 }
 
 const TrackHeader = memo(function TrackHeader({ track }: TrackHeaderProps) {
-  const { selectedTrackId, selectTrack, toggleMute, toggleSolo, toggleLock } =
+  const { selectedTrackId, selectTrack, toggleMute, toggleSolo, toggleLock, videoMonitorTrackId, setVideoMonitorTrack } =
     useEditorStore();
   const isSelected = selectedTrackId === track.id;
+  const isVideoTrack = track.type === 'VIDEO' || track.type === 'GRAPHIC';
+  const isMonitored = videoMonitorTrackId === track.id;
   const color = TRACK_TYPE_COLOR[track.type] ?? 'var(--text-muted)';
 
   return (
@@ -40,6 +42,20 @@ const TrackHeader = memo(function TrackHeader({ track }: TrackHeaderProps) {
       </span>
 
       <div className="track-icons" role="group" aria-label={`${track.name} controls`}>
+        {isVideoTrack && (
+          <button
+            className={`track-icon-btn${isMonitored ? ' active' : ''}`}
+            title={isMonitored ? 'Monitored video track' : 'Set monitored video track'}
+            aria-label={isMonitored ? `${track.name} is the monitored video track` : `Monitor ${track.name}`}
+            aria-pressed={isMonitored}
+            onClick={(e) => {
+              e.stopPropagation();
+              setVideoMonitorTrack(track.id);
+            }}
+          >
+            MON
+          </button>
+        )}
         <button
           className={`track-icon-btn${track.muted ? ' active' : ''}`}
           title={track.muted ? 'Unmute' : 'Mute'}

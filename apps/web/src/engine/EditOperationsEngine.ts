@@ -1289,16 +1289,14 @@ export class EditOperationsEngine {
     const affectedClipIds = clipIds.slice();
 
     useEditorStore.setState((prev) => {
-      const tracks = [...prev.tracks];
-
       // Remove clips from their original tracks
-      for (const track of tracks) {
+      for (const track of prev.tracks) {
         track.clips = track.clips.filter((c) => !clipIds.includes(c.id));
       }
 
       // Find the target track in the mutable state
-      const destTrack = tracks.find((t) => t.id === targetTrackId);
-      if (!destTrack) return {};
+      const destTrack = prev.tracks.find((t) => t.id === targetTrackId);
+      if (!destTrack) return;
 
       // Place clips at the new position, clearing the region first
       for (const clip of clipsToMove) {
@@ -1322,9 +1320,10 @@ export class EditOperationsEngine {
       }
 
       destTrack.clips.sort((a, b) => a.startTime - b.startTime);
-
-      return { tracks, selectedClipIds: newClipIds };
+      prev.selectedClipIds = newClipIds;
     });
+
+    this.recalcDuration();
 
     return successResult(
       `Overwrite Segment To: moved ${clipsToMove.length} clip(s) to ${targetTrackId}`,
@@ -1382,15 +1381,13 @@ export class EditOperationsEngine {
     const affectedClipIds = clipIds.slice();
 
     useEditorStore.setState((prev) => {
-      const tracks = [...prev.tracks];
-
       // Remove clips from their original tracks
-      for (const track of tracks) {
+      for (const track of prev.tracks) {
         track.clips = track.clips.filter((c) => !clipIds.includes(c.id));
       }
 
-      const destTrack = tracks.find((t) => t.id === targetTrackId);
-      if (!destTrack) return {};
+      const destTrack = prev.tracks.find((t) => t.id === targetTrackId);
+      if (!destTrack) return;
 
       // Ripple: push existing clips right to make room
       this.rippleTrack(destTrack, targetTime, totalSpan);
@@ -1413,8 +1410,7 @@ export class EditOperationsEngine {
       }
 
       destTrack.clips.sort((a, b) => a.startTime - b.startTime);
-
-      return { tracks, selectedClipIds: newClipIds };
+      prev.selectedClipIds = newClipIds;
     });
 
     this.recalcDuration();

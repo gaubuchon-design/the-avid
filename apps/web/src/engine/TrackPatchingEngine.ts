@@ -52,6 +52,8 @@ export interface TrackMonitorState {
 
 /** Serialisable snapshot of the full engine state. */
 export interface TrackPatchingState {
+  sourceAssetId: string | null;
+  sourceTracks: SourceTrackDescriptor[];
   patches: TrackPatch[];
   monitor: TrackMonitorState;
 }
@@ -81,6 +83,9 @@ function inferTrackType(sourceTrackId: string): 'VIDEO' | 'AUDIO' | null {
  */
 export class TrackPatchingEngine {
   // ── Private state ───────────────────────────────────────────────────────
+
+  /** Source asset currently loaded into the source monitor. */
+  private sourceAssetId: string | null = null;
 
   /** Source tracks currently available (loaded from a source clip). */
   private sourceTracks: SourceTrackDescriptor[] = [];
@@ -125,6 +130,30 @@ export class TrackPatchingEngine {
     this.patchMap.clear();
     this.reversePatchMap.clear();
     this.notify();
+  }
+
+  /**
+   * Set the source asset and its available source tracks together.
+   *
+   * Used when a new source clip is loaded or when persisted patching state is
+   * restored for the current source monitor asset.
+   */
+  setSourceContext(assetId: string | null, tracks: SourceTrackDescriptor[]): void {
+    this.sourceAssetId = assetId;
+    this.sourceTracks = tracks.map((t) => ({ ...t }));
+    this.patchMap.clear();
+    this.reversePatchMap.clear();
+    this.notify();
+  }
+
+  /** Current source asset identifier, if any. */
+  getSourceAssetId(): string | null {
+    return this.sourceAssetId;
+  }
+
+  /** Current source-track descriptors. */
+  getSourceTracks(): SourceTrackDescriptor[] {
+    return this.sourceTracks.map((track) => ({ ...track }));
   }
 
   /**
@@ -423,11 +452,11 @@ export class TrackPatchingEngine {
    * Set which video track is currently monitored (topmost visible).
    * Only one video track can be monitored at a time.
    *
-   * @param trackId Timeline video track identifier.
+   * @param trackId Timeline video track identifier, or `null` to clear.
    * @example
    * trackPatchingEngine.setVideoMonitorTrack('v2');
    */
-  setVideoMonitorTrack(trackId: string): void {
+  setVideoMonitorTrack(trackId: string | null): void {
     this.monitorState.videoMonitorTrackId = trackId;
     this.notify();
   }
@@ -638,6 +667,8 @@ export class TrackPatchingEngine {
    */
   getState(): TrackPatchingState {
     return {
+      sourceAssetId: this.sourceAssetId,
+      sourceTracks: this.getSourceTracks(),
       patches: this.getPatches(),
       monitor: {
         videoMonitorTrackId: this.monitorState.videoMonitorTrackId,
@@ -650,6 +681,46 @@ export class TrackPatchingEngine {
     };
   }
 
+  /**
+   * Restore a previously captured patching state snapshot.
+   */
+  restoreState(state: TrackPatchingState): void {
+    this.sourceAssetId = state.sourceAssetId ?? null;
+    this.sourceTracks = (state.sourceTracks ?? []).map((track) => ({ ...track }));
+    this.patchMap.clear();
+    this.reversePatchMap.clear();
+
+    const sourceTrackById = new Map(this.sourceTracks.map((track) => [track.id, track]));
+    for (const patch of state.patches ?? []) {
+      const descriptor = sourceTrackById.get(patch.sourceTrackId);
+      if (!descriptor) {
+        continue;
+      }
+
+      const normalizedPatch: TrackPatch = {
+        sourceTrackId: descriptor.id,
+        sourceTrackType: descriptor.type,
+        sourceTrackIndex: descriptor.index,
+        recordTrackId: patch.recordTrackId,
+        enabled: patch.enabled,
+      };
+
+      this.patchMap.set(normalizedPatch.sourceTrackId, normalizedPatch);
+      this.reversePatchMap.set(normalizedPatch.recordTrackId, normalizedPatch.sourceTrackId);
+    }
+
+    this.monitorState = {
+      videoMonitorTrackId: state.monitor?.videoMonitorTrackId ?? null,
+      enabledRecordTracks: new Set(state.monitor?.enabledRecordTracks ?? []),
+      soloTracks: new Set(state.monitor?.soloTracks ?? []),
+      mutedTracks: new Set(state.monitor?.mutedTracks ?? []),
+      syncLocks: new Set(state.monitor?.syncLocks ?? []),
+      lockedTracks: new Set(state.monitor?.lockedTracks ?? []),
+    };
+
+    this.notify();
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   //  Reset / Dispose
   // ═══════════════════════════════════════════════════════════════════════
@@ -660,6 +731,7 @@ export class TrackPatchingEngine {
    * trackPatchingEngine.reset();
    */
   reset(): void {
+    this.sourceAssetId = null;
     this.sourceTracks = [];
     this.patchMap.clear();
     this.reversePatchMap.clear();

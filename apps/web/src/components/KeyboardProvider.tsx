@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { keyboardEngine, type KeyModifier } from '../engine/KeyboardEngine';
+import { isKeyboardProviderDispatchSuspended } from '../lib/keyboardProviderGate';
 import { useUserSettingsStore } from '../store/userSettings.store';
 
 /**
@@ -35,11 +36,17 @@ export function KeyboardProvider({ children }: { children: React.ReactNode }) {
   // Global keydown/keyup delegation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isKeyboardProviderDispatchSuspended()) {
+        return;
+      }
       if (keyboardEngine.handleKeyDown(e)) {
         e.preventDefault();
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
+      if (isKeyboardProviderDispatchSuspended()) {
+        return;
+      }
       keyboardEngine.handleKeyUp(e);
     };
 

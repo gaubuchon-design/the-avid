@@ -909,31 +909,30 @@ input:focus:not(:focus-visible) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   20. PAGE NAVIGATION (Resolve-Style Bottom Bar)
+   20. PAGE NAVIGATION
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .page-nav {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 0;
-  height: var(--sub-toolbar-h);
-  background: var(--bg-void);
-  border-top: 1px solid var(--border-subtle);
-  flex-shrink: 0;
-  z-index: var(--z-sticky);
+  gap: var(--space-1);
+  flex-wrap: wrap;
 }
 
 .page-nav-tab {
-  padding: var(--space-1) var(--space-6);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 var(--space-4);
   font-size: var(--text-sm);
   font-weight: var(--weight-normal);
   letter-spacing: var(--tracking-wider);
   text-transform: uppercase;
   color: var(--text-muted);
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
   cursor: pointer;
   transition: var(--transition-colors);
   font-family: var(--font-ui);
@@ -941,13 +940,16 @@ input:focus:not(:focus-visible) {
 
 .page-nav-tab:hover {
   color: var(--text-secondary);
+  border-color: var(--border-default);
+  background: var(--bg-hover);
 }
 
 .page-nav-tab.active {
   font-weight: var(--weight-semibold);
   color: var(--text-primary);
-  background: var(--bg-active);
-  border-bottom-color: var(--brand);
+  background: linear-gradient(180deg, rgba(124, 92, 252, 0.18), rgba(124, 92, 252, 0.08));
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-accent);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

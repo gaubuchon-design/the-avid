@@ -3,9 +3,11 @@ import { useEditorStore } from '../../store/editor.store';
 import type { Clip } from '../../store/editor.store';
 import { editEngine } from '../../engine/EditEngine';
 import { snapEngine } from '../../engine/SnapEngine';
+import { smartToolEngine } from '../../engine/SmartToolEngine';
 import { trimEngine, TrimSide } from '../../engine/TrimEngine';
 import {
   MoveClipCommand,
+  SegmentMoveCommand,
   TrimClipLeftCommand,
   TrimClipRightCommand,
 } from '../../engine/commands';
@@ -109,9 +111,14 @@ interface ClipViewProps {
   trackColor: string;
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
 export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor }: ClipViewProps) {
   const { selectedClipIds, selectClip, tracks, markers, playheadTime } =
     useEditorStore();
+  const activeTool = useEditorStore((s) => s.activeTool);
   const isSelected = selectedClipIds.includes(clip.id);
   const width = Math.max(2, (clip.endTime - clip.startTime) * zoom);
   const left = clip.startTime * zoom;
@@ -127,6 +134,71 @@ export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor
     setCtxMenu({ x: e.clientX, y: e.clientY });
   }, [clip.id, selectClip]);
 
+  const startTrimDrag = useCallback((
+    event: React.MouseEvent,
+    editPointTime: number,
+    side: TrimSide,
+    overwriteTrimMode: boolean | null = null,
+  ) => {
+    const startX = event.clientX;
+    const previousOverwriteTrim = trimEngine.isOverwriteTrimEnabled();
+
+    if (overwriteTrimMode !== null) {
+      trimEngine.setOverwriteTrim(overwriteTrimMode);
+    }
+
+    trimEngine.enterTrimMode([trackId], editPointTime, side);
+
+    if (!trimEngine.getState().active) {
+      if (overwriteTrimMode !== null) {
+        trimEngine.setOverwriteTrim(previousOverwriteTrim);
+      }
+      return false;
+    }
+
+    const restoreTrimMode = () => {
+      if (overwriteTrimMode !== null) {
+        trimEngine.setOverwriteTrim(previousOverwriteTrim);
+      }
+    };
+
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX;
+      trimEngine.trimToPosition(editPointTime + dx / zoom);
+    };
+
+    const cleanup = (cancel: boolean) => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('keydown', onKeyDown);
+
+      if (trimEngine.getState().active) {
+        if (cancel) {
+          trimEngine.cancelTrim();
+        } else {
+          trimEngine.exitTrimMode();
+        }
+      }
+
+      restoreTrimMode();
+    };
+
+    const onUp = () => {
+      cleanup(false);
+    };
+
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') {
+        cleanup(true);
+      }
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('keydown', onKeyDown);
+    return true;
+  }, [trackId, zoom]);
+
   // ── Body drag (move) ──
   const handleMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -139,6 +211,60 @@ export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor
     const startX = e.clientX;
     const origStart = clip.startTime;
     const origTrackId = trackId;
+    const currentSelectedClipIds = useEditorStore.getState().selectedClipIds;
+    const clipIdsToMove = currentSelectedClipIds.includes(clip.id) ? currentSelectedClipIds : [clip.id];
+    const bounds = e.currentTarget.getBoundingClientRect();
+    const localX = clamp(e.clientX - bounds.left, 0, bounds.width);
+    const localY = clamp(e.clientY - bounds.top, 0, bounds.height);
+    const nearestEdge = localX <= bounds.width - localX
+      ? { editPointTime: clip.startTime, distanceToEdit: localX }
+      : { editPointTime: clip.endTime, distanceToEdit: bounds.width - localX };
+    const smartToolZone = smartToolEngine.hitTest({
+      x: e.clientX,
+      y: e.clientY,
+      timeAtX: clip.startTime + (localX / zoom),
+      trackAtY: trackId,
+      clipAtPos: clip.id,
+      nearestEditPoint: nearestEdge.editPointTime,
+      distanceToEdit: nearestEdge.distanceToEdit,
+      relativeY: bounds.height > 0 ? (localY / bounds.height) : 0.5,
+    });
+    const segmentMoveMode = smartToolZone.mode === 'lift-overwrite-segment'
+      ? 'overwrite'
+      : (smartToolZone.mode === 'extract-splice-segment' ? 'splice' : null);
+    const nearestTrimSide = nearestEdge.editPointTime === clip.startTime
+      ? TrimSide.B_SIDE
+      : TrimSide.A_SIDE;
+    const smartToolTrimSide = smartToolZone.mode === 'roll-trim'
+      ? TrimSide.BOTH
+      : smartToolZone.mode === 'a-side-trim'
+        ? TrimSide.A_SIDE
+        : smartToolZone.mode === 'b-side-trim'
+          ? TrimSide.B_SIDE
+          : nearestTrimSide;
+    const smartToolOverwriteTrimMode = smartToolZone.mode === 'overwrite-trim'
+      ? true
+      : (smartToolZone.mode === 'ripple-trim' ? false : null);
+
+    if (
+      smartToolZone.mode === 'roll-trim'
+      || smartToolZone.mode === 'overwrite-trim'
+      || smartToolZone.mode === 'ripple-trim'
+      || smartToolZone.mode === 'a-side-trim'
+      || smartToolZone.mode === 'b-side-trim'
+    ) {
+      if (
+        startTrimDrag(
+          e,
+          nearestEdge.editPointTime,
+          smartToolTrimSide,
+          smartToolOverwriteTrimMode,
+        )
+      ) {
+        return;
+      }
+    }
+
     let dragging = false;
     let lastStart = origStart;
     let lastTrack = origTrackId;
@@ -177,59 +303,33 @@ export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor
       if (dragging && (lastStart !== origStart || lastTrack !== origTrackId)) {
         // Restore original position, then execute through engine for undo
         useEditorStore.getState().moveClip(clip.id, origTrackId, origStart);
-        editEngine.execute(
-          new MoveClipCommand(clip.id, origTrackId, origStart, lastTrack, lastStart),
-        );
+        if (segmentMoveMode) {
+          editEngine.execute(
+            new SegmentMoveCommand(clipIdsToMove, lastTrack, lastStart, segmentMoveMode),
+          );
+        } else {
+          editEngine.execute(
+            new MoveClipCommand(clip.id, origTrackId, origStart, lastTrack, lastStart),
+          );
+        }
       }
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   };
 
-  // Get the active tool for determining trim behavior
-  const activeTool = useEditorStore((s) => s.activeTool);
-
   // ── Left trim ──
   const handleTrimLeft = (e: React.MouseEvent) => {
     e.stopPropagation();
     const isTrimTool = activeTool === 'trim';
-    const isRipple = e.ctrlKey || e.metaKey; // Modifier for ripple trim
-    const startX = e.clientX;
+    const isRipple = e.ctrlKey || e.metaKey;
 
     if (isTrimTool) {
-      // Delegate to TrimEngine — enter trim mode at the clip's start edge
       const side = isRipple ? TrimSide.B_SIDE : TrimSide.BOTH;
-      trimEngine.enterTrimMode([trackId], clip.startTime, side);
-
-      const onMove = (ev: MouseEvent) => {
-        const dx = ev.clientX - startX;
-        const timeDelta = dx / zoom;
-        const absPosition = clip.startTime + timeDelta;
-        trimEngine.trimToPosition(absPosition);
-      };
-
-      const onUp = () => {
-        window.removeEventListener('mousemove', onMove);
-        window.removeEventListener('mouseup', onUp);
-        window.removeEventListener('keydown', onKeyDown);
-        trimEngine.exitTrimMode();
-      };
-
-      // Escape to cancel
-      const onKeyDown = (ev: KeyboardEvent) => {
-        if (ev.key === 'Escape') {
-          trimEngine.cancelTrim();
-          window.removeEventListener('mousemove', onMove);
-          window.removeEventListener('mouseup', onUp);
-          window.removeEventListener('keydown', onKeyDown);
-        }
-      };
-
-      window.addEventListener('mousemove', onMove);
-      window.addEventListener('mouseup', onUp);
-      window.addEventListener('keydown', onKeyDown);
+      startTrimDrag(e, clip.startTime, side);
     } else {
       // Default behavior — simple left trim with snap + undo
+      const startX = e.clientX;
       const origStart = clip.startTime;
       let lastTime = origStart;
       const anchors = snapEngine.collectAnchors(tracks, playheadTime, markers, clip.id);
@@ -260,41 +360,13 @@ export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor
     e.stopPropagation();
     const isTrimTool = activeTool === 'trim';
     const isRipple = e.ctrlKey || e.metaKey;
-    const startX = e.clientX;
 
     if (isTrimTool) {
-      // Delegate to TrimEngine — enter trim mode at the clip's end edge
       const side = isRipple ? TrimSide.A_SIDE : TrimSide.BOTH;
-      trimEngine.enterTrimMode([trackId], clip.endTime, side);
-
-      const onMove = (ev: MouseEvent) => {
-        const dx = ev.clientX - startX;
-        const timeDelta = dx / zoom;
-        const absPosition = clip.endTime + timeDelta;
-        trimEngine.trimToPosition(absPosition);
-      };
-
-      const onUp = () => {
-        window.removeEventListener('mousemove', onMove);
-        window.removeEventListener('mouseup', onUp);
-        window.removeEventListener('keydown', onKeyDown);
-        trimEngine.exitTrimMode();
-      };
-
-      const onKeyDown = (ev: KeyboardEvent) => {
-        if (ev.key === 'Escape') {
-          trimEngine.cancelTrim();
-          window.removeEventListener('mousemove', onMove);
-          window.removeEventListener('mouseup', onUp);
-          window.removeEventListener('keydown', onKeyDown);
-        }
-      };
-
-      window.addEventListener('mousemove', onMove);
-      window.addEventListener('mouseup', onUp);
-      window.addEventListener('keydown', onKeyDown);
+      startTrimDrag(e, clip.endTime, side);
     } else {
       // Default behavior — simple right trim with snap + undo
+      const startX = e.clientX;
       const origEnd = clip.endTime;
       let lastTime = origEnd;
       const anchors = snapEngine.collectAnchors(tracks, playheadTime, markers, clip.id);

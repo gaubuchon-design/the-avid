@@ -6,6 +6,10 @@
 import React, { useCallback, useEffect, useRef } from 'react';
 import { useColorStore, ScopeType } from '../../store/color.store';
 import { scopesEngine } from '../../engine/ScopesEngine';
+import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
+import { capturePlaybackSnapshotImageData } from '../../engine/playbackSnapshotFrame';
+import { useEditorStore } from '../../store/editor.store';
+import { useTitleStore } from '../../store/title.store';
 
 const SCOPE_TABS: { value: ScopeType; label: string }[] = [
   { value: 'waveform', label: 'Wave' },
@@ -19,22 +23,62 @@ export function ScopesPanel() {
   const scopePosition = useColorStore((s) => s.scopePosition);
   const setScopeType = useColorStore((s) => s.setScopeType);
   const setScopePosition = useColorStore((s) => s.setScopePosition);
+  const tracks = useEditorStore((s) => s.tracks);
+  const subtitleTracks = useEditorStore((s) => s.subtitleTracks);
+  const titleClips = useEditorStore((s) => s.titleClips);
+  const playheadTime = useEditorStore((s) => s.playheadTime);
+  const duration = useEditorStore((s) => s.duration);
+  const sequenceSettings = useEditorStore((s) => s.sequenceSettings);
+  const projectSettings = useEditorStore((s) => s.projectSettings);
+  const showSafeZones = useEditorStore((s) => s.showSafeZones);
+  const currentTitle = useTitleStore((s) => s.currentTitle);
+  const isTitleEditing = useTitleStore((s) => s.isEditing);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const frameRef = useRef<number>(0);
 
   // Render scope
   const renderScope = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
     const w = canvas.width;
     const h = canvas.height;
 
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, w, h);
 
-    // Get current frame data (placeholder — would come from viewer/pipeline)
-    // For now, render empty scope with graticule
+    scopesEngine.setEnabled(true);
+    scopesEngine.setActiveScopeType(scopeType);
+
+    const snapshot = buildPlaybackSnapshot({
+      tracks,
+      subtitleTracks,
+      titleClips,
+      playheadTime,
+      duration,
+      isPlaying: false,
+      showSafeZones,
+      activeMonitor: 'record',
+      activeScope: scopeType,
+      sequenceSettings,
+      projectSettings,
+    }, 'scope');
+
+    const imageData = capturePlaybackSnapshotImageData({
+      snapshot,
+      width: w,
+      height: h,
+      currentTitle,
+      isTitleEditing,
+      colorProcessing: scopePosition,
+      useCache: true,
+    });
+
+    if (imageData) {
+      scopesEngine.updateAndRender(imageData, canvas);
+      return;
+    }
+
     switch (scopeType) {
       case 'waveform':
         renderWaveformGraticule(ctx, w, h);
@@ -49,7 +93,20 @@ export function ScopesPanel() {
         renderParadeGraticule(ctx, w, h);
         break;
     }
-  }, [scopeType]);
+  }, [
+    currentTitle,
+    duration,
+    isTitleEditing,
+    playheadTime,
+    projectSettings,
+    scopePosition,
+    scopeType,
+    sequenceSettings,
+    showSafeZones,
+    subtitleTracks,
+    titleClips,
+    tracks,
+  ]);
 
   useEffect(() => {
     renderScope();
@@ -58,7 +115,10 @@ export function ScopesPanel() {
   // Periodic update
   useEffect(() => {
     const interval = setInterval(renderScope, 100);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      scopesEngine.setEnabled(false);
+    };
   }, [renderScope]);
 
   return (

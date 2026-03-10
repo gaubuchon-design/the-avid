@@ -71,7 +71,7 @@ export interface SlideState {
 
 // ─── Event Types ────────────────────────────────────────────────────────────────
 
-type TrimEventType = 'enter' | 'exit' | 'trim' | 'modeChange';
+type TrimEventType = 'enter' | 'exit' | 'cancel' | 'trim' | 'modeChange';
 type TrimEventCallback = (...args: unknown[]) => void;
 
 // ─── Constants ──────────────────────────────────────────────────────────────────
@@ -417,6 +417,7 @@ export class TrimEngine {
     };
 
     this.notify();
+    this.emit('cancel');
     this.emit('exit');
   }
 
@@ -1300,9 +1301,20 @@ export class TrimEngine {
           if (roller.clipAId) {
             const clipA = track.clips.find((c) => c.id === roller.clipAId);
             if (clipA) {
+              const oldEnd = clipA.endTime;
               clipA.endTime += localDelta;
               clipA.trimEnd = Math.max(0, clipA.trimEnd - localDelta);
               affectedClipIds.push(clipA.id);
+
+              if (roller.side === TrimSide.A_SIDE && !this.overwriteTrim) {
+                for (const c of track.clips) {
+                  if (c.id !== clipA.id && c.startTime >= oldEnd - TIME_EPSILON) {
+                    c.startTime += localDelta;
+                    c.endTime += localDelta;
+                    affectedClipIds.push(c.id);
+                  }
+                }
+              }
             }
           }
         }
@@ -1358,6 +1370,10 @@ export class TrimEngine {
   setOverwriteTrim(enabled: boolean): void {
     this.overwriteTrim = enabled;
     this.notify();
+  }
+
+  isOverwriteTrimEnabled(): boolean {
+    return this.overwriteTrim;
   }
 
   // ── Query Methods ───────────────────────────────────────────────────────────
@@ -1466,7 +1482,7 @@ export class TrimEngine {
    * @returns An unsubscribe function.
    */
   on(
-    event: 'enter' | 'exit' | 'trim' | 'modeChange',
+    event: 'enter' | 'exit' | 'cancel' | 'trim' | 'modeChange',
     cb: (...args: unknown[]) => void,
   ): () => void {
     if (!this.eventListeners.has(event)) {

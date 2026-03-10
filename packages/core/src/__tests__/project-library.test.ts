@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { flattenAssets, getProjectDuration } from '../project-library';
+import { flattenAssets, getProjectDuration, hydrateProject } from '../project-library';
 import type { EditorBin, EditorMediaAsset, EditorProject, EditorTrack, EditorClip } from '../project-library';
 
 // =============================================================================
@@ -224,5 +224,108 @@ describe('getProjectDuration', () => {
   it('handles undefined tracks gracefully', () => {
     const project = { tracks: undefined as unknown as EditorTrack[] };
     expect(getProjectDuration(project)).toBe(0);
+  });
+});
+
+describe('hydrateProject editorialState', () => {
+  it('provides editorial defaults for imported projects', () => {
+    const hydrated = hydrateProject({
+      id: 'project-1',
+      name: 'Imported',
+      tracks: [
+        makeTrack({ id: 'v1', type: 'VIDEO' }),
+        makeTrack({ id: 'a1', type: 'AUDIO' }),
+      ],
+      bins: [makeBin({ id: 'b-master' })],
+    });
+
+    expect(hydrated.editorialState.selectedBinId).toBe('b-master');
+    expect(hydrated.editorialState.enabledTrackIds).toEqual(['v1', 'a1']);
+    expect(hydrated.editorialState.syncLockedTrackIds).toEqual([]);
+    expect(hydrated.editorialState.videoMonitorTrackId).toBe('v1');
+    expect(hydrated.editorialState.sourceTrackDescriptors).toEqual([]);
+    expect(hydrated.editorialState.trackPatches).toEqual([]);
+    expect(hydrated.workstationState).toEqual({
+      subtitleTracks: [],
+      titleClips: [],
+      trackHeights: {},
+      activeWorkspaceId: 'source-record',
+      composerLayout: 'source-record',
+      showTrackingInfo: true,
+      trackingInfoFields: ['master-tc', 'duration'],
+      clipTextDisplay: 'name',
+      dupeDetectionEnabled: false,
+      versionHistoryRetentionPreference: 'manual',
+      versionHistoryCompareMode: 'summary',
+    });
+  });
+
+  it('preserves provided editorial state for valid tracks', () => {
+    const hydrated = hydrateProject({
+      id: 'project-2',
+      name: 'Saved',
+      tracks: [
+        makeTrack({ id: 'v1', type: 'VIDEO' }),
+        makeTrack({ id: 'v2', type: 'VIDEO' }),
+        makeTrack({ id: 'a1', type: 'AUDIO' }),
+      ],
+      bins: [makeBin({ id: 'b-selects' })],
+      editorialState: {
+        selectedBinId: 'b-selects',
+        sourceAssetId: 'asset-1',
+        enabledTrackIds: ['v2'],
+        syncLockedTrackIds: ['a1'],
+        videoMonitorTrackId: 'v2',
+        sourceTrackDescriptors: [
+          { id: 'src-v1', type: 'VIDEO', index: 1 },
+          { id: 'src-a1', type: 'AUDIO', index: 1 },
+        ],
+        trackPatches: [
+          {
+            sourceTrackId: 'src-v1',
+            sourceTrackType: 'VIDEO',
+            sourceTrackIndex: 1,
+            recordTrackId: 'v2',
+            enabled: true,
+          },
+        ],
+      },
+      workstationState: {
+        subtitleTracks: [],
+        titleClips: [],
+        trackHeights: {},
+        activeWorkspaceId: 'audio-mixing',
+        composerLayout: 'full-frame',
+        showTrackingInfo: false,
+        trackingInfoFields: ['duration'],
+        clipTextDisplay: 'source',
+        dupeDetectionEnabled: true,
+        versionHistoryRetentionPreference: 'session',
+        versionHistoryCompareMode: 'details',
+      },
+    });
+
+    expect(hydrated.editorialState).toEqual({
+      selectedBinId: 'b-selects',
+      sourceAssetId: 'asset-1',
+      enabledTrackIds: ['v2'],
+      syncLockedTrackIds: ['a1'],
+      videoMonitorTrackId: 'v2',
+      sourceTrackDescriptors: [
+        { id: 'src-v1', type: 'VIDEO', index: 1 },
+        { id: 'src-a1', type: 'AUDIO', index: 1 },
+      ],
+      trackPatches: [
+        {
+          sourceTrackId: 'src-v1',
+          sourceTrackType: 'VIDEO',
+          sourceTrackIndex: 1,
+          recordTrackId: 'v2',
+          enabled: true,
+        },
+      ],
+    });
+    expect(hydrated.workstationState.versionHistoryRetentionPreference).toBe('session');
+    expect(hydrated.workstationState.versionHistoryCompareMode).toBe('details');
   });
 });

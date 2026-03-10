@@ -2,6 +2,9 @@
 //  THE AVID -- Export Engine (Encoding, Delivery & Caption Export)
 // =============================================================================
 
+import type { PlaybackSnapshot } from './PlaybackSnapshot';
+import { buildPlaybackFrameSignature } from './PlaybackSnapshot';
+
 /** Supported video codec formats. */
 export type ExportFormat = 'h264' | 'h265' | 'prores' | 'dnxhd' | 'av1' | 'webm';
 /** Export preset category. */
@@ -33,6 +36,17 @@ export interface ExportJob {
   status: 'pending' | 'encoding' | 'uploading' | 'completed' | 'failed';
   progress: number;
   startedAt: number;
+  selectionLabel?: string;
+  inFrame?: number;
+  outFrame?: number;
+  snapshotSequenceRevision?: string;
+  snapshotFrameSignature?: string;
+  renderFrameRevision?: string;
+  renderProcessing?: 'pre' | 'post';
+  previewFrameNumber?: number;
+  previewPlayheadTime?: number;
+  previewClipName?: string;
+  previewImageDataUrl?: string;
   completedAt?: number;
   outputPath?: string;
   error?: string;
@@ -327,6 +341,11 @@ class ExportEngine {
     options?: {
       inFrame?: number;
       outFrame?: number;
+      selectionLabel?: string;
+      snapshot?: PlaybackSnapshot;
+      renderFrameRevision?: string;
+      renderProcessing?: 'pre' | 'post';
+      previewImageDataUrl?: string;
       captionFormat?: CaptionFormat;
       canvas?: HTMLCanvasElement;
       duration?: number;
@@ -341,6 +360,19 @@ class ExportEngine {
       status: 'encoding',
       progress: 0,
       startedAt: Date.now(),
+      selectionLabel: options?.selectionLabel,
+      inFrame: options?.inFrame,
+      outFrame: options?.outFrame,
+      snapshotSequenceRevision: options?.snapshot?.sequenceRevision,
+      snapshotFrameSignature: options?.snapshot
+        ? buildPlaybackFrameSignature(options.snapshot)
+        : undefined,
+      renderFrameRevision: options?.renderFrameRevision,
+      renderProcessing: options?.renderProcessing,
+      previewFrameNumber: options?.snapshot?.frameNumber,
+      previewPlayheadTime: options?.snapshot?.playheadTime,
+      previewClipName: options?.snapshot?.primaryVideoLayer?.clip.name,
+      previewImageDataUrl: options?.previewImageDataUrl,
       estimatedTimeRemaining: options?.duration ?? 5,
     };
     this.jobs.set(jobId, job);

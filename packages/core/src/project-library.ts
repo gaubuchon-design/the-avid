@@ -239,6 +239,107 @@ export interface EditorProjectSettings {
   exportFormat: 'mp4' | 'mov' | 'webm' | 'mp3' | 'wav' | 'aiff';
 }
 
+export interface EditorSubtitleCueStyle {
+  fontSize?: number;
+  fontFamily?: string;
+  color?: string;
+  position?: 'top' | 'bottom' | 'custom';
+  y?: number;
+  bgOpacity?: number;
+}
+
+export interface EditorSubtitleCue {
+  id: string;
+  start: number;
+  end: number;
+  text: string;
+  speaker?: string;
+  style?: EditorSubtitleCueStyle;
+}
+
+export interface EditorSubtitleTrack {
+  id: string;
+  name: string;
+  language: string;
+  cues: EditorSubtitleCue[];
+}
+
+export interface EditorTitleClipStyle {
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: number;
+  color: string;
+  outlineColor?: string;
+  outlineWidth?: number;
+  shadowColor?: string;
+  shadowBlur?: number;
+  opacity: number;
+  textAlign: 'left' | 'center' | 'right';
+}
+
+export interface EditorTitleClipPosition {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface EditorTitleClipBackground {
+  type: 'none' | 'solid' | 'gradient';
+  color?: string;
+  gradientColors?: string[];
+  opacity?: number;
+}
+
+export interface EditorTitleClipAnimation {
+  type: 'none' | 'fade-in' | 'slide-up' | 'typewriter' | 'scale-in';
+  duration: number;
+}
+
+export interface EditorTitleClip {
+  id: string;
+  templateId?: string;
+  text: string;
+  style: EditorTitleClipStyle;
+  position: EditorTitleClipPosition;
+  background?: EditorTitleClipBackground;
+  animation?: EditorTitleClipAnimation;
+}
+
+export interface EditorProjectEditorialState {
+  selectedBinId: string | null;
+  sourceAssetId: string | null;
+  enabledTrackIds: string[];
+  syncLockedTrackIds: string[];
+  videoMonitorTrackId: string | null;
+  sourceTrackDescriptors: {
+    id: string;
+    type: 'VIDEO' | 'AUDIO';
+    index: number;
+  }[];
+  trackPatches: {
+    sourceTrackId: string;
+    sourceTrackType: 'VIDEO' | 'AUDIO';
+    sourceTrackIndex: number;
+    recordTrackId: string;
+    enabled: boolean;
+  }[];
+}
+
+export interface EditorProjectWorkstationState {
+  subtitleTracks: EditorSubtitleTrack[];
+  titleClips: EditorTitleClip[];
+  trackHeights: Record<string, number>;
+  activeWorkspaceId: string;
+  composerLayout: 'source-record' | 'full-frame';
+  showTrackingInfo: boolean;
+  trackingInfoFields: string[];
+  clipTextDisplay: 'name' | 'source' | 'media' | 'comments';
+  dupeDetectionEnabled: boolean;
+  versionHistoryRetentionPreference: 'manual' | 'session';
+  versionHistoryCompareMode: 'summary' | 'details';
+}
+
 export interface EditorProject {
   schemaVersion: number;
   id: string;
@@ -261,6 +362,8 @@ export interface EditorProject {
   publishJobs: EditorPublishJob[];
   watchFolders: EditorWatchFolder[];
   tokenBalance: number;
+  editorialState: EditorProjectEditorialState;
+  workstationState: EditorProjectWorkstationState;
 }
 
 export interface ProjectSummary {
@@ -1004,6 +1107,32 @@ function normalizeProject(project: EditorProject): EditorProject {
   // Clamp token balance to >= 0
   const rawTokenBalance = typeof project.tokenBalance === 'number' ? project.tokenBalance : 0;
   const tokenBalance = Number.isFinite(rawTokenBalance) ? Math.max(0, rawTokenBalance) : 0;
+  const trackIds = new Set((project.tracks ?? []).map((track) => track.id));
+  const defaultVideoMonitorTrackId = (project.tracks ?? []).find(
+    (track) => track.type === 'VIDEO' || track.type === 'GRAPHIC',
+  )?.id ?? null;
+  const editorialState = project.editorialState ?? {
+    selectedBinId: null,
+    sourceAssetId: null,
+    enabledTrackIds: Array.from(trackIds),
+    syncLockedTrackIds: [],
+    videoMonitorTrackId: defaultVideoMonitorTrackId,
+    sourceTrackDescriptors: [],
+    trackPatches: [],
+  };
+  const workstationState = project.workstationState ?? {
+    subtitleTracks: [],
+    titleClips: [],
+    trackHeights: {},
+    activeWorkspaceId: 'source-record',
+    composerLayout: 'source-record' as const,
+    showTrackingInfo: true,
+    trackingInfoFields: ['master-tc', 'duration'],
+    clipTextDisplay: 'name' as const,
+    dupeDetectionEnabled: false,
+    versionHistoryRetentionPreference: 'manual' as const,
+    versionHistoryCompareMode: 'summary' as const,
+  };
 
   return {
     ...project,
@@ -1031,6 +1160,60 @@ function normalizeProject(project: EditorProject): EditorProject {
     publishJobs: cloneValue(project.publishJobs ?? []),
     watchFolders: cloneValue(project.watchFolders ?? []),
     tokenBalance,
+    editorialState: {
+      selectedBinId: editorialState.selectedBinId ?? null,
+      sourceAssetId: editorialState.sourceAssetId ?? null,
+      enabledTrackIds: cloneValue(
+        (editorialState.enabledTrackIds ?? []).filter((trackId) => trackIds.has(trackId)),
+      ),
+      syncLockedTrackIds: cloneValue(
+        (editorialState.syncLockedTrackIds ?? []).filter((trackId) => trackIds.has(trackId)),
+      ),
+      videoMonitorTrackId: editorialState.videoMonitorTrackId && trackIds.has(editorialState.videoMonitorTrackId)
+        ? editorialState.videoMonitorTrackId
+        : defaultVideoMonitorTrackId,
+      sourceTrackDescriptors: cloneValue(
+        (editorialState.sourceTrackDescriptors ?? [])
+          .filter((descriptor) => (
+            typeof descriptor?.id === 'string'
+            && (descriptor.type === 'VIDEO' || descriptor.type === 'AUDIO')
+            && Number.isFinite(descriptor.index)
+            && descriptor.index > 0
+          ))
+          .map((descriptor) => ({
+            id: descriptor.id,
+            type: descriptor.type,
+            index: Math.round(descriptor.index),
+          })),
+      ),
+      trackPatches: cloneValue(
+        (editorialState.trackPatches ?? []).filter((patch) => (
+          typeof patch?.sourceTrackId === 'string'
+          && typeof patch.recordTrackId === 'string'
+          && trackIds.has(patch.recordTrackId)
+          && (patch.sourceTrackType === 'VIDEO' || patch.sourceTrackType === 'AUDIO')
+          && Number.isFinite(patch.sourceTrackIndex)
+          && patch.sourceTrackIndex > 0
+        )),
+      ),
+    },
+    workstationState: {
+      subtitleTracks: cloneValue(workstationState.subtitleTracks ?? []),
+      titleClips: cloneValue(workstationState.titleClips ?? []),
+      trackHeights: cloneValue(workstationState.trackHeights ?? {}),
+      activeWorkspaceId: workstationState.activeWorkspaceId ?? 'source-record',
+      composerLayout: workstationState.composerLayout === 'full-frame' ? 'full-frame' : 'source-record',
+      showTrackingInfo: workstationState.showTrackingInfo ?? true,
+      trackingInfoFields: cloneValue(workstationState.trackingInfoFields ?? ['master-tc', 'duration']),
+      clipTextDisplay: workstationState.clipTextDisplay ?? 'name',
+      dupeDetectionEnabled: workstationState.dupeDetectionEnabled ?? false,
+      versionHistoryRetentionPreference: workstationState.versionHistoryRetentionPreference === 'session'
+        ? 'session'
+        : 'manual',
+      versionHistoryCompareMode: workstationState.versionHistoryCompareMode === 'details'
+        ? 'details'
+        : 'summary',
+    },
   };
 }
 
@@ -1064,6 +1247,10 @@ export function getTemplateMeta(template: ProjectTemplate) {
 export function hydrateProject(project: Partial<EditorProject>): EditorProject {
   const template = project.template ?? 'film';
   const bins = project.bins ?? [];
+  const tracks = project.tracks ?? [];
+  const firstVideoTrackId = tracks.find(
+    (track) => track.type === 'VIDEO' || track.type === 'GRAPHIC',
+  )?.id ?? null;
   return normalizeProject({
     schemaVersion: project.schemaVersion ?? PROJECT_SCHEMA_VERSION,
     id: project.id ?? generateId('project'),
@@ -1081,7 +1268,7 @@ export function hydrateProject(project: Partial<EditorProject>): EditorProject {
       sampleRate: 48000,
       exportFormat: 'mov',
     },
-    tracks: project.tracks ?? [],
+    tracks,
     markers: project.markers ?? [],
     bins,
     collaborators: project.collaborators ?? [],
@@ -1092,6 +1279,28 @@ export function hydrateProject(project: Partial<EditorProject>): EditorProject {
     publishJobs: project.publishJobs ?? createPublishJobs(template),
     watchFolders: project.watchFolders ?? [],
     tokenBalance: project.tokenBalance ?? 0,
+    editorialState: project.editorialState ?? {
+      selectedBinId: bins[0]?.id ?? null,
+      sourceAssetId: null,
+      enabledTrackIds: tracks.map((track) => track.id),
+      syncLockedTrackIds: [],
+      videoMonitorTrackId: firstVideoTrackId,
+      sourceTrackDescriptors: [],
+      trackPatches: [],
+    },
+    workstationState: project.workstationState ?? {
+      subtitleTracks: [],
+      titleClips: [],
+      trackHeights: {},
+      activeWorkspaceId: 'source-record',
+      composerLayout: 'source-record',
+      showTrackingInfo: true,
+      trackingInfoFields: ['master-tc', 'duration'],
+      clipTextDisplay: 'name',
+      dupeDetectionEnabled: false,
+      versionHistoryRetentionPreference: 'manual',
+      versionHistoryCompareMode: 'summary',
+    },
   });
 }
 
@@ -1103,6 +1312,9 @@ export function buildProject(options: CreateProjectOptions = {}): EditorProject 
   const transcript = createTranscriptCues(bins, template);
   const now = new Date().toISOString();
   const name = options.name ?? `Untitled ${(template[0] ?? '').toUpperCase()}${template.slice(1)}`;
+  const firstVideoTrackId = tracks.find(
+    (track) => track.type === 'VIDEO' || track.type === 'GRAPHIC',
+  )?.id ?? null;
 
   return normalizeProject({
     schemaVersion: PROJECT_SCHEMA_VERSION,
@@ -1138,6 +1350,28 @@ export function buildProject(options: CreateProjectOptions = {}): EditorProject 
     publishJobs: createPublishJobs(template),
     watchFolders: [],
     tokenBalance: template === 'sports' ? 620 : 487,
+    editorialState: {
+      selectedBinId: bins[0]?.id ?? null,
+      sourceAssetId: null,
+      enabledTrackIds: tracks.map((track) => track.id),
+      syncLockedTrackIds: [],
+      videoMonitorTrackId: firstVideoTrackId,
+      sourceTrackDescriptors: [],
+      trackPatches: [],
+    },
+    workstationState: {
+      subtitleTracks: [],
+      titleClips: [],
+      trackHeights: {},
+      activeWorkspaceId: 'source-record',
+      composerLayout: 'source-record',
+      showTrackingInfo: true,
+      trackingInfoFields: ['master-tc', 'duration'],
+      clipTextDisplay: 'name',
+      dupeDetectionEnabled: false,
+      versionHistoryRetentionPreference: 'manual',
+      versionHistoryCompareMode: 'summary',
+    },
   });
 }
 

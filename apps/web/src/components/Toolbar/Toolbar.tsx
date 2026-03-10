@@ -15,6 +15,7 @@ export function Toolbar() {
   } = useEditorStore();
 
   const tc = new Timecode({ fps: projectSettings?.frameRate || 24 });
+  const isDesktop = Boolean(window.electronAPI);
 
   // Get selected clip info for sub-bar
   const selectedClip = selectedClipIds.length > 0
@@ -27,11 +28,12 @@ export function Toolbar() {
     <div className="toolbar-wrapper" role="banner">
       {/* Main toolbar row */}
       <div className="toolbar" role="toolbar" aria-label="Main toolbar">
-        {/* Mac-style window dots */}
-        <div className="toolbar-window-dots" aria-hidden="true">
-          <span className="dot dot-close" />
-          <span className="dot dot-minimize" />
-          <span className="dot dot-maximize" />
+        <div className="toolbar-brand" aria-label="Application identity">
+          <div className="toolbar-brand-mark">A</div>
+          <div className="toolbar-brand-copy">
+            <span className="toolbar-brand-name">The Avid</span>
+            <span className="toolbar-brand-mode">{isDesktop ? 'Desktop editorial' : 'Web collaborative'}</span>
+          </div>
         </div>
 
         {/* Home + Folder icons */}

@@ -15,9 +15,9 @@ import { useEditorStore } from '../../store/editor.store';
 import {
   trackPatchingEngine,
   type TrackPatch,
-  type SourceTrackDescriptor,
 } from '../../engine/TrackPatchingEngine';
 import type { Track } from '../../store/editor.store';
+import { deriveSourceTracksFromAsset } from '../../lib/sourceTrackDerivation';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -41,18 +41,20 @@ export function TrackPatchPanel() {
   // Auto-patch when source asset changes
   useEffect(() => {
     if (!sourceAsset) {
-      trackPatchingEngine.setSourceTracks([]);
+      trackPatchingEngine.setSourceContext(null, []);
       return;
     }
 
-    // Derive source tracks from the source asset.
-    // Most video clips have 1 video track and 1-2 audio tracks.
-    const sourceTracks: SourceTrackDescriptor[] = [
-      { id: 'src-v1', type: 'VIDEO', index: 1 },
-      { id: 'src-a1', type: 'AUDIO', index: 1 },
-    ];
+    if (
+      trackPatchingEngine.getSourceAssetId() === sourceAsset.id
+      && trackPatchingEngine.getSourceTracks().length > 0
+    ) {
+      return;
+    }
 
-    trackPatchingEngine.setSourceTracks(sourceTracks);
+    const sourceTracks = deriveSourceTracksFromAsset(sourceAsset);
+
+    trackPatchingEngine.setSourceContext(sourceAsset.id, sourceTracks);
     trackPatchingEngine.autoPatch(tracks);
 
     // Enable all record tracks by default
@@ -68,7 +70,6 @@ export function TrackPatchPanel() {
       trackPatchingEngine.unpatchSource(sourceTrackId);
     } else {
       // Re-patch to the default record track
-      const sourceTracks = trackPatchingEngine.getPatches();
       const isVideo = sourceTrackId.includes('-v');
       const pool = tracks
         .filter((t) => t.type === (isVideo ? 'VIDEO' : 'AUDIO'))

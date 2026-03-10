@@ -7,8 +7,10 @@
 
 import { videoSourceManager } from './VideoSourceManager';
 import { effectsEngine } from './EffectsEngine';
+import { buildPlaybackSnapshot, type PlaybackSnapshot } from './PlaybackSnapshot';
 import { renderTitle } from './TitleRenderer';
 import type { Track, Clip, IntrinsicVideoProps, SubtitleTrack, TitleClipData } from '../store/editor.store';
+import type { ScopeType } from '../store/player.store';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,6 +27,15 @@ export interface CompositingContext {
   // Title compositing
   titleClips: TitleClipData[];
   subtitleTracks: SubtitleTrack[];
+  currentTitle: any | null;
+  isTitleEditing: boolean;
+}
+
+export interface PlaybackCompositingContext {
+  ctx: CanvasRenderingContext2D;
+  canvasW: number;
+  canvasH: number;
+  snapshot: PlaybackSnapshot;
   currentTitle: any | null;
   isTitleEditing: boolean;
 }
@@ -173,32 +184,58 @@ export function tryLoadClipSource(
  * 6. Draw placeholder if no video was drawn
  */
 export function compositeRecordFrame(cx: CompositingContext): void {
-  const { ctx, canvasW, canvasH, playheadTime, tracks, fps, aspectRatio, showSafeZones } = cx;
+  const snapshot = buildPlaybackSnapshot({
+    tracks: cx.tracks,
+    subtitleTracks: cx.subtitleTracks,
+    titleClips: cx.titleClips,
+    playheadTime: cx.playheadTime,
+    duration: 0,
+    isPlaying: cx.isPlaying,
+    showSafeZones: cx.showSafeZones,
+    activeMonitor: 'record',
+    activeScope: null as ScopeType | null,
+    sequenceSettings: {
+      fps: cx.fps,
+      width: Math.round(cx.aspectRatio * 1000),
+      height: 1000,
+    },
+    projectSettings: {
+      frameRate: cx.fps,
+      width: Math.round(cx.aspectRatio * 1000),
+      height: 1000,
+    },
+  }, 'record-monitor');
+  compositePlaybackSnapshot({
+    ctx: cx.ctx,
+    canvasW: cx.canvasW,
+    canvasH: cx.canvasH,
+    snapshot,
+    currentTitle: cx.currentTitle,
+    isTitleEditing: cx.isTitleEditing,
+  });
+}
+
+export function compositePlaybackSnapshot(cx: PlaybackCompositingContext): void {
+  const { ctx, canvasW, canvasH, snapshot } = cx;
 
   // 1. Clear to black
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, canvasW, canvasH);
 
-  // 2. Composite video tracks (bottom-to-top: higher sortOrder = lower in stack = drawn first)
-  const videoTracks = tracks
-    .filter((t) => (t.type === 'VIDEO' || t.type === 'GRAPHIC') && !t.muted)
-    .sort((a, b) => b.sortOrder - a.sortOrder);
-
   let drewVideo = false;
 
-  for (const track of videoTracks) {
-    const clip = track.clips.find((c) => playheadTime >= c.startTime && playheadTime < c.endTime);
-    if (!clip?.assetId) continue;
+  for (const layer of snapshot.videoLayers) {
+    const clip = layer.clip;
+    if (!layer.assetId) continue;
 
-    const source = videoSourceManager.getSource(clip.assetId);
+    const source = videoSourceManager.getSource(layer.assetId);
     const vid = source?.element;
     if (!vid || !source.ready || vid.readyState < 2) continue;
 
     // Seek to correct clip time (only when not playing — playback sync handles it otherwise)
-    if (!cx.isPlaying) {
-      const sourceTime = getSourceTime(clip, playheadTime);
-      if (!vid.seeking && Math.abs(vid.currentTime - sourceTime) > 0.02) {
-        vid.currentTime = sourceTime;
+    if (!snapshot.isPlaying) {
+      if (!vid.seeking && Math.abs(vid.currentTime - layer.sourceTime) > 0.02) {
+        vid.currentTime = layer.sourceTime;
       }
     }
 
@@ -212,10 +249,10 @@ export function compositeRecordFrame(cx: CompositingContext): void {
     // 2b. Draw video with letterboxing
     const videoAR = vid.videoWidth / vid.videoHeight;
     let drawW = canvasW, drawH = canvasH, drawX = 0, drawY = 0;
-    if (videoAR > aspectRatio) {
+    if (videoAR > snapshot.aspectRatio) {
       drawH = Math.floor(canvasW / videoAR);
       drawY = Math.floor((canvasH - drawH) / 2);
-    } else if (videoAR < aspectRatio) {
+    } else if (videoAR < snapshot.aspectRatio) {
       drawW = Math.floor(canvasH * videoAR);
       drawX = Math.floor((canvasW - drawW) / 2);
     }
@@ -228,7 +265,7 @@ export function compositeRecordFrame(cx: CompositingContext): void {
     const clipEffects = effectsEngine.getClipEffects(clip.id);
     if (clipEffects.length > 0) {
       const imageData = ctx.getImageData(0, 0, canvasW, canvasH);
-      const currentFrame = Math.floor(playheadTime * fps);
+      const currentFrame = snapshot.frameNumber;
       effectsEngine.processFrame(imageData, clipEffects, currentFrame);
       ctx.putImageData(imageData, 0, 0);
     }
@@ -236,48 +273,25 @@ export function compositeRecordFrame(cx: CompositingContext): void {
 
   // 3. Composite title graphics (GRAPHIC track title clips)
   if (cx.currentTitle && cx.isTitleEditing) {
-    const currentFrame = Math.floor(playheadTime * fps);
-    renderTitle(ctx, cx.currentTitle, canvasW, canvasH, currentFrame, fps);
+    renderTitle(ctx, cx.currentTitle, canvasW, canvasH, snapshot.frameNumber, snapshot.fps);
   }
 
-  const graphicTracks = tracks.filter((t) => t.type === 'GRAPHIC' && !t.muted);
-  for (const gTrack of graphicTracks) {
-    for (const clip of gTrack.clips) {
-      if (playheadTime >= clip.startTime && playheadTime < clip.endTime) {
-        const titleData = cx.titleClips.find((tc) => tc.id === clip.assetId);
-        if (titleData) {
-          const clipFrame = Math.floor((playheadTime - clip.startTime) * fps);
-          renderTitle(ctx, titleData as any, canvasW, canvasH, clipFrame, fps);
-        }
-      }
-    }
+  for (const titleLayer of snapshot.titleLayers) {
+    renderTitle(ctx, titleLayer.titleClip as any, canvasW, canvasH, titleLayer.frameOffset, snapshot.fps);
   }
 
-  // 4. Composite subtitles (SUBTITLE track cues)
-  const subTracks = tracks.filter((t) => t.type === 'SUBTITLE' && !t.muted);
-  for (const sTrack of subTracks) {
-    for (const clip of sTrack.clips) {
-      if (playheadTime >= clip.startTime && playheadTime < clip.endTime) {
-        for (const subTrack of cx.subtitleTracks) {
-          for (const cue of subTrack.cues) {
-            if (playheadTime >= cue.start && playheadTime < cue.end) {
-              renderSubtitleCue(ctx, cue, canvasW, canvasH);
-            }
-          }
-        }
-        break; // Only render first matching subtitle track clip
-      }
-    }
+  for (const subtitleCue of snapshot.subtitleCues) {
+    renderSubtitleCue(ctx, subtitleCue.cue, canvasW, canvasH);
   }
 
   // 5. Safe zones overlay
-  if (showSafeZones) {
+  if (snapshot.showSafeZones) {
     drawSafeZones(ctx, canvasW, canvasH);
   }
 
   // 6. Placeholder when no video is drawn
   if (!drewVideo) {
-    drawRecordPlaceholder(ctx, canvasW, canvasH, playheadTime, fps);
+    drawRecordPlaceholder(ctx, canvasW, canvasH, snapshot.playheadTime, snapshot.fps);
   }
 }
 

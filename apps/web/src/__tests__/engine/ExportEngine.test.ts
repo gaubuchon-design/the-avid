@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { exportEngine } from '../../engine/ExportEngine';
+import { buildPlaybackSnapshot, buildPlaybackFrameSignature } from '../../engine/PlaybackSnapshot';
+import { makeClip } from '../../store/editor.store';
 
 describe('ExportEngine', () => {
   afterEach(() => {
@@ -80,6 +82,80 @@ describe('ExportEngine', () => {
       expect(job.startedAt).toBeGreaterThan(0);
 
       // Cleanup
+      exportEngine.cancelExport(job.id);
+    });
+
+    it('captures export snapshot and selection metadata on the job', () => {
+      const snapshot = buildPlaybackSnapshot({
+        tracks: [
+          {
+            id: 't-v1',
+            name: 'V1',
+            type: 'VIDEO',
+            sortOrder: 0,
+            muted: false,
+            locked: false,
+            solo: false,
+            volume: 1,
+            color: '#5b6af5',
+            clips: [
+              makeClip({
+                id: 'clip-export',
+                trackId: 't-v1',
+                name: 'Export Clip',
+                startTime: 0,
+                endTime: 5,
+                trimStart: 0,
+                trimEnd: 0,
+                type: 'video',
+                assetId: 'asset-export',
+              }),
+            ],
+          },
+        ],
+        subtitleTracks: [],
+        titleClips: [],
+        playheadTime: 2,
+        duration: 5,
+        isPlaying: false,
+        showSafeZones: false,
+        activeMonitor: 'record',
+        activeScope: null,
+        sequenceSettings: {
+          fps: 24,
+          width: 1920,
+          height: 1080,
+        },
+        projectSettings: {
+          frameRate: 24,
+          width: 1920,
+          height: 1080,
+        },
+      }, 'export');
+
+      const job = exportEngine.startExport('stream-h264-1080p', 'local', {
+        inFrame: 48,
+        outFrame: 120,
+        selectionLabel: 'Selected Clips',
+        snapshot,
+        renderFrameRevision: 'render-revision-1',
+        renderProcessing: 'post',
+        previewImageDataUrl: 'data:image/jpeg;base64,preview',
+        duration: 3,
+      });
+      const storedJob = exportEngine.getJob(job.id);
+
+      expect(storedJob?.selectionLabel).toBe('Selected Clips');
+      expect(storedJob?.inFrame).toBe(48);
+      expect(storedJob?.outFrame).toBe(120);
+      expect(storedJob?.previewClipName).toBe('Export Clip');
+      expect(storedJob?.previewFrameNumber).toBe(snapshot.frameNumber);
+      expect(storedJob?.snapshotSequenceRevision).toBe(snapshot.sequenceRevision);
+      expect(storedJob?.snapshotFrameSignature).toBe(buildPlaybackFrameSignature(snapshot));
+      expect(storedJob?.renderFrameRevision).toBe('render-revision-1');
+      expect(storedJob?.renderProcessing).toBe('post');
+      expect(storedJob?.previewImageDataUrl).toBe('data:image/jpeg;base64,preview');
+
       exportEngine.cancelExport(job.id);
     });
 

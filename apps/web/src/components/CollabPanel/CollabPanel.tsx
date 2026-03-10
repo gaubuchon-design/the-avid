@@ -651,17 +651,28 @@ function CommentCard({
 
 function VersionsTab() {
   const { versions, saveVersion, restoreVersion } = useCollabStore();
+  const {
+    versionHistoryRetentionPreference,
+    versionHistoryCompareMode,
+    setVersionHistoryRetentionPreference,
+    setVersionHistoryCompareMode,
+  } = useEditorStore();
   const [showForm, setShowForm] = useState(false);
   const [versionName, setVersionName] = useState('');
   const [versionDesc, setVersionDesc] = useState('');
 
   const handleSave = useCallback(() => {
     if (!versionName.trim()) return;
-    saveVersion(versionName.trim(), versionDesc.trim());
+    saveVersion(
+      versionName.trim(),
+      versionDesc.trim(),
+      undefined,
+      { retentionPolicy: versionHistoryRetentionPreference },
+    );
     setVersionName('');
     setVersionDesc('');
     setShowForm(false);
-  }, [versionName, versionDesc, saveVersion]);
+  }, [saveVersion, versionDesc, versionHistoryRetentionPreference, versionName]);
 
   return (
     <div>
@@ -724,6 +735,9 @@ function VersionsTab() {
               boxSizing: 'border-box',
             }}
           />
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>
+            Retention: {versionHistoryRetentionPreference === 'manual' ? 'Manual retain' : 'Session retention'}
+          </div>
           <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
             <button
               onClick={() => { setShowForm(false); setVersionName(''); setVersionDesc(''); }}
@@ -759,9 +773,71 @@ function VersionsTab() {
         </div>
       )}
 
+      <div
+        style={{
+          display: 'grid',
+          gap: 6,
+          padding: 8,
+          borderRadius: 'var(--radius-md)',
+          background: 'var(--bg-raised)',
+          marginBottom: 8,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
+            Retention
+          </span>
+          {(['manual', 'session'] as const).map((preference) => (
+            <button
+              key={preference}
+              onClick={() => setVersionHistoryRetentionPreference(preference)}
+              style={{
+                padding: '4px 8px',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-default)',
+                background: versionHistoryRetentionPreference === preference ? 'var(--bg-elevated)' : 'transparent',
+                color: versionHistoryRetentionPreference === preference ? 'var(--text-primary)' : 'var(--text-muted)',
+                fontSize: 10,
+                cursor: 'pointer',
+              }}
+            >
+              {preference === 'manual' ? 'Manual retain' : 'Session retention'}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
+            Compare
+          </span>
+          {(['summary', 'details'] as const).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setVersionHistoryCompareMode(mode)}
+              style={{
+                padding: '4px 8px',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-default)',
+                background: versionHistoryCompareMode === mode ? 'var(--bg-elevated)' : 'transparent',
+                color: versionHistoryCompareMode === mode ? 'var(--text-primary)' : 'var(--text-muted)',
+                fontSize: 10,
+                cursor: 'pointer',
+              }}
+            >
+              {mode === 'summary' ? 'Summary view' : 'Detailed compare'}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Version list */}
       {versions.map((version) => (
-        <VersionCard key={version.id} version={version} onRestore={() => restoreVersion(version.id)} />
+        <VersionCard
+          key={version.id}
+          version={version}
+          compareMode={versionHistoryCompareMode}
+          canRestore={canRestoreVersion(version)}
+          onRestore={() => restoreVersion(version.id)}
+        />
       ))}
 
       {versions.length === 0 && (
@@ -773,7 +849,53 @@ function VersionsTab() {
   );
 }
 
-function VersionCard({ version, onRestore }: { version: ProjectVersion; onRestore: () => void }) {
+function canRestoreVersion(version: ProjectVersion): boolean {
+  const snapshot = version.snapshotData as {
+    id?: unknown;
+    tracks?: unknown;
+    bins?: unknown;
+    editorialState?: unknown;
+    workstationState?: unknown;
+  } | null;
+
+  return Boolean(
+    snapshot
+      && typeof snapshot.id === 'string'
+      && Array.isArray(snapshot.tracks)
+      && Array.isArray(snapshot.bins)
+      && snapshot.editorialState
+      && snapshot.workstationState,
+  );
+}
+
+function formatVersionDuration(duration: number): string {
+  const totalFrames = Math.max(0, Math.round(duration * 24));
+  const hours = Math.floor(totalFrames / (24 * 3600));
+  const minutes = Math.floor((totalFrames % (24 * 3600)) / (24 * 60));
+  const seconds = Math.floor((totalFrames % (24 * 60)) / 24);
+  const frames = totalFrames % 24;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}:${String(frames).padStart(2, '0')}`;
+}
+
+function formatSignedDelta(value: number, suffix = ''): string {
+  if (value === 0) {
+    return `0${suffix}`;
+  }
+
+  return `${value > 0 ? '+' : ''}${value}${suffix}`;
+}
+
+function VersionCard({
+  version,
+  compareMode,
+  onRestore,
+  canRestore,
+}: {
+  version: ProjectVersion;
+  compareMode: 'summary' | 'details';
+  onRestore: () => void;
+  canRestore: boolean;
+}) {
   return (
     <div
       style={{
@@ -794,21 +916,96 @@ function VersionCard({ version, onRestore }: { version: ProjectVersion; onRestor
       <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>
         by {version.createdBy}
       </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+        <span
+          style={{
+            padding: '2px 5px',
+            borderRadius: 999,
+            background: version.kind === 'restore-point' ? 'var(--accent-muted)' : 'var(--bg-elevated)',
+            color: version.kind === 'restore-point' ? 'var(--brand-bright)' : 'var(--text-muted)',
+            fontSize: 9,
+            fontWeight: 700,
+            letterSpacing: '0.03em',
+            textTransform: 'uppercase',
+          }}
+        >
+          {version.kind === 'restore-point' ? 'Restore point' : 'Legacy demo'}
+        </span>
+        <span
+          style={{
+            padding: '2px 5px',
+            borderRadius: 999,
+            background: 'var(--bg-elevated)',
+            color: 'var(--text-muted)',
+            fontSize: 9,
+            fontWeight: 700,
+            letterSpacing: '0.03em',
+            textTransform: 'uppercase',
+          }}
+        >
+          {version.retentionPolicy === 'manual'
+            ? 'Retained manually'
+            : version.retentionPolicy === 'session'
+              ? 'Session retention'
+              : 'Fixture'}
+        </span>
+      </div>
       {version.description && (
         <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.4, marginBottom: 6 }}>
           {version.description}
         </div>
       )}
+      {version.snapshotSummary && (
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4, marginBottom: 6 }}>
+          Tracks {version.snapshotSummary.trackCount} · Clips {version.snapshotSummary.clipCount} · Bins {version.snapshotSummary.binCount} · {formatVersionDuration(version.snapshotSummary.duration)}
+        </div>
+      )}
+      {version.compareSummary && (
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4, marginBottom: 6 }}>
+          vs previous {formatSignedDelta(version.compareSummary.trackDelta, ' tracks')} · {formatSignedDelta(version.compareSummary.clipDelta, ' clips')} · {formatSignedDelta(version.compareSummary.binDelta, ' bins')} · {formatSignedDelta(version.compareSummary.durationDelta, 's')}
+        </div>
+      )}
+      {compareMode === 'details' && version.compareMetrics.length > 0 && (
+        <div
+          style={{
+            fontSize: 10,
+            color: 'var(--text-muted)',
+            lineHeight: 1.4,
+            marginBottom: 6,
+            padding: '6px 8px',
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--bg-elevated)',
+          }}
+        >
+          <div style={{ marginBottom: 4, color: 'var(--text-secondary)', fontWeight: 600 }}>
+            Compared to {version.compareBaselineName ?? 'previous saved state'}
+          </div>
+          {version.compareMetrics.map((metric) => (
+            <div key={`${version.id}-${metric.label}`}>
+              {metric.label}: {metric.previousValue} -&gt; {metric.currentValue}
+            </div>
+          ))}
+        </div>
+      )}
+      {!canRestore && (
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4, marginBottom: 6 }}>
+          This entry is demo history only and cannot restore editor state.
+        </div>
+      )}
       <button
         onClick={onRestore}
+        disabled={!canRestore}
+        aria-label={`Restore ${version.name}`}
+        title={canRestore ? 'Restore this version snapshot' : 'This version does not include a restorable project snapshot'}
         style={{
           padding: '4px 10px',
           borderRadius: 'var(--radius-sm)',
           border: '1px solid var(--border-default)',
           background: 'transparent',
-          color: 'var(--text-secondary)',
+          color: canRestore ? 'var(--text-secondary)' : 'var(--text-muted)',
           fontSize: 10,
-          cursor: 'pointer',
+          cursor: canRestore ? 'pointer' : 'default',
+          opacity: canRestore ? 1 : 0.6,
         }}
       >
         Restore

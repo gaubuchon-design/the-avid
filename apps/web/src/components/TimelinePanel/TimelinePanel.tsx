@@ -86,6 +86,14 @@ export function TimelinePanel() {
     setOutPoint,
     inPoint,
     outPoint,
+    smartToolLiftOverwrite,
+    smartToolExtractSplice,
+    smartToolOverwriteTrim,
+    smartToolRippleTrim,
+    toggleSmartToolLiftOverwrite,
+    toggleSmartToolExtractSplice,
+    toggleSmartToolOverwriteTrim,
+    toggleSmartToolRippleTrim,
   } = useEditorStore();
   const fps = useEditorStore((s) => s.sequenceSettings.fps);
   const frameDuration = 1 / (fps || 24);
@@ -219,6 +227,47 @@ export function TimelinePanel() {
             <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
         </button>
+
+        <div className="tl-divider" role="separator" />
+
+        <div className="tl-group" role="group" aria-label="Smart Tool Toggles">
+          <button
+            className={`tl-btn tl-btn-labeled${smartToolLiftOverwrite ? ' active' : ''}`}
+            title="Toggle Lift/Overwrite Segment (Shift+A)"
+            aria-label="Toggle lift or overwrite segment mode"
+            aria-pressed={smartToolLiftOverwrite}
+            onClick={toggleSmartToolLiftOverwrite}
+          >
+            OW
+          </button>
+          <button
+            className={`tl-btn tl-btn-labeled${smartToolExtractSplice ? ' active' : ''}`}
+            title="Toggle Extract/Splice-In Segment (Shift+S)"
+            aria-label="Toggle extract or splice segment mode"
+            aria-pressed={smartToolExtractSplice}
+            onClick={toggleSmartToolExtractSplice}
+          >
+            SP
+          </button>
+          <button
+            className={`tl-btn tl-btn-labeled${smartToolOverwriteTrim ? ' active' : ''}`}
+            title="Toggle Overwrite Trim (Shift+D)"
+            aria-label="Toggle overwrite trim mode"
+            aria-pressed={smartToolOverwriteTrim}
+            onClick={toggleSmartToolOverwriteTrim}
+          >
+            OT
+          </button>
+          <button
+            className={`tl-btn tl-btn-labeled${smartToolRippleTrim ? ' active' : ''}`}
+            title="Toggle Ripple Trim (Shift+F)"
+            aria-label="Toggle ripple trim mode"
+            aria-pressed={smartToolRippleTrim}
+            onClick={toggleSmartToolRippleTrim}
+          >
+            RT
+          </button>
+        </div>
 
         <div className="tl-divider" role="separator" />
 

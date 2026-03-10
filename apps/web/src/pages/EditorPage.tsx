@@ -1,7 +1,9 @@
-import React, { useEffect, useRef, useState, useCallback, Suspense, lazy } from 'react';
+import React, { useEffect, useState, useCallback, Suspense, lazy } from 'react';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorBoundary, PanelErrorBoundary } from '../components/ErrorBoundary';
 import { useParams, useSearchParams } from 'react-router-dom';
+import { TrimSide, trimEngine } from '../engine/TrimEngine';
+import { trackPatchingEngine } from '../engine/TrackPatchingEngine';
 import { Toolbar } from '../components/Toolbar/Toolbar';
 import { BinPanel } from '../components/Bins/BinPanel';
 import { ComposerPanel } from '../components/ComposerPanel/ComposerPanel';
@@ -12,6 +14,7 @@ import { TranscriptPanel } from '../components/TranscriptPanel/TranscriptPanel';
 import { CommandPalette } from '../components/AIPanel/CommandPalette';
 import { ExportPanel } from '../components/ExportPanel/ExportPanel';
 import { StatusBar } from '../components/Editor/StatusBar';
+import { EditorWorkbenchBar } from '../components/Editor/EditorWorkbenchBar';
 import { NewProjectDialog } from '../components/NewProjectDialog/NewProjectDialog';
 import { SequenceDialog } from '../components/SequenceDialog/SequenceDialog';
 import { TitleTool } from '../components/TitleTool/TitleTool';
@@ -25,13 +28,25 @@ import { AlphaImportDialog } from '../components/AlphaImportDialog/AlphaImportDi
 import { TrackerPanel } from '../components/TrackerPanel/TrackerPanel';
 import { TrackingOverlay } from '../components/TrackerPanel/TrackingOverlay';
 import { type WorkspacePreset, workspacePresets } from '../App';
-import { PageNavigation, type EditorPage as PageId } from '../components/PageNavigation/PageNavigation';
+import { type EditorPage as PageId } from '../components/PageNavigation/PageNavigation';
+import {
+  markInForActiveMonitor,
+  markOutForActiveMonitor,
+  playForwardForActiveMonitor,
+  playReverseForActiveMonitor,
+  stopActiveMonitorPlayback,
+  togglePlayForActiveMonitor,
+} from '../lib/editorMonitorActions';
+import { buildProjectPersistenceSnapshot, getProjectPersistenceHash } from '../lib/editorProjectState';
+import { resolveEditorPageParam, resolveWorkspaceParam } from '../lib/editorUrlState';
+import { subscribeSmartToolStateToStore } from '../lib/smartToolStateBridge';
+import { subscribeTrimHistoryToEditEngine } from '../lib/trimHistoryBridge';
+import { subscribeTrimStateToStore } from '../lib/trimStateBridge';
+import { subscribeTrackPatchingStateToStore } from '../lib/trackPatchingStateBridge';
 import { MediaPage } from './MediaPage';
 import { CutPage } from './CutPage';
 import { ColorPage } from './ColorPage';
 import { DeliverPage } from './DeliverPage';
-
-const VALID_WORKSPACES: ReadonlySet<string> = new Set<WorkspacePreset>(['filmtv', 'news', 'sports', 'creator', 'marketing']);
 
 // Lazy-loaded vertical panels
 // NOTE: These lazy imports are intentionally separate from the ones in App.tsx.
@@ -48,35 +63,6 @@ const SportsWorkspace = lazy(() => import('../components/SportsWorkspace/SportsW
 
 // Playback is driven by PlaybackEngine (RAF-based) via editor.store.ts togglePlay().
 // Keyboard dispatch is centralized in useGlobalKeyboard() — called once from EditorPage.
-
-// ─── Workspace Preset Selector ──────────────────────────────────────────────
-
-function WorkspaceSelector({
-  workspace,
-  switchWorkspace,
-  presets,
-}: {
-  workspace: WorkspacePreset;
-  switchWorkspace: (key: WorkspacePreset) => void;
-  presets: Record<WorkspacePreset, { label: string; panels: string[] }>;
-}) {
-  if (!presets) return null;
-  return (
-    <div className="workspace-selector">
-      {(Object.entries(presets) as [WorkspacePreset, { label: string; panels: string[] }][]).map(([key, preset]) => (
-        <button
-          key={key}
-          className={`ws-tab ${workspace === key ? 'ws-tab-active' : ''}`}
-          onClick={() => switchWorkspace(key)}
-          title={preset.label}
-          aria-pressed={workspace === key}
-        >
-          {preset.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 // ─── Vertical Side Panel ────────────────────────────────────────────────────
 
@@ -131,7 +117,7 @@ function VerticalSidePanel({ workspace }: { workspace: WorkspacePreset }) {
 
 export function EditorPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const showAIPanel = useEditorStore((s) => s.showAIPanel);
   const showExportPanel = useEditorStore((s) => s.showExportPanel);
   const showSettingsPanel = useEditorStore((s) => s.showSettingsPanel);
@@ -145,26 +131,35 @@ export function EditorPage() {
   const toggleExportPanel = useEditorStore((s) => s.toggleExportPanel);
   const toggleSettingsPanel = useEditorStore((s) => s.toggleSettingsPanel);
   const loadProject = useEditorStore((s) => s.loadProject);
+  const saveProject = useEditorStore((s) => s.saveProject);
+  const tracks = useEditorStore((s) => s.tracks);
 
   const [showTracker, setShowTracker] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
-  const [workspace, setWorkspace] = useState<WorkspacePreset>(() => {
-    const param = searchParams.get('workspace');
-    return param && VALID_WORKSPACES.has(param) ? (param as WorkspacePreset) : 'filmtv';
-  });
+  const [workspace, setWorkspace] = useState<WorkspacePreset>(() => resolveWorkspaceParam(searchParams.get('workspace')));
   const [showMultiCam, setShowMultiCam] = useState(false);
-  const [activePage, setActivePage] = useState<PageId>('edit');
+  const [activePage, setActivePage] = useState<PageId>(() => resolveEditorPageParam(searchParams.get('page')));
   // Centralized keyboard dispatch — routes keys based on active monitor
   useGlobalKeyboard();
 
   // ─── Register core keyboard actions with the KeyboardEngine ──────────
-  const togglePlay = useEditorStore((s) => s.togglePlay);
-  const setInToPlayhead = useEditorStore((s) => s.setInToPlayhead);
-  const setOutToPlayhead = useEditorStore((s) => s.setOutToPlayhead);
+  const insertEdit = useEditorStore((s) => s.insertEdit);
+  const overwriteEdit = useEditorStore((s) => s.overwriteEdit);
+  const setInPoint = useEditorStore((s) => s.setInPoint);
+  const setOutPoint = useEditorStore((s) => s.setOutPoint);
   const clearInOut = useEditorStore((s) => s.clearInOut);
   const goToStart = useEditorStore((s) => s.goToStart);
   const goToEnd = useEditorStore((s) => s.goToEnd);
+  const goToNextEditPoint = useEditorStore((s) => s.goToNextEditPoint);
+  const goToPrevEditPoint = useEditorStore((s) => s.goToPrevEditPoint);
   const deleteSelectedClips = useEditorStore((s) => s.deleteSelectedClips);
+  const liftSelection = useEditorStore((s) => s.liftSelection);
+  const extractSelection = useEditorStore((s) => s.extractSelection);
+  const setActiveTool = useEditorStore((s) => s.setActiveTool);
+  const toggleSmartToolLiftOverwrite = useEditorStore((s) => s.toggleSmartToolLiftOverwrite);
+  const toggleSmartToolExtractSplice = useEditorStore((s) => s.toggleSmartToolExtractSplice);
+  const toggleSmartToolOverwriteTrim = useEditorStore((s) => s.toggleSmartToolOverwriteTrim);
+  const toggleSmartToolRippleTrim = useEditorStore((s) => s.toggleSmartToolRippleTrim);
 
   // Read from store directly to avoid stale closures in frame-stepping callbacks
   const stepForward = useCallback(() => {
@@ -178,29 +173,233 @@ export function EditorPage() {
     const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
     setPlayhead(Math.max(safeTime - 1 / 24, 0));
   }, []);
+  const markClipAtPlayhead = useCallback(() => {
+    const state = useEditorStore.getState();
+    const targetedTracks = state.tracks.filter((track) => state.enabledTrackIds.includes(track.id));
+    const candidateTracks = state.selectedTrackId
+      ? [state.tracks.find((track) => track.id === state.selectedTrackId)].filter(Boolean)
+      : (targetedTracks.length > 0 ? targetedTracks : state.tracks);
 
-  useKeyboardAction('transport.playForward', togglePlay, [togglePlay]);
-  useKeyboardAction('transport.playReverse', togglePlay, [togglePlay]);
-  useKeyboardAction('transport.stop', () => useEditorStore.getState().isPlaying && togglePlay(), [togglePlay]);
-  useKeyboardAction('transport.playToggle', togglePlay, [togglePlay]);
+    for (const track of candidateTracks) {
+      const clip = track?.clips.find((item) => item.startTime <= state.playheadTime && item.endTime >= state.playheadTime);
+      if (!clip) {
+        continue;
+      }
+      state.setInPoint(clip.startTime);
+      state.setOutPoint(clip.endTime);
+      return;
+    }
+  }, []);
+  const clearIn = useCallback(() => setInPoint(null), [setInPoint]);
+  const clearOut = useCallback(() => setOutPoint(null), [setOutPoint]);
+  const goToIn = useCallback(() => {
+    const { inPoint, setPlayhead } = useEditorStore.getState();
+    if (inPoint !== null) {
+      setPlayhead(inPoint);
+    }
+  }, []);
+  const goToOut = useCallback(() => {
+    const { outPoint, setPlayhead } = useEditorStore.getState();
+    if (outPoint !== null) {
+      setPlayhead(outPoint);
+    }
+  }, []);
+  const enterTrimMode = useCallback(() => {
+    const state = useEditorStore.getState();
+    const targetedTrackIds = state.enabledTrackIds.length > 0
+      ? state.enabledTrackIds
+      : state.tracks.filter((track) => !track.locked).map((track) => track.id);
+    const activeTrackIds = state.selectedTrackId ? [state.selectedTrackId] : targetedTrackIds;
+
+    setActiveTool('trim');
+    trimEngine.enterTrimMode(activeTrackIds, state.playheadTime, TrimSide.BOTH);
+  }, [setActiveTool]);
+  const selectTrimASide = useCallback(() => {
+    trimEngine.selectASide();
+  }, []);
+  const selectTrimBSide = useCallback(() => {
+    trimEngine.selectBSide();
+  }, []);
+  const selectTrimBothSides = useCallback(() => {
+    trimEngine.selectBothSides();
+  }, []);
+  const trimByFrames = useCallback((frames: number) => {
+    const state = useEditorStore.getState();
+    const frameRate = state.sequenceSettings?.fps || state.projectSettings.frameRate || 24;
+    trimEngine.trimByFrames(frames, frameRate);
+  }, []);
+  const trimLeftOneFrame = useCallback(() => trimByFrames(-1), [trimByFrames]);
+  const trimRightOneFrame = useCallback(() => trimByFrames(1), [trimByFrames]);
+  const trimLeftTenFrames = useCallback(() => trimByFrames(-10), [trimByFrames]);
+  const trimRightTenFrames = useCallback(() => trimByFrames(10), [trimByFrames]);
+
+  useKeyboardAction('transport.playForward', playForwardForActiveMonitor, []);
+  useKeyboardAction('transport.playReverse', playReverseForActiveMonitor, []);
+  useKeyboardAction('transport.stop', stopActiveMonitorPlayback, []);
+  useKeyboardAction('transport.playStop', togglePlayForActiveMonitor, []);
+  useKeyboardAction('transport.playToggle', togglePlayForActiveMonitor, []);
   useKeyboardAction('transport.stepForward', stepForward, [stepForward]);
+  useKeyboardAction('transport.stepBack', stepBackward, [stepBackward]);
   useKeyboardAction('transport.stepBackward', stepBackward, [stepBackward]);
   useKeyboardAction('transport.goToStart', goToStart, [goToStart]);
   useKeyboardAction('transport.goToEnd', goToEnd, [goToEnd]);
-  useKeyboardAction('mark.in', setInToPlayhead, [setInToPlayhead]);
-  useKeyboardAction('mark.out', setOutToPlayhead, [setOutToPlayhead]);
+  useKeyboardAction('mark.in', markInForActiveMonitor, []);
+  useKeyboardAction('mark.out', markOutForActiveMonitor, []);
+  useKeyboardAction('mark.clip', markClipAtPlayhead, [markClipAtPlayhead]);
+  useKeyboardAction('mark.clipAlt', markClipAtPlayhead, [markClipAtPlayhead]);
   useKeyboardAction('mark.clearBoth', clearInOut, [clearInOut]);
+  useKeyboardAction('mark.clearIn', clearIn, [clearIn]);
+  useKeyboardAction('mark.clearOut', clearOut, [clearOut]);
+  useKeyboardAction('mark.goToIn', goToIn, [goToIn]);
+  useKeyboardAction('mark.goToOut', goToOut, [goToOut]);
+  useKeyboardAction('edit.spliceIn', insertEdit, [insertEdit]);
+  useKeyboardAction('edit.overwrite', overwriteEdit, [overwriteEdit]);
+  useKeyboardAction('edit.lift', liftSelection, [liftSelection]);
+  useKeyboardAction('edit.extract', extractSelection, [extractSelection]);
   useKeyboardAction('edit.undo', () => editEngine.undo(), []);
   useKeyboardAction('edit.redo', () => editEngine.redo(), []);
   useKeyboardAction('edit.delete', deleteSelectedClips, [deleteSelectedClips]);
+  useKeyboardAction('file.save', () => {
+    void saveProject();
+  }, [saveProject]);
+  useKeyboardAction('trim.enterMode', enterTrimMode, [enterTrimMode]);
+  useKeyboardAction('trim.selectASide', selectTrimASide, [selectTrimASide]);
+  useKeyboardAction('trim.selectBSide', selectTrimBSide, [selectTrimBSide]);
+  useKeyboardAction('trim.selectBoth', selectTrimBothSides, [selectTrimBothSides]);
+  useKeyboardAction('trim.left1', trimLeftOneFrame, [trimLeftOneFrame]);
+  useKeyboardAction('trim.right1', trimRightOneFrame, [trimRightOneFrame]);
+  useKeyboardAction('trim.left10', trimLeftTenFrames, [trimLeftTenFrames]);
+  useKeyboardAction('trim.right10', trimRightTenFrames, [trimRightTenFrames]);
+  useKeyboardAction('nav.prevEdit', goToPrevEditPoint, [goToPrevEditPoint]);
+  useKeyboardAction('nav.nextEdit', goToNextEditPoint, [goToNextEditPoint]);
+  useKeyboardAction('smartTool.toggleLiftOverwrite', toggleSmartToolLiftOverwrite, [toggleSmartToolLiftOverwrite]);
+  useKeyboardAction('smartTool.toggleExtractSplice', toggleSmartToolExtractSplice, [toggleSmartToolExtractSplice]);
+  useKeyboardAction('smartTool.toggleOverwriteTrim', toggleSmartToolOverwriteTrim, [toggleSmartToolOverwriteTrim]);
+  useKeyboardAction('smartTool.toggleRippleTrim', toggleSmartToolRippleTrim, [toggleSmartToolRippleTrim]);
   useKeyboardAction('view.fullScreen', () => {
     if (document.fullscreenElement) void document.exitFullscreen();
     else void document.documentElement.requestFullscreen();
   }, []);
 
   useEffect(() => {
-    if (projectId && projectId !== 'new') loadProject(projectId);
+    if (projectId && projectId !== 'new') {
+      void loadProject(projectId);
+    }
   }, [projectId, loadProject]);
+
+  useEffect(() => {
+    let autosaveTimeout: number | null = null;
+
+    const scheduleAutosave = (state: ReturnType<typeof useEditorStore.getState>) => {
+      const snapshot = buildProjectPersistenceSnapshot(state);
+      if (!snapshot || state.saveStatus === 'saving') {
+        return;
+      }
+
+      const nextHash = getProjectPersistenceHash(snapshot);
+      const isDirty = nextHash !== state.persistedProjectHash;
+      if (state.hasUnsavedChanges !== isDirty) {
+        useEditorStore.setState({ hasUnsavedChanges: isDirty });
+      }
+
+      if (!isDirty) {
+        return;
+      }
+
+      if (autosaveTimeout !== null) {
+        window.clearTimeout(autosaveTimeout);
+      }
+
+      autosaveTimeout = window.setTimeout(() => {
+        void useEditorStore.getState().saveProject();
+      }, 800);
+    };
+
+    const unsubscribe = useEditorStore.subscribe((state) => {
+      scheduleAutosave(state);
+    });
+
+    return () => {
+      unsubscribe();
+      if (autosaveTimeout !== null) {
+        window.clearTimeout(autosaveTimeout);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (tracks.length > 0 && trackPatchingEngine.getEnabledRecordTracks().length === 0) {
+      for (const track of tracks) {
+        if (!track.locked) {
+          trackPatchingEngine.enableRecordTrack(track.id);
+        }
+      }
+    }
+
+    const monitoredTrackId = trackPatchingEngine.getVideoMonitorTrack();
+    const visibleVideoTracks = tracks
+      .filter((track) => (track.type === 'VIDEO' || track.type === 'GRAPHIC') && !track.muted)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const fallbackVideoTrack = visibleVideoTracks[0]
+      ?? tracks
+        .filter((track) => track.type === 'VIDEO' || track.type === 'GRAPHIC')
+        .sort((a, b) => a.sortOrder - b.sortOrder)[0];
+
+    const monitoredVideoTrack = tracks.find(
+      (track) =>
+        track.id === monitoredTrackId
+        && (track.type === 'VIDEO' || track.type === 'GRAPHIC'),
+    );
+
+    if (fallbackVideoTrack && (!monitoredVideoTrack || monitoredVideoTrack.muted)) {
+      trackPatchingEngine.setVideoMonitorTrack(fallbackVideoTrack.id);
+    }
+
+    return subscribeTrackPatchingStateToStore();
+  }, [tracks]);
+
+  useEffect(() => {
+    return subscribeTrimStateToStore();
+  }, []);
+
+  useEffect(() => {
+    return subscribeTrimHistoryToEditEngine();
+  }, []);
+
+  useEffect(() => {
+    return subscribeSmartToolStateToStore();
+  }, []);
+
+  const updateSearchParam = useCallback((key: string, value: string | null) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value) next.set(key, value);
+      else next.delete(key);
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const handleWorkspaceChange = useCallback((nextWorkspace: WorkspacePreset) => {
+    setWorkspace(nextWorkspace);
+    updateSearchParam('workspace', nextWorkspace === 'filmtv' ? null : nextWorkspace);
+  }, [updateSearchParam]);
+
+  const handlePageChange = useCallback((nextPage: PageId) => {
+    setActivePage(nextPage);
+    updateSearchParam('page', nextPage === 'edit' ? null : nextPage);
+  }, [updateSearchParam]);
+
+  useEffect(() => {
+    const nextPage = resolveEditorPageParam(searchParams.get('page'));
+    if (nextPage !== activePage) {
+      setActivePage(nextPage);
+    }
+
+    const nextWorkspace = resolveWorkspaceParam(searchParams.get('workspace'));
+    if (nextWorkspace !== workspace) {
+      setWorkspace(nextWorkspace);
+    }
+  }, [activePage, searchParams, workspace]);
 
   // ⌘K / Ctrl+K to open command palette
   useEffect(() => {
@@ -223,12 +422,12 @@ export function EditorPage() {
       if (e.shiftKey && !e.metaKey && !e.ctrlKey) {
         const pageMap: Record<string, PageId> = { '!': 'media', '@': 'cut', '#': 'edit', '$': 'color', '%': 'deliver' };
         const page = pageMap[e.key];
-        if (page) { e.preventDefault(); setActivePage(page); }
+        if (page) { e.preventDefault(); handlePageChange(page); }
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [handlePageChange]);
 
   const hasVerticalPanel = workspace !== 'filmtv' && workspace !== 'sports';
   const isSportsWorkspace = workspace === 'sports';
@@ -236,9 +435,13 @@ export function EditorPage() {
   return (
     <div className="editor-shell" onContextMenu={e => e.preventDefault()}>
       <Toolbar />
-      {activePage === 'edit' && (
-        <WorkspaceSelector workspace={workspace} switchWorkspace={setWorkspace} presets={workspacePresets} />
-      )}
+      <EditorWorkbenchBar
+        activePage={activePage}
+        onPageChange={handlePageChange}
+        workspace={workspace}
+        onWorkspaceChange={handleWorkspaceChange}
+        presets={workspacePresets}
+      />
 
       {/* Page-specific content */}
       {activePage === 'media' && (
@@ -332,7 +535,6 @@ export function EditorPage() {
         )
       )}
 
-      <PageNavigation activePage={activePage} onPageChange={setActivePage} />
       <StatusBar />
 
       {/* Command Palette (⌘K) */}

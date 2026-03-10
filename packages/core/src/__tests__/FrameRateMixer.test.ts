@@ -85,6 +85,28 @@ function makeProject(
     publishJobs: [],
     watchFolders: [],
     tokenBalance: 1000,
+    editorialState: {
+      selectedBinId: bins[0]?.id ?? null,
+      sourceAssetId: null,
+      enabledTrackIds: tracks.map((track) => track.id),
+      syncLockedTrackIds: [],
+      videoMonitorTrackId: tracks.find((track) => track.type === 'VIDEO' || track.type === 'GRAPHIC')?.id ?? null,
+      sourceTrackDescriptors: [],
+      trackPatches: [],
+    },
+    workstationState: {
+      subtitleTracks: [],
+      titleClips: [],
+      trackHeights: {},
+      activeWorkspaceId: 'source-record',
+      composerLayout: 'source-record',
+      showTrackingInfo: true,
+      trackingInfoFields: ['master-tc', 'duration'],
+      clipTextDisplay: 'name',
+      dupeDetectionEnabled: false,
+      versionHistoryRetentionPreference: 'manual',
+      versionHistoryCompareMode: 'summary',
+    },
   };
 }
 

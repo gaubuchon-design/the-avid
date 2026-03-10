@@ -4,6 +4,8 @@
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
+import type { EditorProject } from '@mcua/core';
+
 export interface CollabUser {
   id: string;
   name: string;
@@ -41,8 +43,34 @@ export interface ProjectVersion {
   createdAt: number;
   createdBy: string;
   description: string;
+  kind: 'demo' | 'restore-point';
+  retentionPolicy: 'fixture' | 'manual' | 'session';
+  snapshotSummary: ProjectVersionSnapshotSummary | null;
+  compareSummary: ProjectVersionCompareSummary | null;
+  compareBaselineName: string | null;
+  compareMetrics: ProjectVersionCompareMetric[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- snapshot is an opaque serialized project blob
   snapshotData: any;
+}
+
+export interface ProjectVersionSnapshotSummary {
+  trackCount: number;
+  clipCount: number;
+  binCount: number;
+  duration: number;
+}
+
+export interface ProjectVersionCompareSummary {
+  trackDelta: number;
+  clipDelta: number;
+  binDelta: number;
+  durationDelta: number;
+}
+
+export interface ProjectVersionCompareMetric {
+  label: string;
+  previousValue: string;
+  currentValue: string;
 }
 
 type Subscriber = () => void;
@@ -137,6 +165,17 @@ const DEMO_VERSIONS: ProjectVersion[] = [
     createdAt: now - 86400000 * 2, // 2 days ago
     createdBy: 'Sarah K.',
     description: 'Initial rough cut with all scenes assembled in order.',
+    kind: 'demo',
+    retentionPolicy: 'fixture',
+    snapshotSummary: {
+      trackCount: 6,
+      clipCount: 8,
+      binCount: 0,
+      duration: 34,
+    },
+    compareSummary: null,
+    compareBaselineName: null,
+    compareMetrics: [],
     snapshotData: { tracks: 6, clips: 8, duration: 34 },
   },
   {
@@ -145,9 +184,212 @@ const DEMO_VERSIONS: ProjectVersion[] = [
     createdAt: now - 86400000, // 1 day ago
     createdBy: 'Marcus T.',
     description: 'Tightened edit after director feedback. Removed 8s of dead air, added B-roll transitions.',
+    kind: 'demo',
+    retentionPolicy: 'fixture',
+    snapshotSummary: {
+      trackCount: 6,
+      clipCount: 10,
+      binCount: 0,
+      duration: 28,
+    },
+    compareSummary: {
+      trackDelta: 0,
+      clipDelta: 2,
+      binDelta: 0,
+      durationDelta: -6,
+    },
+    compareBaselineName: 'First Assembly',
+    compareMetrics: [
+      { label: 'Tracks', previousValue: '6', currentValue: '6' },
+      { label: 'Clips', previousValue: '8', currentValue: '10' },
+      { label: 'Bins', previousValue: '0', currentValue: '0' },
+      { label: 'Duration', previousValue: '34s', currentValue: '28s' },
+    ],
     snapshotData: { tracks: 6, clips: 10, duration: 28 },
   },
 ];
+
+function countBins(bins: unknown): number {
+  if (!Array.isArray(bins)) {
+    return 0;
+  }
+
+  return bins.reduce((count, bin) => {
+    if (!bin || typeof bin !== 'object') {
+      return count;
+    }
+
+    const candidate = bin as { children?: unknown };
+    return count + 1 + countBins(candidate.children);
+  }, 0);
+}
+
+function summarizeProjectVersionSnapshot(snapshotData: unknown): ProjectVersionSnapshotSummary | null {
+  if (!snapshotData || typeof snapshotData !== 'object') {
+    return null;
+  }
+
+  const candidate = snapshotData as {
+    tracks?: unknown;
+    bins?: unknown;
+    duration?: unknown;
+    clips?: unknown;
+  };
+
+  if (Array.isArray(candidate.tracks)) {
+    const clipCount = candidate.tracks.reduce((count, track) => {
+      if (!track || typeof track !== 'object') {
+        return count;
+      }
+
+      const clipCandidate = track as { clips?: unknown[] };
+      return count + (Array.isArray(clipCandidate.clips) ? clipCandidate.clips.length : 0);
+    }, 0);
+    const durationFromTracks = candidate.tracks.reduce((maxDuration, track) => {
+      if (!track || typeof track !== 'object') {
+        return maxDuration;
+      }
+
+      const clipCandidate = track as {
+        clips?: Array<{ endTime?: unknown }>;
+      };
+      const trackEnd = Array.isArray(clipCandidate.clips)
+        ? clipCandidate.clips.reduce((maxClipEnd, clip) => {
+          return typeof clip?.endTime === 'number' ? Math.max(maxClipEnd, clip.endTime) : maxClipEnd;
+        }, 0)
+        : 0;
+
+      return Math.max(maxDuration, trackEnd);
+    }, 0);
+
+    return {
+      trackCount: candidate.tracks.length,
+      clipCount,
+      binCount: countBins(candidate.bins),
+      duration: typeof candidate.duration === 'number' ? candidate.duration : durationFromTracks,
+    };
+  }
+
+  if (
+    typeof candidate.tracks === 'number'
+    && typeof candidate.clips === 'number'
+    && typeof candidate.duration === 'number'
+  ) {
+    return {
+      trackCount: candidate.tracks,
+      clipCount: candidate.clips,
+      binCount: 0,
+      duration: candidate.duration,
+    };
+  }
+
+  return null;
+}
+
+function buildVersionCompareSummary(
+  snapshotSummary: ProjectVersionSnapshotSummary | null,
+  previousSummary: ProjectVersionSnapshotSummary | null,
+): ProjectVersionCompareSummary | null {
+  if (!snapshotSummary || !previousSummary) {
+    return null;
+  }
+
+  return {
+    trackDelta: snapshotSummary.trackCount - previousSummary.trackCount,
+    clipDelta: snapshotSummary.clipCount - previousSummary.clipCount,
+    binDelta: snapshotSummary.binCount - previousSummary.binCount,
+    durationDelta: snapshotSummary.duration - previousSummary.duration,
+  };
+}
+
+function formatDurationMetric(duration: number): string {
+  return Number.isInteger(duration) ? `${duration}s` : `${duration.toFixed(2)}s`;
+}
+
+function isEditorProjectSnapshot(snapshotData: unknown): snapshotData is Pick<
+  EditorProject,
+  'tracks' | 'bins' | 'editorialState' | 'workstationState'
+> {
+  if (!snapshotData || typeof snapshotData !== 'object') {
+    return false;
+  }
+
+  const candidate = snapshotData as Partial<EditorProject>;
+  return (
+    Array.isArray(candidate.tracks)
+    && Array.isArray(candidate.bins)
+    && typeof candidate.editorialState === 'object'
+    && candidate.editorialState !== null
+    && typeof candidate.workstationState === 'object'
+    && candidate.workstationState !== null
+  );
+}
+
+function buildVersionCompareMetrics(
+  snapshotData: unknown,
+  previousSnapshotData: unknown,
+): ProjectVersionCompareMetric[] {
+  const snapshotSummary = summarizeProjectVersionSnapshot(snapshotData);
+  const previousSummary = summarizeProjectVersionSnapshot(previousSnapshotData);
+  const metrics: ProjectVersionCompareMetric[] = [];
+
+  if (snapshotSummary && previousSummary) {
+    metrics.push(
+      {
+        label: 'Tracks',
+        previousValue: String(previousSummary.trackCount),
+        currentValue: String(snapshotSummary.trackCount),
+      },
+      {
+        label: 'Clips',
+        previousValue: String(previousSummary.clipCount),
+        currentValue: String(snapshotSummary.clipCount),
+      },
+      {
+        label: 'Bins',
+        previousValue: String(previousSummary.binCount),
+        currentValue: String(snapshotSummary.binCount),
+      },
+      {
+        label: 'Duration',
+        previousValue: formatDurationMetric(previousSummary.duration),
+        currentValue: formatDurationMetric(snapshotSummary.duration),
+      },
+    );
+  }
+
+  if (isEditorProjectSnapshot(snapshotData) && isEditorProjectSnapshot(previousSnapshotData)) {
+    metrics.push(
+      {
+        label: 'Workspace',
+        previousValue: previousSnapshotData.workstationState.activeWorkspaceId,
+        currentValue: snapshotData.workstationState.activeWorkspaceId,
+      },
+      {
+        label: 'Composer',
+        previousValue: previousSnapshotData.workstationState.composerLayout,
+        currentValue: snapshotData.workstationState.composerLayout,
+      },
+      {
+        label: 'Selected bin',
+        previousValue: previousSnapshotData.editorialState.selectedBinId ?? 'none',
+        currentValue: snapshotData.editorialState.selectedBinId ?? 'none',
+      },
+      {
+        label: 'Target tracks',
+        previousValue: String(previousSnapshotData.editorialState.enabledTrackIds.length),
+        currentValue: String(snapshotData.editorialState.enabledTrackIds.length),
+      },
+      {
+        label: 'Sync locks',
+        previousValue: String(previousSnapshotData.editorialState.syncLockedTrackIds.length),
+        currentValue: String(snapshotData.editorialState.syncLockedTrackIds.length),
+      },
+    );
+  }
+
+  return metrics;
+}
 
 // ─── Engine ─────────────────────────────────────────────────────────────────
 
@@ -167,7 +409,7 @@ export class CollabEngine {
       replies: c.replies.map(r => ({ ...r })),
       reactions: c.reactions.map(r => ({ ...r, userIds: [...r.userIds] })),
     }));
-    this.versions = DEMO_VERSIONS.map(v => ({ ...v }));
+    this.versions = DEMO_VERSIONS.map(v => ({ ...v, compareMetrics: [...v.compareMetrics] }));
   }
 
   // ── Connection ──────────────────────────────────────────────────────────
@@ -312,14 +554,29 @@ export class CollabEngine {
 
   // ── Versions ────────────────────────────────────────────────────────────
 
-  saveVersion(name: string, description: string): ProjectVersion {
+  saveVersion(
+    name: string,
+    description: string,
+    snapshotData?: unknown,
+    options?: { retentionPolicy?: 'manual' | 'session' },
+  ): ProjectVersion {
+    const effectiveSnapshot = snapshotData ?? { tracks: 6, clips: 8, duration: 34, timestamp: Date.now() };
+    const snapshotSummary = summarizeProjectVersionSnapshot(effectiveSnapshot);
+    const previousVersion = this.versions.find((version) => version.snapshotSummary) ?? null;
+    const previousSummary = previousVersion?.snapshotSummary ?? null;
     const version: ProjectVersion = {
       id: `v_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       name,
       createdAt: Date.now(),
       createdBy: this.currentUserName,
       description,
-      snapshotData: { tracks: 6, clips: 8, duration: 34, timestamp: Date.now() },
+      kind: 'restore-point',
+      retentionPolicy: options?.retentionPolicy ?? 'manual',
+      snapshotSummary,
+      compareSummary: buildVersionCompareSummary(snapshotSummary, previousSummary),
+      compareBaselineName: previousVersion?.name ?? null,
+      compareMetrics: buildVersionCompareMetrics(effectiveSnapshot, previousVersion?.snapshotData ?? null),
+      snapshotData: effectiveSnapshot,
     };
     this.versions.unshift(version);
     this.notify();
@@ -327,17 +584,22 @@ export class CollabEngine {
   }
 
   getVersions(): ProjectVersion[] {
-    return [...this.versions];
+    return this.versions.map((version) => ({
+      ...version,
+      compareMetrics: [...version.compareMetrics],
+    }));
   }
 
-  restoreVersion(versionId: string): void {
+  restoreVersion(versionId: string): ProjectVersion | null {
     const version = this.versions.find(v => v.id === versionId);
     if (version) {
-      // In production, this would restore the timeline state from the snapshot
-      // Intentional debug-level log for version restoration tracking
+      // Snapshot application happens in the editor store; the engine resolves
+      // the selected version and emits a change for the collaboration UI.
       console.debug(`[CollabEngine] Restoring version: ${version.name}`);
       this.notify();
+      return { ...version, compareMetrics: [...version.compareMetrics] };
     }
+    return null;
   }
 
   // ── Subscriptions ───────────────────────────────────────────────────────
