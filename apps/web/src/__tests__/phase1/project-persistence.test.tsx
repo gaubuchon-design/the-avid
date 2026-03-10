@@ -688,8 +688,8 @@ describe('phase 1 project persistence', () => {
       );
     });
 
-    const robinIndicator = container.querySelector('[aria-label="Follow Robin Producer at 00:00:04:00"]');
-    const caseyIndicator = container.querySelector('[aria-label="Follow Casey Mixer at 00:00:02:00"]');
+    const robinIndicator = container.querySelector('[aria-label="Follow Robin Producer playhead at 00:00:04:00"]');
+    const caseyIndicator = container.querySelector('[aria-label="Follow Casey Mixer playhead at 00:00:02:00"]');
 
     expect(robinIndicator).toBeInstanceOf(HTMLButtonElement);
     expect(caseyIndicator).toBeInstanceOf(HTMLButtonElement);
@@ -700,6 +700,20 @@ describe('phase 1 project persistence', () => {
 
     await act(async () => {
       caseyIndicator?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(useEditorStore.getState().playheadTime).toBe(2);
+    expect(useEditorStore.getState().selectedTrackId).toBe('t-a1');
+
+    await act(async () => {
+      robinIndicator?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+
+    expect(useEditorStore.getState().playheadTime).toBe(4);
+    expect(useEditorStore.getState().selectedTrackId).toBe('t-v1');
+
+    await act(async () => {
+      caseyIndicator?.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
     });
 
     expect(useEditorStore.getState().playheadTime).toBe(2);

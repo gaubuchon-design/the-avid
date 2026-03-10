@@ -21,6 +21,10 @@ function getInitials(name: string): string {
   return `${parts[0]![0] ?? ''}${parts[1]![0] ?? ''}`.toUpperCase();
 }
 
+function getFollowLabel(name: string, playheadTime: number, fps: number): string {
+  return `Follow ${name} playhead at ${toTimecode(playheadTime, fps)}`;
+}
+
 export const CollaboratorPlayheadIndicators = memo(function CollaboratorPlayheadIndicators({
   zoom,
   scrollLeft,
@@ -57,6 +61,13 @@ export const CollaboratorPlayheadIndicators = memo(function CollaboratorPlayhead
           left,
           '--collab-playhead-color': user.color,
         };
+        const followLabel = getFollowLabel(user.name, user.playheadTime, fps);
+        const followPlayhead = () => {
+          setPlayhead(user.playheadTime);
+          if (user.cursorTrackId) {
+            selectTrack(user.cursorTrackId);
+          }
+        };
 
         return (
           <button
@@ -64,13 +75,15 @@ export const CollaboratorPlayheadIndicators = memo(function CollaboratorPlayhead
             key={user.id}
             className={`collab-playhead${user.isOnline ? '' : ' offline'}`}
             style={style}
-            aria-label={`Follow ${user.name} at ${toTimecode(user.playheadTime, fps)}`}
-            title={`${user.name}${user.isOnline ? '' : ' (offline)'} \u2022 ${toTimecode(user.playheadTime, fps)}`}
-            onClick={() => {
-              setPlayhead(user.playheadTime);
-              if (user.cursorTrackId) {
-                selectTrack(user.cursorTrackId);
+            aria-label={followLabel}
+            title={`${followLabel}${user.isOnline ? '' : ' (offline)'}`}
+            onClick={followPlayhead}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' && event.key !== ' ') {
+                return;
               }
+              event.preventDefault();
+              followPlayhead();
             }}
           >
             <span className="collab-playhead-tag">{getInitials(user.name)}</span>
