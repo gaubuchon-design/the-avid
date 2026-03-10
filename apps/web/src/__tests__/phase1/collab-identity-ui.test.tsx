@@ -297,6 +297,34 @@ describe('phase 1 collab identity UI', () => {
     container.remove();
   });
 
+  it('renders restored versions context summary chips', async () => {
+    useCollabStore.setState({
+      activeTab: 'versions',
+    });
+    useEditorStore.setState({
+      versionHistoryRetentionPreference: 'session',
+      versionHistoryCompareMode: 'details',
+    });
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<CollabPanel />);
+    });
+
+    const summary = container.querySelector('[aria-label="Versions context summary"]');
+    expect(summary).toBeTruthy();
+    expect(summary?.textContent).toContain('Retention: Session retention');
+    expect(summary?.textContent).toContain('Compare: Detailed compare');
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
   it('renders avatar-aware identity chips in users tab rows', async () => {
     useCollabStore.setState({
       activeTab: 'users',

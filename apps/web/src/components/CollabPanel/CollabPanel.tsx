@@ -838,9 +838,59 @@ function VersionsTab() {
     if (!compareTargetVersion || !compareBaseline) return null;
     return buildVersionComparison(compareTargetVersion, compareBaseline);
   }, [compareBaseline, compareTargetVersion]);
+  const hasActiveReviewContext = (
+    versionHistoryRetentionPreference !== 'manual'
+    || versionHistoryCompareMode !== 'summary'
+  );
+  const retentionLabel = versionHistoryRetentionPreference === 'manual'
+    ? 'Manual retain'
+    : 'Session retention';
+  const compareModeLabel = versionHistoryCompareMode === 'summary'
+    ? 'Summary view'
+    : 'Detailed compare';
 
   return (
     <div>
+      {hasActiveReviewContext && (
+        <div
+          aria-label="Versions context summary"
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 4,
+            padding: '0 0 8px',
+          }}
+        >
+          <span
+            style={{
+              padding: '2px 6px',
+              borderRadius: 999,
+              fontSize: 9,
+              fontWeight: 600,
+              letterSpacing: '0.03em',
+              background: 'var(--bg-elevated)',
+              color: 'var(--text-secondary)',
+              border: '1px solid var(--border-default)',
+            }}
+          >
+            Retention: {retentionLabel}
+          </span>
+          <span
+            style={{
+              padding: '2px 6px',
+              borderRadius: 999,
+              fontSize: 9,
+              fontWeight: 600,
+              letterSpacing: '0.03em',
+              background: 'var(--bg-elevated)',
+              color: 'var(--text-muted)',
+              border: '1px solid var(--border-default)',
+            }}
+          >
+            Compare: {compareModeLabel}
+          </span>
+        </div>
+      )}
       <div style={{ padding: 10, background: 'var(--bg-raised)', borderRadius: 'var(--radius-md)', marginBottom: 8 }}>
         <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
           Version Retention

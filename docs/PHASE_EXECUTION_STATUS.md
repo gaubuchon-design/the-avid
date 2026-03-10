@@ -125,10 +125,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Extended project-scoped collaboration panel preferences to persist version-history review controls (`versionHistoryRetentionPreference` + `versionHistoryCompareMode`) alongside tab/filter/search context.
 - Hydrated persisted version-history review controls on collaboration reconnect/reopen and applied them to editor store so version compare/retention UI state restores automatically.
 - Added store coverage for persisted version-history review control hydration and explicit persistence of these controls via collaboration panel preference writes.
+- Surfaced restored version-history review context in the Versions tab header with summary chips for retention mode and compare mode when non-default review controls are active.
+- Added phase-1 UI coverage asserting hydrated version-history retention/compare preferences render the expected restored versions context summary chips.
 
 ## Next Execution Slices
 
-1. Surface restored version-history review context indicators (retention + compare mode chips) in the Versions tab header so reopened compare state is immediately visible.
+1. Persist and hydrate version-compare panel state (`compareTargetVersionId`, baseline mode, custom baseline selection) so version diff setup survives reconnect/reopen.
 
 ## Exit Signals For These Early Phases
 
