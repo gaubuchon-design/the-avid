@@ -9,6 +9,7 @@ import { Ruler } from './Ruler';
 import { TimelineCanvas } from './TimelineCanvas';
 import { ClipView } from './ClipView';
 import { Playhead } from './Playhead';
+import { CollaboratorPlayheadIndicators } from './CollaboratorPlayheadIndicators';
 
 // ─── TrackLane ───────────────────────────────────────────────────────────────
 
@@ -406,6 +407,13 @@ export function TimelinePanel() {
               time={playheadTime}
               zoom={zoom}
               scrollLeft={scrollLeft}
+            />
+
+            {/* Remote collaborator playheads */}
+            <CollaboratorPlayheadIndicators
+              zoom={zoom}
+              scrollLeft={scrollLeft}
+              fps={fps || 24}
             />
           </div>
         </div>

@@ -105,10 +105,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Wired active editor navigation into collaboration presence snapshots by syncing current-user playhead and selected track focus through the collaboration store, with throttled editor-state subscription updates and repository persistence coverage.
 - Surfaced collaborator track-focus badges directly in timeline track headers from hydrated presence snapshots, including playhead timecode context and online/offline badge state.
 - Added rendered phase-1 coverage that asserts timeline track headers show collaborator presence badges for hydrated track-focus snapshots.
+- Rendered collaborator playhead indicators directly in timeline ruler/canvas space from hydrated presence snapshots, with playhead-time and cursor-frame fallback parity for online/offline collaborators.
+- Added rendered phase-1 coverage for collaborator playhead indicator placement and label/timecode output across ruler/canvas overlay coordinates.
 
 ## Next Execution Slices
 
-1. Render collaborator playhead indicators in the timeline ruler/canvas from hydrated presence snapshots so editors can see remote playhead positions relative to the local playhead.
+1. Add click-to-follow interactions on collaborator timeline playhead indicators so editors can jump/park local playhead at a selected collaborator position.
 
 ## Exit Signals For These Early Phases
 

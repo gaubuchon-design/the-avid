@@ -8,6 +8,7 @@ import { TrimStatusOverlay } from '../../components/Editor/TrimStatusOverlay';
 import { CollabPanel } from '../../components/CollabPanel/CollabPanel';
 import { TrackHeaders } from '../../components/TimelinePanel/TrackHeaders';
 import { TrackPatchPanel } from '../../components/TimelinePanel/TrackPatchPanel';
+import { CollaboratorPlayheadIndicators } from '../../components/TimelinePanel/CollaboratorPlayheadIndicators';
 import { Toolbar } from '../../components/Toolbar/Toolbar';
 import { SourceMonitor } from '../../components/SourceMonitor/SourceMonitor';
 import { RecordMonitor } from '../../components/RecordMonitor/RecordMonitor';
@@ -625,6 +626,74 @@ describe('phase 1 project persistence', () => {
 
     const a1PresenceGroup = container.querySelector('[aria-label="A1 collaborator presence"]');
     expect(a1PresenceGroup).toBeNull();
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('renders collaborator playhead indicators across the ruler and canvas timeline space', async () => {
+    useEditorStore.setState({
+      sequenceSettings: {
+        ...useEditorStore.getState().sequenceSettings,
+        fps: 24,
+      },
+      zoom: 30,
+      scrollLeft: 12,
+    });
+    useCollabStore.setState({
+      connected: true,
+      currentUserId: 'u-self',
+      onlineUsers: [
+        {
+          id: 'u-self',
+          name: 'You',
+          color: '#5b6af5',
+          cursorFrame: 0,
+          cursorTrackId: 't-v1',
+          playheadTime: 0,
+          isOnline: true,
+        },
+        {
+          id: 'u-robin',
+          name: 'Robin Producer',
+          color: '#1f9de8',
+          cursorFrame: 96,
+          cursorTrackId: 't-v1',
+          playheadTime: 4,
+          isOnline: true,
+        },
+        {
+          id: 'u-casey',
+          name: 'Casey Mixer',
+          color: '#f59e0b',
+          cursorFrame: 48,
+          cursorTrackId: 't-a1',
+          isOnline: false,
+        },
+      ],
+    });
+
+    const container = document.createElement('div');
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <div style={{ position: 'relative', width: 600, height: 180 }}>
+          <CollaboratorPlayheadIndicators zoom={30} scrollLeft={12} fps={24} />
+        </div>,
+      );
+    });
+
+    const robinIndicator = container.querySelector('[aria-label="Collaborator playhead Robin Producer at 00:00:04:00"]');
+    const caseyIndicator = container.querySelector('[aria-label="Collaborator playhead Casey Mixer at 00:00:02:00"]');
+
+    expect(robinIndicator).toBeInstanceOf(HTMLDivElement);
+    expect(caseyIndicator).toBeInstanceOf(HTMLDivElement);
+    expect(robinIndicator).toHaveTextContent('RP');
+    expect(caseyIndicator).toHaveTextContent('CM');
+    expect(robinIndicator).toHaveStyle({ left: '108px' });
+    expect(caseyIndicator).toHaveStyle({ left: '48px' });
 
     await act(async () => {
       root.unmount();
