@@ -732,6 +732,20 @@ async function persistCollaborationStateToRepository(
   });
 }
 
+function persistPanelPreferencesSnapshot(
+  getState: () => CollabState & CollabActions,
+  activityRetentionPreferences = getState().activityRetentionPreferences,
+): void {
+  void persistCollaborationStateToRepository(
+    getState().projectId,
+    getState().activityFeed,
+    activityRetentionPreferences,
+    getState(),
+  ).catch((error) => {
+    console.error('Failed to persist collaboration panel preferences', error);
+  });
+}
+
 const initialVersionRetentionPreferences = loadVersionRetentionPreferences();
 const initialActivityRetentionPreferences = loadActivityRetentionPreferences();
 collabEngine.setVersionRetentionPreferences(initialVersionRetentionPreferences);
@@ -904,47 +918,19 @@ export const useCollabStore = create<CollabState & CollabActions>()(
       // UI
       setActiveTab: (tab) => {
         set((s) => { s.activeTab = tab; }, false, 'collab/setActiveTab');
-        void persistCollaborationStateToRepository(
-          get().projectId,
-          get().activityFeed,
-          get().activityRetentionPreferences,
-          get(),
-        ).catch((error) => {
-          console.error('Failed to persist collaboration panel preferences', error);
-        });
+        persistPanelPreferencesSnapshot(get);
       },
       setCommentFilter: (filter) => {
         set((s) => { s.commentFilter = filter; }, false, 'collab/setCommentFilter');
-        void persistCollaborationStateToRepository(
-          get().projectId,
-          get().activityFeed,
-          get().activityRetentionPreferences,
-          get(),
-        ).catch((error) => {
-          console.error('Failed to persist collaboration panel preferences', error);
-        });
+        persistPanelPreferencesSnapshot(get);
       },
       setActivityActionFilter: (filter) => {
         set((s) => { s.activityActionFilter = filter; }, false, 'collab/setActivityActionFilter');
-        void persistCollaborationStateToRepository(
-          get().projectId,
-          get().activityFeed,
-          get().activityRetentionPreferences,
-          get(),
-        ).catch((error) => {
-          console.error('Failed to persist collaboration panel preferences', error);
-        });
+        persistPanelPreferencesSnapshot(get);
       },
       setActivitySearchQuery: (query) => {
         set((s) => { s.activitySearchQuery = query; }, false, 'collab/setActivitySearchQuery');
-        void persistCollaborationStateToRepository(
-          get().projectId,
-          get().activityFeed,
-          get().activityRetentionPreferences,
-          get(),
-        ).catch((error) => {
-          console.error('Failed to persist collaboration panel preferences', error);
-        });
+        persistPanelPreferencesSnapshot(get);
       },
       setVersionComparePanelState: (state) => {
         set((s) => {
@@ -958,14 +944,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
             s.versionCompareCustomBaselineId = state.versionCompareCustomBaselineId;
           }
         }, false, 'collab/setVersionComparePanelState');
-        void persistCollaborationStateToRepository(
-          get().projectId,
-          get().activityFeed,
-          get().activityRetentionPreferences,
-          get(),
-        ).catch((error) => {
-          console.error('Failed to persist collaboration panel preferences', error);
-        });
+        persistPanelPreferencesSnapshot(get);
       },
       setCommentsComposerContext: (state) => {
         set((s) => {
@@ -986,14 +965,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
             s.commentsActiveReactionPickerCommentId = state.commentsActiveReactionPickerCommentId;
           }
         }, false, 'collab/setCommentsComposerContext');
-        void persistCollaborationStateToRepository(
-          get().projectId,
-          get().activityFeed,
-          get().activityRetentionPreferences,
-          get(),
-        ).catch((error) => {
-          console.error('Failed to persist collaboration panel preferences', error);
-        });
+        persistPanelPreferencesSnapshot(get);
       },
       setCommentReplyDraft: (commentId, draft) => {
         set((s) => {
@@ -1008,35 +980,14 @@ export const useCollabStore = create<CollabState & CollabActions>()(
             delete s.commentsReplyDrafts[normalizedCommentId];
           }
         }, false, 'collab/setCommentReplyDraft');
-        void persistCollaborationStateToRepository(
-          get().projectId,
-          get().activityFeed,
-          get().activityRetentionPreferences,
-          get(),
-        ).catch((error) => {
-          console.error('Failed to persist collaboration panel preferences', error);
-        });
+        persistPanelPreferencesSnapshot(get);
       },
       persistPanelPreferences: () => {
-        void persistCollaborationStateToRepository(
-          get().projectId,
-          get().activityFeed,
-          get().activityRetentionPreferences,
-          get(),
-        ).catch((error) => {
-          console.error('Failed to persist collaboration panel preferences', error);
-        });
+        persistPanelPreferencesSnapshot(get);
       },
       selectComment: (id) => {
         set((s) => { s.selectedCommentId = id; }, false, 'collab/selectComment');
-        void persistCollaborationStateToRepository(
-          get().projectId,
-          get().activityFeed,
-          get().activityRetentionPreferences,
-          get(),
-        ).catch((error) => {
-          console.error('Failed to persist collaboration panel preferences', error);
-        });
+        persistPanelPreferencesSnapshot(get);
       },
 
       // Comments
