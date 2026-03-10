@@ -203,6 +203,51 @@ describe('phase 1 collab identity UI', () => {
     container.remove();
   });
 
+  it('renders restored activity context summary chips', async () => {
+    useCollabStore.setState({
+      activeTab: 'activity',
+      activityActionFilter: 'versions',
+      activitySearchQuery: 'cut',
+      activityFeed: [
+        {
+          id: 'activity-version',
+          user: 'Alex Editor',
+          userId: 'user-alex',
+          action: 'saved version',
+          timestamp: Date.now(),
+          detail: 'Rough Cut v3',
+        },
+        {
+          id: 'activity-comment',
+          user: 'Jordan Reviewer',
+          userId: 'user-jordan',
+          action: 'added comment',
+          timestamp: Date.now(),
+          detail: 'needs tighter pacing',
+        },
+      ],
+    });
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<CollabPanel />);
+    });
+
+    const summary = container.querySelector('[aria-label="Activity context summary"]');
+    expect(summary).toBeTruthy();
+    expect(summary?.textContent).toContain('Filter: versions');
+    expect(summary?.textContent).toContain('Search: cut');
+    expect(summary?.textContent).toContain('1/2 shown');
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
   it('renders avatar-aware identity chips in users tab rows', async () => {
     useCollabStore.setState({
       activeTab: 'users',

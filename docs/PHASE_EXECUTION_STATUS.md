@@ -118,10 +118,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Added project-scoped collaboration panel preference persistence (`collaborationPanelPreferences`) covering active tab, comment filter, activity action filter, and activity search query.
 - Hydrated collaboration panel review-context preferences on connect/reopen and wired tab/filter/search UI actions to persist those preferences immediately via repository-backed collab state saves.
 - Expanded store and phase-1 UI coverage for collaboration panel preference hydration/persistence and activity action-filter control behavior so reopen cycles restore the same review context.
+- Surfaced restored activity review context in the collaboration panel activity header with active summary chips for action-filter, search query, and shown/total result count.
+- Added phase-1 UI coverage asserting persisted activity filter/search state renders the expected restored context chips and filtered count after reopen hydration.
 
 ## Next Execution Slices
 
-1. Surface persistent activity-search and action-filter summaries (active chips/count indicators) in the collaboration panel header to make restored review context immediately visible after reopen.
+1. Surface persistent comments review-context summary indicators (active filter chip + shown/total thread count) so restored discussion focus is immediately visible after reopen.
 
 ## Exit Signals For These Early Phases
 

@@ -1379,11 +1379,65 @@ function ActivityTab() {
     });
   }, [activityActionFilter, activityFeed, activitySearchQuery]);
 
+  const activeContextLabels = useMemo(() => {
+    const labels: string[] = [];
+    if (activityActionFilter !== 'all') {
+      labels.push(`Filter: ${activityActionFilter}`);
+    }
+    if (activitySearchQuery.trim().length > 0) {
+      labels.push(`Search: ${activitySearchQuery.trim()}`);
+    }
+    return labels;
+  }, [activityActionFilter, activitySearchQuery]);
+
   return (
     <div>
       <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '4px 4px 8px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
         Recent Activity
       </div>
+      {activeContextLabels.length > 0 && (
+        <div
+          aria-label="Activity context summary"
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 4,
+            padding: '0 4px 8px',
+          }}
+        >
+          {activeContextLabels.map((label) => (
+            <span
+              key={label}
+              style={{
+                padding: '2px 6px',
+                borderRadius: 999,
+                fontSize: 9,
+                fontWeight: 600,
+                letterSpacing: '0.03em',
+                background: 'var(--bg-elevated)',
+                color: 'var(--text-secondary)',
+                border: '1px solid var(--border-default)',
+              }}
+            >
+              {label}
+            </span>
+          ))}
+          <span
+            style={{
+              padding: '2px 6px',
+              borderRadius: 999,
+              fontSize: 9,
+              fontWeight: 600,
+              letterSpacing: '0.03em',
+              background: 'var(--bg-elevated)',
+              color: 'var(--text-muted)',
+              border: '1px solid var(--border-default)',
+            }}
+          >
+            {filteredActivityFeed.length}/{activityFeed.length} shown
+          </span>
+        </div>
+      )}
       <div style={{ padding: 8, background: 'var(--bg-raised)', borderRadius: 'var(--radius-md)', marginBottom: 8 }}>
         <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
           Activity Retention
