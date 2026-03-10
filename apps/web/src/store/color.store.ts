@@ -323,7 +323,7 @@ export const useColorStore = create<ColorState & ColorActions>()(
           s.abWipePosition = 50;
         }, false, 'color/resetStore'),
     })),
-    { name: 'ColorStore', enabled: process.env["NODE_ENV"] === 'development' },
+    { name: 'ColorStore', enabled: import.meta.env.DEV },
   )
 );
 

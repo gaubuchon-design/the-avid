@@ -362,7 +362,7 @@ export const useMediaStore = create<MediaState & MediaActions>()(
       ...INITIAL_MEDIA_STATE,
     }), true, 'media/resetStore'),
   })),
-  { name: 'MediaStore', enabled: process.env["NODE_ENV"] === 'development' },
+  { name: 'MediaStore', enabled: import.meta.env.DEV },
   )
 );
 

@@ -380,7 +380,7 @@ export const useCreatorStore = create<CreatorState & CreatorActions>()(
       podcastConfig: { ...DEFAULT_PODCAST_CONFIG },
     }), true, 'creator/resetStore'),
   })),
-  { name: 'CreatorStore', enabled: process.env["NODE_ENV"] === 'development' },
+  { name: 'CreatorStore', enabled: import.meta.env.DEV },
   )
 );
 

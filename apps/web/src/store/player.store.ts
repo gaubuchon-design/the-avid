@@ -152,7 +152,7 @@ export const usePlayerStore = create<PlayerState & PlayerActions>()(
       resetStore: () =>
         set(() => ({ ...INITIAL_STATE }), true, 'player/resetStore'),
     })),
-    { name: 'PlayerStore', enabled: process.env["NODE_ENV"] === 'development' },
+    { name: 'PlayerStore', enabled: import.meta.env.DEV },
   )
 );
 

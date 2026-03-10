@@ -207,7 +207,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
         }), true, 'collab/resetStore');
       },
     })),
-    { name: 'CollabStore', enabled: process.env["NODE_ENV"] === 'development' },
+    { name: 'CollabStore', enabled: import.meta.env.DEV },
   )
 );
 

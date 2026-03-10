@@ -326,7 +326,7 @@ export const useNexisStore = create<NEXISState & NEXISActions>()(
       cacheStats: { ...DEFAULT_CACHE_STATS },
     }), true, 'nexis/resetStore'),
   })),
-  { name: 'NexisStore', enabled: process.env["NODE_ENV"] === 'development' },
+  { name: 'NexisStore', enabled: import.meta.env.DEV },
   )
 );
 

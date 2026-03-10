@@ -541,7 +541,7 @@ export const useBrandStore = create<BrandState & BrandActions>()(
         ...INITIAL_STATE,
       }), true, 'brand/resetStore'),
     })),
-    { name: 'BrandStore', enabled: process.env["NODE_ENV"] === 'development' },
+    { name: 'BrandStore', enabled: import.meta.env.DEV },
   )
 );
 
