@@ -111,10 +111,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Expanded phase-1 coverage to assert clickable collaborator playhead indicators update local playhead and selected-track focus.
 - Added keyboard follow parity for collaborator timeline playhead indicators so Enter/Space activation now routes through the same follow path as click interactions.
 - Updated collaborator playhead accessibility labels to explicit playhead-follow semantics and expanded phase-1 coverage for Enter/Space follow activation.
+- Added roving-keyboard navigation parity for collaborator playhead indicators so ArrowLeft/ArrowRight traverses indicator focus in timeline order while preserving Enter/Space follow activation.
+- Expanded phase-1 coverage for collaborator playheads to assert roving tab-stop behavior and ArrowLeft/ArrowRight focus traversal before keyboard follow activation.
 
 ## Next Execution Slices
 
-1. Add roving-keyboard navigation parity for collaborator playhead indicators (ArrowLeft/ArrowRight traversal while preserving Enter/Space follow activation).
+1. Add Home/End keyboard parity for collaborator playhead indicators (jump focus to first/last indicator while preserving roving traversal and Enter/Space follow activation).
 
 ## Exit Signals For These Early Phases
 

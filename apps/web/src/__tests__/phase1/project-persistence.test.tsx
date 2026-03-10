@@ -697,6 +697,8 @@ describe('phase 1 project persistence', () => {
     expect(caseyIndicator).toHaveTextContent('CM');
     expect(robinIndicator).toHaveStyle({ left: '108px' });
     expect(caseyIndicator).toHaveStyle({ left: '48px' });
+    expect(caseyIndicator).toHaveAttribute('tabindex', '0');
+    expect(robinIndicator).toHaveAttribute('tabindex', '-1');
 
     await act(async () => {
       caseyIndicator?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -706,11 +708,26 @@ describe('phase 1 project persistence', () => {
     expect(useEditorStore.getState().selectedTrackId).toBe('t-a1');
 
     await act(async () => {
+      (caseyIndicator as HTMLButtonElement | null)?.focus();
+      caseyIndicator?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    });
+
+    expect(caseyIndicator).toHaveAttribute('tabindex', '-1');
+    expect(robinIndicator).toHaveAttribute('tabindex', '0');
+
+    await act(async () => {
       robinIndicator?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
 
     expect(useEditorStore.getState().playheadTime).toBe(4);
     expect(useEditorStore.getState().selectedTrackId).toBe('t-v1');
+
+    await act(async () => {
+      robinIndicator?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    });
+
+    expect(caseyIndicator).toHaveAttribute('tabindex', '0');
+    expect(robinIndicator).toHaveAttribute('tabindex', '-1');
 
     await act(async () => {
       caseyIndicator?.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));

@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React, { memo, useState } from 'react';
 import { toTimecode } from '../../lib/timecode';
 import { useCollabStore } from '../../store/collab.store';
 import { useEditorStore } from '../../store/editor.store';
@@ -47,7 +47,11 @@ export const CollaboratorPlayheadIndicators = memo(function CollaboratorPlayhead
         playheadTime,
       };
     })
-    .filter((user) => Number.isFinite(user.playheadTime) && user.playheadTime >= 0);
+    .filter((user) => Number.isFinite(user.playheadTime) && user.playheadTime >= 0)
+    .sort((a, b) => a.playheadTime - b.playheadTime);
+  const [activeIndicatorId, setActiveIndicatorId] = useState<string | null>(null);
+  const hasActiveIndicator = activeIndicatorId !== null
+    && collaborators.some((user) => user.id === activeIndicatorId);
 
   if (collaborators.length === 0) {
     return null;
@@ -55,7 +59,7 @@ export const CollaboratorPlayheadIndicators = memo(function CollaboratorPlayhead
 
   return (
     <div className="collab-playhead-layer" role="group" aria-label="Collaborator playhead indicators">
-      {collaborators.map((user) => {
+      {collaborators.map((user, index) => {
         const left = user.playheadTime * zoom - scrollLeft;
         const style: React.CSSProperties & { '--collab-playhead-color'?: string } = {
           left,
@@ -68,21 +72,53 @@ export const CollaboratorPlayheadIndicators = memo(function CollaboratorPlayhead
             selectTrack(user.cursorTrackId);
           }
         };
+        const tabIndex = hasActiveIndicator
+          ? (activeIndicatorId === user.id ? 0 : -1)
+          : (index === 0 ? 0 : -1);
 
         return (
           <button
             type="button"
             key={user.id}
+            data-indicator-id={user.id}
             className={`collab-playhead${user.isOnline ? '' : ' offline'}`}
             style={style}
             aria-label={followLabel}
             title={`${followLabel}${user.isOnline ? '' : ' (offline)'}`}
-            onClick={followPlayhead}
+            tabIndex={tabIndex}
+            onClick={() => {
+              setActiveIndicatorId(user.id);
+              followPlayhead();
+            }}
             onKeyDown={(event) => {
+              if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                event.preventDefault();
+                const layer = event.currentTarget.parentElement;
+                if (!layer) {
+                  return;
+                }
+                const buttons = Array.from(layer.querySelectorAll<HTMLButtonElement>('.collab-playhead'));
+                const currentIndex = buttons.indexOf(event.currentTarget);
+                if (currentIndex === -1 || buttons.length <= 1) {
+                  return;
+                }
+
+                const direction = event.key === 'ArrowRight' ? 1 : -1;
+                const nextIndex = (currentIndex + direction + buttons.length) % buttons.length;
+                const nextButton = buttons[nextIndex];
+                const nextIndicatorId = nextButton?.dataset['indicatorId'];
+                if (nextIndicatorId) {
+                  setActiveIndicatorId(nextIndicatorId);
+                }
+                nextButton?.focus();
+                return;
+              }
+
               if (event.key !== 'Enter' && event.key !== ' ') {
                 return;
               }
               event.preventDefault();
+              setActiveIndicatorId(user.id);
               followPlayhead();
             }}
           >
