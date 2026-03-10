@@ -209,6 +209,8 @@ describe('useCollabStore', () => {
       commentFilter: 'resolved',
       activityActionFilter: 'versions',
       activitySearchQuery: 'cut',
+      versionHistoryRetentionPreference: 'session',
+      versionHistoryCompareMode: 'details',
     };
     repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
 
@@ -220,6 +222,8 @@ describe('useCollabStore', () => {
     expect(state.commentFilter).toBe('resolved');
     expect(state.activityActionFilter).toBe('versions');
     expect(state.activitySearchQuery).toBe('cut');
+    expect(useEditorStore.getState().versionHistoryRetentionPreference).toBe('session');
+    expect(useEditorStore.getState().versionHistoryCompareMode).toBe('details');
   });
 
   it('disconnect() sets connected to false via setState', () => {
@@ -392,6 +396,28 @@ describe('useCollabStore', () => {
     expect(savedProject.collaborationPanelPreferences?.commentFilter).toBe('resolved');
     expect(savedProject.collaborationPanelPreferences?.activityActionFilter).toBe('comments');
     expect(savedProject.collaborationPanelPreferences?.activitySearchQuery).toBe('review');
+    expect(savedProject.collaborationPanelPreferences?.versionHistoryRetentionPreference).toBe(
+      useEditorStore.getState().versionHistoryRetentionPreference,
+    );
+    expect(savedProject.collaborationPanelPreferences?.versionHistoryCompareMode).toBe(
+      useEditorStore.getState().versionHistoryCompareMode,
+    );
+  });
+
+  it('persistPanelPreferences() persists version history review controls', async () => {
+    const project = buildRepositoryProject('project_version_review_preferences_persist');
+    repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
+    useCollabStore.getState().connect(project.id, 'user_1');
+    await flushAsyncTasks();
+
+    useEditorStore.getState().setVersionHistoryRetentionPreference('session');
+    useEditorStore.getState().setVersionHistoryCompareMode('details');
+    useCollabStore.getState().persistPanelPreferences();
+    await flushAsyncTasks();
+
+    const savedProject = repositoryMocks.saveProjectToRepository.mock.calls.at(-1)?.[0] as EditorProject;
+    expect(savedProject.collaborationPanelPreferences?.versionHistoryRetentionPreference).toBe('session');
+    expect(savedProject.collaborationPanelPreferences?.versionHistoryCompareMode).toBe('details');
   });
 
   it('setActivityRetentionPreferences() prunes feed and persists preference', () => {

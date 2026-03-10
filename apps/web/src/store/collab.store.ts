@@ -85,6 +85,7 @@ interface CollabActions {
   setCommentFilter: (filter: CollabState['commentFilter']) => void;
   setActivityActionFilter: (filter: CollabState['activityActionFilter']) => void;
   setActivitySearchQuery: (query: string) => void;
+  persistPanelPreferences: () => void;
   selectComment: (id: string | null) => void;
 
   // Comments
@@ -166,6 +167,8 @@ const DEFAULT_ACTIVITY_RETENTION_PREFERENCES: ActivityRetentionPreferences = {
   preset: 'last-50',
   autoPrune: true,
 };
+const DEFAULT_VERSION_HISTORY_RETENTION_PREFERENCE = 'manual' as const;
+const DEFAULT_VERSION_HISTORY_COMPARE_MODE = 'summary' as const;
 
 function isVersionRetentionPreset(value: unknown): value is VersionRetentionPreset {
   return value === 'keep-all' || value === 'last-10' || value === 'last-25' || value === 'last-50';
@@ -430,25 +433,45 @@ function isActivityActionFilter(value: unknown): value is ActivityActionFilter {
   return value === 'all' || value === 'comments' || value === 'versions' || value === 'other';
 }
 
+function isVersionHistoryRetentionPreference(value: unknown): value is 'manual' | 'session' {
+  return value === 'manual' || value === 'session';
+}
+
+function isVersionHistoryCompareMode(value: unknown): value is 'summary' | 'details' {
+  return value === 'summary' || value === 'details';
+}
+
 function toPersistedPanelPreferences(
   state: Pick<CollabState, 'activeTab' | 'commentFilter' | 'activityActionFilter' | 'activitySearchQuery'>,
 ): EditorProjectCollaborationPanelPreferences {
+  const editorState = useEditorStore.getState();
   return {
     activeTab: state.activeTab,
     commentFilter: state.commentFilter,
     activityActionFilter: state.activityActionFilter,
     activitySearchQuery: state.activitySearchQuery,
+    versionHistoryRetentionPreference: editorState.versionHistoryRetentionPreference,
+    versionHistoryCompareMode: editorState.versionHistoryCompareMode,
   };
 }
 
 function toPanelPreferencesFromPersistedEntry(
   entry?: EditorProjectCollaborationPanelPreferences,
-): Pick<CollabState, 'activeTab' | 'commentFilter' | 'activityActionFilter' | 'activitySearchQuery'> {
+): Pick<CollabState, 'activeTab' | 'commentFilter' | 'activityActionFilter' | 'activitySearchQuery'> & {
+  versionHistoryRetentionPreference: 'manual' | 'session';
+  versionHistoryCompareMode: 'summary' | 'details';
+} {
   return {
     activeTab: isCollabActiveTab(entry?.activeTab) ? entry.activeTab : 'comments',
     commentFilter: isCommentFilter(entry?.commentFilter) ? entry.commentFilter : 'all',
     activityActionFilter: isActivityActionFilter(entry?.activityActionFilter) ? entry.activityActionFilter : 'all',
     activitySearchQuery: typeof entry?.activitySearchQuery === 'string' ? entry.activitySearchQuery : '',
+    versionHistoryRetentionPreference: isVersionHistoryRetentionPreference(entry?.versionHistoryRetentionPreference)
+      ? entry.versionHistoryRetentionPreference
+      : DEFAULT_VERSION_HISTORY_RETENTION_PREFERENCE,
+    versionHistoryCompareMode: isVersionHistoryCompareMode(entry?.versionHistoryCompareMode)
+      ? entry.versionHistoryCompareMode
+      : DEFAULT_VERSION_HISTORY_COMPARE_MODE,
   };
 }
 
@@ -688,6 +711,12 @@ export const useCollabStore = create<CollabState & CollabActions>()(
             const persistedPanelPreferences = toPanelPreferencesFromPersistedEntry(project.collaborationPanelPreferences);
             collabEngine.hydrateVersions(persistedVersions);
             collabEngine.hydrateComments(persistedComments);
+            useEditorStore.getState().setVersionHistoryRetentionPreference(
+              persistedPanelPreferences.versionHistoryRetentionPreference,
+            );
+            useEditorStore.getState().setVersionHistoryCompareMode(
+              persistedPanelPreferences.versionHistoryCompareMode,
+            );
             set((s) => {
               if (!s.connected || s.projectId !== projectId) return;
               const versions = collabEngine.getVersions();
@@ -757,6 +786,16 @@ export const useCollabStore = create<CollabState & CollabActions>()(
       },
       setActivitySearchQuery: (query) => {
         set((s) => { s.activitySearchQuery = query; }, false, 'collab/setActivitySearchQuery');
+        void persistCollaborationStateToRepository(
+          get().projectId,
+          get().activityFeed,
+          get().activityRetentionPreferences,
+          get(),
+        ).catch((error) => {
+          console.error('Failed to persist collaboration panel preferences', error);
+        });
+      },
+      persistPanelPreferences: () => {
         void persistCollaborationStateToRepository(
           get().projectId,
           get().activityFeed,

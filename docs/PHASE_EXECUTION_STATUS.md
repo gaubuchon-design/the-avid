@@ -122,10 +122,13 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Added phase-1 UI coverage asserting persisted activity filter/search state renders the expected restored context chips and filtered count after reopen hydration.
 - Surfaced restored comments review context in the collaboration panel comments tab with summary indicators for active filter and shown/total thread count.
 - Added phase-1 UI coverage asserting persisted comment-filter state renders restored comments context indicators and expected filtered thread counts.
+- Extended project-scoped collaboration panel preferences to persist version-history review controls (`versionHistoryRetentionPreference` + `versionHistoryCompareMode`) alongside tab/filter/search context.
+- Hydrated persisted version-history review controls on collaboration reconnect/reopen and applied them to editor store so version compare/retention UI state restores automatically.
+- Added store coverage for persisted version-history review control hydration and explicit persistence of these controls via collaboration panel preference writes.
 
 ## Next Execution Slices
 
-1. Persist and hydrate version-history review controls (retention preference + compare mode) so restored context carries across reconnect/reopen without manual re-selection.
+1. Surface restored version-history review context indicators (retention + compare mode chips) in the Versions tab header so reopened compare state is immediately visible.
 
 ## Exit Signals For These Early Phases
 

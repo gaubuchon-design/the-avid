@@ -301,6 +301,8 @@ export interface EditorProjectCollaborationPanelPreferences {
   commentFilter: 'all' | 'open' | 'resolved';
   activityActionFilter: 'all' | 'comments' | 'versions' | 'other';
   activitySearchQuery: string;
+  versionHistoryRetentionPreference: 'manual' | 'session';
+  versionHistoryCompareMode: 'summary' | 'details';
 }
 
 export interface EditorProjectSettings {
@@ -1249,6 +1251,8 @@ function normalizeProject(project: EditorProject): EditorProject {
       commentFilter: 'all',
       activityActionFilter: 'all',
       activitySearchQuery: '',
+      versionHistoryRetentionPreference: 'manual',
+      versionHistoryCompareMode: 'summary',
     }),
     tokenBalance,
     editorialState: {

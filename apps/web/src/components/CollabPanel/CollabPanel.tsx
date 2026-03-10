@@ -798,6 +798,7 @@ function VersionsTab() {
     restoreVersion,
     versionRetentionPreferences,
     setVersionRetentionPreferences,
+    persistPanelPreferences,
     currentUserName,
     currentUserAvatar,
   } = useCollabStore();
@@ -994,7 +995,10 @@ function VersionsTab() {
           {(['manual', 'session'] as const).map((preference) => (
             <button
               key={preference}
-              onClick={() => setVersionHistoryRetentionPreference(preference)}
+              onClick={() => {
+                setVersionHistoryRetentionPreference(preference);
+                persistPanelPreferences();
+              }}
               style={{
                 padding: '4px 8px',
                 borderRadius: 'var(--radius-sm)',
@@ -1016,7 +1020,10 @@ function VersionsTab() {
           {(['summary', 'details'] as const).map((mode) => (
             <button
               key={mode}
-              onClick={() => setVersionHistoryCompareMode(mode)}
+              onClick={() => {
+                setVersionHistoryCompareMode(mode);
+                persistPanelPreferences();
+              }}
               style={{
                 padding: '4px 8px',
                 borderRadius: 'var(--radius-sm)',
