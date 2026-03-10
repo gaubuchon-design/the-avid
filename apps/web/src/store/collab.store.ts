@@ -47,6 +47,7 @@ export interface ActivityRetentionPreferences {
 }
 
 export type ActivityActionFilter = 'all' | 'comments' | 'versions' | 'other';
+export type VersionCompareBaselineMode = 'previous' | 'latest' | 'custom';
 
 export interface CollaboratorIdentityProfile {
   userId?: string;
@@ -70,6 +71,9 @@ interface CollabState {
   commentFilter: 'all' | 'open' | 'resolved';
   activityActionFilter: ActivityActionFilter;
   activitySearchQuery: string;
+  versionCompareTargetVersionId: string;
+  versionCompareBaselineMode: VersionCompareBaselineMode;
+  versionCompareCustomBaselineId: string;
   versionRetentionPreferences: VersionRetentionPreferences;
   activityRetentionPreferences: ActivityRetentionPreferences;
   activityFeed: ActivityEntry[];
@@ -85,6 +89,9 @@ interface CollabActions {
   setCommentFilter: (filter: CollabState['commentFilter']) => void;
   setActivityActionFilter: (filter: CollabState['activityActionFilter']) => void;
   setActivitySearchQuery: (query: string) => void;
+  setVersionComparePanelState: (
+    state: Partial<Pick<CollabState, 'versionCompareTargetVersionId' | 'versionCompareBaselineMode' | 'versionCompareCustomBaselineId'>>,
+  ) => void;
   persistPanelPreferences: () => void;
   selectComment: (id: string | null) => void;
 
@@ -433,6 +440,10 @@ function isActivityActionFilter(value: unknown): value is ActivityActionFilter {
   return value === 'all' || value === 'comments' || value === 'versions' || value === 'other';
 }
 
+function isVersionCompareBaselineMode(value: unknown): value is VersionCompareBaselineMode {
+  return value === 'previous' || value === 'latest' || value === 'custom';
+}
+
 function isVersionHistoryRetentionPreference(value: unknown): value is 'manual' | 'session' {
   return value === 'manual' || value === 'session';
 }
@@ -441,9 +452,16 @@ function isVersionHistoryCompareMode(value: unknown): value is 'summary' | 'deta
   return value === 'summary' || value === 'details';
 }
 
-function toPersistedPanelPreferences(
-  state: Pick<CollabState, 'activeTab' | 'commentFilter' | 'activityActionFilter' | 'activitySearchQuery'>,
-): EditorProjectCollaborationPanelPreferences {
+function toPersistedPanelPreferences(state: Pick<
+  CollabState,
+  | 'activeTab'
+  | 'commentFilter'
+  | 'activityActionFilter'
+  | 'activitySearchQuery'
+  | 'versionCompareTargetVersionId'
+  | 'versionCompareBaselineMode'
+  | 'versionCompareCustomBaselineId'
+>): EditorProjectCollaborationPanelPreferences {
   const editorState = useEditorStore.getState();
   return {
     activeTab: state.activeTab,
@@ -452,12 +470,24 @@ function toPersistedPanelPreferences(
     activitySearchQuery: state.activitySearchQuery,
     versionHistoryRetentionPreference: editorState.versionHistoryRetentionPreference,
     versionHistoryCompareMode: editorState.versionHistoryCompareMode,
+    versionCompareTargetVersionId: state.versionCompareTargetVersionId,
+    versionCompareBaselineMode: state.versionCompareBaselineMode,
+    versionCompareCustomBaselineId: state.versionCompareCustomBaselineId,
   };
 }
 
 function toPanelPreferencesFromPersistedEntry(
   entry?: EditorProjectCollaborationPanelPreferences,
-): Pick<CollabState, 'activeTab' | 'commentFilter' | 'activityActionFilter' | 'activitySearchQuery'> & {
+): Pick<
+  CollabState,
+  | 'activeTab'
+  | 'commentFilter'
+  | 'activityActionFilter'
+  | 'activitySearchQuery'
+  | 'versionCompareTargetVersionId'
+  | 'versionCompareBaselineMode'
+  | 'versionCompareCustomBaselineId'
+> & {
   versionHistoryRetentionPreference: 'manual' | 'session';
   versionHistoryCompareMode: 'summary' | 'details';
 } {
@@ -472,6 +502,15 @@ function toPanelPreferencesFromPersistedEntry(
     versionHistoryCompareMode: isVersionHistoryCompareMode(entry?.versionHistoryCompareMode)
       ? entry.versionHistoryCompareMode
       : DEFAULT_VERSION_HISTORY_COMPARE_MODE,
+    versionCompareTargetVersionId: typeof entry?.versionCompareTargetVersionId === 'string'
+      ? entry.versionCompareTargetVersionId
+      : '',
+    versionCompareBaselineMode: isVersionCompareBaselineMode(entry?.versionCompareBaselineMode)
+      ? entry.versionCompareBaselineMode
+      : 'previous',
+    versionCompareCustomBaselineId: typeof entry?.versionCompareCustomBaselineId === 'string'
+      ? entry.versionCompareCustomBaselineId
+      : '',
   };
 }
 
@@ -600,7 +639,16 @@ async function persistCollaborationStateToRepository(
   projectId: string | null,
   activityFeed: ActivityEntry[],
   activityRetentionPreferences: ActivityRetentionPreferences,
-  panelPreferences: Pick<CollabState, 'activeTab' | 'commentFilter' | 'activityActionFilter' | 'activitySearchQuery'>,
+  panelPreferences: Pick<
+    CollabState,
+    | 'activeTab'
+    | 'commentFilter'
+    | 'activityActionFilter'
+    | 'activitySearchQuery'
+    | 'versionCompareTargetVersionId'
+    | 'versionCompareBaselineMode'
+    | 'versionCompareCustomBaselineId'
+  >,
 ): Promise<void> {
   if (!projectId) return;
   const project = await getProjectFromRepository(projectId);
@@ -644,6 +692,9 @@ const INITIAL_STATE: CollabState = {
   commentFilter: 'all',
   activityActionFilter: 'all',
   activitySearchQuery: '',
+  versionCompareTargetVersionId: '',
+  versionCompareBaselineMode: 'previous',
+  versionCompareCustomBaselineId: '',
   versionRetentionPreferences: initialVersionRetentionPreferences,
   activityRetentionPreferences: initialActivityRetentionPreferences,
   activityFeed: applyActivityRetention(DEMO_ACTIVITY, initialActivityRetentionPreferences),
@@ -727,6 +778,9 @@ export const useCollabStore = create<CollabState & CollabActions>()(
               s.commentFilter = persistedPanelPreferences.commentFilter;
               s.activityActionFilter = persistedPanelPreferences.activityActionFilter;
               s.activitySearchQuery = persistedPanelPreferences.activitySearchQuery;
+              s.versionCompareTargetVersionId = persistedPanelPreferences.versionCompareTargetVersionId;
+              s.versionCompareBaselineMode = persistedPanelPreferences.versionCompareBaselineMode;
+              s.versionCompareCustomBaselineId = persistedPanelPreferences.versionCompareCustomBaselineId;
               s.activityRetentionPreferences = persistedActivityRetentionPreferences;
               s.activityFeed = applyActivityRetention(persistedActivityFeed, persistedActivityRetentionPreferences);
               s.identityProfiles = {
@@ -786,6 +840,27 @@ export const useCollabStore = create<CollabState & CollabActions>()(
       },
       setActivitySearchQuery: (query) => {
         set((s) => { s.activitySearchQuery = query; }, false, 'collab/setActivitySearchQuery');
+        void persistCollaborationStateToRepository(
+          get().projectId,
+          get().activityFeed,
+          get().activityRetentionPreferences,
+          get(),
+        ).catch((error) => {
+          console.error('Failed to persist collaboration panel preferences', error);
+        });
+      },
+      setVersionComparePanelState: (state) => {
+        set((s) => {
+          if (typeof state.versionCompareTargetVersionId === 'string') {
+            s.versionCompareTargetVersionId = state.versionCompareTargetVersionId;
+          }
+          if (isVersionCompareBaselineMode(state.versionCompareBaselineMode)) {
+            s.versionCompareBaselineMode = state.versionCompareBaselineMode;
+          }
+          if (typeof state.versionCompareCustomBaselineId === 'string') {
+            s.versionCompareCustomBaselineId = state.versionCompareCustomBaselineId;
+          }
+        }, false, 'collab/setVersionComparePanelState');
         void persistCollaborationStateToRepository(
           get().projectId,
           get().activityFeed,

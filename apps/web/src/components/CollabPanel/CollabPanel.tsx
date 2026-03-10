@@ -798,6 +798,10 @@ function VersionsTab() {
     restoreVersion,
     versionRetentionPreferences,
     setVersionRetentionPreferences,
+    versionCompareTargetVersionId,
+    versionCompareBaselineMode,
+    versionCompareCustomBaselineId,
+    setVersionComparePanelState,
     persistPanelPreferences,
     currentUserName,
     currentUserAvatar,
@@ -811,9 +815,6 @@ function VersionsTab() {
   const [showForm, setShowForm] = useState(false);
   const [versionName, setVersionName] = useState('');
   const [versionDesc, setVersionDesc] = useState('');
-  const [compareTargetVersionId, setCompareTargetVersionId] = useState<string>('');
-  const [compareMode, setCompareMode] = useState<VersionCompareMode>('previous');
-  const [customBaselineId, setCustomBaselineId] = useState<string>('');
 
   const handleSave = useCallback(() => {
     if (!versionName.trim()) return;
@@ -828,11 +829,16 @@ function VersionsTab() {
     setShowForm(false);
   }, [saveVersion, versionDesc, versionHistoryRetentionPreference, versionName]);
 
-  const compareTargetVersion = versions.find((version) => version.id === compareTargetVersionId) ?? versions[0] ?? null;
+  const compareTargetVersion = versions.find((version) => version.id === versionCompareTargetVersionId) ?? versions[0] ?? null;
   const compareBaseline = useMemo(() => {
     if (!compareTargetVersion) return null;
-    return pickComparisonBaseline(versions, compareTargetVersion.id, compareMode, customBaselineId);
-  }, [compareMode, compareTargetVersion, customBaselineId, versions]);
+    return pickComparisonBaseline(
+      versions,
+      compareTargetVersion.id,
+      versionCompareBaselineMode,
+      versionCompareCustomBaselineId,
+    );
+  }, [compareTargetVersion, versionCompareBaselineMode, versionCompareCustomBaselineId, versions]);
 
   const comparison = useMemo(() => {
     if (!compareTargetVersion || !compareBaseline) return null;
@@ -1100,7 +1106,7 @@ function VersionsTab() {
           currentUserAvatar={currentUserAvatar}
           canRestore={canRestoreVersion(version)}
           onRestore={() => restoreVersion(version.id)}
-          onCompare={() => setCompareTargetVersionId(version.id)}
+          onCompare={() => setVersionComparePanelState({ versionCompareTargetVersionId: version.id })}
           selectedForCompare={compareTargetVersion?.id === version.id}
         />
       ))}
@@ -1120,8 +1126,11 @@ function VersionsTab() {
             <label style={{ display: 'grid', gap: 4, fontSize: 10, color: 'var(--text-muted)' }}>
               Target version
               <select
+                aria-label="Version compare target"
                 value={compareTargetVersion?.id ?? ''}
-                onChange={(event) => setCompareTargetVersionId(event.target.value)}
+                onChange={(event) => {
+                  setVersionComparePanelState({ versionCompareTargetVersionId: event.target.value });
+                }}
                 style={{
                   width: '100%',
                   padding: '6px 8px',
@@ -1146,8 +1155,11 @@ function VersionsTab() {
             <label style={{ display: 'grid', gap: 4, fontSize: 10, color: 'var(--text-muted)' }}>
               Baseline
               <select
-                value={compareMode}
-                onChange={(event) => setCompareMode(event.target.value as VersionCompareMode)}
+                aria-label="Version compare baseline mode"
+                value={versionCompareBaselineMode}
+                onChange={(event) => {
+                  setVersionComparePanelState({ versionCompareBaselineMode: event.target.value as VersionCompareMode });
+                }}
                 style={{
                   width: '100%',
                   padding: '6px 8px',
@@ -1167,12 +1179,15 @@ function VersionsTab() {
               </select>
             </label>
 
-            {compareMode === 'custom' && (
+            {versionCompareBaselineMode === 'custom' && (
               <label style={{ display: 'grid', gap: 4, fontSize: 10, color: 'var(--text-muted)' }}>
                 Compare against
                 <select
-                  value={customBaselineId}
-                  onChange={(event) => setCustomBaselineId(event.target.value)}
+                  aria-label="Version compare custom baseline"
+                  value={versionCompareCustomBaselineId}
+                  onChange={(event) => {
+                    setVersionComparePanelState({ versionCompareCustomBaselineId: event.target.value });
+                  }}
                   style={{
                     width: '100%',
                     padding: '6px 8px',

@@ -325,6 +325,47 @@ describe('phase 1 collab identity UI', () => {
     container.remove();
   });
 
+  it('renders restored version compare panel selections', async () => {
+    useCollabStore.setState({
+      activeTab: 'versions',
+      versions: [
+        {
+          ...makeVersion('Alex Editor'),
+          id: 'version-target',
+          name: 'Target Version',
+        },
+        {
+          ...makeVersion('Jordan Reviewer'),
+          id: 'version-baseline',
+          name: 'Baseline Version',
+        },
+      ],
+      versionCompareTargetVersionId: 'version-target',
+      versionCompareBaselineMode: 'custom',
+      versionCompareCustomBaselineId: 'version-baseline',
+    });
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<CollabPanel />);
+    });
+
+    const targetSelect = container.querySelector('select[aria-label="Version compare target"]') as HTMLSelectElement | null;
+    const baselineModeSelect = container.querySelector('select[aria-label="Version compare baseline mode"]') as HTMLSelectElement | null;
+    const customBaselineSelect = container.querySelector('select[aria-label="Version compare custom baseline"]') as HTMLSelectElement | null;
+    expect(targetSelect?.value).toBe('version-target');
+    expect(baselineModeSelect?.value).toBe('custom');
+    expect(customBaselineSelect?.value).toBe('version-baseline');
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
   it('renders avatar-aware identity chips in users tab rows', async () => {
     useCollabStore.setState({
       activeTab: 'users',

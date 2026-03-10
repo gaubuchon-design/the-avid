@@ -303,6 +303,9 @@ export interface EditorProjectCollaborationPanelPreferences {
   activitySearchQuery: string;
   versionHistoryRetentionPreference: 'manual' | 'session';
   versionHistoryCompareMode: 'summary' | 'details';
+  versionCompareTargetVersionId: string;
+  versionCompareBaselineMode: 'previous' | 'latest' | 'custom';
+  versionCompareCustomBaselineId: string;
 }
 
 export interface EditorProjectSettings {
@@ -1253,6 +1256,9 @@ function normalizeProject(project: EditorProject): EditorProject {
       activitySearchQuery: '',
       versionHistoryRetentionPreference: 'manual',
       versionHistoryCompareMode: 'summary',
+      versionCompareTargetVersionId: '',
+      versionCompareBaselineMode: 'previous',
+      versionCompareCustomBaselineId: '',
     }),
     tokenBalance,
     editorialState: {
