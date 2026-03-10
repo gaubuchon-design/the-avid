@@ -844,6 +844,29 @@ function CommentCard({
         </div>
       )}
 
+      {replyText.trim().length > 0 && (
+        <div
+          aria-label={`Reply draft indicator ${comment.id}`}
+          style={{
+            marginTop: 8,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            padding: '2px 6px',
+            borderRadius: 999,
+            border: '1px solid var(--border-default)',
+            background: 'var(--bg-elevated)',
+            color: 'var(--text-muted)',
+            fontSize: 9,
+            fontWeight: 600,
+            letterSpacing: '0.03em',
+            maxWidth: '100%',
+          }}
+        >
+          Draft reply: {replyText.trim().slice(0, 42)}{replyText.trim().length > 42 ? '...' : ''}
+        </div>
+      )}
+
       {/* Reply input */}
       {showReply && (
         <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>

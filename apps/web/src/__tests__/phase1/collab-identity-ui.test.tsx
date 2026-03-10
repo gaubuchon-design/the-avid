@@ -376,6 +376,7 @@ describe('phase 1 collab identity UI', () => {
     expect(composerSummary).toBeTruthy();
     expect(composerSummary?.textContent).toContain('Draft: Need alt b-roll after this line.');
     expect(composerSummary?.textContent).toContain('Replying to: comment-reply-target');
+    expect(container.textContent).toContain('Draft reply: This beat needs a tighter response.');
 
     await act(async () => {
       root.unmount();
