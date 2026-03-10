@@ -179,9 +179,11 @@ export function errorHandler(
  */
 export function notFoundHandler(req: Request, res: Response) {
   const requestId = req.headers['x-request-id'] as string | undefined;
+  // Sanitize path to prevent reflected data injection in JSON responses
+  const safePath = req.path.replace(/[<>"'&]/g, '').slice(0, 200);
   res.status(404).json({
     error: {
-      message: `Route ${req.method} ${req.path} not found`,
+      message: `Route ${req.method} ${safePath} not found`,
       code: 'NOT_FOUND',
       ...(requestId ? { requestId } : {}),
     },
@@ -224,11 +226,19 @@ export function requireJsonContentType(req: Request, res: Response, next: NextFu
 export function requestDuration(req: Request, res: Response, next: NextFunction) {
   const start = process.hrtime.bigint();
 
-  res.on('finish', () => {
+  // Track response time by intercepting res.end
+  const originalEnd = res.end.bind(res);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (res as any).end = function (this: Response, ...args: any[]) {
     const durationNs = process.hrtime.bigint() - start;
     const durationMs = Number(durationNs) / 1_000_000;
-    res.setHeader('X-Response-Time', `${durationMs.toFixed(2)}ms`);
-  });
+    // Only set header if headers haven't been sent yet
+    if (!res.headersSent) {
+      res.setHeader('X-Response-Time', `${durationMs.toFixed(2)}ms`);
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (originalEnd as any)(...args);
+  };
 
   next();
 }

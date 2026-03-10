@@ -100,7 +100,7 @@ router.get('/me/library', authenticate, async (req: Request, res: Response) => {
 
 // ─── GET /marketplace/:slug ────────────────────────────────────────────────────
 router.get('/:slug', validate(slugParam, 'params'), async (req: Request, res: Response) => {
-  const item = await db.marketplaceItem.findUnique({
+  const item = await db.marketplaceItem.findFirst({
     where: { slug: req.params['slug']!, isPublished: true },
     include: {
       author: { select: { id: true, displayName: true, avatarUrl: true } },

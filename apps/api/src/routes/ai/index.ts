@@ -117,7 +117,7 @@ router.post('/transcribe', validate(schemas.transcribe), async (req: Request, re
 
   const cost = TOKEN_COSTS['TRANSCRIPTION']!;
   const balance = await tokenService.getBalance(req.user!.id);
-  if (balance < cost!) throw new InsufficientTokensError(cost, balance);
+  if (balance < cost) throw new InsufficientTokensError(cost, balance);
 
   await tokenService.debit(req.user!.id, cost, 'transcription', mediaAssetId);
 
@@ -156,7 +156,7 @@ router.post('/script-sync', validate(schemas.scriptSync), async (req: Request, r
 
   const cost = TOKEN_COSTS['SCRIPT_SYNC']!;
   const balance = await tokenService.getBalance(req.user!.id);
-  if (balance < cost!) throw new InsufficientTokensError(cost, balance);
+  if (balance < cost) throw new InsufficientTokensError(cost, balance);
 
   await tokenService.debit(req.user!.id, cost, 'script_sync', projectId);
 
@@ -181,7 +181,7 @@ router.post('/assembly', validate(schemas.assembly), async (req: Request, res: R
 
   const cost = TOKEN_COSTS['ASSEMBLY']!;
   const balance = await tokenService.getBalance(req.user!.id);
-  if (balance < cost!) throw new InsufficientTokensError(cost, balance);
+  if (balance < cost) throw new InsufficientTokensError(cost, balance);
 
   await tokenService.debit(req.user!.id, cost, 'assembly', projectId);
 
@@ -206,7 +206,7 @@ router.post('/highlights', validate(schemas.highlights), async (req: Request, re
 
   const cost = TOKEN_COSTS['HIGHLIGHTS']!;
   const balance = await tokenService.getBalance(req.user!.id);
-  if (balance < cost!) throw new InsufficientTokensError(cost, balance);
+  if (balance < cost) throw new InsufficientTokensError(cost, balance);
 
   await tokenService.debit(req.user!.id, cost, 'highlights', projectId ?? mediaAssetId);
 

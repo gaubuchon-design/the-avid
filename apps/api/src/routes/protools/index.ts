@@ -39,9 +39,12 @@ router.post('/sessions', validate(schemas.createProToolsSession), async (req: Re
 });
 
 router.patch('/sessions/:id', validateAll({ params: sessionIdParam, body: schemas.updateProToolsSession }), async (req: Request, res: Response) => {
+  const existing = await db.proToolsSession.findUnique({ where: { id: req.params['id'] } });
+  if (!existing) throw new BadRequestError('Pro Tools session not found');
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma dynamic data payload
   const data: any = { ...req.body };
-  if (data.lastSyncAt) data.lastSyncAt = new Date(data.lastSyncAt);
+  if (data['lastSyncAt']) data['lastSyncAt'] = new Date(data['lastSyncAt']);
 
   const session = await db.proToolsSession.update({
     where: { id: req.params['id'] },
@@ -100,7 +103,7 @@ router.post(
   async (req: Request, res: Response) => {
     const { direction, markers } = req.body;
     const created = await Promise.all(
-      markers.map((m: any) =>
+      markers.map((m: { avidMarkerId?: string; proToolsLocId?: string; timecode: string; label?: string; color?: string }) =>
         db.markerSync.create({
           data: {
             sessionId: req.params['sessionId'],
@@ -124,9 +127,10 @@ router.post(
   '/sessions/:sessionId/export-aaf',
   validateAll({ params: sessionIdOnlyParam, body: schemas.proToolsExportAAF }),
   async (req: Request, res: Response) => {
-    const session = await db.proToolsSession.findUniqueOrThrow({
+    const session = await db.proToolsSession.findUnique({
       where: { id: req.params['sessionId'] },
     });
+    if (!session) throw new BadRequestError('Pro Tools session not found');
 
     const { timelineId, handleDuration } = req.body;
 
@@ -139,9 +143,10 @@ router.post(
 );
 
 router.post('/sessions/:sessionId/import-aaf', validate(sessionIdOnlyParam, 'params'), async (req: Request, res: Response) => {
-  const session = await db.proToolsSession.findUniqueOrThrow({
+  const session = await db.proToolsSession.findUnique({
     where: { id: req.params['sessionId'] },
   });
+  if (!session) throw new BadRequestError('Pro Tools session not found');
 
   // In production: parse incoming AAF from Pro Tools mix
   res.json({

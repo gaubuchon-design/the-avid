@@ -48,7 +48,10 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
       throw new UnauthorizedError('Malformed token');
     }
 
-    const payload = jwt.verify(token, config.jwt.secret) as JwtPayload;
+    const payload = jwt.verify(token, config.jwt.secret, {
+      issuer: config.jwt.issuer,
+      audience: config.jwt.audience,
+    }) as JwtPayload;
 
     if (!payload.sub) {
       throw new UnauthorizedError('Invalid token payload');
@@ -197,18 +200,29 @@ export function generateTokens(user: { id: string; email: string; displayName: s
   const accessToken = jwt.sign(
     { sub: user.id, email: user.email, displayName: user.displayName },
     config.jwt.secret,
-    { expiresIn: config.jwt.expiresIn as any }
+    {
+      expiresIn: config.jwt.expiresIn as any,
+      issuer: config.jwt.issuer,
+      audience: config.jwt.audience,
+    }
   );
   const refreshToken = jwt.sign(
     { sub: user.id, type: 'refresh' },
-    config.jwt.secret,
-    { expiresIn: config.jwt.refreshExpiresIn as any }
+    config.jwt.refreshSecret,
+    {
+      expiresIn: config.jwt.refreshExpiresIn as any,
+      issuer: config.jwt.issuer,
+      audience: config.jwt.audience,
+    }
   );
   return { accessToken, refreshToken };
 }
 
 export function verifyRefreshToken(token: string): RefreshTokenPayload {
-  const payload = jwt.verify(token, config.jwt.secret) as RefreshTokenPayload;
+  const payload = jwt.verify(token, config.jwt.refreshSecret, {
+    issuer: config.jwt.issuer,
+    audience: config.jwt.audience,
+  }) as RefreshTokenPayload;
   if (payload.type !== 'refresh') {
     throw new UnauthorizedError('Invalid token type');
   }

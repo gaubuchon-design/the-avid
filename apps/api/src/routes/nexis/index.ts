@@ -8,10 +8,14 @@ import { db } from '../../db/client';
 import {
   validate, validateAll, schemas, uuidParam,
 } from '../../utils/validation';
+import { NotFoundError } from '../../utils/errors';
 import { z } from 'zod';
 
 const router = Router();
 router.use(authenticate);
+
+// ─── Query schemas ────────────────────────────────────────────────────────────
+const orgIdQuery = z.object({ orgId: z.string().uuid().optional() });
 
 // ─── Param schemas ───────────────────────────────────────────────────────────
 const workspaceIdParam = z.object({ workspaceId: z.string().uuid() });
@@ -22,7 +26,7 @@ const workspaceAndMediaParams = z.object({
 
 // ─── NEXIS Workspaces ────────────────────────────────────────────────────────
 
-router.get('/workspaces', async (req: Request, res: Response) => {
+router.get('/workspaces', validate(orgIdQuery, 'query'), async (req: Request, res: Response) => {
   const { orgId } = req.query;
   const workspaces = await db.nEXISWorkspace.findMany({
     where: orgId ? { orgId: orgId as string } : {},
@@ -33,7 +37,7 @@ router.get('/workspaces', async (req: Request, res: Response) => {
 });
 
 router.get('/workspaces/:id', validate(uuidParam, 'params'), async (req: Request, res: Response) => {
-  const workspace = await db.nEXISWorkspace.findUniqueOrThrow({
+  const workspace = await db.nEXISWorkspace.findUnique({
     where: { id: req.params['id'] },
     include: {
       mediaPaths: {
@@ -42,6 +46,7 @@ router.get('/workspaces/:id', validate(uuidParam, 'params'), async (req: Request
       },
     },
   });
+  if (!workspace) throw new NotFoundError('NEXIS workspace');
   res.json({ workspace });
 });
 
@@ -145,7 +150,7 @@ router.patch(
 
 // ─── Admin: Storage Overview ─────────────────────────────────────────────────
 
-router.get('/admin/overview', async (req: Request, res: Response) => {
+router.get('/admin/overview', validate(orgIdQuery, 'query'), async (req: Request, res: Response) => {
   const { orgId } = req.query;
   const workspaces = await db.nEXISWorkspace.findMany({
     where: orgId ? { orgId: orgId as string } : {},

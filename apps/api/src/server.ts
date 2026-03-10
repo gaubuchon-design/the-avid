@@ -48,9 +48,39 @@ app.disable('x-powered-by');
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
-  contentSecurityPolicy: false, // handled by frontend
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'none'"],
+      scriptSrc: ["'none'"],
+      styleSrc: ["'none'"],
+      imgSrc: ["'none'"],
+      connectSrc: ["'self'"],
+      fontSrc: ["'none'"],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+      formAction: ["'self'"],
+      baseUri: ["'self'"],
+    },
+  },
   hsts: config.isProd ? { maxAge: 63072000, includeSubDomains: true, preload: true } : false,
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
 }));
+
+// ─── Permissions Policy ────────────────────────────────────────────────────
+app.use((_req, res, next) => {
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  next();
+});
+
+// ─── HTTPS enforcement in production ───────────────────────────────────────
+if (config.isProd) {
+  app.use((req, res, next) => {
+    if (req.headers['x-forwarded-proto'] !== 'https') {
+      return res.redirect(301, `https://${req.headers['host'] ?? ''}${req.url}`);
+    }
+    next();
+  });
+}
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -119,9 +149,19 @@ const uploadLimiter = rateLimit({
 
 /** Liveness probe -- always responds if the process is running */
 app.get('/health', (_req, res) => {
-  const mem = process.memoryUsage();
   // Cache health response for 5 seconds to avoid per-request overhead
-  res.setHeader('Cache-Control', 'public, max-age=5');
+  res.setHeader('Cache-Control', 'no-store');
+
+  // In production, only expose minimal health info to unauthenticated callers
+  if (config.isProd) {
+    res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+    });
+    return;
+  }
+
+  const mem = process.memoryUsage();
   res.json({
     status: 'ok',
     version: process.env['npm_package_version'] ?? '0.1.0',

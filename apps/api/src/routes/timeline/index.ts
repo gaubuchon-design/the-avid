@@ -175,15 +175,12 @@ router.post(
       include: { effects: true, mediaAsset: { select: { id: true, name: true, type: true, duration: true } } },
     });
 
-    // Update timeline duration if needed
+    // Update timeline duration if the new clip extends beyond it
     if (clip.endTime > 0) {
-      const timeline = await db.timeline.findUnique({ where: { id: req.params['timelineId'] } });
-      if (timeline && clip.endTime > timeline.duration) {
-        await db.timeline.update({
-          where: { id: req.params['timelineId'] },
-          data: { duration: clip.endTime },
-        });
-      }
+      await db.timeline.updateMany({
+        where: { id: req.params['timelineId']!, duration: { lt: clip.endTime } },
+        data: { duration: clip.endTime },
+      });
     }
 
     res.status(201).json({ clip });

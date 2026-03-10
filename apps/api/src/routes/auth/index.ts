@@ -10,6 +10,17 @@ import { logger } from '../../utils/logger';
 
 const router = Router();
 
+function recordFailedAttempt(key: string): void {
+  const entry = loginAttempts.get(key) ?? { count: 0, lastAttempt: 0, lockedUntil: 0 };
+  entry.count++;
+  entry.lastAttempt = Date.now();
+  if (entry.count >= config.security.maxLoginAttempts) {
+    entry.lockedUntil = Date.now() + config.security.lockoutDurationMs;
+    logger.warn('Account locked due to too many failed login attempts', { email: key, attempts: entry.count });
+  }
+  loginAttempts.set(key, entry);
+}
+
 // ─── POST /auth/register ───────────────────────────────────────────────────────
 router.post('/register', validate(schemas.register), async (req: Request, res: Response) => {
   const { email, password, displayName } = req.body;
@@ -47,9 +58,31 @@ router.post('/register', validate(schemas.register), async (req: Request, res: R
   res.status(201).json({ user, accessToken, refreshToken });
 });
 
+// ─── In-memory login attempt tracking (use Redis in production) ─────────────
+const loginAttempts = new Map<string, { count: number; lastAttempt: number; lockedUntil: number }>();
+
+// Prune expired lockout entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of loginAttempts) {
+    if (entry.lockedUntil < now && now - entry.lastAttempt > config.security.lockoutDurationMs) {
+      loginAttempts.delete(key);
+    }
+  }
+}, 5 * 60 * 1000).unref();
+
 // ─── POST /auth/login ──────────────────────────────────────────────────────────
 router.post('/login', validate(schemas.login), async (req: Request, res: Response) => {
   const { email, password } = req.body;
+
+  // Check for account lockout
+  const attemptKey = email.toLowerCase();
+  const attempts = loginAttempts.get(attemptKey);
+  if (attempts && attempts.lockedUntil > Date.now()) {
+    const retryAfterSec = Math.ceil((attempts.lockedUntil - Date.now()) / 1000);
+    logger.warn('Login attempt on locked account', { email: attemptKey, retryAfterSec });
+    throw new UnauthorizedError(`Account temporarily locked. Try again in ${retryAfterSec} seconds.`);
+  }
 
   const user = await db.user.findUnique({
     where: { email, deletedAt: null },
@@ -63,9 +96,19 @@ router.post('/login', validate(schemas.login), async (req: Request, res: Respons
     },
   });
 
-  if (!user?.passwordHash) throw new UnauthorizedError('Invalid credentials');
+  if (!user?.passwordHash) {
+    // Track failed attempt (same timing as valid user to prevent enumeration)
+    recordFailedAttempt(attemptKey);
+    throw new UnauthorizedError('Invalid credentials');
+  }
   const valid = await bcrypt.compare(password, user.passwordHash);
-  if (!valid) throw new UnauthorizedError('Invalid credentials');
+  if (!valid) {
+    recordFailedAttempt(attemptKey);
+    throw new UnauthorizedError('Invalid credentials');
+  }
+
+  // Clear failed attempts on successful login
+  loginAttempts.delete(attemptKey);
 
   const { accessToken, refreshToken } = generateTokens(user);
 

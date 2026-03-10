@@ -56,8 +56,11 @@ export const config = {
 
   jwt: {
     secret: optional('JWT_SECRET', 'dev-secret-change-in-production'),
+    refreshSecret: optional('JWT_REFRESH_SECRET', optional('JWT_SECRET', 'dev-refresh-secret-change-in-production')),
     expiresIn: optional('JWT_EXPIRES_IN', '7d'),
     refreshExpiresIn: optional('JWT_REFRESH_EXPIRES_IN', '30d'),
+    issuer: optional('JWT_ISSUER', 'avid-api'),
+    audience: optional('JWT_AUDIENCE', 'avid-app'),
   },
 
   aws: {
@@ -157,6 +160,22 @@ if (config.isProd) {
   }
   if (config.jwt.secret.length < 32) {
     throw new Error('JWT_SECRET must be at least 32 characters in production');
+  }
+  if (config.jwt.refreshSecret === 'dev-refresh-secret-change-in-production') {
+    throw new Error('JWT_REFRESH_SECRET must be set in production');
+  }
+  if (config.jwt.refreshSecret.length < 32) {
+    throw new Error('JWT_REFRESH_SECRET must be at least 32 characters in production');
+  }
+  if (!config.cors.origins.length || config.cors.origins.includes('*')) {
+    throw new Error('ALLOWED_ORIGINS must be explicitly set in production (no wildcards)');
+  }
+}
+
+// Warn in development/staging if using default secret
+if (!config.isTest && !config.isProd) {
+  if (config.jwt.secret === 'dev-secret-change-in-production') {
+    console.warn('[SECURITY] Using default JWT_SECRET -- set JWT_SECRET env var before deploying');
   }
 }
 

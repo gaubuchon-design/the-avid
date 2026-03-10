@@ -102,9 +102,23 @@ export function initWebSocket(httpServer: HttpServer) {
   });
 
   // ─── Connection ──────────────────────────────────────────────────────────────
+  const MAX_CONNECTIONS_PER_USER = 5;
+
   io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- user attached in auth middleware
     const user = (socket as any).user as SocketUser;
+
+    // Limit max connections per user to prevent resource exhaustion
+    const userConnections = Array.from(socketUsers.values()).filter(
+      (u) => u.userId === user.userId
+    ).length;
+    if (userConnections >= MAX_CONNECTIONS_PER_USER) {
+      logger.warn('Max WS connections per user exceeded', { userId: user.userId, connections: userConnections });
+      socket.emit('error', { message: 'Too many connections', code: 'MAX_CONNECTIONS' });
+      socket.disconnect(true);
+      return;
+    }
+
     logger.debug('WS connected', { userId: user.userId, displayName: user.displayName, socketId: socket.id });
 
     // Join project room
@@ -156,13 +170,30 @@ export function initWebSocket(httpServer: HttpServer) {
 
     // Timeline operations (OT-based -- broadcast to room, skip sender)
     socket.on('timeline:operation', (operation) => {
-      if (!operation?.timelineId) {
+      if (!operation?.timelineId || typeof operation.timelineId !== 'string') {
         socket.emit('error', { message: 'timelineId is required', code: 'INVALID_PAYLOAD' });
         return;
       }
 
+      // Validate operation type is one of the allowed types
+      const validTypes = ['clip:add', 'clip:move', 'clip:trim', 'clip:delete', 'track:add', 'track:delete'];
+      if (!operation.type || !validTypes.includes(operation.type)) {
+        socket.emit('error', { message: 'Invalid operation type', code: 'INVALID_PAYLOAD' });
+        return;
+      }
+
+      // Verify the user is actually in a project room (cannot broadcast to arbitrary rooms)
+      const isInRoom = socket.rooms.has(`project:${operation.timelineId}`);
+      if (!isInRoom) {
+        socket.emit('error', { message: 'Not a member of this project', code: 'FORBIDDEN' });
+        return;
+      }
+
+      // Sanitize the payload -- strip any userId/timestamp from client input
       const op: TimelineOperation = {
-        ...operation,
+        type: operation.type,
+        payload: operation.payload,
+        timelineId: operation.timelineId,
         userId: user.userId,
         timestamp: Date.now(),
       };
@@ -172,9 +203,14 @@ export function initWebSocket(httpServer: HttpServer) {
       });
     });
 
-    // Playhead sync
+    // Playhead sync (with input validation)
     socket.on('playhead:move', ({ timelineId, position }) => {
-      if (!timelineId || typeof position !== 'number') return;
+      if (!timelineId || typeof timelineId !== 'string') return;
+      if (typeof position !== 'number' || !Number.isFinite(position) || position < 0) return;
+
+      // Verify user is in the project room
+      if (!socket.rooms.has(`project:${timelineId}`)) return;
+
       socket.to(`project:${timelineId}`).emit('playhead:move', {
         timelineId,
         position,
@@ -182,8 +218,15 @@ export function initWebSocket(httpServer: HttpServer) {
       });
     });
 
-    // Cursor movement (rate-limited)
+    // Cursor movement (rate-limited with input validation)
     socket.on('cursor:move', ({ x, y }) => {
+      // Validate coordinates are finite numbers within reasonable bounds
+      if (typeof x !== 'number' || typeof y !== 'number' ||
+          !Number.isFinite(x) || !Number.isFinite(y) ||
+          x < -10000 || x > 100000 || y < -10000 || y > 100000) {
+        return;
+      }
+
       const now = Date.now();
       const last = lastCursorUpdate.get(socket.id) ?? 0;
       if (now - last < CURSOR_RATE_LIMIT_MS) return;

@@ -24,7 +24,7 @@ router.post(
   requireProjectAccess('EDITOR'),
   validateAll({ params: projectIdParam, body: schemas.exportAAF }),
   async (req: Request, res: Response) => {
-    const { projectId } = req.params;
+    const projectId = req.params['projectId']!;
     const {
       format, embedMedia, includeMarkers, includeEffects,
       includeMetadata, frameRate, dropFrame, trackFilter,
@@ -55,7 +55,7 @@ router.post(
   requireProjectAccess('EDITOR'),
   validateAll({ params: projectIdParam, body: schemas.importAAFComposition }),
   async (req: Request, res: Response) => {
-    const { projectId } = req.params;
+    const projectId = req.params['projectId']!;
 
     const importResult = {
       projectId,
@@ -80,7 +80,7 @@ router.post(
   requireProjectAccess('VIEWER'),
   validateAll({ params: projectIdParam, body: schemas.exportEDL }),
   async (req: Request, res: Response) => {
-    const { projectId } = req.params;
+    const projectId = req.params['projectId']!;
     const {
       format, title, frameRate, timecodeMode,
       includeComments, includeSpeedChanges, trackTypes,
@@ -113,7 +113,7 @@ router.get(
   requireProjectAccess('VIEWER'),
   validate(projectIdParam, 'params'),
   async (req: Request, res: Response) => {
-    const { projectId } = req.params;
+    const projectId = req.params['projectId']!;
 
     res.json({
       projectId,
@@ -132,7 +132,7 @@ router.post(
   requireProjectAccess('EDITOR'),
   validateAll({ params: projectIdParam, body: schemas.relinkScan }),
   async (req: Request, res: Response) => {
-    const { projectId } = req.params;
+    const projectId = req.params['projectId']!;
 
     const scanResult = {
       id: `scan_${Date.now()}`,
@@ -155,7 +155,7 @@ router.post(
   requireProjectAccess('EDITOR'),
   validateAll({ params: projectIdParam, body: schemas.relinkApply }),
   async (req: Request, res: Response) => {
-    const { projectId } = req.params;
+    const projectId = req.params['projectId']!;
     const { proposals } = req.body;
 
     const relinkResult = {
@@ -181,7 +181,7 @@ router.post(
   requireProjectAccess('EDITOR'),
   validateAll({ params: projectIdParam, body: schemas.exportStems }),
   async (req: Request, res: Response) => {
-    const { projectId } = req.params;
+    const projectId = req.params['projectId']!;
     const {
       preset, format, bitDepth, sampleRate,
       embedTimecode, normalize, includeFullMix,
@@ -232,7 +232,7 @@ router.post(
   requireProjectAccess('EDITOR'),
   validateAll({ params: projectIdParam, body: schemas.createMulticam }),
   async (req: Request, res: Response) => {
-    const { projectId } = req.params;
+    const projectId = req.params['projectId']!;
     const { name, syncMethod, assetIds } = req.body;
 
     const multiCamGroup = {
@@ -259,7 +259,8 @@ router.post(
   requireProjectAccess('EDITOR'),
   validateAll({ params: projectIdAndBinIdParams, body: schemas.binLockMessage }),
   async (req: Request, res: Response) => {
-    const { projectId, binId } = req.params;
+    const projectId = req.params['projectId']!;
+    const binId = req.params['binId']!;
     const { message } = req.body;
     const userId = req.user!.id;
     const displayName = req.user!.displayName;
@@ -287,7 +288,7 @@ router.delete(
   requireProjectAccess('EDITOR'),
   validate(projectIdAndBinIdParams, 'params'),
   async (req: Request, res: Response) => {
-    const { binId } = req.params;
+    const binId = req.params['binId']!;
 
     res.status(200).json({
       released: true,
@@ -319,7 +320,7 @@ router.post(
   requireProjectAccess('VIEWER'),
   validateAll({ params: projectIdParam, body: schemas.sequenceCompare }),
   async (req: Request, res: Response) => {
-    const { sequenceA, sequenceB } = req.body;
+    const { sequenceA, sequenceB } = req.body as { sequenceA: { name?: string }; sequenceB: { name?: string } };
 
     const diffResult = {
       nameA: sequenceA.name ?? 'Sequence A',

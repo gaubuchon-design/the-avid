@@ -17,14 +17,14 @@ import type {
 // ─── Constants ─────────────────────────────────────────────────────────────
 
 const EVENT_ICONS: Partial<Record<SportEventType, string>> = {
-  GOAL:          '&#9917;',
-  TOUCHDOWN:     '&#127944;',
-  HOME_RUN:      '&#9918;',
-  THREE_POINTER: '&#127936;',
-  DUNK:          '&#127936;',
-  PENALTY:       '&#9888;',
+  GOAL:          '\u26BD',
+  TOUCHDOWN:     '\uD83C\uDFC8',
+  HOME_RUN:      '\u26BE',
+  THREE_POINTER: '\uD83C\uDFC0',
+  DUNK:          '\uD83C\uDFC0',
+  PENALTY:       '\u26A0',
   FOUL:          '!',
-  SAVE:          '&#128694;',
+  SAVE:          '\uD83E\uDDB6',
   RED_CARD:      'RC',
   YELLOW_CARD:   'YC',
   INTERCEPTION:  'INT',
@@ -148,7 +148,7 @@ function HighlightItem({ highlight, isSelected, onSelect }: {
   isSelected: boolean;
   onSelect: (id: string) => void;
 }) {
-  const icon = EVENT_ICONS[highlight.type] ?? '&#9733;';
+  const icon = EVENT_ICONS[highlight.type] ?? '\u2605';
 
   return (
     <div
@@ -179,8 +179,10 @@ function HighlightItem({ highlight, isSelected, onSelect }: {
           color: 'var(--text-secondary)',
           flexShrink: 0,
         }}
-        dangerouslySetInnerHTML={{ __html: icon }}
-      />
+        aria-hidden="true"
+      >
+        {icon}
+      </span>
 
       {/* Description + Timestamp */}
       <div style={{ flex: 1, minWidth: 0 }}>

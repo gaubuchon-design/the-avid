@@ -21,6 +21,10 @@ const campaignIdParam = z.object({ id: z.string().uuid() });
 const campaignAndDeliverableParams = z.object({ campaignId: z.string().uuid(), id: z.string().uuid() });
 const campaignIdOnlyParam = z.object({ campaignId: z.string().uuid() });
 
+const orgIdQuery = z.object({
+  orgId: z.string().uuid().optional(),
+});
+
 const brandKitQuery = z.object({
   orgId: z.string().uuid().optional(),
 });
@@ -313,7 +317,7 @@ router.post(
 
 // ─── DAM Connections ─────────────────────────────────────────────────────────
 
-router.get('/dam-connections', async (req: Request, res: Response) => {
+router.get('/dam-connections', validate(orgIdQuery, 'query'), async (req: Request, res: Response) => {
   const { orgId } = req.query as { orgId?: string };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma dynamic where clause
   const where: any = { isActive: true };
