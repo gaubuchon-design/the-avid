@@ -84,6 +84,18 @@ describe('useCollabStore', () => {
     expect(useCollabStore.getState().versions.length).toBeGreaterThan(before);
   });
 
+  it('setVersionRetentionPreferences() persists preference and prunes list', () => {
+    localStorage.removeItem('avid:version-retention-preferences');
+    useCollabStore.getState().setVersionRetentionPreferences({ preset: 'last-10', autoPrune: true });
+    for (let i = 0; i < 12; i += 1) {
+      useCollabStore.getState().saveVersion(`Version ${i}`, 'Retention test');
+    }
+    const state = useCollabStore.getState();
+    expect(state.versionRetentionPreferences.preset).toBe('last-10');
+    expect(state.versions.length).toBe(10);
+    expect(localStorage.getItem('avid:version-retention-preferences')).toContain('"preset":"last-10"');
+  });
+
   it('addActivity() adds entry to front of feed', () => {
     const before = useCollabStore.getState().activityFeed.length;
     useCollabStore.getState().addActivity('Test User', 'did something', 'details');

@@ -1,6 +1,6 @@
 // =============================================================================
 //  Scopes Panel — Waveform / Vectorscope / Histogram / Parade
-//  Wired to the color pipeline output with pre/post toggle.
+//  Wired to record-monitor frames with a functional pre/post grading toggle.
 // =============================================================================
 
 import React, { useCallback, useEffect, useRef } from 'react';
@@ -17,6 +17,9 @@ const SCOPE_TABS: { value: ScopeType; label: string }[] = [
   { value: 'histogram', label: 'Histo' },
   { value: 'parade', label: 'Parade' },
 ];
+
+const SCOPE_SAMPLE_WIDTH = 320;
+const SCOPE_SAMPLE_HEIGHT = 200;
 
 export function ScopesPanel() {
   const scopeType = useColorStore((s) => s.scopeType);
@@ -35,7 +38,6 @@ export function ScopesPanel() {
   const isTitleEditing = useTitleStore((s) => s.isEditing);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Render scope
   const renderScope = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -43,9 +45,6 @@ export function ScopesPanel() {
     if (!ctx) return;
     const w = canvas.width;
     const h = canvas.height;
-
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, w, h);
 
     scopesEngine.setEnabled(true);
     scopesEngine.setActiveScopeType(scopeType);
@@ -113,7 +112,6 @@ export function ScopesPanel() {
     renderScope();
   }, [renderScope]);
 
-  // Periodic update
   useEffect(() => {
     const interval = setInterval(renderScope, 100);
     return () => {
@@ -124,7 +122,6 @@ export function ScopesPanel() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Scope tab bar */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border-default)', flexShrink: 0 }}>
         {SCOPE_TABS.map((tab) => (
           <button
@@ -145,7 +142,6 @@ export function ScopesPanel() {
           </button>
         ))}
         <div style={{ flex: 1 }} />
-        {/* Pre/Post toggle */}
         <button
           onClick={() => setScopePosition(scopePosition === 'pre' ? 'post' : 'pre')}
           style={{
@@ -157,17 +153,17 @@ export function ScopesPanel() {
             cursor: 'pointer',
             textTransform: 'uppercase',
           }}
+          title="Toggle scopes between pre-grade and post-grade image data"
         >
           {scopePosition}
         </button>
       </div>
 
-      {/* Scope canvas */}
       <div style={{ flex: 1, minHeight: 0, background: '#000' }}>
         <canvas
           ref={canvasRef}
-          width={320}
-          height={200}
+          width={SCOPE_SAMPLE_WIDTH}
+          height={SCOPE_SAMPLE_HEIGHT}
           style={{ width: '100%', height: '100%', objectFit: 'contain' }}
         />
       </div>
@@ -175,14 +171,11 @@ export function ScopesPanel() {
   );
 }
 
-// ── Graticule Renderers ──────────────────────────────────────────────────────
-
 function renderWaveformGraticule(ctx: CanvasRenderingContext2D, w: number, h: number) {
   ctx.strokeStyle = 'rgba(255,255,255,0.1)';
   ctx.lineWidth = 0.5;
 
-  // IRE levels: 0, 25, 50, 75, 100
-  for (let i = 0; i <= 4; i++) {
+  for (let i = 0; i <= 4; i += 1) {
     const y = h - (i / 4) * h;
     ctx.beginPath();
     ctx.moveTo(0, y);
@@ -198,54 +191,24 @@ function renderWaveformGraticule(ctx: CanvasRenderingContext2D, w: number, h: nu
 function renderVectorscopeGraticule(ctx: CanvasRenderingContext2D, w: number, h: number) {
   const cx = w / 2;
   const cy = h / 2;
-  const r = Math.min(cx, cy) - 8;
+  const radius = Math.min(cx, cy) - 8;
 
   ctx.strokeStyle = 'rgba(255,255,255,0.1)';
   ctx.lineWidth = 0.5;
 
-  // Outer circle
   ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
   ctx.stroke();
 
-  // 75% circle
   ctx.beginPath();
-  ctx.arc(cx, cy, r * 0.75, 0, Math.PI * 2);
+  ctx.arc(cx, cy, radius * 0.75, 0, Math.PI * 2);
   ctx.stroke();
 
-  // Crosshair
   ctx.beginPath();
-  ctx.moveTo(cx - r, cy);
-  ctx.lineTo(cx + r, cy);
-  ctx.moveTo(cx, cy - r);
-  ctx.lineTo(cx, cy + r);
-  ctx.stroke();
-
-  // Color target markers (Rec.709)
-  const targets = [
-    { label: 'R', angle: 103, dist: 0.63 },
-    { label: 'G', angle: 241, dist: 0.56 },
-    { label: 'B', angle: 347, dist: 0.59 },
-    { label: 'Yl', angle: 167, dist: 0.44 },
-    { label: 'Cy', angle: 283, dist: 0.50 },
-    { label: 'Mg', angle: 61, dist: 0.59 },
-  ];
-  for (const t of targets) {
-    const rad = (t.angle * Math.PI) / 180;
-    const tx = cx + Math.cos(rad) * r * t.dist;
-    const ty = cy - Math.sin(rad) * r * t.dist;
-    ctx.fillStyle = 'rgba(255,255,255,0.3)';
-    ctx.fillRect(tx - 2, ty - 2, 4, 4);
-    ctx.font = '7px monospace';
-    ctx.fillText(t.label, tx + 4, ty + 3);
-  }
-
-  // Skin tone line (approximately 123 degrees on vectorscope)
-  const skinAngle = (123 * Math.PI) / 180;
-  ctx.strokeStyle = 'rgba(255,180,100,0.3)';
-  ctx.beginPath();
-  ctx.moveTo(cx, cy);
-  ctx.lineTo(cx + Math.cos(skinAngle) * r, cy - Math.sin(skinAngle) * r);
+  ctx.moveTo(cx - radius, cy);
+  ctx.lineTo(cx + radius, cy);
+  ctx.moveTo(cx, cy - radius);
+  ctx.lineTo(cx, cy + radius);
   ctx.stroke();
 }
 
@@ -253,58 +216,65 @@ function renderHistogramGraticule(ctx: CanvasRenderingContext2D, w: number, h: n
   ctx.strokeStyle = 'rgba(255,255,255,0.08)';
   ctx.lineWidth = 0.5;
 
-  for (let i = 1; i < 4; i++) {
+  for (let i = 1; i < 4; i += 1) {
     const x = (i / 4) * w;
     ctx.beginPath();
     ctx.moveTo(x, 0);
     ctx.lineTo(x, h);
     ctx.stroke();
   }
-
-  // Level labels
-  ctx.fillStyle = 'rgba(255,255,255,0.3)';
-  ctx.font = '8px monospace';
-  ctx.fillText('0', 2, h - 2);
-  ctx.fillText('64', w * 0.25 - 8, h - 2);
-  ctx.fillText('128', w * 0.5 - 10, h - 2);
-  ctx.fillText('192', w * 0.75 - 10, h - 2);
-  ctx.fillText('255', w - 20, h - 2);
 }
 
 function renderParadeGraticule(ctx: CanvasRenderingContext2D, w: number, h: number) {
-  const channelW = w / 3;
+  const channelWidth = w / 3;
 
-  // Channel separators
   ctx.strokeStyle = 'rgba(255,255,255,0.15)';
   ctx.lineWidth = 0.5;
   ctx.beginPath();
-  ctx.moveTo(channelW, 0);
-  ctx.lineTo(channelW, h);
-  ctx.moveTo(channelW * 2, 0);
-  ctx.lineTo(channelW * 2, h);
+  ctx.moveTo(channelWidth, 0);
+  ctx.lineTo(channelWidth, h);
+  ctx.moveTo(channelWidth * 2, 0);
+  ctx.lineTo(channelWidth * 2, h);
   ctx.stroke();
+}
 
-  // Channel labels
-  const labels = [
-    { text: 'R', color: 'rgba(248,113,113,0.5)' },
-    { text: 'G', color: 'rgba(74,222,128,0.5)' },
-    { text: 'B', color: 'rgba(96,165,250,0.5)' },
-  ];
-  labels.forEach((l, i) => {
-    ctx.fillStyle = l.color;
-    ctx.font = '9px monospace';
-    ctx.fillText(l.text, channelW * i + 4, 12);
-  });
+function cloneImageData(source: ImageData): ImageData {
+  return new ImageData(new Uint8ClampedArray(source.data), source.width, source.height);
+}
 
-  // IRE lines per channel
-  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-  for (let c = 0; c < 3; c++) {
-    for (let i = 1; i < 4; i++) {
-      const y = h - (i / 4) * h;
-      ctx.beginPath();
-      ctx.moveTo(channelW * c, y);
-      ctx.lineTo(channelW * (c + 1), y);
-      ctx.stroke();
+function sampleRecordMonitorFrame(width: number, height: number): ImageData | null {
+  const monitorCanvas = document.querySelector('[aria-label="Record Monitor"] canvas');
+  if (!(monitorCanvas instanceof HTMLCanvasElement)) return null;
+
+  const scratchCanvas = document.createElement('canvas');
+  scratchCanvas.width = width;
+  scratchCanvas.height = height;
+  const scratchCtx = scratchCanvas.getContext('2d');
+  if (!scratchCtx) return null;
+
+  try {
+    scratchCtx.drawImage(monitorCanvas, 0, 0, width, height);
+    return scratchCtx.getImageData(0, 0, width, height);
+  } catch {
+    return null;
+  }
+}
+
+function createFallbackFrame(width: number, height: number, tick: number): ImageData {
+  const data = new Uint8ClampedArray(width * height * 4);
+  const phase = tick * 0.03;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const idx = (y * width + x) * 4;
+      const nx = x / Math.max(1, width - 1);
+      const ny = y / Math.max(1, height - 1);
+      const wave = Math.sin((nx * 6 + phase)) * 0.5 + 0.5;
+      const sweep = Math.cos((ny * 9 - phase * 0.7)) * 0.5 + 0.5;
+      data[idx] = Math.round(wave * 255);
+      data[idx + 1] = Math.round(sweep * 255);
+      data[idx + 2] = Math.round(((1 - nx) * 0.6 + ny * 0.4) * 255);
+      data[idx + 3] = 255;
     }
   }
+  return new ImageData(data, width, height);
 }

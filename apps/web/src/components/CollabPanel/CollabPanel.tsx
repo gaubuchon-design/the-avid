@@ -2,10 +2,16 @@
 // Four-tab panel: Users (presence), Comments (threaded with reactions),
 // Versions (snapshots), and Activity (live feed).
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { useCollabStore } from '../../store/collab.store';
 import { useEditorStore } from '../../store/editor.store';
 import { toTimecode } from '../../lib/timecode';
+import {
+  buildVersionComparison,
+  formatSignedDelta,
+  pickComparisonBaseline,
+  type VersionCompareMode,
+} from '../../lib/versionComparison';
 import type { CollabComment, CollabUser, ProjectVersion } from '../../collab/CollabEngine';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -650,7 +656,13 @@ function CommentCard({
 // ─── Versions Tab ───────────────────────────────────────────────────────────
 
 function VersionsTab() {
-  const { versions, saveVersion, restoreVersion } = useCollabStore();
+  const {
+    versions,
+    saveVersion,
+    restoreVersion,
+    versionRetentionPreferences,
+    setVersionRetentionPreferences,
+  } = useCollabStore();
   const {
     versionHistoryRetentionPreference,
     versionHistoryCompareMode,
@@ -660,6 +672,9 @@ function VersionsTab() {
   const [showForm, setShowForm] = useState(false);
   const [versionName, setVersionName] = useState('');
   const [versionDesc, setVersionDesc] = useState('');
+  const [compareTargetVersionId, setCompareTargetVersionId] = useState<string>('');
+  const [compareMode, setCompareMode] = useState<VersionCompareMode>('previous');
+  const [customBaselineId, setCustomBaselineId] = useState<string>('');
 
   const handleSave = useCallback(() => {
     if (!versionName.trim()) return;
@@ -674,8 +689,59 @@ function VersionsTab() {
     setShowForm(false);
   }, [saveVersion, versionDesc, versionHistoryRetentionPreference, versionName]);
 
+  const compareTargetVersion = versions.find((version) => version.id === compareTargetVersionId) ?? versions[0] ?? null;
+  const compareBaseline = useMemo(() => {
+    if (!compareTargetVersion) return null;
+    return pickComparisonBaseline(versions, compareTargetVersion.id, compareMode, customBaselineId);
+  }, [compareMode, compareTargetVersion, customBaselineId, versions]);
+
+  const comparison = useMemo(() => {
+    if (!compareTargetVersion || !compareBaseline) return null;
+    return buildVersionComparison(compareTargetVersion, compareBaseline);
+  }, [compareBaseline, compareTargetVersion]);
+
   return (
     <div>
+      <div style={{ padding: 10, background: 'var(--bg-raised)', borderRadius: 'var(--radius-md)', marginBottom: 8 }}>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+          Version Retention
+        </div>
+        <div style={{ display: 'grid', gap: 6 }}>
+          <label style={{ display: 'grid', gap: 4, fontSize: 10, color: 'var(--text-muted)' }}>
+            Keep
+            <select
+              value={versionRetentionPreferences.preset}
+              onChange={(event) => setVersionRetentionPreferences({ preset: event.target.value as typeof versionRetentionPreferences.preset })}
+              style={{
+                width: '100%',
+                padding: '6px 8px',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-default)',
+                background: 'var(--bg-void)',
+                color: 'var(--text-primary)',
+                fontSize: 11,
+                fontFamily: 'var(--font-ui)',
+                outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            >
+              <option value="keep-all">All restore points</option>
+              <option value="last-50">Last 50 restore points</option>
+              <option value="last-25">Last 25 restore points</option>
+              <option value="last-10">Last 10 restore points</option>
+            </select>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'var(--text-secondary)' }}>
+            <input
+              type="checkbox"
+              checked={versionRetentionPreferences.autoPrune}
+              onChange={(event) => setVersionRetentionPreferences({ autoPrune: event.target.checked })}
+            />
+            Auto-prune when limit is exceeded
+          </label>
+        </div>
+      </div>
+
       {/* Save version form or button */}
       {!showForm ? (
         <button
@@ -837,12 +903,136 @@ function VersionsTab() {
           compareMode={versionHistoryCompareMode}
           canRestore={canRestoreVersion(version)}
           onRestore={() => restoreVersion(version.id)}
+          onCompare={() => setCompareTargetVersionId(version.id)}
+          selectedForCompare={compareTargetVersion?.id === version.id}
         />
       ))}
 
       {versions.length === 0 && (
         <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)', fontSize: 11 }}>
           No saved versions yet.
+        </div>
+      )}
+
+      {versions.length > 1 && (
+        <div style={{ marginTop: 10, padding: 10, borderRadius: 'var(--radius-md)', background: 'var(--bg-raised)' }}>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+            Compare Restore Points
+          </div>
+          <div style={{ display: 'grid', gap: 6, marginBottom: 8 }}>
+            <label style={{ display: 'grid', gap: 4, fontSize: 10, color: 'var(--text-muted)' }}>
+              Target version
+              <select
+                value={compareTargetVersion?.id ?? ''}
+                onChange={(event) => setCompareTargetVersionId(event.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '6px 8px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-default)',
+                  background: 'var(--bg-void)',
+                  color: 'var(--text-primary)',
+                  fontSize: 11,
+                  fontFamily: 'var(--font-ui)',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              >
+                {versions.map((version) => (
+                  <option key={version.id} value={version.id}>
+                    {version.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label style={{ display: 'grid', gap: 4, fontSize: 10, color: 'var(--text-muted)' }}>
+              Baseline
+              <select
+                value={compareMode}
+                onChange={(event) => setCompareMode(event.target.value as VersionCompareMode)}
+                style={{
+                  width: '100%',
+                  padding: '6px 8px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-default)',
+                  background: 'var(--bg-void)',
+                  color: 'var(--text-primary)',
+                  fontSize: 11,
+                  fontFamily: 'var(--font-ui)',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              >
+                <option value="previous">Previous restore point</option>
+                <option value="latest">Latest saved restore point</option>
+                <option value="custom">Custom restore point…</option>
+              </select>
+            </label>
+
+            {compareMode === 'custom' && (
+              <label style={{ display: 'grid', gap: 4, fontSize: 10, color: 'var(--text-muted)' }}>
+                Compare against
+                <select
+                  value={customBaselineId}
+                  onChange={(event) => setCustomBaselineId(event.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '6px 8px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border-default)',
+                    background: 'var(--bg-void)',
+                    color: 'var(--text-primary)',
+                    fontSize: 11,
+                    fontFamily: 'var(--font-ui)',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  <option value="">Select baseline</option>
+                  {versions
+                    .filter((version) => version.id !== compareTargetVersion?.id)
+                    .map((version) => (
+                      <option key={version.id} value={version.id}>
+                        {version.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            )}
+          </div>
+
+          {comparison ? (
+            <div style={{ display: 'grid', gap: 6 }}>
+              <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
+                <strong>{comparison.target.name}</strong> vs <strong>{comparison.baseline.name}</strong>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 6 }}>
+                <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', padding: 6 }}>
+                  <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>Tracks</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-primary)' }}>{formatSignedDelta(comparison.trackDelta, '')}</div>
+                </div>
+                <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', padding: 6 }}>
+                  <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>Clips</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-primary)' }}>{formatSignedDelta(comparison.clipDelta, '')}</div>
+                </div>
+                <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', padding: 6 }}>
+                  <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>Duration</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-primary)' }}>{formatSignedDelta(comparison.durationDelta, 's')}</div>
+                </div>
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                Saved {comparison.createdAtDeltaMs >= 0 ? 'after' : 'before'} baseline by {Math.abs(Math.round(comparison.createdAtDeltaMs / 60000))}m
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
+                Changed snapshot fields: {comparison.changedSnapshotKeys.length ? comparison.changedSnapshotKeys.join(', ') : 'none'}
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+              Select a valid baseline to compare this restore point.
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -877,24 +1067,20 @@ function formatVersionDuration(duration: number): string {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}:${String(frames).padStart(2, '0')}`;
 }
 
-function formatSignedDelta(value: number, suffix = ''): string {
-  if (value === 0) {
-    return `0${suffix}`;
-  }
-
-  return `${value > 0 ? '+' : ''}${value}${suffix}`;
-}
-
 function VersionCard({
   version,
   compareMode,
   onRestore,
   canRestore,
+  onCompare,
+  selectedForCompare,
 }: {
   version: ProjectVersion;
   compareMode: 'summary' | 'details';
   onRestore: () => void;
   canRestore: boolean;
+  onCompare: () => void;
+  selectedForCompare: boolean;
 }) {
   return (
     <div
@@ -903,6 +1089,7 @@ function VersionCard({
         borderRadius: 'var(--radius-md)',
         background: 'var(--bg-raised)',
         marginBottom: 4,
+        border: selectedForCompare ? '1px solid var(--brand-bright)' : '1px solid transparent',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
@@ -992,24 +1179,40 @@ function VersionCard({
           This entry is demo history only and cannot restore editor state.
         </div>
       )}
-      <button
-        onClick={onRestore}
-        disabled={!canRestore}
-        aria-label={`Restore ${version.name}`}
-        title={canRestore ? 'Restore this version snapshot' : 'This version does not include a restorable project snapshot'}
-        style={{
-          padding: '4px 10px',
-          borderRadius: 'var(--radius-sm)',
-          border: '1px solid var(--border-default)',
-          background: 'transparent',
-          color: canRestore ? 'var(--text-secondary)' : 'var(--text-muted)',
-          fontSize: 10,
-          cursor: canRestore ? 'pointer' : 'default',
-          opacity: canRestore ? 1 : 0.6,
-        }}
-      >
-        Restore
-      </button>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button
+          onClick={onRestore}
+          disabled={!canRestore}
+          aria-label={`Restore ${version.name}`}
+          title={canRestore ? 'Restore this version snapshot' : 'This version does not include a restorable project snapshot'}
+          style={{
+            padding: '4px 10px',
+            borderRadius: 'var(--radius-sm)',
+            border: '1px solid var(--border-default)',
+            background: 'transparent',
+            color: canRestore ? 'var(--text-secondary)' : 'var(--text-muted)',
+            fontSize: 10,
+            cursor: canRestore ? 'pointer' : 'default',
+            opacity: canRestore ? 1 : 0.6,
+          }}
+        >
+          Restore
+        </button>
+        <button
+          onClick={onCompare}
+          style={{
+            padding: '4px 10px',
+            borderRadius: 'var(--radius-sm)',
+            border: '1px solid var(--border-default)',
+            background: selectedForCompare ? 'var(--bg-elevated)' : 'transparent',
+            color: 'var(--text-secondary)',
+            fontSize: 10,
+            cursor: 'pointer',
+          }}
+        >
+          Compare
+        </button>
+      </div>
     </div>
   );
 }
