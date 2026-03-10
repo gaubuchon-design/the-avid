@@ -1,7 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState, memo } from 'react';
 import { usePlayerStore, ScopeType } from '../../store/player.store';
 import { useEditorStore } from '../../store/editor.store';
-import { videoSourceManager } from '../../engine/VideoSourceManager';
+import {
+  attachMonitorAudioOutput,
+  previewMonitorAudioOutput,
+  releaseMonitorAudioOutput,
+} from '../../lib/monitorPlayback';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -105,7 +109,8 @@ export function SourceMonitor() {
   useEffect(() => {
     setVideoReady(false);
 
-    if (!sourceAsset) {
+    if (!sourceAsset || !(sourceAsset.fileHandle || sourceAsset.playbackUrl)) {
+      releaseMonitorAudioOutput('source-monitor');
       if (videoRef.current) {
         videoRef.current.pause();
         videoRef.current.src = '';
@@ -114,25 +119,49 @@ export function SourceMonitor() {
       return;
     }
 
-    // Get the video source from VideoSourceManager (already loaded by setSourceAsset)
-    const source = videoSourceManager.getSource(sourceAsset.id);
-    if (source?.ready) {
-      videoRef.current = source.element;
-      setVideoReady(true);
-      return;
-    }
+    const video = document.createElement('video');
+    video.crossOrigin = 'anonymous';
+    video.preload = 'auto';
+    video.playsInline = true;
+    video.muted = true;
 
-    // If not loaded yet, wait for it via subscription
-    const unsub = videoSourceManager.subscribe(() => {
-      const s = videoSourceManager.getSource(sourceAsset.id);
-      if (s?.ready) {
-        videoRef.current = s.element;
-        setVideoReady(true);
+    const ownedUrl = sourceAsset.fileHandle
+      ? URL.createObjectURL(sourceAsset.fileHandle)
+      : undefined;
+    video.src = ownedUrl ?? sourceAsset.playbackUrl!;
+
+    const handleLoadedMetadata = () => {
+      videoRef.current = video;
+      attachMonitorAudioOutput('source-monitor', video);
+      const currentSourcePlayhead = useEditorStore.getState().sourcePlayhead;
+      if (Number.isFinite(currentSourcePlayhead) && currentSourcePlayhead > 0) {
+        video.currentTime = currentSourcePlayhead;
       }
-    });
+      setVideoReady(true);
+    };
 
-    return unsub;
-  }, [sourceAsset?.id]);
+    const handleError = () => {
+      setVideoReady(false);
+    };
+
+    video.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
+    video.addEventListener('error', handleError, { once: true });
+    video.load();
+
+    return () => {
+      releaseMonitorAudioOutput('source-monitor');
+      video.pause();
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.removeEventListener('error', handleError);
+      video.src = '';
+      if (ownedUrl) {
+        URL.revokeObjectURL(ownedUrl);
+      }
+      if (videoRef.current === video) {
+        videoRef.current = null;
+      }
+    };
+  }, [sourceAsset?.id, sourceAsset?.fileHandle, sourceAsset?.playbackUrl]);
 
   // Render loop — draw video frame or placeholder
   useEffect(() => {
@@ -250,6 +279,12 @@ export function SourceMonitor() {
     };
   }, [isPlaying, speed, videoReady, fps, setSourcePlayhead]);
 
+  useEffect(() => {
+    return () => {
+      releaseMonitorAudioOutput('source-monitor');
+    };
+  }, []);
+
   function drawMarkers(c: CanvasRenderingContext2D, cw: number, ch: number) {
     if (sourceInPoint !== null) {
       c.fillStyle = 'rgba(59, 130, 246, 0.8)';
@@ -343,31 +378,51 @@ export function SourceMonitor() {
 
   // Scrub bar interaction
   const scrubRef = useRef<HTMLDivElement>(null);
-  const handleScrub = useCallback((e: React.MouseEvent) => {
+  const dragListenersRef = useRef<{ onMove: (ev: MouseEvent) => void; onUp: () => void } | null>(null);
+  const scrubToTime = useCallback((clientX: number, previewAudio: boolean) => {
     const bar = scrubRef.current;
     if (!bar || !sourceAsset?.duration) return;
     const rect = bar.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    setSourcePlayhead(pct * sourceAsset.duration);
-  }, [sourceAsset?.duration, setSourcePlayhead]);
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const nextTime = pct * sourceAsset.duration;
+    setSourcePlayhead(nextTime);
+
+    if (!previewAudio || isPlaying || !videoRef.current) {
+      return;
+    }
+
+    previewMonitorAudioOutput('source-monitor', videoRef.current, nextTime);
+  }, [isPlaying, setSourcePlayhead, sourceAsset?.duration]);
+  const handleScrub = useCallback((e: React.MouseEvent) => {
+    scrubToTime(e.clientX, true);
+  }, [scrubToTime]);
 
   const handleScrubDrag = useCallback((e: React.MouseEvent) => {
     handleScrub(e);
     const bar = scrubRef.current;
     if (!bar || !sourceAsset?.duration) return;
-    const dur = sourceAsset.duration;
     const onMove = (ev: MouseEvent) => {
-      const rect = bar.getBoundingClientRect();
-      const pct = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
-      setSourcePlayhead(pct * dur);
+      scrubToTime(ev.clientX, true);
     };
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      dragListenersRef.current = null;
     };
+    dragListenersRef.current = { onMove, onUp };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [sourceAsset?.duration, setSourcePlayhead, handleScrub]);
+  }, [handleScrub, scrubToTime, sourceAsset?.duration]);
+
+  useEffect(() => {
+    return () => {
+      if (dragListenersRef.current) {
+        window.removeEventListener('mousemove', dragListenersRef.current.onMove);
+        window.removeEventListener('mouseup', dragListenersRef.current.onUp);
+        dragListenersRef.current = null;
+      }
+    };
+  }, []);
 
   const tc = formatTimecode(sourcePlayhead, fps);
   const dur = sourceAsset?.duration ?? 0;

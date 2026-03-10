@@ -81,12 +81,14 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Persisted collaboration version-history entries into the shared project repository schema (`versionHistory`) and wired collab save/restore flows to capture editor-state snapshots, hydrate persisted histories on connect, and record automatic restore points before restores.
 - Split playback snapshot compositing into explicit picture and overlay stages so scopes can lock to pre-overlay image analysis while export render paths opt into post-overlay output intentionally.
 - Extended evaluated-frame revision metadata and export job telemetry to track overlay-stage selection (`pre` vs `post`) alongside color-stage processing, with parity tests for revision invalidation and frame-step export wiring.
+- Added transport-time pre-color degradation telemetry to the shared playback render path and surfaced cumulative fallback diagnostics in record/program monitors plus the scopes header so realtime grade fallback frequency can be measured during active playback.
+- Routed desktop drag/drop ingest through the same FFprobe-backed desktop import path as file-based ingest by expanding dropped directories server-side, persisting imported assets into project bins, and teaching the bin drop target to prefer desktop `importMedia(...)` when native paths are available.
 
 ## Next Execution Slices
 
-1. Surface transport-time pre-color degradation telemetry in monitor/scopes diagnostics so fallback frequency can be measured in real projects.
-2. Route desktop drag/drop ingest through the same FFprobe-backed metadata contract as file-path ingest so browser-side probing only remains a fallback for pure web mode.
-3. Hydrate editor timeline/shell state from repository project payloads on web load so persisted version-history restore results are visible after reopen.
+1. Hydrate editor timeline/shell state from repository project payloads on web load so persisted version-history restore results are visible after reopen.
+2. Add persisted repository coverage for restored collaboration histories across reopen/reconnect cycles, not just in-session restore flows.
+3. Close the remaining desktop ingest gap by routing file-picker imports through the same persisted desktop import path instead of browser-only probing.
 
 ## Exit Signals For These Early Phases
 

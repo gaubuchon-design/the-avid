@@ -194,7 +194,10 @@ export async function getProjectFromRepository(projectId: string): Promise<Edito
  * Create a new project with the given options and persist it.
  */
 export async function createProjectInRepository(options: CreateProjectOptions = {}): Promise<EditorProject> {
-  const project = buildProject(options);
+  const project = buildProject({
+    ...options,
+    seedContent: options.seedContent ?? false,
+  });
   return saveProjectToRepository(project);
 }
 

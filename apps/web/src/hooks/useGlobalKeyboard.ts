@@ -26,6 +26,7 @@ export function handleEditorKeyboardEvent(event: KeyboardEvent): boolean {
   const key = event.key;
   const isMod = event.metaKey || event.ctrlKey;
   const editorState = useEditorStore.getState();
+  const activeMonitor = usePlayerStore.getState().activeMonitor;
   const fps = editorState.sequenceSettings?.fps || 24;
   const frameDuration = 1 / fps;
 
@@ -43,26 +44,47 @@ export function handleEditorKeyboardEvent(event: KeyboardEvent): boolean {
 
     case 'ArrowLeft':
       event.preventDefault();
-      editorState.setPlayhead(
-        Math.max(0, editorState.playheadTime - (event.shiftKey ? 1 : frameDuration)),
-      );
+      if (activeMonitor === 'source') {
+        editorState.setSourcePlayhead(
+          Math.max(0, editorState.sourcePlayhead - (event.shiftKey ? 1 : frameDuration)),
+        );
+      } else {
+        editorState.setPlayhead(
+          Math.max(0, editorState.playheadTime - (event.shiftKey ? 1 : frameDuration)),
+        );
+      }
       return true;
 
     case 'ArrowRight':
       event.preventDefault();
-      editorState.setPlayhead(
-        Math.min(editorState.duration, editorState.playheadTime + (event.shiftKey ? 1 : frameDuration)),
-      );
+      if (activeMonitor === 'source') {
+        const sourceDuration = editorState.sourceAsset?.duration ?? Number.POSITIVE_INFINITY;
+        editorState.setSourcePlayhead(
+          Math.min(sourceDuration, editorState.sourcePlayhead + (event.shiftKey ? 1 : frameDuration)),
+        );
+      } else {
+        editorState.setPlayhead(
+          Math.min(editorState.duration, editorState.playheadTime + (event.shiftKey ? 1 : frameDuration)),
+        );
+      }
       return true;
 
     case 'Home':
       event.preventDefault();
-      editorState.setPlayhead(0);
+      if (activeMonitor === 'source') {
+        editorState.setSourcePlayhead(0);
+      } else {
+        editorState.setPlayhead(0);
+      }
       return true;
 
     case 'End':
       event.preventDefault();
-      editorState.setPlayhead(editorState.duration);
+      if (activeMonitor === 'source') {
+        editorState.setSourcePlayhead(editorState.sourceAsset?.duration ?? 0);
+      } else {
+        editorState.setPlayhead(editorState.duration);
+      }
       return true;
 
     case 'a':

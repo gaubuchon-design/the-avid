@@ -10,6 +10,7 @@ import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
 import { capturePlaybackSnapshotImageData } from '../../engine/playbackSnapshotFrame';
 import { useEditorStore } from '../../store/editor.store';
 import { useTitleStore } from '../../store/title.store';
+import { PlaybackFallbackDiagnostics } from '../Diagnostics/PlaybackFallbackDiagnostics';
 
 const SCOPE_TABS: { value: ScopeType; label: string }[] = [
   { value: 'waveform', label: 'Wave' },
@@ -157,6 +158,9 @@ export function ScopesPanel() {
         >
           {scopePosition}
         </button>
+        <div style={{ display: 'flex', alignItems: 'center', paddingRight: 6 }}>
+          <PlaybackFallbackDiagnostics consumer="all" />
+        </div>
       </div>
 
       <div style={{ flex: 1, minHeight: 0, background: '#000' }}>

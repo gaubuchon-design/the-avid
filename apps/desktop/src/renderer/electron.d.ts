@@ -262,7 +262,7 @@ interface DesktopBridge {
   getProject: (projectId: string) => Promise<EditorProject | null>;
   saveProject: (project: EditorProject) => Promise<EditorProject>;
   deleteProject: (projectId: string) => Promise<boolean>;
-  importMedia: (projectId: string, filePaths: string[]) => Promise<EditorMediaAsset[]>;
+  importMedia: (projectId: string, filePaths: string[], binId?: string) => Promise<EditorMediaAsset[]>;
   scanProjectMedia: (projectId: string) => Promise<EditorProject | null>;
   relinkProjectMedia: (projectId: string, searchRoots: string[]) => Promise<RelinkResult>;
   addWatchFolder: (projectId: string, folderPath: string) => Promise<EditorProject | null>;

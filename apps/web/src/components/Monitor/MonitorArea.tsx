@@ -4,6 +4,7 @@ import { usePlayerStore } from '../../store/player.store';
 import { useTitleStore } from '../../store/title.store';
 import { Timecode } from '../../lib/timecode';
 import { TrimStatusOverlay } from '../Editor/TrimStatusOverlay';
+import { PlaybackFallbackDiagnostics } from '../Diagnostics/PlaybackFallbackDiagnostics';
 import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
 import { renderPlaybackSnapshotFrame } from '../../engine/playbackSnapshotFrame';
 import {
@@ -12,6 +13,13 @@ import {
   pauseVideoSource,
   tryLoadClipSource,
 } from '../../engine/compositeRecordFrame';
+import { videoSourceManager } from '../../engine/VideoSourceManager';
+import {
+  findTimelineMonitorMediaSource,
+  previewMonitorAudioOutput,
+  releaseMonitorAudioOutput,
+  syncMonitorAudioOutput,
+} from '../../lib/monitorPlayback';
 
 /**
  * MonitorArea — Full-record mode composited monitor.
@@ -26,6 +34,8 @@ export function MonitorArea() {
     tracks, selectedClipIds, inPoint, outPoint, isFullscreen,
     projectSettings,
   } = useEditorStore();
+  const bins = useEditorStore((s) => s.bins);
+  const sequenceFps = useEditorStore((s) => s.sequenceSettings.fps);
 
   const tc = new Timecode({ fps: projectSettings?.frameRate || 24 });
   const aspectRatio = projectSettings ? projectSettings.width / projectSettings.height : 16 / 9;
@@ -41,6 +51,7 @@ export function MonitorArea() {
   const rafRef = useRef<number>();
   const lastClipIdRef = useRef<string | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 640, h: 360 });
+  const [sourceRevision, setSourceRevision] = useState(0);
 
   // Calculate progress
   const progress = duration > 0 ? (playheadTime / duration) * 100 : 0;
@@ -73,6 +84,12 @@ export function MonitorArea() {
     observer.observe(container);
     return () => observer.disconnect();
   }, [aspectRatio]);
+
+  useEffect(() => {
+    return videoSourceManager.subscribe(() => {
+      setSourceRevision((revision) => revision + 1);
+    });
+  }, []);
 
   // ── Continuous RAF render loop ─────────────────────────────────────────
   // Uses the shared compositing pipeline for full compositing:
@@ -157,14 +174,60 @@ export function MonitorArea() {
     }
   }, [playheadTime]);
 
+  useEffect(() => {
+    const candidate = findTimelineMonitorMediaSource(tracks, playheadTime);
+    if (!candidate) {
+      releaseMonitorAudioOutput('program-monitor');
+      return;
+    }
+
+    tryLoadClipSource(candidate.assetId, bins as any);
+    const source = videoSourceManager.getSource(candidate.assetId);
+    if (!source?.ready) {
+      return;
+    }
+
+    syncMonitorAudioOutput(
+      'program-monitor',
+      source.element,
+      candidate.sourceTime,
+      isPlaying,
+      sequenceFps,
+    );
+  }, [bins, isPlaying, playheadTime, sequenceFps, sourceRevision, tracks]);
+
   // ── Scrub bar ──────────────────────────────────────────────────────────
-  const handleScrub = useCallback((e: React.MouseEvent) => {
+  const scrubToTime = useCallback((clientX: number, previewAudio: boolean) => {
     const bar = scrubRef.current;
     if (!bar) return;
     const rect = bar.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    setPlayhead(pct * duration);
-  }, [duration, setPlayhead]);
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const nextTime = pct * duration;
+    setPlayhead(nextTime);
+
+    if (!previewAudio || isPlaying) {
+      return;
+    }
+
+    const state = useEditorStore.getState();
+    const candidate = findTimelineMonitorMediaSource(state.tracks, nextTime);
+    if (!candidate) {
+      releaseMonitorAudioOutput('program-monitor');
+      return;
+    }
+
+    tryLoadClipSource(candidate.assetId, state.bins as any);
+    const source = videoSourceManager.getSource(candidate.assetId);
+    if (!source?.ready) {
+      return;
+    }
+
+    previewMonitorAudioOutput('program-monitor', source.element, candidate.sourceTime);
+  }, [duration, isPlaying, setPlayhead]);
+
+  const handleScrub = useCallback((e: React.MouseEvent) => {
+    scrubToTime(e.clientX, true);
+  }, [scrubToTime]);
 
   const dragListenersRef = useRef<{ onMove: (ev: MouseEvent) => void; onUp: () => void } | null>(null);
 
@@ -173,9 +236,7 @@ export function MonitorArea() {
     const bar = scrubRef.current;
     if (!bar) return;
     const onMove = (ev: MouseEvent) => {
-      const rect = bar.getBoundingClientRect();
-      const pct = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
-      setPlayhead(pct * duration);
+      scrubToTime(ev.clientX, true);
     };
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);
@@ -185,10 +246,11 @@ export function MonitorArea() {
     dragListenersRef.current = { onMove, onUp };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [duration, setPlayhead, handleScrub]);
+  }, [handleScrub, scrubToTime]);
 
   useEffect(() => {
     return () => {
+      releaseMonitorAudioOutput('program-monitor');
       if (dragListenersRef.current) {
         window.removeEventListener('mousemove', dragListenersRef.current.onMove);
         window.removeEventListener('mouseup', dragListenersRef.current.onUp);
@@ -230,6 +292,17 @@ export function MonitorArea() {
         {/* Timecode overlay */}
         <div className="monitor-tc-overlay" role="status" aria-live="polite">
           {tc.secondsToTC(playheadTime)}
+        </div>
+
+        <div
+          style={{
+            position: 'absolute',
+            left: 12,
+            top: 12,
+            zIndex: 2,
+          }}
+        >
+          <PlaybackFallbackDiagnostics consumer="program-monitor" />
         </div>
 
         <TrimStatusOverlay />

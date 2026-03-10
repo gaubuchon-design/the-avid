@@ -119,7 +119,7 @@ export interface DesktopBridge {
   deleteProject: (projectId: string) => Promise<boolean>;
 
   // ─── Media ────────────────────────────────────────────────────────────────
-  importMedia: (projectId: string, filePaths: string[]) => Promise<EditorMediaAsset[]>;
+  importMedia: (projectId: string, filePaths: string[], binId?: string) => Promise<EditorMediaAsset[]>;
   scanProjectMedia: (projectId: string) => Promise<EditorProject | null>;
   relinkProjectMedia: (projectId: string, searchRoots: string[]) => Promise<RelinkResult>;
 

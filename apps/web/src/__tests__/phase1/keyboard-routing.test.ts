@@ -133,4 +133,37 @@ describe('phase 1 keyboard routing', () => {
     expect(nextEditSpy).toHaveBeenCalledTimes(1);
     expect(useEditorStore.getState().tracks[0]!.clips).toHaveLength(1);
   });
+
+  it('routes arrow and home-end transport keys to the source monitor when it is active', () => {
+    usePlayerStore.setState({ activeMonitor: 'source' });
+    useEditorStore.setState({
+      sourcePlayhead: 4,
+      sourceAsset: {
+        id: 'asset-source',
+        name: 'Source',
+        type: 'VIDEO',
+        status: 'READY',
+        duration: 10,
+        tags: [],
+        isFavorite: false,
+      },
+      playheadTime: 7,
+      duration: 30,
+      sequenceSettings: {
+        ...useEditorStore.getState().sequenceSettings,
+        fps: 24,
+      },
+    });
+
+    handleEditorKeyboardEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+    expect(useEditorStore.getState().sourcePlayhead).toBeCloseTo(4 + (1 / 24), 5);
+    expect(useEditorStore.getState().playheadTime).toBe(7);
+
+    handleEditorKeyboardEvent(new KeyboardEvent('keydown', { key: 'Home' }));
+    expect(useEditorStore.getState().sourcePlayhead).toBe(0);
+
+    handleEditorKeyboardEvent(new KeyboardEvent('keydown', { key: 'End' }));
+    expect(useEditorStore.getState().sourcePlayhead).toBe(10);
+    expect(useEditorStore.getState().playheadTime).toBe(7);
+  });
 });

@@ -3,6 +3,7 @@ import { useEditorStore } from '../../store/editor.store';
 import { usePlayerStore } from '../../store/player.store';
 import { useTitleStore } from '../../store/title.store';
 import { TrimStatusOverlay } from '../Editor/TrimStatusOverlay';
+import { PlaybackFallbackDiagnostics } from '../Diagnostics/PlaybackFallbackDiagnostics';
 import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
 import { renderPlaybackSnapshotFrame } from '../../engine/playbackSnapshotFrame';
 import {
@@ -12,6 +13,13 @@ import {
   pauseVideoSource,
   tryLoadClipSource,
 } from '../../engine/compositeRecordFrame';
+import { videoSourceManager } from '../../engine/VideoSourceManager';
+import {
+  findTimelineMonitorMediaSource,
+  previewMonitorAudioOutput,
+  releaseMonitorAudioOutput,
+  syncMonitorAudioOutput,
+} from '../../lib/monitorPlayback';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -37,14 +45,21 @@ export function RecordMonitor() {
   const editorTogglePlay = useEditorStore((s) => s.togglePlay);
   const duration = useEditorStore((s) => s.duration);
   const fps = useEditorStore((s) => s.sequenceSettings.fps);
+  const inPoint = useEditorStore((s) => s.inPoint);
+  const outPoint = useEditorStore((s) => s.outPoint);
+  const tracks = useEditorStore((s) => s.tracks);
+  const bins = useEditorStore((s) => s.bins);
 
   const { setActiveMonitor } = usePlayerStore();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrubRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>();
   const lastClipIdRef = useRef<string | null>(null);
+  const dragListenersRef = useRef<{ onMove: (ev: MouseEvent) => void; onUp: () => void } | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 480, h: 270 });
+  const [sourceRevision, setSourceRevision] = useState(0);
 
   // Responsive canvas sizing
   useEffect(() => {
@@ -68,6 +83,12 @@ export function RecordMonitor() {
     });
     observer.observe(container);
     return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    return videoSourceManager.subscribe(() => {
+      setSourceRevision((revision) => revision + 1);
+    });
   }, []);
 
   // ── Continuous RAF render loop ──────────────────────────────────────────────
@@ -153,6 +174,39 @@ export function RecordMonitor() {
     }
   }, [playheadTime]);
 
+  useEffect(() => {
+    const candidate = findTimelineMonitorMediaSource(tracks, playheadTime);
+    if (!candidate) {
+      releaseMonitorAudioOutput('record-monitor');
+      return;
+    }
+
+    tryLoadClipSource(candidate.assetId, bins as any);
+    const source = videoSourceManager.getSource(candidate.assetId);
+    if (!source?.ready) {
+      return;
+    }
+
+    syncMonitorAudioOutput(
+      'record-monitor',
+      source.element,
+      candidate.sourceTime,
+      editorIsPlaying,
+      fps,
+    );
+  }, [bins, editorIsPlaying, fps, playheadTime, sourceRevision, tracks]);
+
+  useEffect(() => {
+    return () => {
+      releaseMonitorAudioOutput('record-monitor');
+      if (dragListenersRef.current) {
+        window.removeEventListener('mousemove', dragListenersRef.current.onMove);
+        window.removeEventListener('mouseup', dragListenersRef.current.onUp);
+        dragListenersRef.current = null;
+      }
+    };
+  }, []);
+
   // Transport handlers
   const handlePlayPause = useCallback(() => {
     editorTogglePlay();
@@ -206,6 +260,65 @@ export function RecordMonitor() {
     setActiveMonitor('record');
   }, [setActiveMonitor]);
 
+  const progress = duration > 0 ? (playheadTime / duration) * 100 : 0;
+  const inPos = inPoint !== null && duration > 0 ? (inPoint / duration) * 100 : null;
+  const outPos = outPoint !== null && duration > 0 ? (outPoint / duration) * 100 : null;
+  const scrubToTime = useCallback((clientX: number, previewAudio: boolean) => {
+    const bar = scrubRef.current;
+    if (!bar || duration <= 0) {
+      return;
+    }
+
+    const rect = bar.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const nextTime = pct * duration;
+    useEditorStore.getState().setPlayhead(nextTime);
+
+    if (!previewAudio || editorIsPlaying) {
+      return;
+    }
+
+    const state = useEditorStore.getState();
+    const candidate = findTimelineMonitorMediaSource(state.tracks, nextTime);
+    if (!candidate) {
+      releaseMonitorAudioOutput('record-monitor');
+      return;
+    }
+
+    tryLoadClipSource(candidate.assetId, state.bins as any);
+    const source = videoSourceManager.getSource(candidate.assetId);
+    if (!source?.ready) {
+      return;
+    }
+
+    previewMonitorAudioOutput('record-monitor', source.element, candidate.sourceTime);
+  }, [duration, editorIsPlaying]);
+
+  const handleScrub = useCallback((e: React.MouseEvent) => {
+    scrubToTime(e.clientX, true);
+  }, [scrubToTime]);
+
+  const handleScrubDrag = useCallback((e: React.MouseEvent) => {
+    handleScrub(e);
+    const bar = scrubRef.current;
+    if (!bar) {
+      return;
+    }
+
+    const onMove = (ev: MouseEvent) => {
+      scrubToTime(ev.clientX, true);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      dragListenersRef.current = null;
+    };
+
+    dragListenersRef.current = { onMove, onUp };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [handleScrub, scrubToTime]);
+
   const tc = timeToTimecode(playheadTime, fps);
   const isActive = usePlayerStore((s) => s.activeMonitor === 'record');
   const trimActive = useEditorStore((s) => s.trimActive);
@@ -223,6 +336,7 @@ export function RecordMonitor() {
             {trimMode.toUpperCase()} {trimSelectionLabel} {trimCounterFrames > 0 ? '+' : ''}{trimCounterFrames}f
           </span>
         )}
+        <PlaybackFallbackDiagnostics consumer="record-monitor" />
         <span className="monitor-tc">{tc}</span>
       </div>
 
@@ -235,6 +349,30 @@ export function RecordMonitor() {
           style={{ width: '100%', height: '100%', objectFit: 'contain' }}
         />
         <TrimStatusOverlay />
+      </div>
+
+      <div
+        className="composer-scrubbar"
+        ref={scrubRef}
+        onMouseDown={handleScrubDrag}
+        role="slider"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progress}
+        aria-label="Record playback position"
+        tabIndex={0}
+      >
+        {inPos !== null && (
+          <div className="composer-scrubbar-mark in" style={{ left: `${inPos}%` }} title={`In: ${timeToTimecode(inPoint!, fps)}`} />
+        )}
+        {outPos !== null && (
+          <div className="composer-scrubbar-mark out" style={{ left: `${outPos}%` }} title={`Out: ${timeToTimecode(outPoint!, fps)}`} />
+        )}
+        {inPos !== null && outPos !== null && (
+          <div className="composer-scrubbar-range" style={{ left: `${inPos}%`, width: `${outPos - inPos}%` }} />
+        )}
+        <div className="composer-scrubbar-fill" style={{ width: `${progress}%` }} />
+        <div className="composer-scrubbar-head" style={{ left: `${progress}%` }} />
       </div>
 
       {/* Footer / Transport */}

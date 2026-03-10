@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { flattenAssets, getProjectDuration, hydrateProject } from '../project-library';
+import {
+  buildProject,
+  buildSeedProjectLibrary,
+  flattenAssets,
+  getProjectDuration,
+  hydrateProject,
+} from '../project-library';
 import type { EditorBin, EditorMediaAsset, EditorProject, EditorTrack, EditorClip } from '../project-library';
 
 // =============================================================================
@@ -327,5 +333,37 @@ describe('hydrateProject editorialState', () => {
     });
     expect(hydrated.workstationState.versionHistoryRetentionPreference).toBe('session');
     expect(hydrated.workstationState.versionHistoryCompareMode).toBe('details');
+  });
+});
+
+describe('buildProject', () => {
+  it('creates blank user projects when seedContent is false', () => {
+    const project = buildProject({
+      name: 'Blank Project',
+      template: 'film',
+      seedContent: false,
+    });
+
+    expect(project.bins).toEqual([]);
+    expect(project.tracks.length).toBeGreaterThan(0);
+    expect(project.tracks.every((track) => track.clips.length === 0)).toBe(true);
+    expect(project.markers).toEqual([]);
+    expect(project.collaborators).toEqual([]);
+    expect(project.transcript).toEqual([]);
+    expect(project.reviewComments).toEqual([]);
+    expect(project.approvals).toEqual([]);
+    expect(project.publishJobs).toEqual([]);
+    expect(project.progress).toBe(0);
+    expect(project.tokenBalance).toBe(0);
+    expect(project.editorialState.selectedBinId).toBeNull();
+  });
+
+  it('keeps the seed library populated with demo content', () => {
+    const [seededProject] = buildSeedProjectLibrary();
+
+    expect(seededProject).toBeDefined();
+    expect(seededProject!.bins.length).toBeGreaterThan(0);
+    expect(seededProject!.tracks.some((track) => track.clips.length > 0)).toBe(true);
+    expect(seededProject!.reviewComments.length).toBeGreaterThan(0);
   });
 });

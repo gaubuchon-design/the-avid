@@ -399,6 +399,7 @@ export interface CreateProjectOptions {
   description?: string;
   template?: ProjectTemplate;
   tags?: string[];
+  seedContent?: boolean;
 }
 
 const STORAGE_KEY = 'the-avid.projects.v1';
@@ -1320,10 +1321,13 @@ export function hydrateProject(project: Partial<EditorProject>): EditorProject {
 
 export function buildProject(options: CreateProjectOptions = {}): EditorProject {
   const template = options.template ?? 'film';
+  const seedContent = options.seedContent ?? true;
   const meta = TEMPLATE_META[template];
-  const bins = createTemplateBins(template);
-  const tracks = seedTracksFromBins(createTemplateTracks(template), bins);
-  const transcript = createTranscriptCues(bins, template);
+  const bins = seedContent ? createTemplateBins(template) : [];
+  const tracks = seedContent
+    ? seedTracksFromBins(createTemplateTracks(template), bins)
+    : createTemplateTracks(template);
+  const transcript = seedContent ? createTranscriptCues(bins, template) : [];
   const now = new Date().toISOString();
   const name = options.name ?? `Untitled ${(template[0] ?? '').toUpperCase()}${template.slice(1)}`;
   const firstVideoTrackId = tracks.find(
@@ -1339,7 +1343,9 @@ export function buildProject(options: CreateProjectOptions = {}): EditorProject 
     tags: options.tags?.length ? [...options.tags] : [...meta.tags],
     createdAt: now,
     updatedAt: now,
-    progress: Math.max(18, Math.min(100, Math.round(getProjectDuration({ tracks }) * 2))),
+    progress: seedContent
+      ? Math.max(18, Math.min(100, Math.round(getProjectDuration({ tracks }) * 2)))
+      : 0,
     settings: {
       frameRate: meta.resolution.frameRate,
       width: meta.resolution.width,
@@ -1348,23 +1354,27 @@ export function buildProject(options: CreateProjectOptions = {}): EditorProject 
       exportFormat: template === 'podcast' ? 'wav' : 'mov',
     },
     tracks,
-    markers: [
-      { id: generateId('marker'), time: 8.5, label: 'Beat marker', color: '#f59e0b' },
-      { id: generateId('marker'), time: 22, label: 'Revision point', color: '#ef4444' },
-    ],
+    markers: seedContent
+      ? [
+          { id: generateId('marker'), time: 8.5, label: 'Beat marker', color: '#f59e0b' },
+          { id: generateId('marker'), time: 22, label: 'Revision point', color: '#ef4444' },
+        ]
+      : [],
     bins,
-    collaborators: [
-      { id: generateId('user'), displayName: 'Sarah K.', color: '#7c5cfc' },
-      { id: generateId('user'), displayName: 'Marcus T.', color: '#25a865' },
-    ],
+    collaborators: seedContent
+      ? [
+          { id: generateId('user'), displayName: 'Sarah K.', color: '#7c5cfc' },
+          { id: generateId('user'), displayName: 'Marcus T.', color: '#25a865' },
+        ]
+      : [],
     aiJobs: [],
     transcript,
-    reviewComments: createReviewComments(template),
-    approvals: createApprovals(),
-    publishJobs: createPublishJobs(template),
+    reviewComments: seedContent ? createReviewComments(template) : [],
+    approvals: seedContent ? createApprovals() : [],
+    publishJobs: seedContent ? createPublishJobs(template) : [],
     watchFolders: [],
     versionHistory: [],
-    tokenBalance: template === 'sports' ? 620 : 487,
+    tokenBalance: seedContent ? (template === 'sports' ? 620 : 487) : 0,
     editorialState: {
       selectedBinId: bins[0]?.id ?? null,
       sourceAssetId: null,
@@ -1392,16 +1402,19 @@ export function buildProject(options: CreateProjectOptions = {}): EditorProject 
 
 export function buildSeedProjectLibrary(): EditorProject[] {
   return [
-    buildProject({ name: 'Demo Feature Film', template: 'film' }),
-    buildProject({ name: 'Brand Campaign Q4', template: 'commercial' }),
-    buildProject({ name: 'Documentary: City Life', template: 'documentary' }),
-    buildProject({ name: 'Sports Highlights Reel', template: 'sports' }),
-    buildProject({ name: 'Podcast Episode 24', template: 'podcast' }),
+    buildProject({ name: 'Demo Feature Film', template: 'film', seedContent: true }),
+    buildProject({ name: 'Brand Campaign Q4', template: 'commercial', seedContent: true }),
+    buildProject({ name: 'Documentary: City Life', template: 'documentary', seedContent: true }),
+    buildProject({ name: 'Sports Highlights Reel', template: 'sports', seedContent: true }),
+    buildProject({ name: 'Podcast Episode 24', template: 'podcast', seedContent: true }),
   ];
 }
 
 export function createProject(options: CreateProjectOptions = {}): EditorProject {
-  return upsertProject(buildProject(options));
+  return upsertProject(buildProject({
+    ...options,
+    seedContent: options.seedContent ?? false,
+  }));
 }
 
 export function ensureProjectLibrary(): EditorProject[] {

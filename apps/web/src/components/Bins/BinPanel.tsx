@@ -1,6 +1,7 @@
 import React, { useState, memo, useCallback } from 'react';
 import { useEditorStore } from '../../store/editor.store';
 import type { Bin, MediaAsset, SmartBin } from '../../store/editor.store';
+import { extractDesktopDroppedPaths } from '../../lib/desktopDropPaths';
 
 function formatDuration(sec?: number): string {
   if (!sec) return '--:--';
@@ -300,7 +301,18 @@ function SmartBinItem({ smartBin }: { smartBin: SmartBin }) {
 /* ─── Main BinPanel ───────────────────────────────────────────────────── */
 
 export function BinPanel() {
-  const { bins, activeBinAssets, toolbarTab, addBin, selectedBinId, smartBins, importMediaFiles, ingestProgress } = useEditorStore();
+  const {
+    bins,
+    activeBinAssets,
+    toolbarTab,
+    addBin,
+    selectedBinId,
+    smartBins,
+    importMediaFiles,
+    ingestProgress,
+    projectId,
+    loadProject,
+  } = useEditorStore();
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [tab, setTab] = useState<'bins' | 'smart' | 'search'>('bins');
@@ -331,12 +343,27 @@ export function BinPanel() {
       setIsDragOver(false);
     }
   };
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
-    if (e.dataTransfer.files?.length) {
-      importMediaFiles(e.dataTransfer.files, selectedBinId ?? undefined);
+    if (!e.dataTransfer.files?.length) {
+      return;
     }
+
+    const droppedFiles = e.dataTransfer.files;
+    const desktopPaths = extractDesktopDroppedPaths(Array.from(droppedFiles));
+
+    if (window.electronAPI && projectId && desktopPaths.length > 0) {
+      try {
+        await window.electronAPI.importMedia(projectId, desktopPaths, selectedBinId ?? undefined);
+        await loadProject(projectId);
+        return;
+      } catch (error) {
+        console.error('Desktop drag-and-drop ingest failed', error);
+      }
+    }
+
+    importMediaFiles(droppedFiles, selectedBinId ?? undefined);
   };
 
   return (
@@ -357,7 +384,7 @@ export function BinPanel() {
           pointerEvents: 'none',
         }}>
           <div style={{ color: 'var(--brand-bright)', fontSize: 13, fontWeight: 600, textAlign: 'center' }}>
-            Drop media files to import<br />
+            Drop media files{window.electronAPI ? ' or folders' : ''} to import<br />
             <span style={{ fontSize: 11, opacity: 0.7 }}>Video, Audio, Images, Graphics</span>
           </div>
         </div>

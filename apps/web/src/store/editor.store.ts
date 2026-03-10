@@ -2220,7 +2220,22 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     importMediaFiles: (files, binId) => {
       // Phase 1: Create placeholder assets immediately for UI feedback
       const assetIds: string[] = [];
+      let resolvedBinId = binId;
       set((s) => {
+        const createImportBin = (): Bin => {
+          const importBin: Bin = {
+            id: createId('bin'),
+            name: 'Imported Media',
+            color: '#4f63f5',
+            isOpen: true,
+            children: [],
+            assets: [],
+          };
+          s.bins.unshift(importBin);
+          s.selectedBinId = importBin.id;
+          s.activeBinAssets = importBin.assets;
+          return importBin;
+        };
         const targetBin = binId
           ? (function findBin(bins: Bin[]): Bin | null {
               for (const b of bins) {
@@ -2230,8 +2245,9 @@ export const useEditorStore = create<EditorState & EditorActions>()(
               }
               return null;
             })(s.bins)
-          : s.bins[0] ?? null;
+          : s.bins[0] ?? createImportBin();
         if (!targetBin) return;
+        resolvedBinId = targetBin.id;
 
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
@@ -2289,7 +2305,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
             objectUrl: URL.createObjectURL(file),
             metadata,
             status: 'online',
-            binId: binId ?? undefined,
+            binId: resolvedBinId,
             addedAt: Date.now(),
             lastVerified: Date.now(),
           });

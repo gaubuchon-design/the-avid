@@ -750,6 +750,26 @@ function isSupportedIngestFile(filePath: string): boolean {
   return inferMediaType(filePath) !== 'DOCUMENT' || path.extname(filePath).toLowerCase() === '.pdf';
 }
 
+export async function resolveImportSourcePaths(filePaths: string[]): Promise<string[]> {
+  const resolvedPaths: string[] = [];
+
+  for (const filePath of filePaths) {
+    try {
+      const pathStats = await stat(filePath);
+      if (pathStats.isDirectory()) {
+        resolvedPaths.push(...await collectFilesRecursively(filePath));
+        continue;
+      }
+
+      resolvedPaths.push(filePath);
+    } catch {
+      // Ignore paths that disappear or are inaccessible between drag/drop and ingest.
+    }
+  }
+
+  return uniqueList(resolvedPaths.filter(isSupportedIngestFile));
+}
+
 function iterateAssetsMutable(bins: EditorBin[], visit: (asset: EditorMediaAsset) => void): void {
   for (const bin of bins) {
     for (const asset of bin.assets) {

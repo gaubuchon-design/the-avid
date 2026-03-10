@@ -249,8 +249,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     safeInvoke('projects:save', project),
   deleteProject: (projectId: string) =>
     safeInvoke('projects:delete', projectId),
-  importMedia: (projectId: string, filePaths: string[]) =>
-    safeInvoke('projects:import-media', projectId, filePaths),
+  importMedia: (projectId: string, filePaths: string[], binId?: string) =>
+    safeInvoke('projects:import-media', projectId, filePaths, binId),
   scanProjectMedia: (projectId: string) =>
     safeInvoke('projects:scan-media', projectId),
   relinkProjectMedia: (projectId: string, searchRoots: string[]) =>

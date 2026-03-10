@@ -3,9 +3,11 @@ import { colorEngine } from '../../engine/ColorEngine';
 import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
 import { compositePlaybackSnapshot } from '../../engine/compositeRecordFrame';
 import {
+  getPlaybackRealtimeFallbackStats,
   buildPlaybackSnapshotRenderRevision,
   evaluatePlaybackSnapshotImageData,
   renderPlaybackSnapshotFrame,
+  resetPlaybackRealtimeFallbackStats,
   resetPlaybackSnapshotFrameCache,
 } from '../../engine/playbackSnapshotFrame';
 
@@ -13,7 +15,9 @@ vi.mock('../../engine/compositeRecordFrame', () => ({
   compositePlaybackSnapshot: vi.fn(),
 }));
 
-function makeSnapshot(consumer: 'record-monitor' | 'export' | 'scope' = 'record-monitor') {
+function makeSnapshot(
+  consumer: 'record-monitor' | 'program-monitor' | 'export' | 'scope' = 'record-monitor',
+) {
   return buildPlaybackSnapshot({
     tracks: [],
     subtitleTracks: [],
@@ -37,7 +41,9 @@ function makeSnapshot(consumer: 'record-monitor' | 'export' | 'scope' = 'record-
   }, consumer);
 }
 
-function makePlayingSnapshot(consumer: 'record-monitor' | 'export' | 'scope' = 'record-monitor') {
+function makePlayingSnapshot(
+  consumer: 'record-monitor' | 'program-monitor' | 'export' | 'scope' = 'record-monitor',
+) {
   return buildPlaybackSnapshot({
     tracks: [],
     subtitleTracks: [],
@@ -119,6 +125,7 @@ function createThrowingReadbackCanvas(width = 320, height = 180): HTMLCanvasElem
 describe('phase 1 playback render parity', () => {
   beforeEach(() => {
     resetPlaybackSnapshotFrameCache();
+    resetPlaybackRealtimeFallbackStats();
     restorePrimaryDefaults();
     vi.mocked(compositePlaybackSnapshot).mockClear();
   });
@@ -239,5 +246,31 @@ describe('phase 1 playback render parity', () => {
     expect(result.degradedToPreColor).toBe(true);
     expect(result.cacheHit).toBe(false);
     expect(vi.mocked(compositePlaybackSnapshot)).toHaveBeenCalledTimes(2);
+
+    const telemetry = getPlaybackRealtimeFallbackStats('record-monitor');
+    expect(telemetry.totalTransportFrames).toBe(1);
+    expect(telemetry.degradedTransportFrames).toBe(1);
+    expect(telemetry.fallbackRate).toBe(1);
+    expect(telemetry.lastFrameRevision).toBeTruthy();
+  });
+
+  it('records transport-time stability when realtime post-color renders succeed', () => {
+    const snapshot = makePlayingSnapshot('program-monitor');
+
+    const result = renderPlaybackSnapshotFrame({
+      snapshot,
+      width: 320,
+      height: 180,
+      canvas: createMockCanvas(),
+      colorProcessing: 'post',
+      useCache: false,
+    });
+
+    expect(result.degradedToPreColor).toBe(false);
+
+    const telemetry = getPlaybackRealtimeFallbackStats('program-monitor');
+    expect(telemetry.totalTransportFrames).toBe(1);
+    expect(telemetry.degradedTransportFrames).toBe(0);
+    expect(telemetry.fallbackRate).toBe(0);
   });
 });

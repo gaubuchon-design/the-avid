@@ -1,4 +1,4 @@
-import type { PlaybackSnapshot } from './PlaybackSnapshot';
+import type { PlaybackConsumer, PlaybackSnapshot } from './PlaybackSnapshot';
 import { buildPlaybackFrameSignature } from './PlaybackSnapshot';
 import { colorEngine } from './ColorEngine';
 import type { TitleData } from './TitleRenderer';
@@ -33,9 +33,43 @@ export interface PlaybackSnapshotImageDataResult {
   degradedToPreColor?: boolean;
 }
 
+export interface PlaybackRealtimeFallbackStats {
+  consumer: PlaybackConsumer | 'all';
+  totalTransportFrames: number;
+  degradedTransportFrames: number;
+  fallbackRate: number;
+  lastDegradedAt: number | null;
+  lastFrameRevision: string | null;
+}
+
 let scratchCanvas: HTMLCanvasElement | null = null;
 const playbackFrameCache = new Map<string, ImageData>();
 const PLAYBACK_FRAME_CACHE_LIMIT = 24;
+const realtimeFallbackStats = new Map<PlaybackConsumer, PlaybackRealtimeFallbackStats>([
+  ['record-monitor', createEmptyRealtimeFallbackStats('record-monitor')],
+  ['program-monitor', createEmptyRealtimeFallbackStats('program-monitor')],
+  ['scope', createEmptyRealtimeFallbackStats('scope')],
+  ['export', createEmptyRealtimeFallbackStats('export')],
+]);
+
+function createEmptyRealtimeFallbackStats(
+  consumer: PlaybackConsumer | 'all',
+): PlaybackRealtimeFallbackStats {
+  return {
+    consumer,
+    totalTransportFrames: 0,
+    degradedTransportFrames: 0,
+    fallbackRate: 0,
+    lastDegradedAt: null,
+    lastFrameRevision: null,
+  };
+}
+
+function cloneRealtimeFallbackStats(
+  stats: PlaybackRealtimeFallbackStats,
+): PlaybackRealtimeFallbackStats {
+  return { ...stats };
+}
 
 function cloneImageData(imageData: ImageData): ImageData {
   return new ImageData(new Uint8ClampedArray(imageData.data), imageData.width, imageData.height);
@@ -119,6 +153,55 @@ function shouldUsePlaybackFrameCache(options: PlaybackSnapshotFrameOptions): boo
 
 function shouldUseRealtimePreColorFallback(options: PlaybackSnapshotFrameOptions): boolean {
   return options.snapshot.isPlaying && (options.colorProcessing ?? 'pre') === 'post';
+}
+
+function recordRealtimeFallbackSample(
+  options: PlaybackSnapshotFrameOptions,
+  frameRevision: string,
+  degradedToPreColor: boolean,
+): void {
+  if (!shouldUseRealtimePreColorFallback(options)) {
+    return;
+  }
+
+  const current = realtimeFallbackStats.get(options.snapshot.consumer)
+    ?? createEmptyRealtimeFallbackStats(options.snapshot.consumer);
+  const totalTransportFrames = current.totalTransportFrames + 1;
+  const degradedTransportFrames = current.degradedTransportFrames + (degradedToPreColor ? 1 : 0);
+
+  realtimeFallbackStats.set(options.snapshot.consumer, {
+    consumer: options.snapshot.consumer,
+    totalTransportFrames,
+    degradedTransportFrames,
+    fallbackRate: totalTransportFrames > 0 ? degradedTransportFrames / totalTransportFrames : 0,
+    lastDegradedAt: degradedToPreColor ? Date.now() : current.lastDegradedAt,
+    lastFrameRevision: degradedToPreColor ? frameRevision : current.lastFrameRevision,
+  });
+}
+
+export function getPlaybackRealtimeFallbackStats(
+  consumer: PlaybackConsumer | 'all' = 'all',
+): PlaybackRealtimeFallbackStats {
+  if (consumer !== 'all') {
+    return cloneRealtimeFallbackStats(
+      realtimeFallbackStats.get(consumer) ?? createEmptyRealtimeFallbackStats(consumer),
+    );
+  }
+
+  const aggregate = createEmptyRealtimeFallbackStats('all');
+  for (const stats of realtimeFallbackStats.values()) {
+    aggregate.totalTransportFrames += stats.totalTransportFrames;
+    aggregate.degradedTransportFrames += stats.degradedTransportFrames;
+    if ((stats.lastDegradedAt ?? 0) > (aggregate.lastDegradedAt ?? 0)) {
+      aggregate.lastDegradedAt = stats.lastDegradedAt;
+      aggregate.lastFrameRevision = stats.lastFrameRevision;
+    }
+  }
+
+  aggregate.fallbackRate = aggregate.totalTransportFrames > 0
+    ? aggregate.degradedTransportFrames / aggregate.totalTransportFrames
+    : 0;
+  return aggregate;
 }
 
 function compositeSnapshotToCanvas(
@@ -240,6 +323,7 @@ export function renderPlaybackSnapshotFrame(options: PlaybackSnapshotFrameOption
       colorProcessing: 'pre',
       useCache: false,
     });
+    recordRealtimeFallbackSample(options, result.frameRevision, true);
     return {
       canvas,
       frameRevision: result.frameRevision,
@@ -250,6 +334,7 @@ export function renderPlaybackSnapshotFrame(options: PlaybackSnapshotFrameOption
 
   const ctx = canvas.getContext('2d');
   if (!ctx || !result.imageData) {
+    recordRealtimeFallbackSample(options, result.frameRevision, Boolean(result.degradedToPreColor));
     return {
       canvas,
       frameRevision: result.frameRevision,
@@ -259,6 +344,7 @@ export function renderPlaybackSnapshotFrame(options: PlaybackSnapshotFrameOption
   }
 
   ctx.putImageData(result.imageData, 0, 0);
+  recordRealtimeFallbackSample(options, result.frameRevision, Boolean(result.degradedToPreColor));
   return {
     canvas,
     frameRevision: result.frameRevision,
@@ -273,4 +359,11 @@ export function capturePlaybackSnapshotImageData(options: PlaybackSnapshotFrameO
 
 export function resetPlaybackSnapshotFrameCache(): void {
   playbackFrameCache.clear();
+}
+
+export function resetPlaybackRealtimeFallbackStats(): void {
+  realtimeFallbackStats.set('record-monitor', createEmptyRealtimeFallbackStats('record-monitor'));
+  realtimeFallbackStats.set('program-monitor', createEmptyRealtimeFallbackStats('program-monitor'));
+  realtimeFallbackStats.set('scope', createEmptyRealtimeFallbackStats('scope'));
+  realtimeFallbackStats.set('export', createEmptyRealtimeFallbackStats('export'));
 }

@@ -54,6 +54,7 @@ class AudioEngine {
   private trackRoutings: Map<string, TrackRouting> = new Map();
   private listeners = new Set<() => void>();
   private soloActive = false;
+  private mediaElementSourceNodes = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
 
   /**
    * Initialise the Web Audio context and master chain.
@@ -162,7 +163,11 @@ class AudioEngine {
     this.disconnectVideoSource(trackId);
 
     try {
-      const source = this.context.createMediaElementSource(videoElement);
+      const source = this.mediaElementSourceNodes.get(videoElement)
+        ?? this.context.createMediaElementSource(videoElement);
+      if (!this.mediaElementSourceNodes.has(videoElement)) {
+        this.mediaElementSourceNodes.set(videoElement, source);
+      }
       const routing = this.getOrCreateTrack(trackId);
       source.connect(routing.gain);
       this.videoSources.set(trackId, source);
@@ -458,6 +463,8 @@ class AudioEngine {
       this.context.close().catch(() => {});
     }
     this.context = null;
+    this.videoSources.clear();
+    this.mediaElementSourceNodes = new WeakMap();
     this.listeners.clear();
   }
 }
