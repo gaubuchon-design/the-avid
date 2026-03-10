@@ -176,7 +176,7 @@ export const useEffectsStore = create<EffectsState & EffectsActions>()(
       favorites: [...INITIAL_EFFECTS_STATE.favorites],
     }), true, 'effects/resetStore'),
   })),
-  { name: 'EffectsStore', enabled: process.env["NODE_ENV"] === 'development' },
+  { name: 'EffectsStore', enabled: import.meta.env.DEV },
   )
 );
 

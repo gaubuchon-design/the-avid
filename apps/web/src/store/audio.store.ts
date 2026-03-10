@@ -255,7 +255,7 @@ export const useAudioStore = create<AudioState & AudioActions>()(
         })),
       }), true, 'audio/resetStore'),
     })),
-    { name: 'AudioStore', enabled: process.env["NODE_ENV"] === 'development' },
+    { name: 'AudioStore', enabled: import.meta.env.DEV },
   )
 );
 
