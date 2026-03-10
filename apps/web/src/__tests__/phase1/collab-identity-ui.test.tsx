@@ -117,6 +117,7 @@ describe('phase 1 collab identity UI', () => {
       activityFeed: [
         {
           id: 'activity-1',
+          userId: 'user-alex',
           user: 'Alex Editor',
           action: 'saved version',
           timestamp: Date.now(),
@@ -216,6 +217,90 @@ describe('phase 1 collab identity UI', () => {
     expect(avatars.length).toBeGreaterThanOrEqual(2);
     expect(container.textContent).toContain('Identity comment');
     expect(container.textContent).toContain('Identity reply');
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it('renders hydrated non-current collaborator avatar in comments and activity rows', async () => {
+    useCollabStore.setState({
+      activeTab: 'comments',
+      currentUserName: 'Alex Editor',
+      currentUserAvatar: 'avatar://alex',
+      identityProfiles: {
+        'id:user-jordan': {
+          userId: 'user-jordan',
+          displayName: 'Jordan Reviewer',
+          avatarUrl: 'avatar://jordan',
+          color: '#118ab2',
+        },
+        'name:jordan reviewer': {
+          userId: 'user-jordan',
+          displayName: 'Jordan Reviewer',
+          avatarUrl: 'avatar://jordan',
+          color: '#118ab2',
+        },
+      },
+      comments: [
+        {
+          id: 'comment-jordan',
+          userId: 'user-jordan',
+          userName: 'Jordan Reviewer',
+          frame: 80,
+          text: 'Needs one more pass.',
+          timestamp: Date.now(),
+          resolved: false,
+          reactions: [],
+          replies: [
+            {
+              id: 'reply-jordan',
+              userId: 'user-jordan',
+              userName: 'Jordan Reviewer',
+              text: 'I can handle this.',
+              timestamp: Date.now(),
+            },
+          ],
+        },
+      ],
+      activityFeed: [
+        {
+          id: 'activity-jordan',
+          userId: 'user-jordan',
+          user: 'Jordan Reviewer',
+          action: 'replied to comment',
+          timestamp: Date.now(),
+          detail: 'I can handle this.',
+        },
+      ],
+    });
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<CollabPanel />);
+    });
+
+    const commentTab = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Comments');
+    expect(commentTab).toBeTruthy();
+    await act(async () => {
+      commentTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const jordanCommentAvatars = container.querySelectorAll('img[alt="Jordan Reviewer avatar"]');
+    expect(jordanCommentAvatars.length).toBeGreaterThanOrEqual(2);
+
+    const activityTab = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Activity');
+    expect(activityTab).toBeTruthy();
+    await act(async () => {
+      activityTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.querySelector('img[alt="Jordan Reviewer avatar"]')).toBeTruthy();
+    expect(container.textContent).toContain('replied to comment');
 
     await act(async () => {
       root.unmount();

@@ -79,6 +79,7 @@ describe('useCollabStore', () => {
     expect(state.versions[0]?.createdByProfile?.avatarUrl).toBe('avatar://taylor');
     expect(state.versions[0]?.createdByProfile?.displayName).toBe('Taylor Editor');
     expect(state.activityFeed[0]?.user).toBe('Taylor Editor');
+    expect(state.activityFeed[0]?.userId).toBe('user_identity');
     expect(state.onlineUsers.some((user) => user.id === 'user_identity' && user.avatar === 'avatar://taylor')).toBe(true);
   });
 
@@ -107,10 +108,15 @@ describe('useCollabStore', () => {
     await flushAsyncTasks();
 
     const hydratedVersion = useCollabStore.getState().versions[0];
+    const identityById = useCollabStore.getState().identityProfiles['id:user-persisted'];
+    const identityByName = useCollabStore.getState().identityProfiles['name:user'];
     expect(hydratedVersion?.id).toBe('persisted-version-1');
     expect(hydratedVersion?.name).toBe('Persisted Version');
     expect(hydratedVersion?.createdByProfile?.avatarUrl).toBe('avatar://persisted-user');
     expect(hydratedVersion?.createdByProfile?.color).toBe('#1f9de8');
+    expect(identityById?.avatarUrl).toBe('avatar://persisted-user');
+    expect(identityById?.color).toBe('#1f9de8');
+    expect(identityByName?.displayName).toBe('User');
     expect(repositoryMocks.getProjectFromRepository).toHaveBeenCalledWith(project.id);
   });
 

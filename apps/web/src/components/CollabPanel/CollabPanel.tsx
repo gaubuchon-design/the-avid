@@ -3,7 +3,7 @@
 // Versions (snapshots), and Activity (live feed).
 
 import React, { useState, useCallback, useMemo } from 'react';
-import { useCollabStore } from '../../store/collab.store';
+import { useCollabStore, type CollaboratorIdentityProfile } from '../../store/collab.store';
 import { useEditorStore } from '../../store/editor.store';
 import { toTimecode } from '../../lib/timecode';
 import {
@@ -35,6 +35,30 @@ function getDisplayColorForUser(userName: string): string {
   if (userName === 'Sarah K.') return '#7c5cfc';
   if (userName === 'Marcus T.') return '#2bb672';
   return '#f59e0b';
+}
+
+function resolveIdentityProfile(
+  identityProfiles: Record<string, CollaboratorIdentityProfile>,
+  userId?: string,
+  displayName?: string,
+): CollaboratorIdentityProfile | null {
+  const normalizedUserId = userId?.trim();
+  if (normalizedUserId) {
+    const byId = identityProfiles[`id:${normalizedUserId}`];
+    if (byId) {
+      return byId;
+    }
+  }
+
+  const normalizedDisplayName = displayName?.trim().toLowerCase();
+  if (normalizedDisplayName) {
+    const byName = identityProfiles[`name:${normalizedDisplayName}`];
+    if (byName) {
+      return byName;
+    }
+  }
+
+  return null;
 }
 
 function IdentityAvatar({
@@ -248,6 +272,7 @@ function CommentsTab() {
     addReaction,
     currentUserName,
     currentUserAvatar,
+    identityProfiles,
   } = useCollabStore();
   const { setPlayhead, playheadTime } = useEditorStore();
   const [newCommentText, setNewCommentText] = useState('');
@@ -390,6 +415,7 @@ function CommentsTab() {
           comment={comment}
           currentUserName={currentUserName}
           currentUserAvatar={currentUserAvatar}
+          identityProfiles={identityProfiles}
           isSelected={selectedCommentId === comment.id}
           onSelect={() => selectComment(comment.id === selectedCommentId ? null : comment.id)}
           onSeek={() => setPlayhead(comment.frame / 23.976)}
@@ -416,6 +442,7 @@ function CommentCard({
   comment,
   currentUserName,
   currentUserAvatar,
+  identityProfiles,
   isSelected,
   onSelect,
   onSeek,
@@ -430,6 +457,7 @@ function CommentCard({
   comment: CollabComment;
   currentUserName: string;
   currentUserAvatar?: string;
+  identityProfiles: Record<string, CollaboratorIdentityProfile>;
   isSelected: boolean;
   onSelect: () => void;
   onSeek: () => void;
@@ -443,8 +471,10 @@ function CommentCard({
 }) {
   const [showReactionPicker, setShowReactionPicker] = useState(false);
 
-  const userColor = getDisplayColorForUser(comment.userName);
-  const commentAvatar = comment.userName === currentUserName ? currentUserAvatar : undefined;
+  const commentIdentity = resolveIdentityProfile(identityProfiles, comment.userId, comment.userName);
+  const userColor = commentIdentity?.color || getDisplayColorForUser(comment.userName);
+  const commentAvatar = commentIdentity?.avatarUrl
+    ?? (comment.userName === currentUserName ? currentUserAvatar : undefined);
 
   return (
     <div
@@ -627,8 +657,10 @@ function CommentCard({
       {comment.replies.length > 0 && (
         <div style={{ marginTop: 8, paddingLeft: 16, borderLeft: '2px solid var(--border-default)' }}>
           {comment.replies.map((reply) => {
-            const replyColor = getDisplayColorForUser(reply.userName);
-            const replyAvatar = reply.userName === currentUserName ? currentUserAvatar : undefined;
+            const replyIdentity = resolveIdentityProfile(identityProfiles, reply.userId, reply.userName);
+            const replyColor = replyIdentity?.color || getDisplayColorForUser(reply.userName);
+            const replyAvatar = replyIdentity?.avatarUrl
+              ?? (reply.userName === currentUserName ? currentUserAvatar : undefined);
             return (
               <div key={reply.id} style={{ marginBottom: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
@@ -1282,7 +1314,12 @@ function VersionCard({
 // ─── Activity Tab ───────────────────────────────────────────────────────────
 
 function ActivityTab() {
-  const { activityFeed, currentUserName, currentUserAvatar } = useCollabStore();
+  const {
+    activityFeed,
+    currentUserName,
+    currentUserAvatar,
+    identityProfiles,
+  } = useCollabStore();
 
   return (
     <div>
@@ -1290,8 +1327,10 @@ function ActivityTab() {
         Recent Activity
       </div>
       {activityFeed.map((entry) => {
-        const userColor = getDisplayColorForUser(entry.user);
-        const userAvatar = entry.user === currentUserName ? currentUserAvatar : undefined;
+        const entryIdentity = resolveIdentityProfile(identityProfiles, entry.userId, entry.user);
+        const userColor = entryIdentity?.color || getDisplayColorForUser(entry.user);
+        const userAvatar = entryIdentity?.avatarUrl
+          ?? (entry.user === currentUserName ? currentUserAvatar : undefined);
         return (
           <div
             key={entry.id}
