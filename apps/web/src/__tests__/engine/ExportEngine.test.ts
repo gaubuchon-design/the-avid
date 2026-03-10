@@ -3,6 +3,7 @@ import { exportEngine } from '../../engine/ExportEngine';
 
 describe('ExportEngine', () => {
   afterEach(() => {
+    exportEngine.getActiveJobs().forEach((job) => exportEngine.cancelExport(job.id));
     vi.restoreAllMocks();
   });
 
@@ -109,6 +110,91 @@ describe('ExportEngine', () => {
       // Cleanup
       exportEngine.cancelExport(j1.id);
       exportEngine.cancelExport(j2.id);
+    });
+
+    it('passes audio sources into real export and stores muxed track metadata', async () => {
+      const createObjectURL = vi
+        .spyOn(URL, 'createObjectURL')
+        .mockReturnValue('blob:mock-audio-export');
+      const revokeObjectURL = vi
+        .spyOn(URL, 'revokeObjectURL')
+        .mockImplementation(() => undefined);
+      const appendSpy = vi.spyOn(document.body, 'appendChild');
+      const removeSpy = vi.spyOn(document.body, 'removeChild');
+
+      const startRealExport = vi
+        .spyOn(exportEngine, 'startRealExport')
+        .mockResolvedValue({
+          blob: new Blob(['muxed-export'], { type: 'video/webm' }),
+          mimeType: 'video/webm;codecs=vp9,opus',
+          audioTrackCount: 2,
+        });
+
+      const canvas = { captureStream: vi.fn() } as unknown as HTMLCanvasElement;
+      const fakeAudioTrack = { kind: 'audio' } as MediaStreamTrack;
+      const audioStream = {
+        getAudioTracks: () => [fakeAudioTrack],
+      } as unknown as MediaStream;
+
+      const job = exportEngine.startExport('custom-webm-vp9', 'local', {
+        canvas,
+        duration: 1,
+        audioSources: [{ stream: audioStream, label: 'mix-main' }],
+      });
+
+      await Promise.resolve();
+
+      expect(startRealExport).toHaveBeenCalledWith(
+        canvas,
+        1,
+        30,
+        [{ stream: audioStream, label: 'mix-main' }],
+        expect.any(Function),
+      );
+
+      const completed = exportEngine.getJob(job.id);
+      expect(completed).toBeDefined();
+      expect(completed!.status).toBe('completed');
+      expect(completed!.audio).toEqual({
+        requestedSources: 1,
+        muxedTrackCount: 2,
+      });
+
+      expect(createObjectURL).toHaveBeenCalled();
+      expect(revokeObjectURL).toHaveBeenCalledTimes(0);
+      expect(appendSpy).toHaveBeenCalled();
+      expect(removeSpy).toHaveBeenCalled();
+    });
+
+    it('adds encoder handoff metadata when preset container is not webm', async () => {
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-handoff-export');
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+      vi.spyOn(document.body, 'appendChild');
+      vi.spyOn(document.body, 'removeChild');
+
+      vi.spyOn(exportEngine, 'startRealExport').mockResolvedValue({
+        blob: new Blob(['handoff-export'], { type: 'video/webm' }),
+        mimeType: 'video/webm;codecs=vp9,opus',
+        audioTrackCount: 1,
+      });
+
+      const canvas = { captureStream: vi.fn() } as unknown as HTMLCanvasElement;
+      const job = exportEngine.startExport('stream-h264-1080p', 'local', {
+        canvas,
+        duration: 1,
+      });
+
+      await Promise.resolve();
+
+      const completed = exportEngine.getJob(job.id);
+      expect(completed).toBeDefined();
+      expect(completed!.status).toBe('completed');
+      expect(completed!.encoderHandoff).toBeDefined();
+      expect(completed!.encoderHandoff!.targetFormat).toBe('h264');
+      expect(completed!.encoderHandoff!.targetContainer).toBe('mp4');
+      expect(completed!.encoderHandoff!.targetAudioCodec).toBe('aac');
+      expect(completed!.encoderHandoff!.sourceMimeType).toContain('video/webm');
+      expect(completed!.outputPath).toMatch(/\.webm$/);
     });
   });
 

@@ -11,6 +11,26 @@ export type CaptionFormat = 'srt' | 'vtt' | 'scc' | 'ttml';
 /** Export delivery destination. */
 export type ExportDestination = 'local' | 'cloud' | 'youtube' | 'vimeo' | 'instagram' | 'tiktok';
 
+/** Audio source used for browser-side export muxing. */
+export interface ExportAudioSource {
+  stream?: MediaStream;
+  element?: HTMLMediaElement;
+  gain?: number;
+  enabled?: boolean;
+  label?: string;
+}
+
+/** Metadata describing handoff from browser WebM capture to external encoders. */
+export interface ExportEncoderHandoff {
+  targetFormat: ExportFormat;
+  targetContainer: string;
+  targetAudioCodec: string;
+  sourceMimeType: string;
+  sourceArtifact: string;
+  reason: string;
+  generatedAt: number;
+}
+
 /** An encoding preset defining format, resolution, and codec settings. */
 export interface ExportPreset {
   id: string;
@@ -37,6 +57,11 @@ export interface ExportJob {
   outputPath?: string;
   error?: string;
   estimatedTimeRemaining?: number;
+  audio?: {
+    requestedSources: number;
+    muxedTrackCount: number;
+  };
+  encoderHandoff?: ExportEncoderHandoff;
 }
 
 // -- Default Presets ----------------------------------------------------------
@@ -330,6 +355,7 @@ class ExportEngine {
       captionFormat?: CaptionFormat;
       canvas?: HTMLCanvasElement;
       duration?: number;
+      audioSources?: ExportAudioSource[];
     },
   ): ExportJob {
     const preset = this.getPreset(presetId);
@@ -342,6 +368,10 @@ class ExportEngine {
       progress: 0,
       startedAt: Date.now(),
       estimatedTimeRemaining: options?.duration ?? 5,
+      audio: {
+        requestedSources: options?.audioSources?.filter((source) => source.enabled !== false).length ?? 0,
+        muxedTrackCount: 0,
+      },
     };
     this.jobs.set(jobId, job);
     this.notify();
@@ -351,7 +381,7 @@ class ExportEngine {
       const canvas = options.canvas;
       const duration = options.duration ?? 5;
 
-      this.startRealExport(canvas, duration, fps, (progress) => {
+      this.startRealExport(canvas, duration, fps, options.audioSources, (progress) => {
         const currentJob = this.jobs.get(jobId);
         if (!currentJob || currentJob.status === 'failed') return;
 
@@ -366,7 +396,7 @@ class ExportEngine {
         }
         this.notify();
       })
-        .then((blob) => {
+        .then(({ blob, mimeType, audioTrackCount }) => {
           const currentJob = this.jobs.get(jobId);
           if (!currentJob || currentJob.status === 'failed') return;
 
@@ -374,13 +404,31 @@ class ExportEngine {
           currentJob.progress = 100;
           currentJob.completedAt = Date.now();
           currentJob.estimatedTimeRemaining = 0;
+          currentJob.audio = {
+            requestedSources: options?.audioSources?.filter((source) => source.enabled !== false).length ?? 0,
+            muxedTrackCount: audioTrackCount,
+          };
 
           // Generate a download URL and trigger browser download
           const url = URL.createObjectURL(blob);
-          const fileName = preset
-            ? `${preset.name.replace(/\s+/g, '_').toLowerCase()}_${jobId}.webm`
-            : `output_${jobId}.webm`;
+          const expectedContainer = preset?.container ?? 'webm';
+          const sourceContainer = 'webm';
+          const sourceFileName = preset
+            ? `${preset.name.replace(/\s+/g, '_').toLowerCase()}_${jobId}.${sourceContainer}`
+            : `output_${jobId}.${sourceContainer}`;
+          const fileName = sourceFileName;
           currentJob.outputPath = fileName;
+          if (preset && this.requiresEncoderHandoff(preset)) {
+            currentJob.encoderHandoff = {
+              targetFormat: preset.format,
+              targetContainer: expectedContainer,
+              targetAudioCodec: preset.audioCodec,
+              sourceMimeType: mimeType,
+              sourceArtifact: fileName,
+              reason: 'Browser MediaRecorder emits WebM output; transcode required for requested preset container/codec.',
+              generatedAt: Date.now(),
+            };
+          }
 
           const anchor = document.createElement('a');
           anchor.href = url;
@@ -462,9 +510,11 @@ class ExportEngine {
     canvas: HTMLCanvasElement,
     duration: number,
     fps: number = 30,
+    audioSources?: ExportAudioSource[],
     onProgress?: (progress: number) => void,
-  ): Promise<Blob> {
-    const stream = canvas.captureStream(fps);
+  ): Promise<{ blob: Blob; mimeType: string; audioTrackCount: number }> {
+    const mediaStream = this.createCompositeExportStream(canvas, fps, audioSources);
+    const stream = mediaStream.stream;
 
     // Choose the best supported MIME type
     const preferredMime = 'video/webm;codecs=vp9';
@@ -481,7 +531,7 @@ class ExportEngine {
     const recorderId = `rec_${Date.now()}`;
     this.activeRecorders.set(recorderId, recorder);
 
-    return new Promise<Blob>((resolve, reject) => {
+    return new Promise<{ blob: Blob; mimeType: string; audioTrackCount: number }>((resolve, reject) => {
       recorder.ondataavailable = (event: BlobEvent) => {
         if (event.data.size > 0) {
           chunks.push(event.data);
@@ -490,13 +540,19 @@ class ExportEngine {
 
       recorder.onerror = (event: Event) => {
         this.activeRecorders.delete(recorderId);
+        mediaStream.cleanup();
         reject(new Error(`MediaRecorder error: ${(event as ErrorEvent).message ?? 'unknown'}`));
       };
 
       recorder.onstop = () => {
         this.activeRecorders.delete(recorderId);
         const blob = new Blob(chunks, { type: mimeType });
-        resolve(blob);
+        mediaStream.cleanup();
+        resolve({
+          blob,
+          mimeType,
+          audioTrackCount: mediaStream.audioTrackCount,
+        });
       };
 
       // Start recording – request data every 100ms for responsive progress
@@ -517,8 +573,6 @@ class ExportEngine {
           if (recorder.state === 'recording') {
             recorder.stop();
           }
-          // Stop all tracks on the captured stream
-          stream.getTracks().forEach((track) => track.stop());
         }
       }, 100);
 
@@ -527,7 +581,6 @@ class ExportEngine {
         'stop',
         () => {
           clearInterval(progressInterval);
-          stream.getTracks().forEach((track) => track.stop());
         },
         { once: true },
       );
@@ -663,6 +716,111 @@ class ExportEngine {
         console.error('[ExportEngine] Listener error:', err);
       }
     });
+  }
+
+  /**
+   * Build a composite MediaStream containing canvas video and optional mixed audio.
+   */
+  private createCompositeExportStream(
+    canvas: HTMLCanvasElement,
+    fps: number,
+    audioSources?: ExportAudioSource[],
+  ): {
+    stream: MediaStream;
+    audioTrackCount: number;
+    cleanup: () => void;
+  } {
+    const canvasStream = canvas.captureStream(fps);
+    const composed = new MediaStream();
+    canvasStream.getVideoTracks().forEach((track) => composed.addTrack(track));
+
+    const activeSources = (audioSources ?? []).filter((source) => source.enabled !== false);
+    if (activeSources.length === 0) {
+      return {
+        stream: composed,
+        audioTrackCount: 0,
+        cleanup: () => {
+          canvasStream.getTracks().forEach((track) => track.stop());
+        },
+      };
+    }
+
+    const AudioContextCtor =
+      typeof window !== 'undefined'
+        ? window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+        : undefined;
+
+    if (!AudioContextCtor) {
+      for (const source of activeSources) {
+        const sourceStream = this.resolveAudioSourceStream(source);
+        if (!sourceStream) continue;
+        sourceStream.getAudioTracks().forEach((track) => composed.addTrack(track));
+      }
+
+      return {
+        stream: composed,
+        audioTrackCount: composed.getAudioTracks().length,
+        cleanup: () => {
+          canvasStream.getTracks().forEach((track) => track.stop());
+        },
+      };
+    }
+
+    const audioContext = new AudioContextCtor();
+    const destination = audioContext.createMediaStreamDestination();
+    const sourceNodes: MediaStreamAudioSourceNode[] = [];
+    const gainNodes: GainNode[] = [];
+
+    for (const source of activeSources) {
+      const sourceStream = this.resolveAudioSourceStream(source);
+      if (!sourceStream) continue;
+      if (sourceStream.getAudioTracks().length === 0) continue;
+
+      const sourceNode = audioContext.createMediaStreamSource(sourceStream);
+      sourceNodes.push(sourceNode);
+
+      const gainNode = audioContext.createGain();
+      gainNode.gain.value = source.gain ?? 1;
+      gainNodes.push(gainNode);
+
+      sourceNode.connect(gainNode);
+      gainNode.connect(destination);
+    }
+
+    destination.stream.getAudioTracks().forEach((track) => composed.addTrack(track));
+
+    return {
+      stream: composed,
+      audioTrackCount: destination.stream.getAudioTracks().length,
+      cleanup: () => {
+        sourceNodes.forEach((node) => node.disconnect());
+        gainNodes.forEach((node) => node.disconnect());
+        destination.disconnect();
+        canvasStream.getTracks().forEach((track) => track.stop());
+        void audioContext.close();
+      },
+    };
+  }
+
+  /**
+   * Resolve an export audio source into a MediaStream when possible.
+   */
+  private resolveAudioSourceStream(source: ExportAudioSource): MediaStream | undefined {
+    if (source.stream) return source.stream;
+    if (!source.element) return undefined;
+    const capture = (source.element as HTMLMediaElement & { captureStream?: () => MediaStream }).captureStream;
+    if (typeof capture === 'function') {
+      return capture.call(source.element);
+    }
+    return undefined;
+  }
+
+  /**
+   * Browser recorder currently writes WebM, so non-WebM preset containers/codecs require handoff.
+   */
+  private requiresEncoderHandoff(preset?: ExportPreset): boolean {
+    if (!preset) return false;
+    return preset.container.toLowerCase() !== 'webm' || preset.format !== 'webm';
   }
 
   // -- Helpers ----------------------------------------------------------------
