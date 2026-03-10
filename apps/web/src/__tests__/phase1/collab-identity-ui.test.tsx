@@ -144,6 +144,56 @@ describe('phase 1 collab identity UI', () => {
     container.remove();
   });
 
+  it('updates activity retention preferences from activity tab controls', async () => {
+    useCollabStore.setState({
+      activeTab: 'activity',
+      activityRetentionPreferences: {
+        preset: 'last-50',
+        autoPrune: true,
+      },
+      activityFeed: Array.from({ length: 30 }, (_, index) => ({
+        id: `activity-${index}`,
+        user: 'Alex Editor',
+        userId: 'user-alex',
+        action: 'edited timeline',
+        timestamp: Date.now() - (index * 1000),
+        detail: `event-${index}`,
+      })),
+    });
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<CollabPanel />);
+    });
+
+    const presetSelect = container.querySelector('select[aria-label="Activity retention preset"]') as HTMLSelectElement | null;
+    expect(presetSelect).toBeTruthy();
+    await act(async () => {
+      if (!presetSelect) return;
+      presetSelect.value = 'last-25';
+      presetSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    const autoPruneToggle = container.querySelector('input[aria-label="Activity retention auto prune"]') as HTMLInputElement | null;
+    expect(autoPruneToggle).toBeTruthy();
+    await act(async () => {
+      if (!autoPruneToggle) return;
+      autoPruneToggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(useCollabStore.getState().activityRetentionPreferences.preset).toBe('last-25');
+    expect(useCollabStore.getState().activityRetentionPreferences.autoPrune).toBe(false);
+    expect(useCollabStore.getState().activityFeed.length).toBe(25);
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
   it('renders avatar-aware identity chips in users tab rows', async () => {
     useCollabStore.setState({
       activeTab: 'users',

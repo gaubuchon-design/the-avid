@@ -112,10 +112,13 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Added explicit collaboration activity retention preferences (`preset` + `autoPrune`) in collab state with local preference persistence, policy-driven feed pruning, and a dedicated `setActivityRetentionPreferences(...)` action.
 - Persisted/hydrated collaboration activity retention preferences in repository project data (`collaborationActivityRetentionPreferences`) so reopen/reconnect cycles preserve the same activity history policy.
 - Replaced the hardcoded activity-feed cap with policy-based pruning (`keep-all`/`last-25`/`last-50`/`last-100`) and expanded store coverage for retention hydration, pruning behavior, and retention preference persistence.
+- Surfaced collaboration activity retention controls directly in the collaboration panel activity tab (preset selector + auto-prune toggle) so editors can manage history policy from UI without direct store/API calls.
+- Wired activity-tab retention controls to live store updates via `setActivityRetentionPreferences(...)`, including immediate feed-prune feedback and current-entry count visibility in the panel.
+- Expanded phase-1 UI coverage to assert activity-tab retention control interactions update store retention preferences and prune activity entries as expected.
 
 ## Next Execution Slices
 
-1. Surface collaboration activity retention controls in the collaboration panel UI so editors can tune history policy without direct store/API calls.
+1. Persist and hydrate active collaboration tab + activity filter/search preferences per project so reopen cycles restore the same collaboration review context.
 
 ## Exit Signals For These Early Phases
 

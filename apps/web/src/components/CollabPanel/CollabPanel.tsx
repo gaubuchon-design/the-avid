@@ -1338,6 +1338,8 @@ function VersionCard({
 function ActivityTab() {
   const {
     activityFeed,
+    activityRetentionPreferences,
+    setActivityRetentionPreferences,
     currentUserName,
     currentUserAvatar,
     identityProfiles,
@@ -1347,6 +1349,49 @@ function ActivityTab() {
     <div>
       <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '4px 4px 8px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
         Recent Activity
+      </div>
+      <div style={{ padding: 8, background: 'var(--bg-raised)', borderRadius: 'var(--radius-md)', marginBottom: 8 }}>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+          Activity Retention
+        </div>
+        <div style={{ display: 'grid', gap: 6 }}>
+          <label style={{ display: 'grid', gap: 4, fontSize: 10, color: 'var(--text-muted)' }}>
+            Keep
+            <select
+              aria-label="Activity retention preset"
+              value={activityRetentionPreferences.preset}
+              onChange={(event) => setActivityRetentionPreferences({ preset: event.target.value as typeof activityRetentionPreferences.preset })}
+              style={{
+                width: '100%',
+                padding: '6px 8px',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-default)',
+                background: 'var(--bg-void)',
+                color: 'var(--text-primary)',
+                fontSize: 10,
+                fontFamily: 'var(--font-ui)',
+                outline: 'none',
+              }}
+            >
+              <option value="keep-all">All activity</option>
+              <option value="last-25">Last 25 entries</option>
+              <option value="last-50">Last 50 entries</option>
+              <option value="last-100">Last 100 entries</option>
+            </select>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'var(--text-muted)', cursor: 'pointer' }}>
+            <input
+              aria-label="Activity retention auto prune"
+              type="checkbox"
+              checked={activityRetentionPreferences.autoPrune}
+              onChange={(event) => setActivityRetentionPreferences({ autoPrune: event.target.checked })}
+            />
+            Auto-prune old activity entries
+          </label>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+            Showing {activityFeed.length} entries
+          </div>
+        </div>
       </div>
       {activityFeed.map((entry) => {
         const entryIdentity = resolveIdentityProfile(identityProfiles, entry.userId, entry.user);
