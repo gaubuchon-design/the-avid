@@ -109,10 +109,13 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Persisted collaboration activity-feed entries into project repository data under `collaborationActivityFeed`, and hydrated that feed on collab connect/reopen so chronological collaboration context survives reloads.
 - Extended unified collab-state repository saves to include activity feed snapshots alongside version history and comment-thread state for reopen/reconnect parity.
 - Expanded store coverage for repository-backed activity-feed hydration/persistence so saved collaboration actions retain actor metadata (`userId`/name/action/detail) across project reloads.
+- Added explicit collaboration activity retention preferences (`preset` + `autoPrune`) in collab state with local preference persistence, policy-driven feed pruning, and a dedicated `setActivityRetentionPreferences(...)` action.
+- Persisted/hydrated collaboration activity retention preferences in repository project data (`collaborationActivityRetentionPreferences`) so reopen/reconnect cycles preserve the same activity history policy.
+- Replaced the hardcoded activity-feed cap with policy-based pruning (`keep-all`/`last-25`/`last-50`/`last-100`) and expanded store coverage for retention hydration, pruning behavior, and retention preference persistence.
 
 ## Next Execution Slices
 
-1. Add explicit collaboration activity retention policy + pruning controls (store + repository persistence) so long-lived projects bound activity history growth predictably.
+1. Surface collaboration activity retention controls in the collaboration panel UI so editors can tune history policy without direct store/API calls.
 
 ## Exit Signals For These Early Phases
 

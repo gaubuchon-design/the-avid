@@ -185,6 +185,10 @@ describe('useCollabStore', () => {
         detail: '"Persisted Cut"',
       },
     ];
+    project.collaborationActivityRetentionPreferences = {
+      preset: 'last-25',
+      autoPrune: true,
+    };
     repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
 
     useCollabStore.getState().connect(project.id, 'user_1');
@@ -195,6 +199,7 @@ describe('useCollabStore', () => {
     expect(activityEntry?.user).toBe('Jordan Reviewer');
     expect(activityEntry?.userId).toBe('user-reviewer');
     expect(activityEntry?.action).toBe('saved version');
+    expect(useCollabStore.getState().activityRetentionPreferences.preset).toBe('last-25');
   });
 
   it('disconnect() sets connected to false via setState', () => {
@@ -314,6 +319,7 @@ describe('useCollabStore', () => {
     expect(savedProject.versionHistory?.[0]?.createdByProfile?.userId).toBe('user_1');
     expect(savedProject.collaborationActivityFeed?.[0]?.action).toBe('saved version');
     expect(savedProject.collaborationActivityFeed?.[0]?.userId).toBe('user_1');
+    expect(savedProject.collaborationActivityRetentionPreferences?.preset).toBe('last-50');
 
     repositoryMocks.getProjectFromRepository.mockResolvedValue(savedProject);
     useCollabStore.getState().connect(project.id, 'user_1');
@@ -347,6 +353,18 @@ describe('useCollabStore', () => {
     expect(state.versionRetentionPreferences.preset).toBe('last-10');
     expect(state.versions.length).toBe(10);
     expect(localStorage.getItem('avid:version-retention-preferences')).toContain('"preset":"last-10"');
+  });
+
+  it('setActivityRetentionPreferences() prunes feed and persists preference', () => {
+    localStorage.removeItem('avid:activity-retention-preferences');
+    useCollabStore.getState().setActivityRetentionPreferences({ preset: 'last-25', autoPrune: true });
+    for (let i = 0; i < 30; i += 1) {
+      useCollabStore.getState().addActivity('Retention User', `event-${i}`, 'retention detail');
+    }
+    const state = useCollabStore.getState();
+    expect(state.activityRetentionPreferences.preset).toBe('last-25');
+    expect(state.activityFeed.length).toBe(25);
+    expect(localStorage.getItem('avid:activity-retention-preferences')).toContain('"preset":"last-25"');
   });
 
   it('addActivity() adds entry to front of feed', () => {

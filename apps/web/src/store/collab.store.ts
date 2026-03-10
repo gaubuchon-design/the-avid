@@ -5,6 +5,7 @@
 import type {
   EditorProject,
   EditorProjectCollaborationActivityEntry,
+  EditorProjectCollaborationActivityRetentionPreferences,
   EditorProjectCollaborationCommentEntry,
   EditorProjectVersionHistoryEntry,
 } from '@mcua/core';
@@ -37,6 +38,13 @@ export interface ActivityEntry {
   detail: string;
 }
 
+export type ActivityRetentionPreset = 'keep-all' | 'last-25' | 'last-50' | 'last-100';
+
+export interface ActivityRetentionPreferences {
+  preset: ActivityRetentionPreset;
+  autoPrune: boolean;
+}
+
 export interface CollaboratorIdentityProfile {
   userId?: string;
   displayName: string;
@@ -58,6 +66,7 @@ interface CollabState {
   selectedCommentId: string | null;
   commentFilter: 'all' | 'open' | 'resolved';
   versionRetentionPreferences: VersionRetentionPreferences;
+  activityRetentionPreferences: ActivityRetentionPreferences;
   activityFeed: ActivityEntry[];
 }
 
@@ -87,6 +96,7 @@ interface CollabActions {
   ) => void;
   restoreVersion: (versionId: string) => void;
   setVersionRetentionPreferences: (preferences: Partial<VersionRetentionPreferences>) => void;
+  setActivityRetentionPreferences: (preferences: Partial<ActivityRetentionPreferences>) => void;
 
   // Sync
   refreshFromEngine: () => void;
@@ -144,6 +154,11 @@ function isEditorProjectSnapshot(value: unknown): value is EditorProject {
 }
 
 const VERSION_RETENTION_STORAGE_KEY = 'avid:version-retention-preferences';
+const ACTIVITY_RETENTION_STORAGE_KEY = 'avid:activity-retention-preferences';
+const DEFAULT_ACTIVITY_RETENTION_PREFERENCES: ActivityRetentionPreferences = {
+  preset: 'last-50',
+  autoPrune: true,
+};
 
 function isVersionRetentionPreset(value: unknown): value is VersionRetentionPreset {
   return value === 'keep-all' || value === 'last-10' || value === 'last-25' || value === 'last-50';
@@ -177,6 +192,62 @@ function persistVersionRetentionPreferences(preferences: VersionRetentionPrefere
   } catch {
     // ignore localStorage persistence failures in private/incognito contexts
   }
+}
+
+function isActivityRetentionPreset(value: unknown): value is ActivityRetentionPreset {
+  return value === 'keep-all' || value === 'last-25' || value === 'last-50' || value === 'last-100';
+}
+
+function loadActivityRetentionPreferences(): ActivityRetentionPreferences {
+  if (typeof window === 'undefined') {
+    return { ...DEFAULT_ACTIVITY_RETENTION_PREFERENCES };
+  }
+  try {
+    const raw = window.localStorage.getItem(ACTIVITY_RETENTION_STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_ACTIVITY_RETENTION_PREFERENCES };
+    const parsed = JSON.parse(raw) as Partial<ActivityRetentionPreferences>;
+    return {
+      preset: isActivityRetentionPreset(parsed.preset)
+        ? parsed.preset
+        : DEFAULT_ACTIVITY_RETENTION_PREFERENCES.preset,
+      autoPrune: typeof parsed.autoPrune === 'boolean'
+        ? parsed.autoPrune
+        : DEFAULT_ACTIVITY_RETENTION_PREFERENCES.autoPrune,
+    };
+  } catch {
+    return { ...DEFAULT_ACTIVITY_RETENTION_PREFERENCES };
+  }
+}
+
+function persistActivityRetentionPreferences(preferences: ActivityRetentionPreferences): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(ACTIVITY_RETENTION_STORAGE_KEY, JSON.stringify(preferences));
+  } catch {
+    // ignore localStorage persistence failures in private/incognito contexts
+  }
+}
+
+function applyActivityRetention(
+  entries: ActivityEntry[],
+  preferences: ActivityRetentionPreferences,
+): ActivityEntry[] {
+  if (!preferences.autoPrune) {
+    return entries;
+  }
+  const maxEntriesByPreset: Record<Exclude<ActivityRetentionPreset, 'keep-all'>, number> = {
+    'last-25': 25,
+    'last-50': 50,
+    'last-100': 100,
+  };
+  if (preferences.preset === 'keep-all') {
+    return entries;
+  }
+  const maxEntries = maxEntriesByPreset[preferences.preset];
+  if (entries.length <= maxEntries) {
+    return entries;
+  }
+  return entries.slice(0, maxEntries);
 }
 
 function toPersistedVersionHistoryEntry(version: ProjectVersion): EditorProjectVersionHistoryEntry {
@@ -315,6 +386,31 @@ function toActivityEntryFromPersistedEntry(entry: EditorProjectCollaborationActi
   };
 }
 
+function toPersistedActivityRetentionPreferences(
+  preferences: ActivityRetentionPreferences,
+): EditorProjectCollaborationActivityRetentionPreferences {
+  return {
+    preset: preferences.preset,
+    autoPrune: preferences.autoPrune,
+  };
+}
+
+function toActivityRetentionPreferencesFromPersistedEntry(
+  entry?: EditorProjectCollaborationActivityRetentionPreferences,
+): ActivityRetentionPreferences {
+  if (!entry) {
+    return { ...DEFAULT_ACTIVITY_RETENTION_PREFERENCES };
+  }
+  return {
+    preset: isActivityRetentionPreset(entry.preset)
+      ? entry.preset
+      : DEFAULT_ACTIVITY_RETENTION_PREFERENCES.preset,
+    autoPrune: typeof entry.autoPrune === 'boolean'
+      ? entry.autoPrune
+      : DEFAULT_ACTIVITY_RETENTION_PREFERENCES.autoPrune,
+  };
+}
+
 function getIdentityProfileKey(userId?: string, displayName?: string): string | null {
   const normalizedUserId = userId?.trim();
   if (normalizedUserId) {
@@ -439,6 +535,7 @@ function buildIdentityProfilesFromComments(
 async function persistCollaborationStateToRepository(
   projectId: string | null,
   activityFeed: ActivityEntry[],
+  activityRetentionPreferences: ActivityRetentionPreferences,
 ): Promise<void> {
   if (!projectId) return;
   const project = await getProjectFromRepository(projectId);
@@ -451,10 +548,12 @@ async function persistCollaborationStateToRepository(
     versionHistory,
     collaborationComments,
     collaborationActivityFeed,
+    collaborationActivityRetentionPreferences: toPersistedActivityRetentionPreferences(activityRetentionPreferences),
   });
 }
 
 const initialVersionRetentionPreferences = loadVersionRetentionPreferences();
+const initialActivityRetentionPreferences = loadActivityRetentionPreferences();
 collabEngine.setVersionRetentionPreferences(initialVersionRetentionPreferences);
 // ─── Initial State ──────────────────────────────────────────────────────────
 
@@ -478,7 +577,8 @@ const INITIAL_STATE: CollabState = {
   selectedCommentId: null,
   commentFilter: 'all',
   versionRetentionPreferences: initialVersionRetentionPreferences,
-  activityFeed: DEMO_ACTIVITY,
+  activityRetentionPreferences: initialActivityRetentionPreferences,
+  activityFeed: applyActivityRetention(DEMO_ACTIVITY, initialActivityRetentionPreferences),
 };
 
 // ─── Store ──────────────────────────────────────────────────────────────────
@@ -537,6 +637,9 @@ export const useCollabStore = create<CollabState & CollabActions>()(
             const persistedVersions = (project.versionHistory ?? []).map(toProjectVersionFromPersistedEntry);
             const persistedComments = (project.collaborationComments ?? []).map(toCollabCommentFromPersistedEntry);
             const persistedActivityFeed = (project.collaborationActivityFeed ?? []).map(toActivityEntryFromPersistedEntry);
+            const persistedActivityRetentionPreferences = toActivityRetentionPreferencesFromPersistedEntry(
+              project.collaborationActivityRetentionPreferences,
+            );
             collabEngine.hydrateVersions(persistedVersions);
             collabEngine.hydrateComments(persistedComments);
             set((s) => {
@@ -545,13 +648,15 @@ export const useCollabStore = create<CollabState & CollabActions>()(
               const comments = collabEngine.getComments();
               s.versions = versions;
               s.comments = comments;
-              s.activityFeed = persistedActivityFeed;
+              s.activityRetentionPreferences = persistedActivityRetentionPreferences;
+              s.activityFeed = applyActivityRetention(persistedActivityFeed, persistedActivityRetentionPreferences);
               s.identityProfiles = {
                 ...s.identityProfiles,
                 ...buildIdentityProfilesFromComments(comments, s.identityProfiles),
                 ...buildIdentityProfilesFromVersions(versions),
               };
             }, false, `collab/hydrateVersions/${connectRequestToken}`);
+            persistActivityRetentionPreferences(persistedActivityRetentionPreferences);
           } catch (error) {
             console.error('Failed to hydrate collaboration version history', error);
           }
@@ -580,7 +685,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           s.identityProfiles = buildIdentityProfilesFromComments(comments, s.identityProfiles);
         }, false, 'collab/addComment');
         get().addActivity(get().currentUserName, 'added comment', `"${text.slice(0, 40)}${text.length > 40 ? '...' : ''}"`, get().currentUserId);
-        void persistCollaborationStateToRepository(get().projectId, get().activityFeed).catch((error) => {
+        void persistCollaborationStateToRepository(get().projectId, get().activityFeed, get().activityRetentionPreferences).catch((error) => {
           console.error('Failed to persist collaboration comments', error);
         });
       },
@@ -593,7 +698,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           s.identityProfiles = buildIdentityProfilesFromComments(comments, s.identityProfiles);
         }, false, 'collab/replyToComment');
         get().addActivity(get().currentUserName, 'replied to comment', `"${text.slice(0, 40)}${text.length > 40 ? '...' : ''}"`, get().currentUserId);
-        void persistCollaborationStateToRepository(get().projectId, get().activityFeed).catch((error) => {
+        void persistCollaborationStateToRepository(get().projectId, get().activityFeed, get().activityRetentionPreferences).catch((error) => {
           console.error('Failed to persist collaboration comments', error);
         });
       },
@@ -606,7 +711,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           s.identityProfiles = buildIdentityProfilesFromComments(comments, s.identityProfiles);
         }, false, 'collab/resolveComment');
         get().addActivity(get().currentUserName, 'resolved comment', `Comment ${commentId}`, get().currentUserId);
-        void persistCollaborationStateToRepository(get().projectId, get().activityFeed).catch((error) => {
+        void persistCollaborationStateToRepository(get().projectId, get().activityFeed, get().activityRetentionPreferences).catch((error) => {
           console.error('Failed to persist collaboration comments', error);
         });
       },
@@ -619,7 +724,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           s.identityProfiles = buildIdentityProfilesFromComments(comments, s.identityProfiles);
         }, false, 'collab/reopenComment');
         get().addActivity(get().currentUserName, 'reopened comment', `Comment ${commentId}`, get().currentUserId);
-        void persistCollaborationStateToRepository(get().projectId, get().activityFeed).catch((error) => {
+        void persistCollaborationStateToRepository(get().projectId, get().activityFeed, get().activityRetentionPreferences).catch((error) => {
           console.error('Failed to persist collaboration comments', error);
         });
       },
@@ -631,7 +736,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           s.comments = comments;
           s.identityProfiles = buildIdentityProfilesFromComments(comments, s.identityProfiles);
         }, false, 'collab/addReaction');
-        void persistCollaborationStateToRepository(get().projectId, get().activityFeed).catch((error) => {
+        void persistCollaborationStateToRepository(get().projectId, get().activityFeed, get().activityRetentionPreferences).catch((error) => {
           console.error('Failed to persist collaboration comments', error);
         });
       },
@@ -653,7 +758,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           };
         }, false, 'collab/saveVersion');
         get().addActivity(get().currentUserName, 'saved version', `"${name}"`, get().currentUserId);
-        void persistCollaborationStateToRepository(get().projectId, get().activityFeed).catch((error) => {
+        void persistCollaborationStateToRepository(get().projectId, get().activityFeed, get().activityRetentionPreferences).catch((error) => {
           console.error('Failed to persist collaboration state', error);
         });
       },
@@ -698,7 +803,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
             console.error('Failed to persist restored collaboration snapshot', error);
           });
           get().addActivity(get().currentUserName, 'restored version', `"${version.name}"`, get().currentUserId);
-          void persistCollaborationStateToRepository(get().projectId, get().activityFeed).catch((error) => {
+          void persistCollaborationStateToRepository(get().projectId, get().activityFeed, get().activityRetentionPreferences).catch((error) => {
             console.error('Failed to persist collaboration state', error);
           });
           return;
@@ -710,7 +815,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           `"${version.name}" does not contain a restorable project snapshot.`,
           get().currentUserId,
         );
-        void persistCollaborationStateToRepository(get().projectId, get().activityFeed).catch((error) => {
+        void persistCollaborationStateToRepository(get().projectId, get().activityFeed, get().activityRetentionPreferences).catch((error) => {
           console.error('Failed to persist collaboration state', error);
         });
       },
@@ -726,7 +831,21 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           s.versionRetentionPreferences = mergedPreferences;
           s.versions = collabEngine.getVersions();
         }, false, 'collab/setVersionRetentionPreferences');
-        void persistCollaborationStateToRepository(get().projectId, get().activityFeed).catch((error) => {
+        void persistCollaborationStateToRepository(get().projectId, get().activityFeed, get().activityRetentionPreferences).catch((error) => {
+          console.error('Failed to persist collaboration state', error);
+        });
+      },
+      setActivityRetentionPreferences: (preferences) => {
+        const mergedPreferences = {
+          ...get().activityRetentionPreferences,
+          ...preferences,
+        };
+        persistActivityRetentionPreferences(mergedPreferences);
+        set((s) => {
+          s.activityRetentionPreferences = mergedPreferences;
+          s.activityFeed = applyActivityRetention(s.activityFeed, mergedPreferences);
+        }, false, 'collab/setActivityRetentionPreferences');
+        void persistCollaborationStateToRepository(get().projectId, get().activityFeed, mergedPreferences).catch((error) => {
           console.error('Failed to persist collaboration state', error);
         });
       },
@@ -747,18 +866,18 @@ export const useCollabStore = create<CollabState & CollabActions>()(
 
       // Activity
       addActivity: (user, action, detail, userId) => set((s) => {
-        s.activityFeed.unshift({
+        const nextFeed = [
+          {
           id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           user,
           userId,
           action,
           timestamp: Date.now(),
           detail,
-        });
-        // Keep feed under 50 entries
-        if (s.activityFeed.length > 50) {
-          s.activityFeed = s.activityFeed.slice(0, 50);
-        }
+          },
+          ...s.activityFeed,
+        ];
+        s.activityFeed = applyActivityRetention(nextFeed, s.activityRetentionPreferences);
       }, false, 'collab/addActivity'),
 
       // Reset
@@ -770,6 +889,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           comments: collabEngine.getComments(),
           versions: collabEngine.getVersions(),
           versionRetentionPreferences: get().versionRetentionPreferences,
+          activityRetentionPreferences: get().activityRetentionPreferences,
           identityProfiles: get().identityProfiles,
         }), true, 'collab/resetStore');
       },
@@ -790,6 +910,7 @@ export const selectCollabActiveTab = (state: CollabStoreState) => state.activeTa
 export const selectSelectedCommentId = (state: CollabStoreState) => state.selectedCommentId;
 export const selectCommentFilter = (state: CollabStoreState) => state.commentFilter;
 export const selectVersionRetentionPreferences = (state: CollabStoreState) => state.versionRetentionPreferences;
+export const selectActivityRetentionPreferences = (state: CollabStoreState) => state.activityRetentionPreferences;
 export const selectActivityFeed = (state: CollabStoreState) => state.activityFeed;
 export const selectOnlineUserCount = (state: CollabStoreState) => state.onlineUsers.length;
 export const selectOpenComments = (state: CollabStoreState) =>

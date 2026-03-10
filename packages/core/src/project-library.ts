@@ -291,6 +291,11 @@ export interface EditorProjectCollaborationActivityEntry {
   detail: string;
 }
 
+export interface EditorProjectCollaborationActivityRetentionPreferences {
+  preset: 'keep-all' | 'last-25' | 'last-50' | 'last-100';
+  autoPrune: boolean;
+}
+
 export interface EditorProjectSettings {
   frameRate: number;
   width: number;
@@ -424,6 +429,7 @@ export interface EditorProject {
   versionHistory?: EditorProjectVersionHistoryEntry[];
   collaborationComments?: EditorProjectCollaborationCommentEntry[];
   collaborationActivityFeed?: EditorProjectCollaborationActivityEntry[];
+  collaborationActivityRetentionPreferences?: EditorProjectCollaborationActivityRetentionPreferences;
   tokenBalance: number;
   editorialState: EditorProjectEditorialState;
   workstationState: EditorProjectWorkstationState;
@@ -1226,6 +1232,10 @@ function normalizeProject(project: EditorProject): EditorProject {
     versionHistory: cloneValue(project.versionHistory ?? []),
     collaborationComments: cloneValue(project.collaborationComments ?? []),
     collaborationActivityFeed: cloneValue(project.collaborationActivityFeed ?? []),
+    collaborationActivityRetentionPreferences: cloneValue(project.collaborationActivityRetentionPreferences ?? {
+      preset: 'last-50',
+      autoPrune: true,
+    }),
     tokenBalance,
     editorialState: {
       selectedBinId: editorialState.selectedBinId ?? null,
