@@ -282,6 +282,15 @@ export interface EditorProjectCollaborationCommentEntry {
   reactions: EditorProjectCollaborationReaction[];
 }
 
+export interface EditorProjectCollaborationActivityEntry {
+  id: string;
+  user: string;
+  userId?: string;
+  action: string;
+  timestamp: number;
+  detail: string;
+}
+
 export interface EditorProjectSettings {
   frameRate: number;
   width: number;
@@ -414,6 +423,7 @@ export interface EditorProject {
   watchFolders: EditorWatchFolder[];
   versionHistory?: EditorProjectVersionHistoryEntry[];
   collaborationComments?: EditorProjectCollaborationCommentEntry[];
+  collaborationActivityFeed?: EditorProjectCollaborationActivityEntry[];
   tokenBalance: number;
   editorialState: EditorProjectEditorialState;
   workstationState: EditorProjectWorkstationState;
@@ -1215,6 +1225,7 @@ function normalizeProject(project: EditorProject): EditorProject {
     watchFolders: cloneValue(project.watchFolders ?? []),
     versionHistory: cloneValue(project.versionHistory ?? []),
     collaborationComments: cloneValue(project.collaborationComments ?? []),
+    collaborationActivityFeed: cloneValue(project.collaborationActivityFeed ?? []),
     tokenBalance,
     editorialState: {
       selectedBinId: editorialState.selectedBinId ?? null,

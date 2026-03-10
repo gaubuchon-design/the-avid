@@ -173,6 +173,30 @@ describe('useCollabStore', () => {
     expect(identityById?.avatarUrl).toBe('avatar://jordan');
   });
 
+  it('connect() hydrates persisted collaboration activity feed from repository', async () => {
+    const project = buildRepositoryProject('project_hydrate_activity');
+    project.collaborationActivityFeed = [
+      {
+        id: 'activity-persisted-1',
+        user: 'Jordan Reviewer',
+        userId: 'user-reviewer',
+        action: 'saved version',
+        timestamp: Date.now() - 1500,
+        detail: '"Persisted Cut"',
+      },
+    ];
+    repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
+
+    useCollabStore.getState().connect(project.id, 'user_1');
+    await flushAsyncTasks();
+
+    const activityEntry = useCollabStore.getState().activityFeed[0];
+    expect(activityEntry?.id).toBe('activity-persisted-1');
+    expect(activityEntry?.user).toBe('Jordan Reviewer');
+    expect(activityEntry?.userId).toBe('user-reviewer');
+    expect(activityEntry?.action).toBe('saved version');
+  });
+
   it('disconnect() sets connected to false via setState', () => {
     useCollabStore.setState({ connected: true });
     useCollabStore.setState({ connected: false });
@@ -288,6 +312,8 @@ describe('useCollabStore', () => {
     expect(savedProject.versionHistory?.[0]?.name).toBe('Persisted Cut');
     expect(savedProject.versionHistory?.[0]?.createdByProfile?.displayName).toBe('You');
     expect(savedProject.versionHistory?.[0]?.createdByProfile?.userId).toBe('user_1');
+    expect(savedProject.collaborationActivityFeed?.[0]?.action).toBe('saved version');
+    expect(savedProject.collaborationActivityFeed?.[0]?.userId).toBe('user_1');
 
     repositoryMocks.getProjectFromRepository.mockResolvedValue(savedProject);
     useCollabStore.getState().connect(project.id, 'user_1');

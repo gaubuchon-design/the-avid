@@ -106,10 +106,13 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Persisted collaboration comment threads (including replies, reactions, and reaction actor profiles) into project repository data under `collaborationComments`, and hydrated those threads on collab connect/reopen.
 - Added engine-level comment hydration (`hydrateComments(...)`) and unified collab-state repository saves so comment mutations and version-history writes persist together for reopen/reconnect parity.
 - Expanded store coverage for repository-backed comment hydration and reaction persistence so reopened projects retain review-thread context and non-current reaction identity metadata.
+- Persisted collaboration activity-feed entries into project repository data under `collaborationActivityFeed`, and hydrated that feed on collab connect/reopen so chronological collaboration context survives reloads.
+- Extended unified collab-state repository saves to include activity feed snapshots alongside version history and comment-thread state for reopen/reconnect parity.
+- Expanded store coverage for repository-backed activity-feed hydration/persistence so saved collaboration actions retain actor metadata (`userId`/name/action/detail) across project reloads.
 
 ## Next Execution Slices
 
-1. Persist and hydrate collaboration activity feed entries in the project repository so reopen/reconnect cycles retain chronological session context alongside comment/version history.
+1. Add explicit collaboration activity retention policy + pruning controls (store + repository persistence) so long-lived projects bound activity history growth predictably.
 
 ## Exit Signals For These Early Phases
 
