@@ -301,7 +301,9 @@ function CommentsTab() {
     return true;
   });
   const selectedComment = comments.find((comment) => comment.id === selectedCommentId) ?? null;
+  const activeReplyComment = comments.find((comment) => comment.id === commentsActiveReplyCommentId) ?? null;
   const hasActiveContext = commentFilter !== 'all';
+  const hasComposerContext = commentsComposerDraft.trim().length > 0 || activeReplyComment !== null;
 
   const handleAddComment = useCallback(() => {
     if (!commentsComposerDraft.trim()) return;
@@ -424,6 +426,50 @@ function CommentsTab() {
           >
             Focus at {toTimecode(selectedComment.frame / 23.976)}
           </span>
+        </div>
+      )}
+      {hasComposerContext && (
+        <div
+          aria-label="Comments composer context summary"
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 4,
+            padding: '0 0 8px',
+          }}
+        >
+          {commentsComposerDraft.trim().length > 0 && (
+            <span
+              style={{
+                padding: '2px 6px',
+                borderRadius: 999,
+                fontSize: 9,
+                fontWeight: 600,
+                letterSpacing: '0.03em',
+                background: 'var(--bg-elevated)',
+                color: 'var(--text-secondary)',
+                border: '1px solid var(--border-default)',
+              }}
+            >
+              Draft: {commentsComposerDraft.trim().slice(0, 36)}{commentsComposerDraft.trim().length > 36 ? '...' : ''}
+            </span>
+          )}
+          {activeReplyComment && (
+            <span
+              style={{
+                padding: '2px 6px',
+                borderRadius: 999,
+                fontSize: 9,
+                fontWeight: 600,
+                letterSpacing: '0.03em',
+                background: 'var(--bg-elevated)',
+                color: 'var(--text-muted)',
+                border: '1px solid var(--border-default)',
+              }}
+            >
+              Replying to: {activeReplyComment.id}
+            </span>
+          )}
         </div>
       )}
 
