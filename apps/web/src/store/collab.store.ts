@@ -366,6 +366,10 @@ export const useCollabStore = create<CollabState & CollabActions>()(
               playheadTime: savedPlayheadTime,
             }));
           }
+          // Persist the restored snapshot immediately so reopen/reload reflects the restored timeline/shell state.
+          void useEditorStore.getState().saveProject().catch((error) => {
+            console.error('Failed to persist restored collaboration snapshot', error);
+          });
           get().addActivity('You', 'restored version', `"${version.name}"`);
           void persistVersionsToRepository(get().projectId).catch((error) => {
             console.error('Failed to persist collaboration version history', error);

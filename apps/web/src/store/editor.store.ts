@@ -341,6 +341,7 @@ export interface WatchFolder {
 }
 
 type SaveStatus = 'idle' | 'saved' | 'saving' | 'error';
+let loadProjectRequestSequence = 0;
 
 // ─── Store ─────────────────────────────────────────────────────────────────────
 
@@ -2134,6 +2135,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     goToEnd: () => set((s) => { s.playheadTime = s.duration; }),
 
     loadProject: async (id) => {
+      const requestSequence = ++loadProjectRequestSequence;
       set((s) => {
         s.projectId = id;
         s.saveStatus = 'saving';
@@ -2141,6 +2143,9 @@ export const useEditorStore = create<EditorState & EditorActions>()(
 
       try {
         const project = await getProjectFromRepository(id);
+        if (requestSequence !== loadProjectRequestSequence) {
+          return;
+        }
         if (!project) {
           set((s) => {
             s.saveStatus = 'error';
@@ -2149,6 +2154,9 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         }
         get().applyProjectSnapshot(project, { markDirty: false, lastSavedAt: project.updatedAt });
       } catch (error) {
+        if (requestSequence !== loadProjectRequestSequence) {
+          return;
+        }
         console.error('Failed to load project', error);
         set((s) => {
           s.saveStatus = 'error';

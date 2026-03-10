@@ -85,10 +85,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Routed desktop drag/drop ingest through the same FFprobe-backed desktop import path as file-based ingest by expanding dropped directories server-side, persisting imported assets into project bins, and teaching the bin drop target to prefer desktop `importMedia(...)` when native paths are available.
 - Added repository-backed collaboration version-history hydration/persistence coverage in the collab store so saved restore points are persisted to `project.versionHistory` and restored on reconnect/reopen cycles.
 - Closed the remaining desktop ingest parity gap by routing BinPanel file-picker imports through desktop `openFile(...)` + `importMedia(...)` when Electron is available, then reloading the persisted project from repository storage.
+- Hardened web-load repository hydration by ignoring stale `loadProject(...)` responses when project switches race, and persisted restored collaboration snapshots immediately so reopened projects reflect restored timeline/shell state without depending on autosave timing.
+- Added phase-1 hydration coverage proving (a) latest web-load repository payload wins over late stale responses and (b) restored collaboration snapshots survive reopen via repository persistence.
 
 ## Next Execution Slices
 
-1. Hydrate editor timeline/shell state from repository project payloads on web load so persisted version-history restore results are visible after reopen.
+1. Wire collaboration connect/disconnect lifecycle into the editor shell so repository-backed version history hydration runs automatically on project open, not only in tests/manual store calls.
 
 ## Exit Signals For These Early Phases
 
