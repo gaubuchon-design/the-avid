@@ -3,7 +3,15 @@
 // =============================================================================
 
 import type { PlaybackSnapshot } from './PlaybackSnapshot';
-import { buildPlaybackFrameSignature } from './PlaybackSnapshot';
+import { buildPlaybackFrameSignature, buildPlaybackSnapshot } from './PlaybackSnapshot';
+import { renderPlaybackSnapshotFrame } from './playbackSnapshotFrame';
+import type {
+  ProjectSettings,
+  SequenceSettings,
+  SubtitleTrack,
+  TitleClipData,
+  Track,
+} from '../store/editor.store';
 
 /** Supported video codec formats. */
 export type ExportFormat = 'h264' | 'h265' | 'prores' | 'dnxhd' | 'av1' | 'webm';
@@ -43,14 +51,113 @@ export interface ExportJob {
   snapshotFrameSignature?: string;
   renderFrameRevision?: string;
   renderProcessing?: 'pre' | 'post';
+  renderOverlayProcessing?: 'pre' | 'post';
   previewFrameNumber?: number;
   previewPlayheadTime?: number;
   previewClipName?: string;
   previewImageDataUrl?: string;
+  renderedFrameCount?: number;
+  totalFrameCount?: number;
   completedAt?: number;
   outputPath?: string;
   error?: string;
   estimatedTimeRemaining?: number;
+}
+
+export interface ExportRenderSource {
+  tracks: Track[];
+  subtitleTracks: SubtitleTrack[];
+  titleClips: TitleClipData[];
+  showSafeZones: boolean;
+  sequenceSettings: Pick<SequenceSettings, 'fps' | 'width' | 'height'>;
+  projectSettings?: Pick<ProjectSettings, 'frameRate' | 'width' | 'height'> | null;
+  sequenceDuration: number;
+  inPoint: number;
+  outPoint: number;
+}
+
+export interface ExportFramePlan {
+  outputFps: number;
+  startTime: number;
+  endTime: number;
+  duration: number;
+  frameCount: number;
+}
+
+interface CompletedExportOptions {
+  outputPath?: string;
+  skipDownload?: boolean;
+}
+
+interface StartExportOptions {
+  inFrame?: number;
+  outFrame?: number;
+  selectionLabel?: string;
+  snapshot?: PlaybackSnapshot;
+  renderFrameRevision?: string;
+  renderProcessing?: 'pre' | 'post';
+  renderOverlayProcessing?: 'pre' | 'post';
+  previewImageDataUrl?: string;
+  captionFormat?: CaptionFormat;
+  canvas?: HTMLCanvasElement;
+  duration?: number;
+  renderSource?: ExportRenderSource;
+}
+
+function clampExportTime(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, value);
+}
+
+export function buildExportFramePlan(
+  source: ExportRenderSource,
+  outputFps: number,
+): ExportFramePlan {
+  const startTime = clampExportTime(source.inPoint);
+  const rawEndTime = clampExportTime(source.outPoint);
+  const safeFps = Number.isFinite(outputFps) && outputFps > 0 ? outputFps : 24;
+  const minDuration = 1 / safeFps;
+  const endTime = Math.max(startTime + minDuration, rawEndTime);
+  const duration = endTime - startTime;
+
+  return {
+    outputFps: safeFps,
+    startTime,
+    endTime,
+    duration,
+    frameCount: Math.max(1, Math.ceil(duration * safeFps)),
+  };
+}
+
+export function getExportFrameTime(
+  plan: ExportFramePlan,
+  frameIndex: number,
+): number {
+  const safeFrameIndex = Math.max(0, Math.floor(frameIndex));
+  return Math.min(plan.endTime, plan.startTime + safeFrameIndex / plan.outputFps);
+}
+
+export function buildExportSnapshotForFrame(
+  source: ExportRenderSource,
+  plan: ExportFramePlan,
+  frameIndex: number,
+): PlaybackSnapshot {
+  return buildPlaybackSnapshot({
+    tracks: source.tracks,
+    subtitleTracks: source.subtitleTracks,
+    titleClips: source.titleClips,
+    playheadTime: getExportFrameTime(plan, frameIndex),
+    duration: source.sequenceDuration,
+    isPlaying: false,
+    showSafeZones: source.showSafeZones,
+    activeMonitor: 'record',
+    activeScope: null,
+    sequenceSettings: source.sequenceSettings,
+    projectSettings: source.projectSettings,
+  }, 'export');
 }
 
 // -- Default Presets ----------------------------------------------------------
@@ -286,6 +393,7 @@ class ExportEngine {
   private timers: Map<string, ReturnType<typeof setInterval>> = new Map();
   private listeners = new Set<() => void>();
   private activeRecorders: Map<string, MediaRecorder> = new Map();
+  private frameSteppers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
   /** Initialise with built-in export presets. */
   constructor() {
@@ -317,6 +425,231 @@ class ExportEngine {
     return this.presets.find((p) => p.id === id);
   }
 
+  private isBrowserFrameExportSupported(): boolean {
+    return (
+      typeof document !== 'undefined' &&
+      typeof MediaRecorder !== 'undefined' &&
+      typeof HTMLCanvasElement !== 'undefined' &&
+      typeof HTMLCanvasElement.prototype.captureStream === 'function'
+    );
+  }
+
+  private updateJobRenderState(
+    jobId: string,
+    renderedFrameCount: number,
+    totalFrameCount: number,
+  ): void {
+    const currentJob = this.jobs.get(jobId);
+    if (!currentJob || currentJob.status === 'failed') {
+      return;
+    }
+
+    currentJob.renderedFrameCount = renderedFrameCount;
+    currentJob.totalFrameCount = totalFrameCount;
+    this.notify();
+  }
+
+  private updateJobProgress(
+    jobId: string,
+    destination: ExportDestination,
+    normalizedProgress: number,
+  ): void {
+    const currentJob = this.jobs.get(jobId);
+    if (!currentJob || currentJob.status === 'failed') {
+      return;
+    }
+
+    const progress = Math.max(0, Math.min(1, normalizedProgress));
+    currentJob.progress = Math.max(currentJob.progress, Math.round(progress * 100));
+
+    const elapsed = (Date.now() - currentJob.startedAt) / 1000;
+    const rate = progress > 0 ? elapsed / progress : 0;
+    currentJob.estimatedTimeRemaining =
+      Math.round(Math.max(0, rate * (1 - progress)) * 10) / 10;
+
+    if (progress >= 0.8 && currentJob.status === 'encoding') {
+      currentJob.status = destination === 'local' ? 'encoding' : 'uploading';
+    }
+
+    this.notify();
+  }
+
+  private completeExportJob(
+    jobId: string,
+    preset: ExportPreset | undefined,
+    blob: Blob,
+    options?: CompletedExportOptions,
+  ): void {
+    const currentJob = this.jobs.get(jobId);
+    if (!currentJob || currentJob.status === 'failed') {
+      return;
+    }
+
+    currentJob.status = 'completed';
+    currentJob.progress = 100;
+    currentJob.completedAt = Date.now();
+    currentJob.estimatedTimeRemaining = 0;
+
+    const extension = preset?.container ?? (blob.type.includes('webm') ? 'webm' : 'mp4');
+    const fileName = options?.outputPath ?? (
+      preset
+        ? `${preset.name.replace(/\s+/g, '_').toLowerCase()}_${jobId}.${extension}`
+        : `output_${jobId}.${extension}`
+    );
+    currentJob.outputPath = fileName;
+
+    if (typeof document !== 'undefined' && !options?.skipDownload) {
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    }
+
+    this.notify();
+  }
+
+  private supportsDesktopTranscodeHandoff(): boolean {
+    return (
+      typeof window !== 'undefined'
+      && typeof window.electronAPI?.transcodeExportArtifact === 'function'
+    );
+  }
+
+  private async transcodeViaDesktopHandoff(
+    jobId: string,
+    preset: ExportPreset,
+    sourceBlob: Blob,
+  ): Promise<string> {
+    if (!this.supportsDesktopTranscodeHandoff() || !window.electronAPI) {
+      throw new Error('Desktop transcode handoff is unavailable.');
+    }
+
+    const currentJob = this.jobs.get(jobId);
+    if (currentJob && currentJob.status !== 'failed') {
+      currentJob.status = 'uploading';
+      this.notify();
+    }
+
+    const sourceArtifact = new Uint8Array(await sourceBlob.arrayBuffer());
+    const result = await window.electronAPI.transcodeExportArtifact({
+      jobId,
+      sourceArtifact,
+      sourceContainer: 'webm',
+      targetContainer: preset.container,
+      targetVideoCodec: preset.format,
+      targetAudioCodec: preset.audioCodec,
+      fps: preset.fps,
+      width: preset.resolution.width,
+      height: preset.resolution.height,
+    });
+
+    return result.outputPath;
+  }
+
+  private failExportJob(jobId: string, error: unknown): void {
+    const currentJob = this.jobs.get(jobId);
+    if (!currentJob) {
+      return;
+    }
+
+    currentJob.status = 'failed';
+    currentJob.error = error instanceof Error ? error.message : String(error);
+    currentJob.estimatedTimeRemaining = 0;
+    this.notify();
+  }
+
+  private clearFrameStepper(jobId: string): void {
+    const stepper = this.frameSteppers.get(jobId);
+    if (stepper) {
+      clearTimeout(stepper);
+      this.frameSteppers.delete(jobId);
+    }
+  }
+
+  private async startFrameSteppedExport(
+    jobId: string,
+    preset: ExportPreset,
+    destination: ExportDestination,
+    source: ExportRenderSource,
+    overlayProcessing: 'pre' | 'post',
+  ): Promise<Blob> {
+    if (typeof document === 'undefined') {
+      throw new Error('Browser export is unavailable in this environment.');
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = preset.resolution.width;
+    canvas.height = preset.resolution.height;
+
+    const plan = buildExportFramePlan(source, preset.fps);
+    const recordingDuration = Math.max(plan.duration, plan.frameCount / plan.outputFps);
+    const renderFrame = (frameIndex: number) => {
+      const snapshot = buildExportSnapshotForFrame(source, plan, frameIndex);
+      renderPlaybackSnapshotFrame({
+        snapshot,
+        width: preset.resolution.width,
+        height: preset.resolution.height,
+        canvas,
+        colorProcessing: 'post',
+        overlayProcessing,
+        useCache: false,
+      });
+      this.updateJobRenderState(jobId, frameIndex + 1, plan.frameCount);
+    };
+    const scheduleFrame = (frameIndex: number) => {
+      if (frameIndex >= plan.frameCount) {
+        this.clearFrameStepper(jobId);
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        const currentJob = this.jobs.get(jobId);
+        if (!currentJob || currentJob.status === 'failed') {
+          this.clearFrameStepper(jobId);
+          return;
+        }
+
+        renderFrame(frameIndex);
+        scheduleFrame(frameIndex + 1);
+      }, 1000 / plan.outputFps);
+
+      this.frameSteppers.set(jobId, timeout);
+    };
+
+    this.updateJobRenderState(jobId, 0, plan.frameCount);
+    const currentJob = this.jobs.get(jobId);
+    if (currentJob) {
+      currentJob.estimatedTimeRemaining = Math.round(recordingDuration * 10) / 10;
+      this.notify();
+    }
+
+    renderFrame(0);
+    if (plan.frameCount > 1) {
+      scheduleFrame(1);
+    }
+
+    try {
+      return await this.startRealExport(
+        jobId,
+        canvas,
+        recordingDuration,
+        plan.outputFps,
+        (progress) => {
+          const frameProgress = plan.frameCount > 0
+            ? ((this.jobs.get(jobId)?.renderedFrameCount ?? 0) / plan.frameCount) * 0.9
+            : 0;
+          this.updateJobProgress(jobId, destination, Math.max(progress, frameProgress));
+        },
+      );
+    } finally {
+      this.clearFrameStepper(jobId);
+    }
+  }
+
   // -- Jobs -------------------------------------------------------------------
 
   /**
@@ -338,18 +671,7 @@ class ExportEngine {
   startExport(
     presetId: string,
     destination: ExportDestination,
-    options?: {
-      inFrame?: number;
-      outFrame?: number;
-      selectionLabel?: string;
-      snapshot?: PlaybackSnapshot;
-      renderFrameRevision?: string;
-      renderProcessing?: 'pre' | 'post';
-      previewImageDataUrl?: string;
-      captionFormat?: CaptionFormat;
-      canvas?: HTMLCanvasElement;
-      duration?: number;
-    },
+    options?: StartExportOptions,
   ): ExportJob {
     const preset = this.getPreset(presetId);
     const jobId = `export_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -369,6 +691,7 @@ class ExportEngine {
         : undefined,
       renderFrameRevision: options?.renderFrameRevision,
       renderProcessing: options?.renderProcessing,
+      renderOverlayProcessing: options?.renderOverlayProcessing,
       previewFrameNumber: options?.snapshot?.frameNumber,
       previewPlayheadTime: options?.snapshot?.playheadTime,
       previewClipName: options?.snapshot?.primaryVideoLayer?.clip.name,
@@ -378,60 +701,47 @@ class ExportEngine {
     this.jobs.set(jobId, job);
     this.notify();
 
+    const canUseFrameSteppedExport =
+      Boolean(preset) &&
+      Boolean(options?.renderSource) &&
+      (preset?.container === 'webm' || this.supportsDesktopTranscodeHandoff()) &&
+      this.isBrowserFrameExportSupported();
+
+    if (canUseFrameSteppedExport && preset && options?.renderSource) {
+      const overlayProcessing = options.renderOverlayProcessing ?? 'post';
+      this.startFrameSteppedExport(jobId, preset, destination, options.renderSource, overlayProcessing)
+        .then(async (blob) => {
+          if (preset.container !== 'webm') {
+            const outputPath = await this.transcodeViaDesktopHandoff(jobId, preset, blob);
+            this.completeExportJob(jobId, preset, blob, {
+              outputPath,
+              skipDownload: true,
+            });
+            return;
+          }
+
+          this.completeExportJob(jobId, preset, blob);
+        })
+        .catch((err) => {
+          this.failExportJob(jobId, err);
+        });
+
+      return { ...job };
+    }
+
     // ── Real MediaRecorder-based export (canvas provided) ──────────────
     if (options?.canvas) {
       const canvas = options.canvas;
       const duration = options.duration ?? 5;
 
-      this.startRealExport(canvas, duration, fps, (progress) => {
-        const currentJob = this.jobs.get(jobId);
-        if (!currentJob || currentJob.status === 'failed') return;
-
-        currentJob.progress = Math.round(progress * 100);
-        const elapsed = (Date.now() - currentJob.startedAt) / 1000;
-        const rate = progress > 0 ? elapsed / progress : 0;
-        currentJob.estimatedTimeRemaining =
-          Math.round(Math.max(0, rate * (1 - progress)) * 10) / 10;
-
-        if (progress >= 0.8 && currentJob.status === 'encoding') {
-          currentJob.status = destination === 'local' ? 'encoding' : 'uploading';
-        }
-        this.notify();
+      this.startRealExport(jobId, canvas, duration, fps, (progress) => {
+        this.updateJobProgress(jobId, destination, progress);
       })
         .then((blob) => {
-          const currentJob = this.jobs.get(jobId);
-          if (!currentJob || currentJob.status === 'failed') return;
-
-          currentJob.status = 'completed';
-          currentJob.progress = 100;
-          currentJob.completedAt = Date.now();
-          currentJob.estimatedTimeRemaining = 0;
-
-          // Generate a download URL and trigger browser download
-          const url = URL.createObjectURL(blob);
-          const fileName = preset
-            ? `${preset.name.replace(/\s+/g, '_').toLowerCase()}_${jobId}.webm`
-            : `output_${jobId}.webm`;
-          currentJob.outputPath = fileName;
-
-          const anchor = document.createElement('a');
-          anchor.href = url;
-          anchor.download = fileName;
-          document.body.appendChild(anchor);
-          anchor.click();
-          document.body.removeChild(anchor);
-
-          // Revoke the object URL after a short delay to ensure download starts
-          setTimeout(() => URL.revokeObjectURL(url), 5000);
-          this.notify();
+          this.completeExportJob(jobId, preset, blob);
         })
         .catch((err) => {
-          const currentJob = this.jobs.get(jobId);
-          if (currentJob) {
-            currentJob.status = 'failed';
-            currentJob.error = err instanceof Error ? err.message : String(err);
-          }
-          this.notify();
+          this.failExportJob(jobId, err);
         });
 
       return { ...job };
@@ -491,6 +801,7 @@ class ExportEngine {
    * const blob = await exportEngine.startRealExport(canvas, 10, 30, (p) => console.log(p));
    */
   async startRealExport(
+    jobId: string,
     canvas: HTMLCanvasElement,
     duration: number,
     fps: number = 30,
@@ -509,9 +820,7 @@ class ExportEngine {
     const recorder = new MediaRecorder(stream, { mimeType });
     const chunks: Blob[] = [];
 
-    // Track the recorder for potential cancellation
-    const recorderId = `rec_${Date.now()}`;
-    this.activeRecorders.set(recorderId, recorder);
+    this.activeRecorders.set(jobId, recorder);
 
     return new Promise<Blob>((resolve, reject) => {
       recorder.ondataavailable = (event: BlobEvent) => {
@@ -521,12 +830,12 @@ class ExportEngine {
       };
 
       recorder.onerror = (event: Event) => {
-        this.activeRecorders.delete(recorderId);
+        this.activeRecorders.delete(jobId);
         reject(new Error(`MediaRecorder error: ${(event as ErrorEvent).message ?? 'unknown'}`));
       };
 
       recorder.onstop = () => {
-        this.activeRecorders.delete(recorderId);
+        this.activeRecorders.delete(jobId);
         const blob = new Blob(chunks, { type: mimeType });
         resolve(blob);
       };
@@ -577,21 +886,18 @@ class ExportEngine {
     if (!job) return;
     job.status = 'failed';
     job.error = 'Cancelled by user';
+    job.estimatedTimeRemaining = 0;
     const timer = this.timers.get(jobId);
     if (timer) {
       clearInterval(timer);
       this.timers.delete(jobId);
     }
-    // Stop any active MediaRecorder associated with this job
-    // Collect IDs first to avoid modifying the map during iteration
-    const recorderIds = Array.from(this.activeRecorders.keys());
-    for (const recId of recorderIds) {
-      const recorder = this.activeRecorders.get(recId);
-      if (recorder && recorder.state === 'recording') {
-        recorder.stop();
-      }
-      this.activeRecorders.delete(recId);
+    this.clearFrameStepper(jobId);
+    const recorder = this.activeRecorders.get(jobId);
+    if (recorder && recorder.state === 'recording') {
+      recorder.stop();
     }
+    this.activeRecorders.delete(jobId);
     this.notify();
   }
 

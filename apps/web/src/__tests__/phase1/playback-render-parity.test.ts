@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { colorEngine } from '../../engine/ColorEngine';
 import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
+import { compositePlaybackSnapshot } from '../../engine/compositeRecordFrame';
 import {
   buildPlaybackSnapshotRenderRevision,
   evaluatePlaybackSnapshotImageData,
+  renderPlaybackSnapshotFrame,
   resetPlaybackSnapshotFrameCache,
 } from '../../engine/playbackSnapshotFrame';
 
@@ -19,6 +21,30 @@ function makeSnapshot(consumer: 'record-monitor' | 'export' | 'scope' = 'record-
     playheadTime: 2,
     duration: 10,
     isPlaying: false,
+    showSafeZones: false,
+    activeMonitor: 'record',
+    activeScope: consumer === 'scope' ? 'waveform' : null,
+    sequenceSettings: {
+      fps: 24,
+      width: 1920,
+      height: 1080,
+    },
+    projectSettings: {
+      frameRate: 24,
+      width: 1920,
+      height: 1080,
+    },
+  }, consumer);
+}
+
+function makePlayingSnapshot(consumer: 'record-monitor' | 'export' | 'scope' = 'record-monitor') {
+  return buildPlaybackSnapshot({
+    tracks: [],
+    subtitleTracks: [],
+    titleClips: [],
+    playheadTime: 2,
+    duration: 10,
+    isPlaying: true,
     showSafeZones: false,
     activeMonitor: 'record',
     activeScope: consumer === 'scope' ? 'waveform' : null,
@@ -75,10 +101,26 @@ function createMockCanvas(width = 320, height = 180): HTMLCanvasElement {
   return canvas as unknown as HTMLCanvasElement;
 }
 
+function createThrowingReadbackCanvas(width = 320, height = 180): HTMLCanvasElement {
+  const canvas = {
+    width,
+    height,
+    getContext: vi.fn(() => ({
+      getImageData: vi.fn(() => {
+        throw new Error('readback unavailable');
+      }),
+      putImageData: vi.fn(),
+    })),
+  };
+
+  return canvas as unknown as HTMLCanvasElement;
+}
+
 describe('phase 1 playback render parity', () => {
   beforeEach(() => {
     resetPlaybackSnapshotFrameCache();
     restorePrimaryDefaults();
+    vi.mocked(compositePlaybackSnapshot).mockClear();
   });
 
   it('builds the same evaluated frame revision across monitor and export consumers', () => {
@@ -97,6 +139,26 @@ describe('phase 1 playback render parity', () => {
     });
 
     expect(recordRevision).toBe(exportRevision);
+  });
+
+  it('invalidates the evaluated frame revision when overlay processing changes', () => {
+    const snapshot = makeSnapshot('scope');
+    const preOverlayRevision = buildPlaybackSnapshotRenderRevision({
+      snapshot,
+      width: 640,
+      height: 360,
+      colorProcessing: 'post',
+      overlayProcessing: 'pre',
+    });
+    const postOverlayRevision = buildPlaybackSnapshotRenderRevision({
+      snapshot,
+      width: 640,
+      height: 360,
+      colorProcessing: 'post',
+      overlayProcessing: 'post',
+    });
+
+    expect(preOverlayRevision).not.toBe(postOverlayRevision);
   });
 
   it('reuses cached paused frames for identical revisions', () => {
@@ -159,5 +221,23 @@ describe('phase 1 playback render parity', () => {
     expect(Array.from(after.imageData?.data.slice(0, 24) ?? [])).not.toEqual(
       Array.from(before.imageData?.data.slice(0, 24) ?? []),
     );
+  });
+
+  it('falls back to pre-color composite when realtime graded readback fails during transport', () => {
+    const canvas = createThrowingReadbackCanvas();
+    const snapshot = makePlayingSnapshot('record-monitor');
+
+    const result = renderPlaybackSnapshotFrame({
+      snapshot,
+      width: 320,
+      height: 180,
+      canvas,
+      colorProcessing: 'post',
+      useCache: false,
+    });
+
+    expect(result.degradedToPreColor).toBe(true);
+    expect(result.cacheHit).toBe(false);
+    expect(vi.mocked(compositePlaybackSnapshot)).toHaveBeenCalledTimes(2);
   });
 });

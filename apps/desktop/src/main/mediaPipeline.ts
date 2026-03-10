@@ -58,6 +58,25 @@ export interface WatchFolderScanSummary {
   scannedFiles: number;
 }
 
+export interface ExportTranscodeRequest {
+  jobId: string;
+  sourceArtifact: Uint8Array;
+  sourceContainer: string;
+  targetContainer: string;
+  targetVideoCodec?: string;
+  targetAudioCodec?: string;
+  fps?: number;
+  width?: number;
+  height?: number;
+}
+
+export interface ExportTranscodeResult {
+  outputPath: string;
+  outputContainer: string;
+  outputVideoCodec: string;
+  outputAudioCodec?: string;
+}
+
 type ToolAvailability = {
   ffmpeg: boolean;
   ffprobe: boolean;
@@ -138,6 +157,14 @@ function parseFrameRate(value?: string): number | undefined {
     return undefined;
   }
   return numerator! / denominator!;
+}
+
+function normalizeAudioChannelLayout(layout?: string): string | undefined {
+  if (!layout) {
+    return undefined;
+  }
+  const normalized = layout.trim().toLowerCase();
+  return normalized || undefined;
 }
 
 async function hasExecutable(name: string): Promise<boolean> {
@@ -293,6 +320,7 @@ async function probeMediaFile(filePath: string): Promise<EditorMediaTechnicalMet
         height?: number;
         r_frame_rate?: string;
         channels?: number;
+        channel_layout?: string;
         sample_rate?: string;
         tags?: Record<string, string>;
       }>;
@@ -315,6 +343,7 @@ async function probeMediaFile(filePath: string): Promise<EditorMediaTechnicalMet
       width: videoStream?.width,
       height: videoStream?.height,
       audioChannels: audioStream?.channels,
+      audioChannelLayout: normalizeAudioChannelLayout(audioStream?.channel_layout),
       sampleRate: audioStream?.sample_rate ? Number(audioStream.sample_rate) : undefined,
       bitRate: parsed.format?.bit_rate ? Number(parsed.format.bit_rate) : undefined,
       timecodeStart: tags['timecode'],
@@ -1271,4 +1300,135 @@ export async function writeConformExportPackage(project: EditorProject, paths: P
   }
 
   return exportDir;
+}
+
+function mapVideoEncoder(codec?: string, fallbackContainer?: string): string {
+  const normalized = normalizeToken(codec ?? '');
+  switch (normalized) {
+    case 'h264':
+    case 'avc':
+    case 'libx264':
+      return 'libx264';
+    case 'h265':
+    case 'hevc':
+    case 'libx265':
+      return 'libx265';
+    case 'prores':
+    case 'prores ks':
+    case 'prores_ks':
+      return 'prores_ks';
+    case 'dnxhd':
+    case 'dnxhr':
+      return 'dnxhd';
+    case 'av1':
+    case 'libaom-av1':
+    case 'libaom av1':
+      return 'libaom-av1';
+    case 'vp9':
+    case 'libvpx-vp9':
+      return 'libvpx-vp9';
+    default: {
+      const container = normalizeToken(fallbackContainer ?? '');
+      if (container === 'mov') {
+        return 'prores_ks';
+      }
+      if (container === 'mxf') {
+        return 'dnxhd';
+      }
+      return 'libx264';
+    }
+  }
+}
+
+function mapAudioEncoder(codec?: string, fallbackContainer?: string): string | null {
+  const normalized = normalizeToken(codec ?? '');
+  switch (normalized) {
+    case '':
+      break;
+    case 'none':
+      return null;
+    case 'aac':
+      return 'aac';
+    case 'opus':
+      return 'libopus';
+    case 'pcm s24le':
+    case 'pcm_s24le':
+      return 'pcm_s24le';
+    case 'pcm s16le':
+    case 'pcm_s16le':
+      return 'pcm_s16le';
+    default:
+      return normalized.replace(/\s+/g, '_');
+  }
+
+  const container = normalizeToken(fallbackContainer ?? '');
+  if (container === 'mxf' || container === 'mov') {
+    return 'pcm_s24le';
+  }
+  return 'aac';
+}
+
+export async function transcodeExportArtifact(
+  request: ExportTranscodeRequest,
+  outputDirectory: string,
+): Promise<ExportTranscodeResult> {
+  const availability = await getToolAvailability();
+  const toolPaths = await getMediaToolPaths();
+  if (!availability.ffmpeg || !toolPaths.ffmpeg) {
+    throw new Error('ffmpeg not available for export transcode handoff');
+  }
+
+  await mkdir(outputDirectory, { recursive: true });
+
+  const safeJobId = sanitizeFileName(request.jobId || createId('export'));
+  const targetContainer = sanitizeFileName(request.targetContainer || 'mp4');
+  const sourceContainer = sanitizeFileName(request.sourceContainer || 'webm');
+  const tempInputPath = path.join(outputDirectory, `${safeJobId}.handoff.${sourceContainer}`);
+  const outputPath = path.join(outputDirectory, `${safeJobId}.${targetContainer}`);
+
+  await writeFile(tempInputPath, Buffer.from(request.sourceArtifact));
+
+  const videoEncoder = mapVideoEncoder(request.targetVideoCodec, targetContainer);
+  const audioEncoder = mapAudioEncoder(request.targetAudioCodec, targetContainer);
+  const args = ['-y', '-i', tempInputPath];
+
+  if (
+    Number.isFinite(request.width)
+    && Number.isFinite(request.height)
+    && (request.width ?? 0) > 0
+    && (request.height ?? 0) > 0
+  ) {
+    args.push(
+      '-vf',
+      `scale=${Math.round(request.width!)}:${Math.round(request.height!)}:flags=lanczos,format=yuv420p`,
+    );
+  } else {
+    args.push('-pix_fmt', 'yuv420p');
+  }
+
+  if (Number.isFinite(request.fps) && (request.fps ?? 0) > 0) {
+    args.push('-r', String(request.fps));
+  }
+
+  args.push('-c:v', videoEncoder);
+
+  if (audioEncoder) {
+    args.push('-c:a', audioEncoder);
+  } else {
+    args.push('-an');
+  }
+
+  if (targetContainer === 'mp4' || targetContainer === 'mov') {
+    args.push('-movflags', '+faststart');
+  }
+
+  args.push(outputPath);
+  await execFileAsync(toolPaths.ffmpeg, args);
+
+  return {
+    outputPath,
+    outputContainer: targetContainer,
+    outputVideoCodec: videoEncoder,
+    outputAudioCodec: audioEncoder ?? undefined,
+  };
 }

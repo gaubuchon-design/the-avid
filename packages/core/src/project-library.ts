@@ -35,6 +35,7 @@ export interface EditorMediaTechnicalMetadata {
   container?: string;
   videoCodec?: string;
   audioCodec?: string;
+  audioChannelLayout?: string;
   durationSeconds?: number;
   frameRate?: number;
   width?: number;

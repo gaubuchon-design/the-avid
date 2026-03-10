@@ -5,6 +5,7 @@ import type { TitleData } from './TitleRenderer';
 import { compositePlaybackSnapshot } from './compositeRecordFrame';
 
 export type PlaybackColorProcessing = 'pre' | 'post';
+export type PlaybackOverlayProcessing = 'pre' | 'post';
 
 export interface PlaybackSnapshotFrameOptions {
   snapshot: PlaybackSnapshot;
@@ -14,6 +15,7 @@ export interface PlaybackSnapshotFrameOptions {
   isTitleEditing?: boolean;
   canvas?: HTMLCanvasElement | null;
   colorProcessing?: PlaybackColorProcessing;
+  overlayProcessing?: PlaybackOverlayProcessing;
   useCache?: boolean;
 }
 
@@ -21,12 +23,14 @@ export interface PlaybackSnapshotFrameResult {
   canvas: HTMLCanvasElement | null;
   frameRevision: string;
   cacheHit: boolean;
+  degradedToPreColor?: boolean;
 }
 
 export interface PlaybackSnapshotImageDataResult {
   imageData: ImageData | null;
   frameRevision: string;
   cacheHit: boolean;
+  degradedToPreColor?: boolean;
 }
 
 let scratchCanvas: HTMLCanvasElement | null = null;
@@ -91,6 +95,7 @@ export function buildPlaybackSnapshotRenderRevision(options: PlaybackSnapshotFra
     options.snapshot.activeMonitor,
     options.snapshot.showSafeZones ? 'safezones' : 'clean',
     options.colorProcessing ?? 'pre',
+    options.overlayProcessing ?? 'post',
     colorRevision,
     titleRevision,
   ].join(':');
@@ -112,6 +117,10 @@ function shouldUsePlaybackFrameCache(options: PlaybackSnapshotFrameOptions): boo
   return true;
 }
 
+function shouldUseRealtimePreColorFallback(options: PlaybackSnapshotFrameOptions): boolean {
+  return options.snapshot.isPlaying && (options.colorProcessing ?? 'pre') === 'post';
+}
+
 function compositeSnapshotToCanvas(
   canvas: HTMLCanvasElement,
   options: PlaybackSnapshotFrameOptions,
@@ -128,6 +137,7 @@ function compositeSnapshotToCanvas(
     snapshot: options.snapshot,
     currentTitle: options.currentTitle ?? null,
     isTitleEditing: options.isTitleEditing ?? false,
+    overlayProcessing: options.overlayProcessing ?? 'post',
   });
 
   return ctx;
@@ -145,6 +155,7 @@ export function evaluatePlaybackSnapshotImageData(
         imageData: cloneImageData(cached),
         frameRevision,
         cacheHit: true,
+        degradedToPreColor: false,
       };
     }
   }
@@ -155,6 +166,7 @@ export function evaluatePlaybackSnapshotImageData(
       imageData: null,
       frameRevision,
       cacheHit: false,
+      degradedToPreColor: false,
     };
   }
 
@@ -164,12 +176,23 @@ export function evaluatePlaybackSnapshotImageData(
       imageData: null,
       frameRevision,
       cacheHit: false,
+      degradedToPreColor: false,
     };
   }
 
-  let imageData = ctx.getImageData(0, 0, options.width, options.height);
-  if ((options.colorProcessing ?? 'pre') === 'post') {
-    imageData = colorEngine.processFrame(imageData);
+  let imageData: ImageData;
+  try {
+    imageData = ctx.getImageData(0, 0, options.width, options.height);
+    if ((options.colorProcessing ?? 'pre') === 'post') {
+      imageData = colorEngine.processFrame(imageData);
+    }
+  } catch {
+    return {
+      imageData: null,
+      frameRevision,
+      cacheHit: false,
+      degradedToPreColor: shouldUseRealtimePreColorFallback(options),
+    };
   }
 
   if (canUseCache) {
@@ -180,6 +203,7 @@ export function evaluatePlaybackSnapshotImageData(
     imageData: cloneImageData(imageData),
     frameRevision,
     cacheHit: false,
+    degradedToPreColor: false,
   };
 }
 
@@ -191,6 +215,7 @@ export function renderPlaybackSnapshotFrame(options: PlaybackSnapshotFrameOption
       canvas: null,
       frameRevision,
       cacheHit: false,
+      degradedToPreColor: false,
     };
   }
 
@@ -200,19 +225,36 @@ export function renderPlaybackSnapshotFrame(options: PlaybackSnapshotFrameOption
       canvas,
       frameRevision,
       cacheHit: false,
+      degradedToPreColor: false,
     };
   }
 
   const result = evaluatePlaybackSnapshotImageData({
     ...options,
-    canvas: null,
+    canvas,
   });
+
+  if (!result.imageData && shouldUseRealtimePreColorFallback(options)) {
+    compositeSnapshotToCanvas(canvas, {
+      ...options,
+      colorProcessing: 'pre',
+      useCache: false,
+    });
+    return {
+      canvas,
+      frameRevision: result.frameRevision,
+      cacheHit: false,
+      degradedToPreColor: true,
+    };
+  }
+
   const ctx = canvas.getContext('2d');
   if (!ctx || !result.imageData) {
     return {
       canvas,
       frameRevision: result.frameRevision,
       cacheHit: result.cacheHit,
+      degradedToPreColor: result.degradedToPreColor,
     };
   }
 
@@ -221,6 +263,7 @@ export function renderPlaybackSnapshotFrame(options: PlaybackSnapshotFrameOption
     canvas,
     frameRevision: result.frameRevision,
     cacheHit: result.cacheHit,
+    degradedToPreColor: result.degradedToPreColor,
   };
 }
 

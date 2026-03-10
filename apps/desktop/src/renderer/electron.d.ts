@@ -85,6 +85,25 @@ interface MediaToolInfo {
   ffprobe: string | null;
 }
 
+interface ExportTranscodeRequest {
+  jobId: string;
+  sourceArtifact: Uint8Array;
+  sourceContainer: string;
+  targetContainer: string;
+  targetVideoCodec?: string;
+  targetAudioCodec?: string;
+  fps?: number;
+  width?: number;
+  height?: number;
+}
+
+interface ExportTranscodeResult {
+  outputPath: string;
+  outputContainer: string;
+  outputVideoCodec: string;
+  outputAudioCodec?: string;
+}
+
 // ─── App Types ────────────────────────────────────────────────────────────────
 
 interface AppPaths {
@@ -253,6 +272,7 @@ interface DesktopBridge {
   // Jobs
   listDesktopJobs: () => Promise<DesktopJob[]>;
   startExportJob: (project: EditorProject) => Promise<DesktopJob>;
+  transcodeExportArtifact: (payload: ExportTranscodeRequest) => Promise<ExportTranscodeResult>;
 
   // File system
   readTextFile: (filePath: string) => Promise<string>;

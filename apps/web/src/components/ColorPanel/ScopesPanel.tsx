@@ -71,6 +71,7 @@ export function ScopesPanel() {
       currentTitle,
       isTitleEditing,
       colorProcessing: scopePosition,
+      overlayProcessing: 'pre',
       useCache: true,
     });
 

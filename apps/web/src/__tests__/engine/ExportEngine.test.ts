@@ -1,11 +1,64 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { exportEngine } from '../../engine/ExportEngine';
+import {
+  buildExportFramePlan,
+  buildExportSnapshotForFrame,
+  exportEngine,
+  getExportFrameTime,
+} from '../../engine/ExportEngine';
 import { buildPlaybackSnapshot, buildPlaybackFrameSignature } from '../../engine/PlaybackSnapshot';
+import * as playbackSnapshotFrameModule from '../../engine/playbackSnapshotFrame';
 import { makeClip } from '../../store/editor.store';
 
 describe('ExportEngine', () => {
   afterEach(() => {
+    window.electronAPI = undefined;
+    vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  const createRenderSource = () => ({
+    tracks: [
+      {
+        id: 'track-v1',
+        name: 'V1',
+        type: 'VIDEO' as const,
+        sortOrder: 0,
+        muted: false,
+        locked: false,
+        solo: false,
+        volume: 1,
+        color: '#5b6af5',
+        clips: [
+          makeClip({
+            id: 'clip-sequence-export',
+            trackId: 'track-v1',
+            name: 'Sequence Export Clip',
+            startTime: 0,
+            endTime: 0.2,
+            trimStart: 0,
+            trimEnd: 0,
+            type: 'video',
+            assetId: 'asset-sequence-export',
+          }),
+        ],
+      },
+    ],
+    subtitleTracks: [],
+    titleClips: [],
+    showSafeZones: false,
+    sequenceSettings: {
+      fps: 30,
+      width: 1920,
+      height: 1080,
+    },
+    projectSettings: {
+      frameRate: 30,
+      width: 1920,
+      height: 1080,
+    },
+    sequenceDuration: 0.2,
+    inPoint: 0,
+    outPoint: 0.2,
   });
 
   // ── Presets ────────────────────────────────────────────────────────────
@@ -140,6 +193,7 @@ describe('ExportEngine', () => {
         snapshot,
         renderFrameRevision: 'render-revision-1',
         renderProcessing: 'post',
+        renderOverlayProcessing: 'post',
         previewImageDataUrl: 'data:image/jpeg;base64,preview',
         duration: 3,
       });
@@ -154,6 +208,7 @@ describe('ExportEngine', () => {
       expect(storedJob?.snapshotFrameSignature).toBe(buildPlaybackFrameSignature(snapshot));
       expect(storedJob?.renderFrameRevision).toBe('render-revision-1');
       expect(storedJob?.renderProcessing).toBe('post');
+      expect(storedJob?.renderOverlayProcessing).toBe('post');
       expect(storedJob?.previewImageDataUrl).toBe('data:image/jpeg;base64,preview');
 
       exportEngine.cancelExport(job.id);
@@ -185,6 +240,149 @@ describe('ExportEngine', () => {
       // Cleanup
       exportEngine.cancelExport(j1.id);
       exportEngine.cancelExport(j2.id);
+    });
+
+    it('builds deterministic frame plans and snapshots for real exports', () => {
+      const renderSource = createRenderSource();
+      const plan = buildExportFramePlan(renderSource, 30);
+
+      expect(plan.outputFps).toBe(30);
+      expect(plan.startTime).toBe(0);
+      expect(plan.endTime).toBe(0.2);
+      expect(plan.frameCount).toBe(6);
+      expect(getExportFrameTime(plan, 3)).toBeCloseTo(0.1, 5);
+
+      const snapshot = buildExportSnapshotForFrame(renderSource, plan, 3);
+      expect(snapshot.playheadTime).toBeCloseTo(0.1, 5);
+      expect(snapshot.duration).toBe(0.2);
+      expect(snapshot.fps).toBe(30);
+      expect(snapshot.aspectRatio).toBeCloseTo(16 / 9, 5);
+      expect(snapshot.activeMonitor).toBe('record');
+    });
+
+    it('steps sequence frames for supported browser webm exports', async () => {
+      vi.useFakeTimers();
+
+      const renderSource = createRenderSource();
+      const mockCanvas = { width: 0, height: 0 } as HTMLCanvasElement;
+      const originalCreateElement = document.createElement.bind(document);
+
+      vi.spyOn(document, 'createElement').mockImplementation(((tagName: string) => {
+        if (tagName === 'canvas') {
+          return mockCanvas;
+        }
+
+        const element = originalCreateElement(tagName);
+        if (tagName === 'a') {
+          element.click = vi.fn();
+        }
+        return element;
+      }) as typeof document.createElement);
+      vi.spyOn(exportEngine as unknown as { isBrowserFrameExportSupported: () => boolean }, 'isBrowserFrameExportSupported')
+        .mockReturnValue(true);
+      vi.spyOn(playbackSnapshotFrameModule, 'renderPlaybackSnapshotFrame').mockReturnValue({
+        canvas: mockCanvas,
+        frameRevision: 'frame-stepped-export',
+        cacheHit: false,
+      });
+      const startRealExportSpy = vi
+        .spyOn(exportEngine, 'startRealExport')
+        .mockImplementation(async (_jobId, _canvas, _duration, _fps, onProgress) => {
+          onProgress?.(0.2);
+          return await new Promise<Blob>((resolve) => {
+            setTimeout(() => {
+              onProgress?.(1);
+              resolve(new Blob(['webm'], { type: 'video/webm' }));
+            }, 250);
+          });
+        });
+
+      const job = exportEngine.startExport('custom-webm-vp9', 'local', {
+        duration: 0.2,
+        renderSource,
+      });
+
+      await vi.runAllTimersAsync();
+
+      const storedJob = exportEngine.getJob(job.id);
+      expect(storedJob?.status).toBe('completed');
+      expect(storedJob?.totalFrameCount).toBe(6);
+      expect(storedJob?.renderedFrameCount).toBe(6);
+      expect(storedJob?.outputPath).toMatch(/\.webm$/);
+      expect(startRealExportSpy).toHaveBeenCalledWith(
+        job.id,
+        mockCanvas,
+        0.2,
+        30,
+        expect.any(Function),
+      );
+      expect(playbackSnapshotFrameModule.renderPlaybackSnapshotFrame).toHaveBeenCalledTimes(6);
+      expect(playbackSnapshotFrameModule.renderPlaybackSnapshotFrame).toHaveBeenCalledWith(expect.objectContaining({
+        overlayProcessing: 'post',
+      }));
+    });
+
+    it('hands non-webm frame-stepped exports to desktop transcode', async () => {
+      vi.useFakeTimers();
+
+      const renderSource = createRenderSource();
+      const mockCanvas = { width: 0, height: 0 } as HTMLCanvasElement;
+      const originalCreateElement = document.createElement.bind(document);
+      const transcodeExportArtifact = vi.fn().mockResolvedValue({
+        outputPath: '/tmp/transcoded/stream_h264.mp4',
+        outputContainer: 'mp4',
+        outputVideoCodec: 'libx264',
+        outputAudioCodec: 'aac',
+      });
+
+      window.electronAPI = {
+        transcodeExportArtifact,
+      } as unknown as typeof window.electronAPI;
+
+      vi.spyOn(document, 'createElement').mockImplementation(((tagName: string) => {
+        if (tagName === 'canvas') {
+          return mockCanvas;
+        }
+
+        const element = originalCreateElement(tagName);
+        if (tagName === 'a') {
+          element.click = vi.fn();
+        }
+        return element;
+      }) as typeof document.createElement);
+      vi.spyOn(exportEngine as unknown as { isBrowserFrameExportSupported: () => boolean }, 'isBrowserFrameExportSupported')
+        .mockReturnValue(true);
+      vi.spyOn(playbackSnapshotFrameModule, 'renderPlaybackSnapshotFrame').mockReturnValue({
+        canvas: mockCanvas,
+        frameRevision: 'frame-stepped-export',
+        cacheHit: false,
+      });
+      vi.spyOn(exportEngine, 'startRealExport').mockImplementation(async (_jobId, _canvas, _duration, _fps, onProgress) => {
+        onProgress?.(1);
+        return new Blob(['webm'], { type: 'video/webm' });
+      });
+
+      const job = exportEngine.startExport('stream-h264-1080p', 'local', {
+        duration: 0.2,
+        renderSource,
+      });
+
+      await vi.runAllTimersAsync();
+
+      const storedJob = exportEngine.getJob(job.id);
+      expect(storedJob?.status).toBe('completed');
+      expect(storedJob?.outputPath).toBe('/tmp/transcoded/stream_h264.mp4');
+      expect(transcodeExportArtifact).toHaveBeenCalledWith(expect.objectContaining({
+        jobId: job.id,
+        sourceContainer: 'webm',
+        targetContainer: 'mp4',
+        targetVideoCodec: 'h264',
+        targetAudioCodec: 'aac',
+        sourceArtifact: expect.any(Uint8Array),
+      }));
+      expect(playbackSnapshotFrameModule.renderPlaybackSnapshotFrame).toHaveBeenCalledWith(expect.objectContaining({
+        overlayProcessing: 'post',
+      }));
     });
   });
 

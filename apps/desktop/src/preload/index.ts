@@ -74,6 +74,7 @@ const ALLOWED_INVOKE_CHANNELS = new Set([
   // Jobs
   'jobs:list',
   'jobs:start-export',
+  'jobs:transcode-export-artifact',
 
   // File system
   'fs:read-text',
@@ -264,6 +265,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     safeInvoke('jobs:list'),
   startExportJob: (project: unknown) =>
     safeInvoke('jobs:start-export', project),
+  transcodeExportArtifact: (payload: unknown) =>
+    safeInvoke('jobs:transcode-export-artifact', payload),
   readTextFile: (filePath: string) =>
     safeInvoke('fs:read-text', filePath) as Promise<string>,
   writeTextFile: (filePath: string, contents: string) =>

@@ -38,6 +38,7 @@ export interface PlaybackCompositingContext {
   snapshot: PlaybackSnapshot;
   currentTitle: any | null;
   isTitleEditing: boolean;
+  overlayProcessing?: 'pre' | 'post';
 }
 
 // ─── Exported Helpers ─────────────────────────────────────────────────────────
@@ -217,6 +218,7 @@ export function compositeRecordFrame(cx: CompositingContext): void {
 
 export function compositePlaybackSnapshot(cx: PlaybackCompositingContext): void {
   const { ctx, canvasW, canvasH, snapshot } = cx;
+  const overlayProcessing = cx.overlayProcessing ?? 'post';
 
   // 1. Clear to black
   ctx.fillStyle = '#000';
@@ -271,26 +273,28 @@ export function compositePlaybackSnapshot(cx: PlaybackCompositingContext): void 
     }
   }
 
-  // 3. Composite title graphics (GRAPHIC track title clips)
-  if (cx.currentTitle && cx.isTitleEditing) {
-    renderTitle(ctx, cx.currentTitle, canvasW, canvasH, snapshot.frameNumber, snapshot.fps);
-  }
+  if (overlayProcessing === 'post') {
+    // 3. Composite title graphics (GRAPHIC track title clips)
+    if (cx.currentTitle && cx.isTitleEditing) {
+      renderTitle(ctx, cx.currentTitle, canvasW, canvasH, snapshot.frameNumber, snapshot.fps);
+    }
 
-  for (const titleLayer of snapshot.titleLayers) {
-    renderTitle(ctx, titleLayer.titleClip as any, canvasW, canvasH, titleLayer.frameOffset, snapshot.fps);
-  }
+    for (const titleLayer of snapshot.titleLayers) {
+      renderTitle(ctx, titleLayer.titleClip as any, canvasW, canvasH, titleLayer.frameOffset, snapshot.fps);
+    }
 
-  for (const subtitleCue of snapshot.subtitleCues) {
-    renderSubtitleCue(ctx, subtitleCue.cue, canvasW, canvasH);
-  }
+    for (const subtitleCue of snapshot.subtitleCues) {
+      renderSubtitleCue(ctx, subtitleCue.cue, canvasW, canvasH);
+    }
 
-  // 5. Safe zones overlay
-  if (snapshot.showSafeZones) {
-    drawSafeZones(ctx, canvasW, canvasH);
+    // 5. Safe zones overlay
+    if (snapshot.showSafeZones) {
+      drawSafeZones(ctx, canvasW, canvasH);
+    }
   }
 
   // 6. Placeholder when no video is drawn
-  if (!drewVideo) {
+  if (!drewVideo && overlayProcessing === 'post') {
     drawRecordPlaceholder(ctx, canvasW, canvasH, snapshot.playheadTime, snapshot.fps);
   }
 }

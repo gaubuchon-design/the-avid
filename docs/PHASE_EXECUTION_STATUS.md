@@ -67,14 +67,26 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Wired scope pre/post analysis through the shared playback-frame helper so the scopes panel now evaluates pre-grade and post-grade frames instead of only raw composited frames.
 - Promoted export jobs from snapshot metadata only to snapshot-backed rendered preview frames with shared render revisions, so delivery jobs now capture a real evaluated frame artifact alongside their selection metadata.
 - Updated the color scopes panel render path to sample live record-monitor canvases and run post mode through `ColorEngine.processFrame(...)`, with deterministic fallback frames when monitor pixels are unavailable.
+- Captured this pass's implementation note: pre/post scopes now degrade gracefully with deterministic fallback frames when monitor sampling is unavailable during panel evaluation.
+- Pushed browser-supported export jobs from still-preview parity into actual sequence frame stepping by rendering shared playback snapshots frame-by-frame into real WebM recordings, with per-job recorder ownership, frame counts, and cancellable runtime cleanup.
+- Extended browser export from silent canvas capture to audio-aware muxed WebM by allowing explicit audio sources (MediaStreams or capturable media elements), mixed gain staging, and muxed-track telemetry on each export job.
+- Added explicit encoder handoff metadata for non-WebM presets so browser-captured WebM artifacts now carry target container/codec intent for downstream transcode workers.
+- Added export-engine tests proving audio-source forwarding/mux metadata and non-WebM handoff metadata generation for canvas-based exports.
+- Executed the non-WebM handoff path in desktop by adding an FFmpeg-backed transcode endpoint that receives frame-stepped WebM artifacts over Electron IPC and emits requested container/codec outputs to desktop export storage.
+- Extended export engine frame-stepped behavior so non-WebM presets now use desktop transcode handoff when available, and added coverage for this renderer-to-desktop handoff flow.
+- Extended shared graded-frame rendering from paused-only monitor paths into active transport by routing realtime record/program monitor draws through `renderPlaybackSnapshotFrame(..., colorProcessing: 'post')` with cache disabled while playing.
+- Hardened realtime transport rendering fallback so post-grade readback failures now degrade to pre-color compositing instead of dropping monitor frames, and added parity coverage for the fallback behavior.
+- Replaced source-track audio-layout fallback heuristics with FFprobe-backed ingest metadata by persisting `channel_layout` in desktop technical metadata and teaching source-track derivation to prefer `technicalMetadata` channel/layout descriptors when flattened browser probe fields are absent.
+- Added phase-1 derivation coverage proving desktop-ingested assets with FFprobe metadata resolve multichannel source tracks without codec-string-only inference.
+- Persisted collaboration version-history entries into the shared project repository schema (`versionHistory`) and wired collab save/restore flows to capture editor-state snapshots, hydrate persisted histories on connect, and record automatic restore points before restores.
+- Split playback snapshot compositing into explicit picture and overlay stages so scopes can lock to pre-overlay image analysis while export render paths opt into post-overlay output intentionally.
+- Extended evaluated-frame revision metadata and export job telemetry to track overlay-stage selection (`pre` vs `post`) alongside color-stage processing, with parity tests for revision invalidation and frame-step export wiring.
 
 ## Next Execution Slices
 
-1. Push export parity beyond rendered preview frames into actual sequence frame stepping and encoded output generation.
-2. Extend the shared graded-frame path from paused monitor renders into reliable realtime playback/fallback behavior during transport.
-3. Replace browser-side audio layout heuristics with real media-agent/FFprobe metadata when the ingest path is available.
-4. Persist actual version-history entries and restore points into project or collaboration backends instead of runtime-only session memory.
-5. Split picture grading from title/subtitle/safe-zone overlays so scopes and export can choose pre-overlay vs post-overlay analysis explicitly.
+1. Surface transport-time pre-color degradation telemetry in monitor/scopes diagnostics so fallback frequency can be measured in real projects.
+2. Route desktop drag/drop ingest through the same FFprobe-backed metadata contract as file-path ingest so browser-side probing only remains a fallback for pure web mode.
+3. Hydrate editor timeline/shell state from repository project payloads on web load so persisted version-history restore results are visible after reopen.
 
 ## Exit Signals For These Early Phases
 

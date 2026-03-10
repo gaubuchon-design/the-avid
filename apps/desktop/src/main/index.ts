@@ -39,6 +39,7 @@ import {
   scanProjectMedia,
   scanWatchFolderIntoProject,
   sanitizeFileName,
+  transcodeExportArtifact,
   writeConformExportPackage,
   writeMediaIndexManifest,
 } from './mediaPipeline';
@@ -1773,6 +1774,57 @@ ipcMain.handle('jobs:start-export', async (_event, project: unknown) => {
     throw new Error('Project must have a valid string "id" field');
   }
   return startExportJob(project as unknown as EditorProject);
+});
+
+ipcMain.handle('jobs:transcode-export-artifact', async (_event, payload: unknown) => {
+  assertObject(payload, 'payload');
+
+  const {
+    jobId,
+    sourceArtifact,
+    sourceContainer,
+    targetContainer,
+    targetVideoCodec,
+    targetAudioCodec,
+    fps,
+    width,
+    height,
+  } = payload as Record<string, unknown>;
+
+  assertString(jobId, 'jobId');
+  if (!(sourceArtifact instanceof Uint8Array)) {
+    throw new Error('Invalid parameter "sourceArtifact": expected Uint8Array');
+  }
+  assertString(sourceContainer, 'sourceContainer');
+  assertString(targetContainer, 'targetContainer');
+  if (targetVideoCodec !== undefined && typeof targetVideoCodec !== 'string') {
+    throw new Error('Invalid parameter "targetVideoCodec": expected string');
+  }
+  if (targetAudioCodec !== undefined && typeof targetAudioCodec !== 'string') {
+    throw new Error('Invalid parameter "targetAudioCodec": expected string');
+  }
+  if (fps !== undefined && typeof fps !== 'number') {
+    throw new Error('Invalid parameter "fps": expected number');
+  }
+  if (width !== undefined && typeof width !== 'number') {
+    throw new Error('Invalid parameter "width": expected number');
+  }
+  if (height !== undefined && typeof height !== 'number') {
+    throw new Error('Invalid parameter "height": expected number');
+  }
+
+  const outputDirectory = path.join(app.getPath('documents'), 'The Avid', 'exports', 'handoff');
+  return transcodeExportArtifact({
+    jobId,
+    sourceArtifact,
+    sourceContainer,
+    targetContainer,
+    targetVideoCodec,
+    targetAudioCodec,
+    fps,
+    width,
+    height,
+  }, outputDirectory);
 });
 
 // ─── File System Handlers (path sanitization) ─────────────────────────────────

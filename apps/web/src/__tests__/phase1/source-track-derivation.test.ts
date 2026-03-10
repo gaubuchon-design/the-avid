@@ -88,4 +88,31 @@ describe('phase 1 source-track derivation', () => {
       { id: 'src-a8', type: 'AUDIO', index: 8 },
     ]);
   });
+
+  it('uses FFprobe technical metadata when flattened audio fields are absent', () => {
+    const descriptors = deriveSourceTracksFromAsset({
+      id: 'asset-ffprobe-layout',
+      name: 'Desktop Ingest',
+      type: 'VIDEO',
+      status: 'READY',
+      tags: [],
+      isFavorite: false,
+      technicalMetadata: {
+        videoCodec: 'prores',
+        audioCodec: 'pcm_s24le',
+        audioChannels: 6,
+        audioChannelLayout: '5.1',
+      },
+    } as Parameters<typeof deriveSourceTracksFromAsset>[0]);
+
+    expect(descriptors).toEqual([
+      { id: 'src-v1', type: 'VIDEO', index: 1 },
+      { id: 'src-a1', type: 'AUDIO', index: 1 },
+      { id: 'src-a2', type: 'AUDIO', index: 2 },
+      { id: 'src-a3', type: 'AUDIO', index: 3 },
+      { id: 'src-a4', type: 'AUDIO', index: 4 },
+      { id: 'src-a5', type: 'AUDIO', index: 5 },
+      { id: 'src-a6', type: 'AUDIO', index: 6 },
+    ]);
+  });
 });

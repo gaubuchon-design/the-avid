@@ -6,7 +6,6 @@ import { TrimStatusOverlay } from '../Editor/TrimStatusOverlay';
 import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
 import { renderPlaybackSnapshotFrame } from '../../engine/playbackSnapshotFrame';
 import {
-  compositePlaybackSnapshot,
   findActiveClip,
   getSourceTime,
   syncVideoPlayback,
@@ -79,9 +78,6 @@ export function RecordMonitor() {
     if (!canvas) return;
 
     const render = () => {
-      const ctx = canvas.getContext('2d');
-      if (!ctx) { rafRef.current = requestAnimationFrame(render); return; }
-
       const { w, h } = canvasSize;
       canvas.width = w;
       canvas.height = h;
@@ -125,27 +121,16 @@ export function RecordMonitor() {
         tryLoadClipSource(activeClip.assetId, state.bins as any);
       }
 
-      if (state.isPlaying) {
-        compositePlaybackSnapshot({
-          ctx,
-          canvasW: w,
-          canvasH: h,
-          snapshot,
-          currentTitle: titleState.currentTitle,
-          isTitleEditing: titleState.isEditing,
-        });
-      } else {
-        renderPlaybackSnapshotFrame({
-          snapshot,
-          width: w,
-          height: h,
-          canvas,
-          currentTitle: titleState.currentTitle,
-          isTitleEditing: titleState.isEditing,
-          colorProcessing: 'post',
-          useCache: true,
-        });
-      }
+      renderPlaybackSnapshotFrame({
+        snapshot,
+        width: w,
+        height: h,
+        canvas,
+        currentTitle: titleState.currentTitle,
+        isTitleEditing: titleState.isEditing,
+        colorProcessing: 'post',
+        useCache: !state.isPlaying,
+      });
 
       rafRef.current = requestAnimationFrame(render);
     };

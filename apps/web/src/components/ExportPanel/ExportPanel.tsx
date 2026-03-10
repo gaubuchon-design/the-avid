@@ -571,6 +571,7 @@ function StepExport() {
         height: preset?.resolution.height ?? sequenceSettings.height,
         canvas: previewCanvas,
         colorProcessing: 'post',
+        overlayProcessing: 'post',
         useCache: true,
       });
 
@@ -589,26 +590,42 @@ function StepExport() {
       snapshot: exportSnapshot,
       renderFrameRevision,
       renderProcessing: 'post',
+      renderOverlayProcessing: 'post',
       previewImageDataUrl,
       captionFormat: includeCaptions ? captionFormat : undefined,
       duration: selectionSummary.duration,
+      renderSource: {
+        tracks,
+        subtitleTracks,
+        titleClips,
+        showSafeZones,
+        sequenceSettings,
+        projectSettings,
+        sequenceDuration: Math.max(duration, selectionSummary.outPoint),
+        inPoint: selectionSummary.inPoint,
+        outPoint: selectionSummary.outPoint,
+      },
     });
   }, [
     captionFormat,
     destination,
+    duration,
     exportSnapshot,
     includeCaptions,
+    projectSettings,
     preset?.resolution.height,
     preset?.resolution.width,
     selectedPresetId,
+    sequenceSettings,
     selectionSummary.duration,
     selectionSummary.inPoint,
     selectionSummary.outPoint,
     selectionSummary.label,
     selectionSummary.valid,
-    sequenceSettings.height,
-    sequenceSettings.fps,
-    sequenceSettings.width,
+    showSafeZones,
+    subtitleTracks,
+    titleClips,
+    tracks,
   ]);
 
   const handleCancel = useCallback(
@@ -777,7 +794,7 @@ const JobCard = memo(function JobCard({ job, onCancel }: { job: ExportJob; onCan
           )}
           {job.renderFrameRevision && (
             <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>
-              Rendered {job.renderProcessing ?? 'pre'} frame locked to shared revision
+              Rendered {job.renderProcessing ?? 'pre'} frame ({job.renderOverlayProcessing ?? 'post'} overlay) locked to shared revision
             </div>
           )}
           <div style={{ height: 4, borderRadius: 2, background: 'var(--bg-elevated)', overflow: 'hidden', marginBottom: 4 }} role="progressbar" aria-valuenow={job.progress} aria-valuemin={0} aria-valuemax={100} aria-label="Export progress">
