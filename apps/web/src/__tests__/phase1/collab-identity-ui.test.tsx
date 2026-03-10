@@ -297,6 +297,44 @@ describe('phase 1 collab identity UI', () => {
     container.remove();
   });
 
+  it('renders restored selected comment focus indicators', async () => {
+    useCollabStore.setState({
+      activeTab: 'comments',
+      selectedCommentId: 'comment-focus',
+      comments: [
+        {
+          id: 'comment-focus',
+          userId: 'user-alex',
+          userName: 'Alex Editor',
+          frame: 120,
+          text: 'Focus thread',
+          timestamp: Date.now(),
+          resolved: false,
+          reactions: [],
+          replies: [],
+        },
+      ],
+    });
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<CollabPanel />);
+    });
+
+    const summary = container.querySelector('[aria-label="Comments focus summary"]');
+    expect(summary).toBeTruthy();
+    expect(summary?.textContent).toContain('Selected: comment-focus');
+    expect(summary?.textContent).toContain('Focus at 00:00:05:00');
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
   it('renders restored versions context summary chips', async () => {
     useCollabStore.setState({
       activeTab: 'versions',

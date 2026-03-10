@@ -134,10 +134,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Added phase-1 UI coverage asserting hydrated version-compare selections render compare-context summary indicators (`Target`/`Baseline`) with restored labels.
 - Persisted selected comment focus in `collaborationPanelPreferences.selectedCommentId` and hydrated it on reconnect/reopen only when the corresponding persisted comment thread still exists.
 - Wired `selectComment(...)` to persist panel preferences immediately, and added store coverage for selected-comment hydration validity checks plus selected-thread persistence round-trip behavior.
+- Surfaced restored selected-comment focus indicators in the Comments tab header with summary chips for selected thread id and focus timecode.
+- Added phase-1 UI coverage asserting hydrated selected-comment focus renders expected comments focus summary indicators.
 
 ## Next Execution Slices
 
-1. Surface restored selected-comment focus indicator in the Comments tab header (selected thread id/timecode chip) so reopened discussion context is immediately visible.
+1. Persist and hydrate comments-panel composer context (`showAddComment`, draft new-comment text, active reply thread id) so in-progress review notes survive reconnect/reopen.
 
 ## Exit Signals For These Early Phases
 

@@ -299,6 +299,7 @@ function CommentsTab() {
     if (commentFilter === 'resolved') return c.resolved;
     return true;
   });
+  const selectedComment = comments.find((comment) => comment.id === selectedCommentId) ?? null;
   const hasActiveContext = commentFilter !== 'all';
 
   const handleAddComment = useCallback(() => {
@@ -379,6 +380,46 @@ function CommentsTab() {
             }}
           >
             {filteredComments.length}/{comments.length} shown
+          </span>
+        </div>
+      )}
+      {selectedComment && (
+        <div
+          aria-label="Comments focus summary"
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 4,
+            padding: '0 0 8px',
+          }}
+        >
+          <span
+            style={{
+              padding: '2px 6px',
+              borderRadius: 999,
+              fontSize: 9,
+              fontWeight: 600,
+              letterSpacing: '0.03em',
+              background: 'var(--bg-elevated)',
+              color: 'var(--text-secondary)',
+              border: '1px solid var(--border-default)',
+            }}
+          >
+            Selected: {selectedComment.id}
+          </span>
+          <span
+            style={{
+              padding: '2px 6px',
+              borderRadius: 999,
+              fontSize: 9,
+              fontWeight: 600,
+              letterSpacing: '0.03em',
+              background: 'var(--bg-elevated)',
+              color: 'var(--text-muted)',
+              border: '1px solid var(--border-default)',
+            }}
+          >
+            Focus at {toTimecode(selectedComment.frame / 23.976)}
           </span>
         </div>
       )}
