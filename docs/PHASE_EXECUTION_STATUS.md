@@ -150,10 +150,11 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Surfaced restored reaction-picker context indicators in the Comments tab header with a focus chip showing which comment currently has reaction selection open.
 - Extended phase-1 UI coverage to assert hydrated reaction-picker context renders expected comments reaction-focus summary indicators.
 - Consolidated repeated panel-preference persistence call sites in collab UI actions behind a shared store helper so tab/filter/comment/compare/composer updates route through one persistence path and error boundary.
+- Consolidated non-panel collaboration-state persistence call sites behind typed store helpers (`persistCommentsSnapshot` / `persistStateSnapshot`) so comment/version/retention mutation paths share standardized repository-save wiring and failure logging.
 
 ## Next Execution Slices
 
-1. Consolidate non-panel collaboration-state persistence call sites (comment/version/activity mutation paths) behind typed helper wrappers to reduce duplication and standardize failure logging.
+1. Add focused collab-store coverage asserting typed non-panel persistence helpers keep activity-retention override behavior (`setActivityRetentionPreferences`) while preserving standardized persistence-error boundaries.
 
 ## Exit Signals For These Early Phases
 

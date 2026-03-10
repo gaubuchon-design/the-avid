@@ -736,13 +736,36 @@ function persistPanelPreferencesSnapshot(
   getState: () => CollabState & CollabActions,
   activityRetentionPreferences = getState().activityRetentionPreferences,
 ): void {
+  persistCollaborationSnapshot(getState, 'panel preferences', activityRetentionPreferences);
+}
+
+function persistCommentsSnapshot(
+  getState: () => CollabState & CollabActions,
+  activityRetentionPreferences = getState().activityRetentionPreferences,
+): void {
+  persistCollaborationSnapshot(getState, 'comments', activityRetentionPreferences);
+}
+
+function persistStateSnapshot(
+  getState: () => CollabState & CollabActions,
+  activityRetentionPreferences = getState().activityRetentionPreferences,
+): void {
+  persistCollaborationSnapshot(getState, 'state', activityRetentionPreferences);
+}
+
+function persistCollaborationSnapshot(
+  getState: () => CollabState & CollabActions,
+  domain: 'panel preferences' | 'comments' | 'state',
+  activityRetentionPreferences = getState().activityRetentionPreferences,
+): void {
+  const state = getState();
   void persistCollaborationStateToRepository(
-    getState().projectId,
-    getState().activityFeed,
+    state.projectId,
+    state.activityFeed,
     activityRetentionPreferences,
-    getState(),
+    state,
   ).catch((error) => {
-    console.error('Failed to persist collaboration panel preferences', error);
+    console.error(`Failed to persist collaboration ${domain}`, error);
   });
 }
 
@@ -999,9 +1022,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           s.identityProfiles = buildIdentityProfilesFromComments(comments, s.identityProfiles);
         }, false, 'collab/addComment');
         get().addActivity(get().currentUserName, 'added comment', `"${text.slice(0, 40)}${text.length > 40 ? '...' : ''}"`, get().currentUserId);
-        void persistCollaborationStateToRepository(get().projectId, get().activityFeed, get().activityRetentionPreferences, get()).catch((error) => {
-          console.error('Failed to persist collaboration comments', error);
-        });
+        persistCommentsSnapshot(get);
       },
 
       replyToComment: (commentId, text) => {
@@ -1012,9 +1033,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           s.identityProfiles = buildIdentityProfilesFromComments(comments, s.identityProfiles);
         }, false, 'collab/replyToComment');
         get().addActivity(get().currentUserName, 'replied to comment', `"${text.slice(0, 40)}${text.length > 40 ? '...' : ''}"`, get().currentUserId);
-        void persistCollaborationStateToRepository(get().projectId, get().activityFeed, get().activityRetentionPreferences, get()).catch((error) => {
-          console.error('Failed to persist collaboration comments', error);
-        });
+        persistCommentsSnapshot(get);
       },
 
       resolveComment: (commentId) => {
@@ -1025,9 +1044,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           s.identityProfiles = buildIdentityProfilesFromComments(comments, s.identityProfiles);
         }, false, 'collab/resolveComment');
         get().addActivity(get().currentUserName, 'resolved comment', `Comment ${commentId}`, get().currentUserId);
-        void persistCollaborationStateToRepository(get().projectId, get().activityFeed, get().activityRetentionPreferences, get()).catch((error) => {
-          console.error('Failed to persist collaboration comments', error);
-        });
+        persistCommentsSnapshot(get);
       },
 
       reopenComment: (commentId) => {
@@ -1038,9 +1055,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           s.identityProfiles = buildIdentityProfilesFromComments(comments, s.identityProfiles);
         }, false, 'collab/reopenComment');
         get().addActivity(get().currentUserName, 'reopened comment', `Comment ${commentId}`, get().currentUserId);
-        void persistCollaborationStateToRepository(get().projectId, get().activityFeed, get().activityRetentionPreferences, get()).catch((error) => {
-          console.error('Failed to persist collaboration comments', error);
-        });
+        persistCommentsSnapshot(get);
       },
 
       addReaction: (commentId, emoji) => {
@@ -1050,9 +1065,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           s.comments = comments;
           s.identityProfiles = buildIdentityProfilesFromComments(comments, s.identityProfiles);
         }, false, 'collab/addReaction');
-        void persistCollaborationStateToRepository(get().projectId, get().activityFeed, get().activityRetentionPreferences, get()).catch((error) => {
-          console.error('Failed to persist collaboration comments', error);
-        });
+        persistCommentsSnapshot(get);
       },
 
       // Versions
@@ -1072,9 +1085,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           };
         }, false, 'collab/saveVersion');
         get().addActivity(get().currentUserName, 'saved version', `"${name}"`, get().currentUserId);
-        void persistCollaborationStateToRepository(get().projectId, get().activityFeed, get().activityRetentionPreferences, get()).catch((error) => {
-          console.error('Failed to persist collaboration state', error);
-        });
+        persistStateSnapshot(get);
       },
 
       restoreVersion: (versionId) => {
@@ -1117,9 +1128,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
             console.error('Failed to persist restored collaboration snapshot', error);
           });
           get().addActivity(get().currentUserName, 'restored version', `"${version.name}"`, get().currentUserId);
-          void persistCollaborationStateToRepository(get().projectId, get().activityFeed, get().activityRetentionPreferences, get()).catch((error) => {
-            console.error('Failed to persist collaboration state', error);
-          });
+          persistStateSnapshot(get);
           return;
         }
 
@@ -1129,9 +1138,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           `"${version.name}" does not contain a restorable project snapshot.`,
           get().currentUserId,
         );
-        void persistCollaborationStateToRepository(get().projectId, get().activityFeed, get().activityRetentionPreferences, get()).catch((error) => {
-          console.error('Failed to persist collaboration state', error);
-        });
+        persistStateSnapshot(get);
       },
 
       setVersionRetentionPreferences: (preferences) => {
@@ -1145,9 +1152,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           s.versionRetentionPreferences = mergedPreferences;
           s.versions = collabEngine.getVersions();
         }, false, 'collab/setVersionRetentionPreferences');
-        void persistCollaborationStateToRepository(get().projectId, get().activityFeed, get().activityRetentionPreferences, get()).catch((error) => {
-          console.error('Failed to persist collaboration state', error);
-        });
+        persistStateSnapshot(get);
       },
       setActivityRetentionPreferences: (preferences) => {
         const mergedPreferences = {
@@ -1159,9 +1164,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           s.activityRetentionPreferences = mergedPreferences;
           s.activityFeed = applyActivityRetention(s.activityFeed, mergedPreferences);
         }, false, 'collab/setActivityRetentionPreferences');
-        void persistCollaborationStateToRepository(get().projectId, get().activityFeed, mergedPreferences, get()).catch((error) => {
-          console.error('Failed to persist collaboration state', error);
-        });
+        persistStateSnapshot(get, mergedPreferences);
       },
 
       // Sync
