@@ -248,6 +248,40 @@ export interface EditorProjectVersionHistoryEntry {
   isRestorePoint?: boolean;
 }
 
+export interface EditorProjectCollaborationReactionActorProfile {
+  userId: string;
+  displayName: string;
+  avatarUrl?: string;
+  color?: string;
+}
+
+export interface EditorProjectCollaborationReaction {
+  emoji: string;
+  userIds: string[];
+  actorProfiles?: EditorProjectCollaborationReactionActorProfile[];
+}
+
+export interface EditorProjectCollaborationReply {
+  id: string;
+  userId: string;
+  userName: string;
+  text: string;
+  timestamp: number;
+}
+
+export interface EditorProjectCollaborationCommentEntry {
+  id: string;
+  userId: string;
+  userName: string;
+  frame: number;
+  trackId?: string;
+  text: string;
+  timestamp: number;
+  resolved: boolean;
+  replies: EditorProjectCollaborationReply[];
+  reactions: EditorProjectCollaborationReaction[];
+}
+
 export interface EditorProjectSettings {
   frameRate: number;
   width: number;
@@ -379,6 +413,7 @@ export interface EditorProject {
   publishJobs: EditorPublishJob[];
   watchFolders: EditorWatchFolder[];
   versionHistory?: EditorProjectVersionHistoryEntry[];
+  collaborationComments?: EditorProjectCollaborationCommentEntry[];
   tokenBalance: number;
   editorialState: EditorProjectEditorialState;
   workstationState: EditorProjectWorkstationState;
@@ -1179,6 +1214,7 @@ function normalizeProject(project: EditorProject): EditorProject {
     publishJobs: cloneValue(project.publishJobs ?? []),
     watchFolders: cloneValue(project.watchFolders ?? []),
     versionHistory: cloneValue(project.versionHistory ?? []),
+    collaborationComments: cloneValue(project.collaborationComments ?? []),
     tokenBalance,
     editorialState: {
       selectedBinId: editorialState.selectedBinId ?? null,

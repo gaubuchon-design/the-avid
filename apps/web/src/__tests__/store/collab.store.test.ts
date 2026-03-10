@@ -17,6 +17,7 @@ vi.mock('../../lib/projectRepository', () => ({
 const initialCollabState = useCollabStore.getState();
 const initialEditorState = useEditorStore.getState();
 const seedVersions = new CollabEngine().getVersions();
+const seedComments = new CollabEngine().getComments();
 const flushAsyncTasks = async (): Promise<void> => {
   await Promise.resolve();
   await Promise.resolve();
@@ -38,6 +39,7 @@ function buildRepositoryProject(projectId: string): EditorProject {
 describe('useCollabStore', () => {
   beforeEach(() => {
     collabEngine.hydrateVersions(seedVersions);
+    collabEngine.hydrateComments(seedComments);
     repositoryMocks.getProjectFromRepository.mockReset();
     repositoryMocks.saveProjectToRepository.mockReset();
     repositoryMocks.getProjectFromRepository.mockResolvedValue(null);
@@ -120,6 +122,57 @@ describe('useCollabStore', () => {
     expect(repositoryMocks.getProjectFromRepository).toHaveBeenCalledWith(project.id);
   });
 
+  it('connect() hydrates persisted collaboration comments from repository', async () => {
+    const project = buildRepositoryProject('project_hydrate_comments');
+    project.collaborationComments = [
+      {
+        id: 'persisted-comment-1',
+        userId: 'user-reviewer',
+        userName: 'Jordan Reviewer',
+        frame: 200,
+        trackId: 't1',
+        text: 'Persisted comment',
+        timestamp: Date.now() - 5000,
+        resolved: false,
+        replies: [
+          {
+            id: 'persisted-reply-1',
+            userId: 'user-assist',
+            userName: 'Sky Assist',
+            text: 'Persisted reply',
+            timestamp: Date.now() - 4000,
+          },
+        ],
+        reactions: [
+          {
+            emoji: '👍',
+            userIds: ['user-reviewer'],
+            actorProfiles: [
+              {
+                userId: 'user-reviewer',
+                displayName: 'Jordan Reviewer',
+                avatarUrl: 'avatar://jordan',
+                color: '#118ab2',
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
+
+    useCollabStore.getState().connect(project.id, 'user_1');
+    await flushAsyncTasks();
+
+    const hydratedComment = useCollabStore.getState().comments[0];
+    const identityById = useCollabStore.getState().identityProfiles['id:user-reviewer'];
+    expect(hydratedComment?.id).toBe('persisted-comment-1');
+    expect(hydratedComment?.text).toBe('Persisted comment');
+    expect(hydratedComment?.replies[0]?.text).toBe('Persisted reply');
+    expect(hydratedComment?.reactions[0]?.actorProfiles?.[0]?.displayName).toBe('Jordan Reviewer');
+    expect(identityById?.avatarUrl).toBe('avatar://jordan');
+  });
+
   it('disconnect() sets connected to false via setState', () => {
     useCollabStore.setState({ connected: true });
     useCollabStore.setState({ connected: false });
@@ -164,6 +217,27 @@ describe('useCollabStore', () => {
     expect(reaction?.actorProfiles?.[0]?.userId).toBe('user_reaction');
     expect(reaction?.actorProfiles?.[0]?.displayName).toBe('Riley Mixer');
     expect(reaction?.actorProfiles?.[0]?.avatarUrl).toBe('avatar://riley');
+  });
+
+  it('addReaction() persists collaboration comments for reopen/reconnect cycles', async () => {
+    const project = buildRepositoryProject('project_persist_comments');
+    repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
+
+    useCollabStore.getState().connect(project.id, 'user_reaction', {
+      name: 'Riley Mixer',
+      avatar: 'avatar://riley',
+    });
+    await flushAsyncTasks();
+
+    useCollabStore.getState().addComment(120, 't1', 'Persist me');
+    const commentId = useCollabStore.getState().comments[0]?.id;
+    useCollabStore.getState().addReaction(commentId!, '🔥');
+    await flushAsyncTasks();
+
+    const savedProject = repositoryMocks.saveProjectToRepository.mock.calls.at(-1)?.[0] as EditorProject;
+    expect(savedProject.collaborationComments?.[0]?.text).toBe('Persist me');
+    expect(savedProject.collaborationComments?.[0]?.reactions[0]?.emoji).toBe('🔥');
+    expect(savedProject.collaborationComments?.[0]?.reactions[0]?.actorProfiles?.[0]?.displayName).toBe('Riley Mixer');
   });
 
   it('resolveComment() works on a standalone CollabEngine', () => {
