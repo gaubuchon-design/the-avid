@@ -22,6 +22,7 @@ import { SubtitleEditor } from '../components/SubtitleEditor/SubtitleEditor';
 import { useEditorStore } from '../store/editor.store';
 import { useGlobalKeyboard } from '../hooks/useGlobalKeyboard';
 import { useEditorCollabLifecycle } from '../hooks/useEditorCollabLifecycle';
+import { useEditorCollabPresenceSync } from '../hooks/useEditorCollabPresenceSync';
 import { UserSettingsPanel } from '../components/UserSettings/UserSettingsPanel';
 import { useKeyboardAction } from '../hooks/useKeyboardAction';
 import { editEngine } from '../engine/EditEngine';
@@ -119,6 +120,7 @@ function VerticalSidePanel({ workspace }: { workspace: WorkspacePreset }) {
 export function EditorPage() {
   const { projectId } = useParams<{ projectId: string }>();
   useEditorCollabLifecycle(projectId);
+  useEditorCollabPresenceSync(projectId);
   const [searchParams, setSearchParams] = useSearchParams();
   const showAIPanel = useEditorStore((s) => s.showAIPanel);
   const showExportPanel = useEditorStore((s) => s.showExportPanel);

@@ -290,6 +290,35 @@ describe('useCollabStore', () => {
     expect(withCollaboration).toBeDefined();
   });
 
+  it('syncPresenceFromEditor() updates current-user playhead/track presence and persists snapshots', async () => {
+    const project = buildRepositoryProject('project_sync_presence');
+    repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
+
+    useCollabStore.getState().connect(project.id, 'user_1');
+    await flushAsyncTasks();
+
+    useCollabStore.getState().syncPresenceFromEditor({
+      playheadTime: 12.5,
+      selectedTrackId: 'v2',
+      fps: 24,
+    });
+    await flushAsyncTasks();
+
+    const syncedUser = useCollabStore.getState().onlineUsers.find((user) => user.id === 'user_1');
+    expect(syncedUser?.cursorFrame).toBe(300);
+    expect(syncedUser?.cursorTrackId).toBe('v2');
+    expect(syncedUser?.playheadTime).toBe(12.5);
+
+    const savedProjectWithPresence = repositoryMocks.saveProjectToRepository.mock.calls
+      .map((call) => call[0] as EditorProject)
+      .find((candidate) => candidate.collaboration?.presenceSnapshots.some((snapshot) =>
+        snapshot.userId === 'user_1'
+        && snapshot.cursorFrame === 300
+        && snapshot.cursorTrackId === 'v2'
+        && snapshot.playheadTime === 12.5));
+    expect(savedProjectWithPresence).toBeDefined();
+  });
+
   it('resolveComment() works on a standalone CollabEngine', () => {
     // Test resolve/reopen on a fresh engine instance to avoid the
     // Immer freeze bug that affects the singleton shared with the store.

@@ -91,6 +91,11 @@ interface CollabActions {
 
   // Sync
   refreshFromEngine: () => void;
+  syncPresenceFromEditor: (presence: {
+    playheadTime: number;
+    selectedTrackId: string | null;
+    fps: number;
+  }) => void;
 
   // Activity
   addActivity: (user: string, action: string, detail: string, userId?: string) => void;
@@ -872,6 +877,47 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           collabEngine.getAllUsers(),
           get().comments,
           get().activityFeed,
+        ).catch((error) => {
+          console.error('Failed to persist collaboration presence/comments/activity', error);
+        });
+      },
+      syncPresenceFromEditor: ({ playheadTime, selectedTrackId, fps }) => {
+        const state = get();
+        if (!state.connected || !state.projectId) {
+          return;
+        }
+
+        const safePlayheadTime = Number.isFinite(playheadTime)
+          ? Math.max(0, playheadTime)
+          : 0;
+        const safeFps = Number.isFinite(fps) && fps > 0 ? fps : 24;
+        const cursorFrame = Math.round(safePlayheadTime * safeFps);
+        const currentUser = collabEngine.getAllUsers().find((user) => user.id === state.currentUserId);
+        if (
+          currentUser
+          && currentUser.cursorFrame === cursorFrame
+          && currentUser.cursorTrackId === selectedTrackId
+          && Math.abs((currentUser.playheadTime ?? 0) - safePlayheadTime) < 0.001
+        ) {
+          return;
+        }
+
+        collabEngine.updateCursor(cursorFrame, selectedTrackId, safePlayheadTime);
+        set((s) => {
+          s.onlineUsers = collabEngine.getOnlineUsers();
+          s.identityProfiles = buildHydratedIdentityProfiles(s.identityProfiles, {
+            onlineUsers: s.onlineUsers,
+            comments: s.comments,
+            versions: s.versions,
+            activityFeed: s.activityFeed,
+          });
+        }, false, 'collab/syncPresenceFromEditor');
+
+        void persistCollaborationToRepository(
+          state.projectId,
+          collabEngine.getAllUsers(),
+          state.comments,
+          state.activityFeed,
         ).catch((error) => {
           console.error('Failed to persist collaboration presence/comments/activity', error);
         });

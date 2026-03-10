@@ -102,10 +102,11 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Added store/UI coverage that asserts persisted collaborator identity profiles hydrate non-current comment/activity authorship paths and render stable avatars/colors.
 - Persisted and hydrated collaboration threaded comments and activity-feed entries in repository project schema (`project.collaboration`), with connect-time restoration and mutation-time saves for reconnect/reopen continuity.
 - Persisted and hydrated collaboration presence snapshots in repository project schema (`project.collaboration.presenceSnapshots`), including online/offline state plus cursor/playhead metadata for reconnect/reopen continuity.
+- Wired active editor navigation into collaboration presence snapshots by syncing current-user playhead and selected track focus through the collaboration store, with throttled editor-state subscription updates and repository persistence coverage.
 
 ## Next Execution Slices
 
-1. Wire active editor playhead/track focus updates into collaboration presence snapshots so persisted cursor/playhead metadata reflects current timeline navigation rather than connect-time/demo defaults.
+1. Surface collaborator playhead/track-focus badges in the timeline UI from hydrated presence snapshots so editors can see persisted collaborator navigation context directly in-track.
 
 ## Exit Signals For These Early Phases
 
