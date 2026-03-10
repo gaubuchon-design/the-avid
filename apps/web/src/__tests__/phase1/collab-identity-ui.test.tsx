@@ -248,6 +248,55 @@ describe('phase 1 collab identity UI', () => {
     container.remove();
   });
 
+  it('renders restored comments context summary indicators', async () => {
+    useCollabStore.setState({
+      activeTab: 'comments',
+      commentFilter: 'resolved',
+      comments: [
+        {
+          id: 'comment-open',
+          userId: 'user-alex',
+          userName: 'Alex Editor',
+          frame: 100,
+          text: 'Open thread',
+          timestamp: Date.now(),
+          resolved: false,
+          reactions: [],
+          replies: [],
+        },
+        {
+          id: 'comment-resolved',
+          userId: 'user-jordan',
+          userName: 'Jordan Reviewer',
+          frame: 200,
+          text: 'Resolved thread',
+          timestamp: Date.now(),
+          resolved: true,
+          reactions: [],
+          replies: [],
+        },
+      ],
+    });
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<CollabPanel />);
+    });
+
+    const summary = container.querySelector('[aria-label="Comments context summary"]');
+    expect(summary).toBeTruthy();
+    expect(summary?.textContent).toContain('Filter: resolved');
+    expect(summary?.textContent).toContain('1/2 shown');
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
   it('renders avatar-aware identity chips in users tab rows', async () => {
     useCollabStore.setState({
       activeTab: 'users',

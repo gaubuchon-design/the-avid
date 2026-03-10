@@ -299,6 +299,7 @@ function CommentsTab() {
     if (commentFilter === 'resolved') return c.resolved;
     return true;
   });
+  const hasActiveContext = commentFilter !== 'all';
 
   const handleAddComment = useCallback(() => {
     if (!newCommentText.trim()) return;
@@ -341,6 +342,46 @@ function CommentsTab() {
           </button>
         ))}
       </div>
+      {hasActiveContext && (
+        <div
+          aria-label="Comments context summary"
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 4,
+            padding: '0 0 8px',
+          }}
+        >
+          <span
+            style={{
+              padding: '2px 6px',
+              borderRadius: 999,
+              fontSize: 9,
+              fontWeight: 600,
+              letterSpacing: '0.03em',
+              background: 'var(--bg-elevated)',
+              color: 'var(--text-secondary)',
+              border: '1px solid var(--border-default)',
+            }}
+          >
+            Filter: {commentFilter}
+          </span>
+          <span
+            style={{
+              padding: '2px 6px',
+              borderRadius: 999,
+              fontSize: 9,
+              fontWeight: 600,
+              letterSpacing: '0.03em',
+              background: 'var(--bg-elevated)',
+              color: 'var(--text-muted)',
+              border: '1px solid var(--border-default)',
+            }}
+          >
+            {filteredComments.length}/{comments.length} shown
+          </span>
+        </div>
+      )}
 
       {/* Add comment button */}
       {!showAddComment && (

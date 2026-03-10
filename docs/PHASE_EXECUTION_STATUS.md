@@ -120,10 +120,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Expanded store and phase-1 UI coverage for collaboration panel preference hydration/persistence and activity action-filter control behavior so reopen cycles restore the same review context.
 - Surfaced restored activity review context in the collaboration panel activity header with active summary chips for action-filter, search query, and shown/total result count.
 - Added phase-1 UI coverage asserting persisted activity filter/search state renders the expected restored context chips and filtered count after reopen hydration.
+- Surfaced restored comments review context in the collaboration panel comments tab with summary indicators for active filter and shown/total thread count.
+- Added phase-1 UI coverage asserting persisted comment-filter state renders restored comments context indicators and expected filtered thread counts.
 
 ## Next Execution Slices
 
-1. Surface persistent comments review-context summary indicators (active filter chip + shown/total thread count) so restored discussion focus is immediately visible after reopen.
+1. Persist and hydrate version-history review controls (retention preference + compare mode) so restored context carries across reconnect/reopen without manual re-selection.
 
 ## Exit Signals For These Early Phases
 
