@@ -89,10 +89,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Added phase-1 hydration coverage proving (a) latest web-load repository payload wins over late stale responses and (b) restored collaboration snapshots survive reopen via repository persistence.
 - Wired collaboration connect/disconnect lifecycle into the editor shell so collab sessions now auto-connect on project open and cleanly disconnect on project switches/unmount without manual store calls.
 - Added focused hook coverage for auto-connect on open, session switch reconnect, `new`/unset project disconnect, and unmount cleanup.
+- Hydrated collaboration identity from authenticated user profile during auto-connect (name/avatar), and propagated that identity into comment authorship, version `createdBy`, and collaboration activity labels.
+- Hardened collaboration user presence updates to avoid mutating frozen state references by replacing in-place user mutations with immutable map writes.
 
 ## Next Execution Slices
 
-1. Hydrate collaboration identity from authenticated user profile (name/avatar) during auto-connect so comments/activity/version metadata align with real user sessions.
+1. Surface authenticated collaboration identity (avatar/display name) in additional UI affordances such as activity feed rows and version cards where fallback placeholders are still shown.
 
 ## Exit Signals For These Early Phases
 

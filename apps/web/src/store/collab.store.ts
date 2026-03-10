@@ -8,6 +8,7 @@ import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import {
   collabEngine,
+  type CollabIdentityProfile,
   DEFAULT_VERSION_RETENTION_PREFERENCES,
   type CollabComment,
   type CollabUser,
@@ -33,6 +34,8 @@ interface CollabState {
   projectId: string | null;
   connected: boolean;
   currentUserId: string;
+  currentUserName: string;
+  currentUserAvatar?: string;
   onlineUsers: CollabUser[];
   comments: CollabComment[];
   versions: ProjectVersion[];
@@ -45,7 +48,7 @@ interface CollabState {
 
 interface CollabActions {
   // Connection
-  connect: (projectId: string, userId: string) => void;
+  connect: (projectId: string, userId: string, profile?: CollabIdentityProfile) => void;
   disconnect: () => void;
 
   // UI
@@ -214,6 +217,8 @@ const INITIAL_STATE: CollabState = {
   projectId: null,
   connected: false,
   currentUserId: 'u_self',
+  currentUserName: 'You',
+  currentUserAvatar: undefined,
   onlineUsers: collabEngine.getOnlineUsers(),
   comments: collabEngine.getComments(),
   versions: collabEngine.getVersions(),
@@ -233,13 +238,15 @@ export const useCollabStore = create<CollabState & CollabActions>()(
       ...INITIAL_STATE,
 
       // Connection
-      connect: (projectId, userId) => {
+      connect: (projectId, userId, profile) => {
         const connectRequestToken = `${projectId}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`;
-        collabEngine.connect(projectId, userId);
+        collabEngine.connect(projectId, userId, profile);
         set((s) => {
           s.projectId = projectId;
           s.connected = true;
           s.currentUserId = userId;
+          s.currentUserName = profile?.name?.trim() || s.currentUserName;
+          s.currentUserAvatar = profile?.avatar;
           s.onlineUsers = collabEngine.getOnlineUsers();
         }, false, 'collab/connect');
 
@@ -285,7 +292,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
         set((s) => {
           s.comments = collabEngine.getComments();
         }, false, 'collab/addComment');
-        get().addActivity('You', 'added comment', `"${text.slice(0, 40)}${text.length > 40 ? '...' : ''}"`);
+        get().addActivity(get().currentUserName, 'added comment', `"${text.slice(0, 40)}${text.length > 40 ? '...' : ''}"`);
       },
 
       replyToComment: (commentId, text) => {
@@ -293,7 +300,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
         set((s) => {
           s.comments = collabEngine.getComments();
         }, false, 'collab/replyToComment');
-        get().addActivity('You', 'replied to comment', `"${text.slice(0, 40)}${text.length > 40 ? '...' : ''}"`);
+        get().addActivity(get().currentUserName, 'replied to comment', `"${text.slice(0, 40)}${text.length > 40 ? '...' : ''}"`);
       },
 
       resolveComment: (commentId) => {
@@ -301,7 +308,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
         set((s) => {
           s.comments = collabEngine.getComments();
         }, false, 'collab/resolveComment');
-        get().addActivity('You', 'resolved comment', `Comment ${commentId}`);
+        get().addActivity(get().currentUserName, 'resolved comment', `Comment ${commentId}`);
       },
 
       reopenComment: (commentId) => {
@@ -309,7 +316,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
         set((s) => {
           s.comments = collabEngine.getComments();
         }, false, 'collab/reopenComment');
-        get().addActivity('You', 'reopened comment', `Comment ${commentId}`);
+        get().addActivity(get().currentUserName, 'reopened comment', `Comment ${commentId}`);
       },
 
       addReaction: (commentId, emoji) => {
@@ -330,7 +337,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
         set((s) => {
           s.versions = collabEngine.getVersions();
         }, false, 'collab/saveVersion');
-        get().addActivity('You', 'saved version', `"${name}"`);
+        get().addActivity(get().currentUserName, 'saved version', `"${name}"`);
         void persistVersionsToRepository(get().projectId).catch((error) => {
           console.error('Failed to persist collaboration version history', error);
         });
@@ -370,14 +377,14 @@ export const useCollabStore = create<CollabState & CollabActions>()(
           void useEditorStore.getState().saveProject().catch((error) => {
             console.error('Failed to persist restored collaboration snapshot', error);
           });
-          get().addActivity('You', 'restored version', `"${version.name}"`);
+          get().addActivity(get().currentUserName, 'restored version', `"${version.name}"`);
           void persistVersionsToRepository(get().projectId).catch((error) => {
             console.error('Failed to persist collaboration version history', error);
           });
           return;
         }
 
-        get().addActivity('You', 'restore unavailable', `"${version.name}" does not contain a restorable project snapshot.`);
+        get().addActivity(get().currentUserName, 'restore unavailable', `"${version.name}" does not contain a restorable project snapshot.`);
       },
 
       setVersionRetentionPreferences: (preferences) => {

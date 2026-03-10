@@ -5,7 +5,10 @@ import { useCollabStore } from '../store/collab.store';
 export function useEditorCollabLifecycle(projectId?: string): void {
   const connect = useCollabStore((state) => state.connect);
   const disconnect = useCollabStore((state) => state.disconnect);
-  const userId = useAuthStore((state) => state.user?.id ?? 'u_self');
+  const authUser = useAuthStore((state) => state.user);
+  const userId = authUser?.id ?? 'u_self';
+  const userName = authUser?.name ?? 'You';
+  const userAvatar = authUser?.avatarUrl;
 
   useEffect(() => {
     if (!projectId || projectId === 'new') {
@@ -13,9 +16,9 @@ export function useEditorCollabLifecycle(projectId?: string): void {
       return;
     }
 
-    connect(projectId, userId);
+    connect(projectId, userId, { name: userName, avatar: userAvatar });
     return () => {
       disconnect();
     };
-  }, [connect, disconnect, projectId, userId]);
+  }, [connect, disconnect, projectId, userAvatar, userId, userName]);
 }

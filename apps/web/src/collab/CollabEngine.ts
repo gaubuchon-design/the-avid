@@ -81,6 +81,11 @@ export interface VersionRetentionPreferences {
   autoPrune: boolean;
 }
 
+export interface CollabIdentityProfile {
+  name?: string;
+  avatar?: string;
+}
+
 export const DEFAULT_VERSION_RETENTION_PREFERENCES: VersionRetentionPreferences = {
   preset: 'last-25',
   autoPrune: true,
@@ -440,18 +445,29 @@ export class CollabEngine {
 
   // ── Connection ──────────────────────────────────────────────────────────
 
-  connect(projectId: string, userId: string): void {
+  connect(projectId: string, userId: string, profile?: CollabIdentityProfile): void {
     this.currentUserId = userId;
+    const existingUser = this.users.get(userId);
+    const resolvedName = profile?.name?.trim() || existingUser?.name || this.currentUserName || 'You';
+    this.currentUserName = resolvedName;
     this.connected = true;
 
     // Add self to users if not present
-    if (!this.users.has(userId)) {
+    if (!existingUser) {
       this.users.set(userId, {
         id: userId,
-        name: this.currentUserName,
+        name: resolvedName,
+        avatar: profile?.avatar,
         color: '#f59e0b',
         cursorFrame: 0,
         cursorTrackId: null,
+        isOnline: true,
+      });
+    } else {
+      this.users.set(userId, {
+        ...existingUser,
+        name: resolvedName,
+        avatar: profile && 'avatar' in profile ? profile.avatar : existingUser.avatar,
         isOnline: true,
       });
     }
@@ -462,7 +478,12 @@ export class CollabEngine {
   disconnect(): void {
     this.connected = false;
     const self = this.users.get(this.currentUserId);
-    if (self) self.isOnline = false;
+    if (self) {
+      this.users.set(this.currentUserId, {
+        ...self,
+        isOnline: false,
+      });
+    }
     this.notify();
   }
 
@@ -479,8 +500,11 @@ export class CollabEngine {
   updateCursor(frame: number, trackId: string | null): void {
     const self = this.users.get(this.currentUserId);
     if (self) {
-      self.cursorFrame = frame;
-      self.cursorTrackId = trackId;
+      this.users.set(this.currentUserId, {
+        ...self,
+        cursorFrame: frame,
+        cursorTrackId: trackId,
+      });
       this.notify();
     }
   }

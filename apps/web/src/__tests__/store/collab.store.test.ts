@@ -62,6 +62,24 @@ describe('useCollabStore', () => {
     expect(useCollabStore.getState().currentUserId).toBe('user_1');
   });
 
+  it('hydrates collab identity from profile metadata on connect', () => {
+    useCollabStore.getState().connect('project_identity', 'user_identity', {
+      name: 'Taylor Editor',
+      avatar: 'avatar://taylor',
+    });
+
+    useCollabStore.getState().addComment(100, 't1', 'Identity-backed comment');
+    useCollabStore.getState().saveVersion('Identity Version', 'Metadata should use profile');
+
+    const state = useCollabStore.getState();
+    expect(state.currentUserName).toBe('Taylor Editor');
+    expect(state.currentUserAvatar).toBe('avatar://taylor');
+    expect(state.comments[0]?.userName).toBe('Taylor Editor');
+    expect(state.versions[0]?.createdBy).toBe('Taylor Editor');
+    expect(state.activityFeed[0]?.user).toBe('Taylor Editor');
+    expect(state.onlineUsers.some((user) => user.id === 'user_identity' && user.avatar === 'avatar://taylor')).toBe(true);
+  });
+
   it('connect() hydrates persisted version history from repository', async () => {
     const project = buildRepositoryProject('project_hydrate_versions');
     project.versionHistory = [

@@ -8,7 +8,7 @@ const collabMocks = vi.hoisted(() => ({
 }));
 
 const authState = vi.hoisted(() => ({
-  user: { id: 'user-alpha' },
+  user: { id: 'user-alpha', name: 'Alex Editor', avatarUrl: 'avatar://alex' },
 }));
 
 vi.mock('../../store/collab.store', () => ({
@@ -20,7 +20,7 @@ vi.mock('../../store/collab.store', () => ({
 }));
 
 vi.mock('../../store/auth.store', () => ({
-  useAuthStore: (selector: (state: { user: { id: string } | null }) => unknown) =>
+  useAuthStore: (selector: (state: { user: { id: string; name: string; avatarUrl?: string } | null }) => unknown) =>
     selector({
       user: authState.user,
     }),
@@ -40,7 +40,7 @@ describe('useEditorCollabLifecycle', () => {
   beforeEach(() => {
     collabMocks.connect.mockReset();
     collabMocks.disconnect.mockReset();
-    authState.user = { id: 'user-alpha' };
+    authState.user = { id: 'user-alpha', name: 'Alex Editor', avatarUrl: 'avatar://alex' };
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -58,7 +58,11 @@ describe('useEditorCollabLifecycle', () => {
       root.render(<Harness projectId="project-123" />);
     });
 
-    expect(collabMocks.connect).toHaveBeenCalledWith('project-123', 'user-alpha');
+    expect(collabMocks.connect).toHaveBeenCalledWith(
+      'project-123',
+      'user-alpha',
+      { name: 'Alex Editor', avatar: 'avatar://alex' },
+    );
     expect(collabMocks.disconnect).not.toHaveBeenCalled();
   });
 
@@ -70,8 +74,18 @@ describe('useEditorCollabLifecycle', () => {
       root.render(<Harness projectId="project-b" />);
     });
 
-    expect(collabMocks.connect).toHaveBeenNthCalledWith(1, 'project-a', 'user-alpha');
-    expect(collabMocks.connect).toHaveBeenNthCalledWith(2, 'project-b', 'user-alpha');
+    expect(collabMocks.connect).toHaveBeenNthCalledWith(
+      1,
+      'project-a',
+      'user-alpha',
+      { name: 'Alex Editor', avatar: 'avatar://alex' },
+    );
+    expect(collabMocks.connect).toHaveBeenNthCalledWith(
+      2,
+      'project-b',
+      'user-alpha',
+      { name: 'Alex Editor', avatar: 'avatar://alex' },
+    );
     expect(collabMocks.disconnect).toHaveBeenCalledTimes(1);
   });
 
