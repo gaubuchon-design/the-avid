@@ -511,6 +511,7 @@ describe('phase 1 project persistence', () => {
     });
 
     const container = document.createElement('div');
+    document.body.appendChild(container);
     const root = createRoot(container);
 
     await act(async () => {
@@ -792,8 +793,11 @@ describe('phase 1 project persistence', () => {
     const robinIndicatorAfterReorder = container.querySelector('[aria-label="Follow Robin Producer playhead at 00:00:03:00"]');
     expect(caseyIndicatorAfterReorder).toHaveAttribute('tabindex', '0');
     expect(robinIndicatorAfterReorder).toHaveAttribute('tabindex', '-1');
+    const robinFocusSpy = vi.spyOn(robinIndicatorAfterReorder as HTMLButtonElement, 'focus');
 
     await act(async () => {
+      (caseyIndicatorAfterReorder as HTMLButtonElement | null)?.focus();
+      robinFocusSpy.mockClear();
       useCollabStore.setState((state) => ({
         ...state,
         onlineUsers: state.onlineUsers.filter((user) => user.id !== 'u-casey'),
@@ -804,6 +808,7 @@ describe('phase 1 project persistence', () => {
     const averyIndicatorAfterCaseyLeave = container.querySelector('[aria-label="Follow Avery Editor playhead at 00:00:01:00"]');
     expect(robinIndicatorAfterCaseyLeave).toHaveAttribute('tabindex', '0');
     expect(averyIndicatorAfterCaseyLeave).toHaveAttribute('tabindex', '-1');
+    expect(robinFocusSpy).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       useCollabStore.setState((state) => ({
@@ -818,6 +823,7 @@ describe('phase 1 project persistence', () => {
     await act(async () => {
       root.unmount();
     });
+    container.remove();
   });
 
   it('renders save and checkpoint affordances in the workbench shell', async () => {

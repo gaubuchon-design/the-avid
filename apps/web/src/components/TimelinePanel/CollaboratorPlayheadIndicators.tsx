@@ -1,4 +1,4 @@
-import React, { memo, useRef, useState } from 'react';
+import React, { memo, useLayoutEffect, useRef, useState } from 'react';
 import { toTimecode } from '../../lib/timecode';
 import { useCollabStore } from '../../store/collab.store';
 import { useEditorStore } from '../../store/editor.store';
@@ -51,6 +51,7 @@ export const CollaboratorPlayheadIndicators = memo(function CollaboratorPlayhead
     .sort((a, b) => a.playheadTime - b.playheadTime);
   const [activeIndicatorId, setActiveIndicatorId] = useState<string | null>(null);
   const lastActiveIndicatorIndexRef = useRef(0);
+  const indicatorButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const activeIndicatorIndex = activeIndicatorId === null
     ? -1
     : collaborators.findIndex((user) => user.id === activeIndicatorId);
@@ -71,12 +72,39 @@ export const CollaboratorPlayheadIndicators = memo(function CollaboratorPlayhead
       : null;
   const hasActiveIndicator = resolvedActiveIndicatorId !== null;
 
+  useLayoutEffect(() => {
+    if (activeIndicatorId === null) {
+      return;
+    }
+
+    if (collaborators.some((user) => user.id === activeIndicatorId)) {
+      return;
+    }
+
+    const fallbackIndicatorId = resolvedActiveIndicatorId ?? collaborators[0]?.id ?? null;
+    if (!fallbackIndicatorId || fallbackIndicatorId === activeIndicatorId) {
+      return;
+    }
+
+    const fallbackIndicator = indicatorButtonRefs.current.get(fallbackIndicatorId);
+    if (!fallbackIndicator) {
+      return;
+    }
+
+    setActiveIndicatorId(fallbackIndicatorId);
+    fallbackIndicator.focus();
+  }, [activeIndicatorId, collaborators, resolvedActiveIndicatorId]);
+
   if (collaborators.length === 0) {
     return null;
   }
 
   return (
-    <div className="collab-playhead-layer" role="group" aria-label="Collaborator playhead indicators">
+    <div
+      className="collab-playhead-layer"
+      role="group"
+      aria-label="Collaborator playhead indicators"
+    >
       {collaborators.map((user, index) => {
         const left = user.playheadTime * zoom - scrollLeft;
         const style: React.CSSProperties & { '--collab-playhead-color'?: string } = {
@@ -98,6 +126,13 @@ export const CollaboratorPlayheadIndicators = memo(function CollaboratorPlayhead
           <button
             type="button"
             key={user.id}
+            ref={(node) => {
+              if (node) {
+                indicatorButtonRefs.current.set(user.id, node);
+              } else {
+                indicatorButtonRefs.current.delete(user.id);
+              }
+            }}
             data-indicator-id={user.id}
             className={`collab-playhead${user.isOnline ? '' : ' offline'}`}
             style={style}
