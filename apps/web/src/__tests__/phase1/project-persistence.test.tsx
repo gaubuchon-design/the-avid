@@ -730,6 +730,20 @@ describe('phase 1 project persistence', () => {
     expect(robinIndicator).toHaveAttribute('tabindex', '-1');
 
     await act(async () => {
+      caseyIndicator?.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    });
+
+    expect(caseyIndicator).toHaveAttribute('tabindex', '-1');
+    expect(robinIndicator).toHaveAttribute('tabindex', '0');
+
+    await act(async () => {
+      robinIndicator?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    });
+
+    expect(caseyIndicator).toHaveAttribute('tabindex', '0');
+    expect(robinIndicator).toHaveAttribute('tabindex', '-1');
+
+    await act(async () => {
       caseyIndicator?.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
     });
 

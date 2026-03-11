@@ -91,7 +91,7 @@ export const CollaboratorPlayheadIndicators = memo(function CollaboratorPlayhead
               followPlayhead();
             }}
             onKeyDown={(event) => {
-              if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+              if (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'Home' || event.key === 'End') {
                 event.preventDefault();
                 const layer = event.currentTarget.parentElement;
                 if (!layer) {
@@ -103,8 +103,11 @@ export const CollaboratorPlayheadIndicators = memo(function CollaboratorPlayhead
                   return;
                 }
 
-                const direction = event.key === 'ArrowRight' ? 1 : -1;
-                const nextIndex = (currentIndex + direction + buttons.length) % buttons.length;
+                const nextIndex = event.key === 'Home'
+                  ? 0
+                  : event.key === 'End'
+                    ? buttons.length - 1
+                    : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
                 const nextButton = buttons[nextIndex];
                 const nextIndicatorId = nextButton?.dataset['indicatorId'];
                 if (nextIndicatorId) {
