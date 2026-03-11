@@ -119,10 +119,12 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Expanded phase-1 collaborator playhead coverage with live join/leave/reorder churn assertions for retained roving tab-stop behavior and nearest-indicator fallback.
 - Preserved DOM keyboard focus continuity when the active collaborator playhead indicator disappears by reassigning roving focus to the resolved nearest fallback indicator without requiring an extra Tab cycle.
 - Expanded phase-1 collaborator playhead coverage to assert focus-transfer behavior when the active indicator is removed during live presence churn.
+- Preserved Escape-key keyboard exit parity for collaborator playhead roving focus by clearing the active roving indicator and restoring first-indicator tab-stop entry behavior on the next Tab cycle.
+- Expanded phase-1 collaborator playhead coverage with Escape-key assertions that reset roving tab-stop ownership back to the first indicator before keyboard follow activation resumes.
 
 ## Next Execution Slices
 
-1. Preserve Escape-key keyboard exit parity for collaborator playhead roving focus by clearing the active roving indicator and restoring first-indicator tab-stop entry behavior on the next Tab cycle.
+1. Add Shift+Tab reverse-entry parity after Escape exit so collaborator playhead roving focus can re-enter from the last indicator while preserving forward Tab first-indicator entry.
 
 ## Exit Signals For These Early Phases
 

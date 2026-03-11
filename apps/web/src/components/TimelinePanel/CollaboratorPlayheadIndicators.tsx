@@ -144,6 +144,13 @@ export const CollaboratorPlayheadIndicators = memo(function CollaboratorPlayhead
               followPlayhead();
             }}
             onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                setActiveIndicatorId(null);
+                return;
+              }
+
               if (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'Home' || event.key === 'End') {
                 event.preventDefault();
                 const layer = event.currentTarget.parentElement;
