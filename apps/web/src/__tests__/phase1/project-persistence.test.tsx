@@ -738,6 +738,17 @@ describe('phase 1 project persistence', () => {
     expect(robinIndicator).toHaveAttribute('tabindex', '0');
 
     await act(async () => {
+      robinIndicator?.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+
+    expect(caseyIndicator).toHaveAttribute('tabindex', '0');
+    expect(robinIndicator).toHaveAttribute('tabindex', '-1');
+
+    await act(async () => {
       robinIndicator?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
     });
 
