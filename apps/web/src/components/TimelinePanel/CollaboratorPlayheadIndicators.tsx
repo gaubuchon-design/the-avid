@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useRef, useState } from 'react';
 import { toTimecode } from '../../lib/timecode';
 import { useCollabStore } from '../../store/collab.store';
 import { useEditorStore } from '../../store/editor.store';
@@ -50,8 +50,26 @@ export const CollaboratorPlayheadIndicators = memo(function CollaboratorPlayhead
     .filter((user) => Number.isFinite(user.playheadTime) && user.playheadTime >= 0)
     .sort((a, b) => a.playheadTime - b.playheadTime);
   const [activeIndicatorId, setActiveIndicatorId] = useState<string | null>(null);
-  const hasActiveIndicator = activeIndicatorId !== null
-    && collaborators.some((user) => user.id === activeIndicatorId);
+  const lastActiveIndicatorIndexRef = useRef(0);
+  const activeIndicatorIndex = activeIndicatorId === null
+    ? -1
+    : collaborators.findIndex((user) => user.id === activeIndicatorId);
+
+  if (activeIndicatorIndex >= 0) {
+    lastActiveIndicatorIndexRef.current = activeIndicatorIndex;
+  }
+
+  const resolvedActiveIndicatorId = activeIndicatorIndex >= 0
+    ? activeIndicatorId
+    : activeIndicatorId !== null && collaborators.length > 0
+      ? collaborators[
+        Math.min(
+          Math.max(lastActiveIndicatorIndexRef.current, 0),
+          collaborators.length - 1,
+        )
+      ]?.id ?? null
+      : null;
+  const hasActiveIndicator = resolvedActiveIndicatorId !== null;
 
   if (collaborators.length === 0) {
     return null;
@@ -73,7 +91,7 @@ export const CollaboratorPlayheadIndicators = memo(function CollaboratorPlayhead
           }
         };
         const tabIndex = hasActiveIndicator
-          ? (activeIndicatorId === user.id ? 0 : -1)
+          ? (resolvedActiveIndicatorId === user.id ? 0 : -1)
           : (index === 0 ? 0 : -1);
 
         return (

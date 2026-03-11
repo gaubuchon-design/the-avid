@@ -751,6 +751,71 @@ describe('phase 1 project persistence', () => {
     expect(useEditorStore.getState().selectedTrackId).toBe('t-a1');
 
     await act(async () => {
+      useCollabStore.setState((state) => ({
+        ...state,
+        onlineUsers: [
+          ...state.onlineUsers,
+          {
+            id: 'u-avery',
+            name: 'Avery Editor',
+            color: '#14b8a6',
+            cursorFrame: 24,
+            cursorTrackId: 't-v1',
+            playheadTime: 1,
+            isOnline: true,
+          },
+        ],
+      }));
+    });
+
+    const averyIndicator = container.querySelector('[aria-label="Follow Avery Editor playhead at 00:00:01:00"]');
+    const caseyIndicatorAfterJoin = container.querySelector('[aria-label="Follow Casey Mixer playhead at 00:00:02:00"]');
+    expect(averyIndicator).toHaveAttribute('tabindex', '-1');
+    expect(caseyIndicatorAfterJoin).toHaveAttribute('tabindex', '0');
+
+    await act(async () => {
+      useCollabStore.setState((state) => ({
+        ...state,
+        onlineUsers: state.onlineUsers.map((user) => {
+          if (user.id === 'u-casey') {
+            return { ...user, playheadTime: 6, cursorFrame: 144 };
+          }
+          if (user.id === 'u-robin') {
+            return { ...user, playheadTime: 3, cursorFrame: 72 };
+          }
+          return user;
+        }),
+      }));
+    });
+
+    const caseyIndicatorAfterReorder = container.querySelector('[aria-label="Follow Casey Mixer playhead at 00:00:06:00"]');
+    const robinIndicatorAfterReorder = container.querySelector('[aria-label="Follow Robin Producer playhead at 00:00:03:00"]');
+    expect(caseyIndicatorAfterReorder).toHaveAttribute('tabindex', '0');
+    expect(robinIndicatorAfterReorder).toHaveAttribute('tabindex', '-1');
+
+    await act(async () => {
+      useCollabStore.setState((state) => ({
+        ...state,
+        onlineUsers: state.onlineUsers.filter((user) => user.id !== 'u-casey'),
+      }));
+    });
+
+    const robinIndicatorAfterCaseyLeave = container.querySelector('[aria-label="Follow Robin Producer playhead at 00:00:03:00"]');
+    const averyIndicatorAfterCaseyLeave = container.querySelector('[aria-label="Follow Avery Editor playhead at 00:00:01:00"]');
+    expect(robinIndicatorAfterCaseyLeave).toHaveAttribute('tabindex', '0');
+    expect(averyIndicatorAfterCaseyLeave).toHaveAttribute('tabindex', '-1');
+
+    await act(async () => {
+      useCollabStore.setState((state) => ({
+        ...state,
+        onlineUsers: state.onlineUsers.filter((user) => user.id !== 'u-robin'),
+      }));
+    });
+
+    const averyIndicatorAfterRobinLeave = container.querySelector('[aria-label="Follow Avery Editor playhead at 00:00:01:00"]');
+    expect(averyIndicatorAfterRobinLeave).toHaveAttribute('tabindex', '0');
+
+    await act(async () => {
       root.unmount();
     });
   });
