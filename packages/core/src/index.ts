@@ -45,6 +45,7 @@ export * from './api';
 export * from './collab';
 export * from './project-library';
 export * from './media-helpers';
+export * from './parity';
 
 // ─── Vertical Modules ──────────────────────────────────────────────────────
 export * from './news';

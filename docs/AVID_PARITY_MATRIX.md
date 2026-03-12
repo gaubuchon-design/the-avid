@@ -45,6 +45,7 @@ This matrix focuses on core Media Composer expectations rather than every adjace
 - AAF-driven interchange and handoff to finishing and audio tools.
 - Collaborative storage and locking semantics.
 - Multicam, advanced subtitles, color finishing, and higher-end audio workflows.
+- The contract-level execution scaffold for the remaining parity gaps now lives in `docs/NLE_PARITY_GAP_ARCHITECTURE.md` and `packages/core/src/parity/`.
 
 ## Recommendation
 
