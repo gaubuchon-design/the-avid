@@ -1,4 +1,11 @@
-import type { CreateProjectOptions, ProjectTemplate } from '@mcua/core';
+import {
+  coerceWorkspaceForSurface,
+  listProjectTemplatesForSurface,
+  type BuiltInEditorialWorkspaceId,
+  type CreateProjectOptions,
+  type ProjectTemplate,
+} from '@mcua/core';
+import { resolveRuntimeSurface } from './runtimeSurface';
 
 export type EditorialWorkspacePreset = 'filmtv';
 
@@ -14,8 +21,16 @@ export interface ProjectCreationPersonaConfig {
   description: string;
   template: ProjectTemplate;
   sequence: ProjectCreationSequencePreset;
-  activeWorkspaceId: CreateProjectOptions['activeWorkspaceId'];
+  activeWorkspaceId: BuiltInEditorialWorkspaceId;
   composerLayout: CreateProjectOptions['composerLayout'];
+}
+
+export interface ProjectCreationTemplateVisual {
+  badge: string;
+  accent: string;
+  suggestedName: string;
+  quickStartTitle: string;
+  quickStartDescription: string;
 }
 
 const TEMPLATE_CREATION_DEFAULTS: Record<ProjectTemplate, ProjectCreationPersonaConfig> = {
@@ -81,10 +96,116 @@ export const PROJECT_CREATION_PERSONAS: Record<EditorialWorkspacePreset, Project
   filmtv: TEMPLATE_CREATION_DEFAULTS.film,
 };
 
-export const EDITORIAL_TEMPLATE_OPTIONS: ProjectTemplate[] = ['film', 'documentary', 'commercial', 'podcast'];
+export const EDITORIAL_TEMPLATE_OPTIONS: ProjectTemplate[] = listProjectTemplatesForSurface(resolveRuntimeSurface());
+
+export const PROJECT_CREATION_TEMPLATE_VISUALS: Record<ProjectTemplate, ProjectCreationTemplateVisual> = {
+  film: {
+    badge: 'Offline editorial',
+    accent: '#4f63f5',
+    suggestedName: 'Film Cut',
+    quickStartTitle: 'Blank Timeline',
+    quickStartDescription: 'Source / record editorial with 23.976 fps defaults.',
+  },
+  documentary: {
+    badge: 'Story editorial',
+    accent: '#ca8a04',
+    suggestedName: 'Documentary Edit',
+    quickStartTitle: 'Documentary Cut',
+    quickStartDescription: 'Interview-driven edit with room for research and archive.',
+  },
+  commercial: {
+    badge: 'Client review',
+    accent: '#0f9f6e',
+    suggestedName: 'Commercial Spot',
+    quickStartTitle: 'Commercial Spot',
+    quickStartDescription: 'Fast-turn spot workflow with 4K review defaults.',
+  },
+  sports: {
+    badge: 'Legacy preset',
+    accent: '#e05b8e',
+    suggestedName: 'Sports Edit',
+    quickStartTitle: 'Sports',
+    quickStartDescription: 'Compatibility preset retained for existing projects.',
+  },
+  podcast: {
+    badge: 'Audio editorial',
+    accent: '#0891b2',
+    suggestedName: 'Podcast Episode',
+    quickStartTitle: 'Podcast Episode',
+    quickStartDescription: 'Audio-first edit that still opens in the same editor.',
+  },
+  social: {
+    badge: 'Legacy preset',
+    accent: '#8b5cf6',
+    suggestedName: 'Social Cut',
+    quickStartTitle: 'Creator',
+    quickStartDescription: 'Compatibility preset retained for existing projects.',
+  },
+  news: {
+    badge: 'Legacy preset',
+    accent: '#64748b',
+    suggestedName: 'News Cut',
+    quickStartTitle: 'News',
+    quickStartDescription: 'Compatibility preset retained for existing projects.',
+  },
+};
+
+const DISPOSABLE_PROJECT_NAMES = new Set([
+  'Autosave Cut',
+  'Baseline Compare',
+  'Collab Restore',
+  'Diverged Collab Restore',
+  'Metadata Cut',
+  'Persisted Project',
+  'Project project-a',
+  'Project project-b',
+  'Selection Feedback',
+  'Shell Save Test',
+  'Versioned Cut',
+]);
+
+const DISPOSABLE_PROJECT_ID_PATTERNS = [
+  /^project-(?:a|b|collab|compare|metadata|reopen|shell)$/i,
+];
 
 export function getProjectCreationTemplateConfig(template: ProjectTemplate): ProjectCreationPersonaConfig {
   return TEMPLATE_CREATION_DEFAULTS[template];
+}
+
+export function getProjectCreationTemplateVisual(template: ProjectTemplate): ProjectCreationTemplateVisual {
+  return PROJECT_CREATION_TEMPLATE_VISUALS[template];
+}
+
+export function buildSuggestedProjectName(
+  template: ProjectTemplate,
+  existingProjectNames: string[] = [],
+): string {
+  const baseName = PROJECT_CREATION_TEMPLATE_VISUALS[template].suggestedName;
+  const normalizedExistingNames = new Set(
+    existingProjectNames
+      .map((name) => name.trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+  if (!normalizedExistingNames.has(baseName.toLowerCase())) {
+    return baseName;
+  }
+
+  let suffix = 2;
+  while (normalizedExistingNames.has(`${baseName} ${suffix}`.toLowerCase())) {
+    suffix += 1;
+  }
+
+  return `${baseName} ${suffix}`;
+}
+
+export function isDisposableProjectCandidate(project: { id: string; name: string }): boolean {
+  const normalizedName = project.name.trim();
+  if (DISPOSABLE_PROJECT_NAMES.has(normalizedName)) {
+    return true;
+  }
+
+  return DISPOSABLE_PROJECT_ID_PATTERNS.some((pattern) => pattern.test(project.id));
 }
 
 export interface BuildProjectCreationOptionsInput {
@@ -131,7 +252,10 @@ export function buildProjectCreationOptions(
     width: input.sequence?.width ?? baseSequence.width,
     height: input.sequence?.height ?? baseSequence.height,
     dropFrame: input.sequence?.dropFrame ?? baseSequence.dropFrame,
-    activeWorkspaceId: input.activeWorkspaceId ?? baseWorkspaceId,
+    activeWorkspaceId: coerceWorkspaceForSurface(
+      resolveRuntimeSurface(),
+      input.activeWorkspaceId ?? baseWorkspaceId,
+    ),
     composerLayout: input.composerLayout ?? baseComposerLayout,
   };
 }

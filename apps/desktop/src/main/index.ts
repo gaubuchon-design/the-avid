@@ -27,6 +27,7 @@ import type { EditorBin, EditorMediaAsset, EditorProject } from '@mcua/core';
 import { detectGPU } from './gpu';
 import { FileLogger } from './logging/FileLogger';
 import { VideoIOManager } from './videoIO/VideoIOManager';
+import { DesktopParityPlaybackManager } from './parity/DesktopParityPlaybackManager';
 import { StreamManager } from './streaming/StreamManager';
 import { DeckControlManager } from './deckControl/DeckControlManager';
 import {
@@ -389,6 +390,30 @@ const secondaryWindows = new Set<BrowserWindow>();
 const videoIOManager = new VideoIOManager();
 const streamManager = new StreamManager();
 const deckControlManager = new DeckControlManager();
+const parityPlaybackManager = new DesktopParityPlaybackManager({
+  getProjectPackagePath,
+  ensureProjectPackageDir,
+  outputBindings: {
+    startPlayback: async (config) => {
+      const result = await videoIOManager.startPlayback(config);
+      if (!result.ok) {
+        throw new Error(result.error ?? `Failed to start playback on ${config.deviceId}`);
+      }
+    },
+    stopPlayback: async (deviceId) => {
+      const result = await videoIOManager.stopPlayback(deviceId);
+      if (!result.ok) {
+        throw new Error(result.error ?? `Failed to stop playback on ${deviceId}`);
+      }
+    },
+    sendFrame: async (deviceId, frameData) => {
+      const result = await videoIOManager.sendFrame(deviceId, frameData);
+      if (!result.ok) {
+        throw new Error(result.error ?? `Failed to send frame to ${deviceId}`);
+      }
+    },
+  },
+});
 const PROJECT_STORE_DIR = 'projects';
 const PROJECT_FILE_EXTENSION = '.avidproj.json';
 const PROJECT_MANIFEST_FILE = 'project.avid.json';
@@ -805,6 +830,7 @@ async function savePersistedProject(project: EditorProject): Promise<EditorProje
   } catch {
     // Ignore missing legacy files after migrating to package storage.
   }
+  await parityPlaybackManager.syncProject(nextProject);
   await syncProjectWatchers(nextProject);
   void addRecentProject(nextProject);
   return nextProject;
@@ -1464,6 +1490,7 @@ if (!gotTheLock) {
 
     // Initialize professional I/O subsystems (non-blocking — missing modules are OK)
     videoIOManager.registerIPCHandlers();
+    parityPlaybackManager.registerIPCHandlers();
     streamManager.registerIPCHandlers();
     deckControlManager.registerIPCHandlers();
 

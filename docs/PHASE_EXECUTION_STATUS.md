@@ -5,7 +5,9 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 ## Current State
 
 - `Phase 0: Program Reset` is in progress.
-- `Phase 1: Editorial Alpha` is in progress.
+- `Phase 1: Editorial Alpha` has cleared its last open editorial behavior contract in the shared shell; remaining execution focus now shifts toward desktop media-runtime depth.
+- `Phase 2: Desktop Media Runtime` is in progress.
+- `Phase 3: Audio Parity` is in progress with layout-aware bussing, send topology, preview metering, and stricter Pro Tools turnover diagnostics now landed.
 
 ## Started In This Pass
 
@@ -14,6 +16,8 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Added a formal modernization program and UI/UX refactor plan.
 - Consolidated the editor shell around a workbench bar and URL-backed page/workspace state.
 - Added a phase execution status file so delivery can be tracked in-repo.
+- Landed a shared cross-surface editorial experience contract in `@mcua/core` so desktop, browser, and mobile can consume one capability/workspace policy instead of drifting on hardcoded defaults.
+- Wired project creation and default workspace selection through that shared contract for shared desktop/web and mobile companion surfaces.
 
 ### Phase 1
 
@@ -121,10 +125,77 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Expanded phase-1 collaborator playhead coverage to assert focus-transfer behavior when the active indicator is removed during live presence churn.
 - Preserved Escape-key keyboard exit parity for collaborator playhead roving focus by clearing the active roving indicator and restoring first-indicator tab-stop entry behavior on the next Tab cycle.
 - Expanded phase-1 collaborator playhead coverage with Escape-key assertions that reset roving tab-stop ownership back to the first indicator before keyboard follow activation resumes.
+- Aligned the store-level `matchFrame()` path with the richer monitor action flow so match frame now resolves the topmost active media layer, loads the source monitor, sets source time from timeline context, and focuses the source monitor instead of only swapping the asset reference.
+- Clamped store-level `slipClip()` and `slideClip()` operations to real source-handle and neighbor-boundary limits so editorial trims preserve clip duration, source continuity, and adjacent track boundaries.
+- Added focused Phase 1 coverage for store-driven match-frame, slip, and slide behavior alongside the existing monitor keyboard parity suite.
+- Routed store-level `liftSelection()` and `extractSelection()` through `EditOperationsEngine` instead of ad hoc timeline filtering so segment edits now follow the same editorial math and history model as the rest of the editor.
+- Made segment lift/extract actions undoable through `EditEngine` snapshot restores, including selection restoration on undo/redo so keyboard-first segment editing behaves like a real NLE operation instead of a one-way state mutation.
+- Hardened segment lift/extract to respect locked tracks and clear stale inspected-clip state when affected clips are removed, with new store and Phase-1 acceptance coverage for ripple-vs-filler segment behavior.
+- Added undoable marked-range `lift` and `extract` actions in the editor store that delegate to the primary edit engine, so record `IN/OUT` edits now behave like real editorial operations instead of falling back to selection-only segment removal.
+- Updated keyboard routing on the main editor page so `Z`/`X` prefer marked-range lift/extract when record marks are present and fall back to selected-segment lift/extract when they are not.
+- Made mark-clear and go-to-mark keyboard behavior active-monitor aware, so source-monitor mark clearing/jumping no longer mutates record marks or timeline playhead state, and vice versa.
+- Tightened edit-point navigation so it now ignores locked or muted tracks even when they remain enabled, with fresh store and Phase-1 coverage for enabled-track navigation edge cases.
+- Moved `Mark Clip` onto the same active-monitor routing model so source monitor keyboard marking now marks the loaded source clip while record monitor keyboard marking still resolves the timeline clip under the playhead.
+- Hardened `saveProject()` against repository adapters that return no saved payload by falling back to the locally built project snapshot, eliminating the pre-existing non-failing persistence error during Phase 1 restore/save coverage.
+- Added focused persistence coverage for the save fallback path and expanded monitor-action coverage for source-vs-record clip-mark, clear-mark, and go-to-mark behavior.
+- Centralized `Lift`/`Extract` intent policy in the editor store so full record marks take precedence over selected segments, while partial record marks now block the edit instead of silently falling back to selection-based removal.
+- Removed page-local `Lift`/`Extract` precedence logic so keyboard routing now consumes one shared editorial rule instead of duplicating mark-vs-selection decisions in the page shell.
+- Added focused store coverage for partial-mark edge cases to prove that one-sided record marks do not trigger destructive segment edits.
+- Introduced a shared `resolveEditorialFocusTrackIds(...)` helper so next/previous edit, trim-mode entry, and record-monitor `Mark Clip` all resolve the same focus order: selected editable track, enabled editable targets, monitored video track, then all editable tracks.
+- Added focused helper/store coverage for the shared editorial focus policy and a desktop renderer smoke test proving `@mcua/desktop` boots the same dashboard/editor route contract used by the browser shell.
+
+### Phase 2
+
+- Replaced the desktop decode path's manifest-only behavior with file-backed frame and audio artifacts, using new media-pipeline helpers that materialize decoded still frames, decoded audio slices, and composite frame artifacts into project-local cache directories.
+- Taught the desktop decode adapter to persist decoded video/audio artifact metadata in session manifests and to reuse cached artifacts for repeated frame/slice requests instead of treating every request as a synthetic handle-only decode.
+- Taught the desktop compositor to resolve active timeline layers, materialize their frame artifacts, and render a file-backed composite artifact for the requested monitor target rather than only recording a render request manifest.
+- Updated desktop realtime playback telemetry to derive decode/composite latency from actual decode/composite artifact work and to persist the last decoded/composited artifact paths in playback transport manifests.
+- Added desktop runtime coverage proving cached decode/composite reuse, file-backed decode/composite artifacts, and transport-manifest artifact telemetry in the parity runtime test suite.
+- Added a real `SharedArrayBuffer` playback frame transport per desktop playback session, fed from the same composite artifact path that powers the new compositor runtime instead of a separate preview-only path.
+- Added desktop playback-output attachment so the runtime can hand the same composite-derived BGRA buffer to external device playback bindings while still writing it into the shared transport for renderer-side consumption.
+- Added explicit desktop cache invalidation hooks for decode/render playback caches so revision-driven runtime refresh can clear project-local cache state instead of accumulating stale composite artifacts indefinitely.
+- Wired the desktop parity playback runtime into the actual Electron app through a dedicated main-process manager that binds live editor projects to project-package paths, creates playback transports over IPC, and routes external playback through the existing `VideoIOManager`.
+- Exposed the parity playback transport and control surface through the desktop preload bridge so the renderer can create transports, attach streams, preroll/start/stop playback, inspect telemetry, and attach or detach external output devices without inventing a second desktop playback API.
+- Added a desktop renderer transport reader that decodes the shared playback `SharedArrayBuffer` directly in the renderer and chooses the newest written slot by timestamp, which makes the parity runtime consumable from the desktop shell without copying frame payloads through IPC.
+- Added desktop coverage for the new main/renderer seam, including manager-level transport/output tests and renderer-side transport-reader tests on top of the existing runtime tests.
+- Wired the shared record/program monitor canvases onto the desktop parity playback bridge when running in Electron, so the desktop shell now prefers parity-runtime frames for monitor drawing while the browser shell keeps its existing canvas/video path.
+- Added transport-release plumbing across the desktop runtime, manager, preload bridge, and shared shell so monitor-driven transport recreation does not accumulate stale decode/composite state in the main process.
+- Added focused web coverage proving the shared monitor hook creates a parity transport, attaches the active program streams, draws the returned frame into the monitor canvas, and releases the transport on unmount.
+- Replaced the desktop parity playback control path with a real continuous scheduler in the runtime, so one playback transport can keep feeding renderer monitors and external outputs across successive frames instead of depending on repeated one-frame `start(...)` calls.
+- Split the shared desktop monitor hook into transport configuration, playback control, and RAF-driven frame readback, which removes repeated transport setup churn on small playhead drift while keeping paused-frame scrubbing on the explicit one-shot render path.
+- Added focused coverage proving continuous desktop playback starts once, keeps drawing new transport frames without restarting the transport, and only issues explicit resync calls on meaningful playhead jumps.
+- Added manager-level coverage proving the desktop playback scheduler forwards more than one frame to attached output bindings during continuous playback.
+- Added adaptive transport policy on top of the continuous desktop scheduler, so playback now derives frame budget, stream pressure, quality level, and cache strategy from actual transport conditions instead of treating every session as a fixed full-quality path.
+- Added opportunistic lookahead promotion into decode/composite caches for upcoming frames, which lets heavier multistream playback trade storage and background work for better continuity on future frames.
+- Expanded shared playback telemetry with current quality, cache strategy, stream pressure, frame budget, last-frame render latency, cache-hit rate, and promoted-frame counts, and persisted the same policy data into playback transport manifests.
+- Hardened transport shutdown so in-flight scheduler and promotion tasks are awaited during stop/release, preventing background playback work from outliving a released transport.
+
+### Phase 3
+
+- Added a shared normalized audio-channel-layout helper in `@mcua/core` so ingest, audio mix compilation, and Pro Tools turnover can reason about the same `mono` / `stereo` / `5.1` / `7.1` layouts instead of drifting on raw strings.
+- Tightened core project/media typing so ingested `technicalMetadata.audioChannelLayout` is preserved as a normalized layout value rather than an arbitrary label.
+- Upgraded desktop audio mix compilation to derive bus layout, channel count, dominant layout, source layouts, and containerized-audio state from the bound project instead of assuming every mix is stereo.
+- Upgraded desktop audio preview manifests and loudness analysis to carry layout/channel-count context and explicit warnings when containerized multichannel audio is present.
+- Expanded desktop audio turnover manifests with project-, track-, and clip-level channel-layout metadata so downstream turnover tools have enough information to preserve multichannel assignments.
+- Upgraded `ProToolsAAFExporter` so track and clip channel assignment are derived from asset layout metadata, and turnover validation now flags mixed-layout tracks and multichannel clips that are missing layout metadata.
+- Added focused core and desktop coverage for channel-layout normalization, multichannel Pro Tools turnover, reference-runtime surround mix compilation, and surround-aware desktop mix/turnover artifacts.
+- Added a shared audio-mix topology model in `@mcua/core` so reference and desktop runtimes now compile the same bus roles, send targets, printmaster path, fold-down path, and routing warnings.
+- Upgraded desktop audio preview artifacts from flat stem lists into routing-aware manifests with send topology, monitoring/printmaster routing, and per-bus metering snapshots.
+- Expanded loudness analysis to report per-bus measurements and routing diagnostics instead of only one aggregate LUFS/true-peak result.
+- Deepened desktop turnover artifacts so `audio-turnover.json` now includes bus topology and `protools-turnover.validation.json` includes source-path, resample, and summary diagnostics.
+- Added focused topology/export coverage proving printmaster and fold-down routing, richer preview metering manifests, and stricter Pro Tools turnover validation.
+- Added explicit automation-mode tracking to compiled mixes so track-level writes now promote `read` state into `touch`/`latch`/`write` modes in the shared parity model instead of remaining out-of-band runtime state.
+- Added per-bus insert-chain metadata for EQ, dynamics, limiter, meter, and fold-down stages, and threaded that processing metadata through the shared topology model, preview manifests, and turnover manifests.
+- Deepened Pro Tools turnover diagnostics with head/tail handle shortfall warnings and desktop-side facility-policy enforcement for printmaster/fold-down bus presence plus required processing stages.
+- Added explicit preview-vs-print processing policy to bus insert stages so interactive preview and turnover/export can now describe different active processing chains without inventing a second audio model.
+- Added assistant-editor turnover checklist output plus stem-role metadata in `audio-turnover.json`, and validated those checklist/stem-role requirements in desktop Pro Tools turnover diagnostics.
+- Added a shared audio-processing-policy summary helper so reference and desktop runtimes now agree on which stages are active, bypassed, preview-only, or print-only on every bus.
+- Upgraded audio preview artifacts to include print-reference measurements and per-bus processing-policy deltas, so monitor-path loudness can now be compared directly against the print path.
+- Added richer assistant-editor handoff artifacts with sign-off status, recommended actions, processing-intent summaries, and facility-policy rollups for turnover review.
 
 ## Next Execution Slices
 
-1. Add Shift+Tab reverse-entry parity after Escape exit so collaborator playhead roving focus can re-enter from the last indicator while preserving forward Tab first-indicator entry.
+1. Deepen Phase 3 from artifact-level processing intent into fuller audio workflow behavior: actual preview-vs-print render decisions in the desktop monitor/export path, stricter stem-delivery policy, and facility-ready assistant-editor sign-off outputs.
 
 ## Exit Signals For These Early Phases
 

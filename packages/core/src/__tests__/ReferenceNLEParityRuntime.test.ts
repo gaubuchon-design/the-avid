@@ -385,6 +385,7 @@ describe('ReferenceNLEParityRuntime', () => {
     await runtime.professionalAudioMix.writeAutomation(mix.mixId, {
       trackId: 'A1',
       parameter: 'gain',
+      mode: 'touch',
       points: [
         { timeSeconds: 0, value: -2 },
         { timeSeconds: 2, value: 0 },
@@ -410,10 +411,131 @@ describe('ReferenceNLEParityRuntime', () => {
 
     expect(telemetry.activeStreamCount).toBe(2);
     expect(telemetry.maxDecodeLatencyMs).toBeGreaterThan(0);
+    expect(telemetry.streamPressure).toBe('single');
+    expect(telemetry.currentQuality).toBe('full');
+    expect(telemetry.cacheStrategy).toBe('source-only');
+    expect(telemetry.frameBudgetMs).toBeGreaterThan(0);
+    expect(mix.dominantLayout).toBe('stereo');
+    expect(mix.printMasterBusId).toBe('printmaster');
+    expect(mix.monitoringBusId).toBe('master');
+    expect(mix.processingWarnings).toEqual([]);
+    expect(mix.buses.find((bus) => bus.role === 'printmaster')?.stemRole).toBe('PRINTMASTER');
+    expect(mix.buses.find((bus) => bus.id === 'master')?.sendTargets?.map((send) => send.targetBusId)).toEqual([
+      'printmaster',
+    ]);
+    expect(mix.buses.find((bus) => bus.role === 'printmaster')?.processingChain?.map((stage) => stage.kind)).toEqual([
+      'meter',
+      'limiter',
+    ]);
+    expect(mix.buses.find((bus) => bus.role === 'printmaster')?.processingChain?.map((stage) => stage.appliesDuring)).toEqual([
+      'print',
+      'print',
+    ]);
     expect(preview).toContain('mix-preview');
-    expect(loudness.integratedLufs).toBeGreaterThan(-24);
+    expect(loudness.integratedLufs).toBeGreaterThanOrEqual(-24);
+    expect(loudness.analyzedLayout).toBe('stereo');
+    const previewArtifact = runtime.listArtifacts().find((artifact) => artifact.format === 'audio-preview');
+    const previewArtifactContents = JSON.parse(previewArtifact?.contents ?? '{}') as {
+      meteringContext?: string;
+      processingPolicy?: {
+        requiresDedicatedPreviewRender?: boolean;
+        requiresDedicatedPrintRender?: boolean;
+      };
+      buses?: Array<{
+        role?: string;
+        previewProcessingChain?: Array<{ kind: string }>;
+        printProcessingChain?: Array<{ kind: string }>;
+        processingPolicy?: {
+          previewBypassedProcessingChain?: Array<{ kind: string }>;
+        };
+      }>;
+      previewBusMeasurements?: Array<{ busId: string; truePeakDbtp: number }>;
+      printReferenceBusMeasurements?: Array<{ busId: string; truePeakDbtp: number }>;
+      automationModes?: Array<{ trackId: string }>;
+    };
+    expect(previewArtifactContents.meteringContext).toBe('preview');
+    expect(previewArtifactContents.processingPolicy?.requiresDedicatedPrintRender).toBe(true);
+    expect(previewArtifactContents.processingPolicy?.requiresDedicatedPreviewRender).toBe(true);
+    expect(previewArtifactContents.automationModes?.[0]?.trackId).toBe('A1');
+    expect(previewArtifactContents.buses?.find((bus) => bus.role === 'printmaster')?.previewProcessingChain).toEqual([]);
+    expect(previewArtifactContents.buses?.find((bus) => bus.role === 'printmaster')?.printProcessingChain?.map((stage) => stage.kind)).toEqual([
+      'meter',
+      'limiter',
+    ]);
+    expect(
+      previewArtifactContents.buses
+        ?.find((bus) => bus.role === 'printmaster')
+        ?.processingPolicy
+        ?.previewBypassedProcessingChain
+        ?.map((stage) => stage.kind),
+    ).toEqual(['meter', 'limiter']);
+    const previewPrintmaster = previewArtifactContents.previewBusMeasurements?.find((bus) => bus.busId === 'printmaster');
+    const printReferencePrintmaster = previewArtifactContents.printReferenceBusMeasurements?.find((bus) => bus.busId === 'printmaster');
+    expect(previewPrintmaster?.truePeakDbtp).toBeGreaterThan(printReferencePrintmaster?.truePeakDbtp ?? Number.NEGATIVE_INFINITY);
+    expect(loudness.busMeasurements?.some((bus) => bus.busId === 'printmaster')).toBe(true);
     expect(templates).toHaveLength(3);
     expect(rendered.handle).toContain('motion');
+  });
+
+  it('compiles multichannel audio mixes with surround layout metadata', async () => {
+    const project = makeProject();
+    const surroundAsset = project.bins[0]!.assets.find((asset) => asset.id === 'asset-a');
+    if (!surroundAsset?.technicalMetadata) {
+      throw new Error('Expected test asset technical metadata');
+    }
+    surroundAsset.technicalMetadata.audioChannels = 6;
+    surroundAsset.technicalMetadata.audioChannelLayout = '5.1';
+
+    const runtime = createReferenceNLEParityRuntime({
+      projects: [project],
+      sequenceRevisions: [],
+    });
+    const snapshot = runtime.buildSnapshotForProject(project.id, 'seq-1', 'rev-audio');
+
+    const mix = await runtime.professionalAudioMix.compileMix(snapshot);
+    const preview = await runtime.professionalAudioMix.renderPreview(mix.mixId, {
+      startSeconds: 0,
+      endSeconds: 5,
+    });
+    const loudness = await runtime.professionalAudioMix.analyzeLoudness(mix.mixId, {
+      startSeconds: 0,
+      endSeconds: 5,
+    });
+    const previewArtifact = runtime.listArtifacts().find((artifact) => (
+      artifact.format === 'audio-preview' && artifact.path.includes(mix.mixId)
+    ));
+    const previewArtifactContents = JSON.parse(previewArtifact?.contents ?? '{}') as {
+      processingPolicy?: {
+        requiresDedicatedPrintRender?: boolean;
+      };
+      buses?: Array<{
+        role?: string;
+        processingPolicy?: {
+          previewBypassedProcessingChain?: Array<{ kind: string }>;
+        };
+      }>;
+    };
+
+    expect(mix.dominantLayout).toBe('5.1');
+    expect(mix.containsContainerizedAudio).toBe(true);
+    expect(mix.monitoringBusId).toBe('fold-down');
+    expect(mix.buses.some((bus) => bus.layout === '5.1')).toBe(true);
+    expect(mix.buses.some((bus) => bus.role === 'fold-down')).toBe(true);
+    expect(mix.buses.find((bus) => bus.role === 'fold-down')?.stemRole).toBe('FOLDDOWN');
+    expect(mix.processingWarnings?.[0]).toContain('Fold-down monitoring');
+    expect(preview).toContain('mix-preview');
+    expect(previewArtifactContents.processingPolicy?.requiresDedicatedPrintRender).toBe(true);
+    expect(
+      previewArtifactContents.buses
+        ?.find((bus) => bus.role === 'fold-down')
+        ?.processingPolicy
+        ?.previewBypassedProcessingChain
+        ?.map((stage) => stage.kind),
+    ).toEqual(['limiter']);
+    expect(loudness.analyzedLayout).toBe('5.1');
+    expect(loudness.analyzedChannelCount).toBe(6);
+    expect(loudness.warnings?.[0]).toContain('Containerized multichannel audio');
+    expect(loudness.busMeasurements?.some((bus) => bus.busId === 'fold-down')).toBe(true);
   });
 
   it('handles media management and multicam workflows', async () => {

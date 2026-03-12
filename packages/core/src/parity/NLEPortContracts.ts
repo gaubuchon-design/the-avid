@@ -1,3 +1,5 @@
+import type { AudioChannelLayout } from '../audio/channelLayout';
+
 export const NLE_PORT_CONTRACTS = [
   'ProfessionalMediaDecodePort',
   'VideoCompositingPort',
@@ -177,12 +179,23 @@ export interface PlaybackStreamDescriptor {
   role: 'program' | 'source-monitor' | 'multicam-angle' | 'title' | 'effects-return';
 }
 
+export type PlaybackQualityLevel = 'draft' | 'preview' | 'full';
+export type PlaybackCacheStrategy = 'source-only' | 'promote-next-frames' | 'prefer-promoted-cache';
+export type PlaybackStreamPressure = 'single' | 'multi' | 'heavy';
+
 export interface PlaybackTelemetry {
   activeStreamCount: number;
   droppedVideoFrames: number;
   audioUnderruns: number;
   maxDecodeLatencyMs: number;
   maxCompositeLatencyMs: number;
+  currentQuality: PlaybackQualityLevel;
+  cacheStrategy: PlaybackCacheStrategy;
+  streamPressure: PlaybackStreamPressure;
+  frameBudgetMs: number;
+  lastFrameRenderLatencyMs: number;
+  lastFrameCacheHitRate: number;
+  promotedFrameCount: number;
 }
 
 export interface RealtimePlaybackPort {
@@ -200,8 +213,62 @@ export interface RealtimePlaybackPort {
 export interface AudioBusDefinition {
   id: string;
   name: string;
-  layout: 'mono' | 'stereo' | '5.1' | '7.1';
+  layout: AudioChannelLayout;
+  role?: AudioBusRole;
+  stemRole?: AudioStemRole;
+  channelCount?: number;
+  sourceTrackIds?: string[];
+  sourceLayouts?: AudioChannelLayout[];
+  meteringMode?: AudioBusMeteringMode;
+  sendTargets?: AudioBusSendDefinition[];
+  processingChain?: AudioInsertDefinition[];
 }
+
+export type AudioBusRole =
+  | 'master'
+  | 'dialogue'
+  | 'music-effects'
+  | 'surround'
+  | 'printmaster'
+  | 'fold-down';
+
+export type AudioBusMeteringMode = 'sample-peak' | 'true-peak' | 'ebu-r128';
+export type AudioBusSendMode = 'pre-fader' | 'post-fader';
+export type AudioBusSendPurpose = 'submix' | 'printmaster' | 'fold-down' | 'cue';
+export type AudioAutomationMode = 'off' | 'read' | 'touch' | 'latch' | 'write';
+export type AudioInsertKind = 'eq' | 'dynamics' | 'limiter' | 'fold-down-matrix' | 'meter';
+export type AudioInsertPlacement = 'track' | 'bus' | 'output';
+export type AudioInsertApplication = 'preview' | 'print' | 'both';
+export type AudioProcessingContext = 'preview' | 'print';
+export type AudioStemRole =
+  | 'DX'
+  | 'MXFX'
+  | 'SURROUND'
+  | 'FULLMIX'
+  | 'PRINTMASTER'
+  | 'FOLDDOWN';
+
+export interface AudioBusSendDefinition {
+  id: string;
+  targetBusId: string;
+  mode: AudioBusSendMode;
+  gainDb: number;
+  purpose: AudioBusSendPurpose;
+  layout?: AudioChannelLayout;
+}
+
+export interface AudioInsertDefinition {
+  id: string;
+  name: string;
+  kind: AudioInsertKind;
+  placement: AudioInsertPlacement;
+  appliesDuring: AudioInsertApplication;
+  slot: number;
+  enabled: boolean;
+  latencyMs: number;
+}
+
+export type AudioAutomationParameter = 'gain' | 'pan' | 'send' | 'mute';
 
 export interface AudioAutomationPoint {
   timeSeconds: number;
@@ -210,14 +277,36 @@ export interface AudioAutomationPoint {
 
 export interface AudioAutomationWrite {
   trackId: string;
-  parameter: 'gain' | 'pan' | 'send' | 'mute';
+  parameter: AudioAutomationParameter;
+  mode?: AudioAutomationMode;
   points: AudioAutomationPoint[];
+}
+
+export interface AudioAutomationModeAssignment {
+  trackId: string;
+  mode: AudioAutomationMode;
+  touchedParameters: AudioAutomationParameter[];
 }
 
 export interface LoudnessMeasurement {
   integratedLufs: number;
   shortTermLufs: number;
   truePeakDbtp: number;
+  analyzedLayout?: AudioChannelLayout;
+  analyzedChannelCount?: number;
+  warnings?: string[];
+  diagnostics?: string[];
+  busMeasurements?: AudioBusLoudnessMeasurement[];
+}
+
+export interface AudioBusLoudnessMeasurement {
+  busId: string;
+  layout: AudioChannelLayout;
+  integratedLufs: number;
+  shortTermLufs: number;
+  truePeakDbtp: number;
+  meteringMode?: AudioBusMeteringMode;
+  warnings?: string[];
 }
 
 export interface AudioMixCompilation {
@@ -225,6 +314,14 @@ export interface AudioMixCompilation {
   revisionId: SequenceRevisionId;
   buses: AudioBusDefinition[];
   trackCount: number;
+  dominantLayout?: AudioChannelLayout;
+  sourceLayouts?: AudioChannelLayout[];
+  containsContainerizedAudio?: boolean;
+  printMasterBusId?: string;
+  monitoringBusId?: string;
+  routingWarnings?: string[];
+  processingWarnings?: string[];
+  automationModes?: AudioAutomationModeAssignment[];
 }
 
 export interface ProfessionalAudioMixPort {

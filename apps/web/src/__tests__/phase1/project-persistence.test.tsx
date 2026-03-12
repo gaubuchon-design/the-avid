@@ -665,6 +665,28 @@ describe('phase 1 project persistence', () => {
     });
   });
 
+  it('falls back to the local project snapshot when the repository save returns no payload', async () => {
+    repositoryMocks.saveProjectToRepository.mockResolvedValue(undefined as unknown as EditorProject);
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    useEditorStore.setState({
+      projectId: 'project-fallback-save',
+      projectName: 'Fallback Save',
+      saveStatus: 'idle',
+      hasUnsavedChanges: true,
+    });
+
+    await useEditorStore.getState().saveProject();
+
+    const state = useEditorStore.getState();
+    expect(repositoryMocks.saveProjectToRepository).toHaveBeenCalledTimes(1);
+    expect(state.projectId).toBe('project-fallback-save');
+    expect(state.projectName).toBe('Fallback Save');
+    expect(state.saveStatus).toBe('saved');
+    expect(state.hasUnsavedChanges).toBe(false);
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+  });
+
   it('restores saved version snapshots back into the editor state', () => {
     useEditorStore.setState({
       projectId: 'project-versioned',

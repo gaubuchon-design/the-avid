@@ -91,6 +91,22 @@ const ALLOWED_INVOKE_CHANNELS = new Set([
   'video-io:device-status',
   'video-io:get-transport-buffer',
 
+  // Desktop parity playback
+  'parity-playback:sync-project',
+  'parity-playback:create-transport',
+  'parity-playback:get-transport-view',
+  'parity-playback:attach-streams',
+  'parity-playback:preroll',
+  'parity-playback:start',
+  'parity-playback:stop',
+  'parity-playback:release-transport',
+  'parity-playback:play',
+  'parity-playback:sync-frame',
+  'parity-playback:get-telemetry',
+  'parity-playback:attach-output-device',
+  'parity-playback:detach-output-device',
+  'parity-playback:invalidate-caches',
+
   // Streaming
   'streaming:available',
   'streaming:start-ndi',
@@ -312,6 +328,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deviceStatus:   (deviceId: string) => safeInvoke('video-io:device-status', deviceId),
     getTransportBuffer: (deviceId: string) => safeInvoke('video-io:get-transport-buffer', deviceId),
     onFrameAvailable: (cb: (info: unknown) => void) => safeSubscribe('video-io:frame-available', cb),
+  },
+
+  parityPlayback: {
+    syncProject: (project: unknown) => safeInvoke('parity-playback:sync-project', project) as Promise<boolean>,
+    createTransport: (request: unknown) => safeInvoke('parity-playback:create-transport', request),
+    getTransportView: (transportHandle: string) => safeInvoke('parity-playback:get-transport-view', transportHandle),
+    attachStreams: (transportHandle: string, streams: unknown[]) =>
+      safeInvoke('parity-playback:attach-streams', transportHandle, streams) as Promise<boolean>,
+    preroll: (transportHandle: string, range: unknown) =>
+      safeInvoke('parity-playback:preroll', transportHandle, range) as Promise<boolean>,
+    start: (transportHandle: string, frame: number) =>
+      safeInvoke('parity-playback:start', transportHandle, frame) as Promise<boolean>,
+    stop: (transportHandle: string) =>
+      safeInvoke('parity-playback:stop', transportHandle) as Promise<boolean>,
+    releaseTransport: (transportHandle: string) =>
+      safeInvoke('parity-playback:release-transport', transportHandle) as Promise<boolean>,
+    play: (transportHandle: string, frame: number, playbackRate?: number) =>
+      safeInvoke('parity-playback:play', transportHandle, frame, playbackRate) as Promise<boolean>,
+    syncFrame: (transportHandle: string, frame: number) =>
+      safeInvoke('parity-playback:sync-frame', transportHandle, frame) as Promise<boolean>,
+    getTelemetry: (transportHandle: string) => safeInvoke('parity-playback:get-telemetry', transportHandle),
+    attachOutputDevice: (transportHandle: string, config: unknown) =>
+      safeInvoke('parity-playback:attach-output-device', transportHandle, config) as Promise<boolean>,
+    detachOutputDevice: (transportHandle: string, deviceId?: string) =>
+      safeInvoke('parity-playback:detach-output-device', transportHandle, deviceId) as Promise<boolean>,
+    invalidateCaches: (projectId: string) =>
+      safeInvoke('parity-playback:invalidate-caches', projectId) as Promise<boolean>,
   },
 
   // ─── Streaming (NDI, SRT) ───────────────────────────────────────────

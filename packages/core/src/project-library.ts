@@ -1,3 +1,6 @@
+import { DEFAULT_EDITORIAL_WORKSPACE_ID } from './editorial-experience';
+import type { AudioChannelLayout } from './audio/channelLayout';
+
 export type TrackType = 'VIDEO' | 'AUDIO' | 'EFFECT' | 'SUBTITLE' | 'GRAPHIC';
 export type PanelType = 'edit' | 'color' | 'audio' | 'effects' | 'publish' | 'review' | 'ingest' | 'script' | 'news';
 export type WorkspaceTab = 'video' | 'audio' | 'color' | 'ai';
@@ -35,7 +38,7 @@ export interface EditorMediaTechnicalMetadata {
   container?: string;
   videoCodec?: string;
   audioCodec?: string;
-  audioChannelLayout?: string;
+  audioChannelLayout?: AudioChannelLayout;
   durationSeconds?: number;
   frameRate?: number;
   width?: number;
@@ -1206,7 +1209,7 @@ function normalizeProject(project: EditorProject): EditorProject {
     subtitleTracks: [],
     titleClips: [],
     trackHeights: {},
-    activeWorkspaceId: 'source-record',
+    activeWorkspaceId: DEFAULT_EDITORIAL_WORKSPACE_ID,
     composerLayout: 'source-record' as const,
     showTrackingInfo: true,
     trackingInfoFields: ['master-tc', 'duration'],
@@ -1290,7 +1293,7 @@ function normalizeProject(project: EditorProject): EditorProject {
       subtitleTracks: cloneValue(workstationState.subtitleTracks ?? []),
       titleClips: cloneValue(workstationState.titleClips ?? []),
       trackHeights: cloneValue(workstationState.trackHeights ?? {}),
-      activeWorkspaceId: workstationState.activeWorkspaceId ?? 'source-record',
+      activeWorkspaceId: workstationState.activeWorkspaceId ?? DEFAULT_EDITORIAL_WORKSPACE_ID,
       composerLayout: workstationState.composerLayout === 'full-frame' ? 'full-frame' : 'source-record',
       showTrackingInfo: workstationState.showTrackingInfo ?? true,
       trackingInfoFields: cloneValue(workstationState.trackingInfoFields ?? ['master-tc', 'duration']),
@@ -1388,7 +1391,7 @@ export function hydrateProject(project: Partial<EditorProject>): EditorProject {
       subtitleTracks: [],
       titleClips: [],
       trackHeights: {},
-      activeWorkspaceId: 'source-record',
+      activeWorkspaceId: DEFAULT_EDITORIAL_WORKSPACE_ID,
       composerLayout: 'source-record',
       showTrackingInfo: true,
       trackingInfoFields: ['master-tc', 'duration'],
@@ -1480,7 +1483,7 @@ export function buildProject(options: CreateProjectOptions = {}): EditorProject 
       subtitleTracks: [],
       titleClips: [],
       trackHeights: {},
-      activeWorkspaceId: options.activeWorkspaceId ?? 'source-record',
+      activeWorkspaceId: options.activeWorkspaceId ?? DEFAULT_EDITORIAL_WORKSPACE_ID,
       composerLayout: options.composerLayout ?? 'source-record',
       showTrackingInfo: true,
       trackingInfoFields: ['master-tc', 'duration'],

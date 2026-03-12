@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildProjectCreationOptions } from '../../lib/projectCreation';
+import {
+  buildProjectCreationOptions,
+  buildSuggestedProjectName,
+  isDisposableProjectCandidate,
+} from '../../lib/projectCreation';
 
 describe('project creation presets', () => {
   it('maps editorial workspace defaults into real project settings', () => {
@@ -46,5 +50,25 @@ describe('project creation presets', () => {
     expect(options.frameRate).toBe(30);
     expect(options.activeWorkspaceId).toBe('audio-mixing');
     expect(options.composerLayout).toBe('source-record');
+  });
+
+  it('coerces unknown workspace ids back to the surface default', () => {
+    const options = buildProjectCreationOptions({
+      activeWorkspaceId: 'unknown-workspace' as never,
+    });
+
+    expect(options.activeWorkspaceId).toBe('source-record');
+  });
+
+  it('builds a unique suggested project name when the base name already exists', () => {
+    expect(buildSuggestedProjectName('film')).toBe('Film Cut');
+    expect(buildSuggestedProjectName('film', ['Film Cut', 'Film Cut 2'])).toBe('Film Cut 3');
+    expect(buildSuggestedProjectName('commercial', ['commercial spot'])).toBe('Commercial Spot 2');
+  });
+
+  it('identifies disposable test projects by name or id pattern', () => {
+    expect(isDisposableProjectCandidate({ id: 'project-shell', name: 'Anything' })).toBe(true);
+    expect(isDisposableProjectCandidate({ id: 'real-project-1', name: 'Persisted Project' })).toBe(true);
+    expect(isDisposableProjectCandidate({ id: 'real-project-2', name: 'Feature Cut' })).toBe(false);
   });
 });

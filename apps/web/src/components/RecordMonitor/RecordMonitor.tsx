@@ -27,6 +27,7 @@ import {
   syncMonitorAudioOutput,
 } from '../../lib/monitorPlayback';
 import { usePointerScrub } from '../../hooks/usePointerScrub';
+import { useDesktopParityMonitorPlayback } from '../../hooks/useDesktopParityMonitorPlayback';
 import { useMonitorTransportState } from '../../hooks/useMonitorTransportState';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -107,6 +108,11 @@ export function RecordMonitor() {
   const requestedFrameRevisionRef = useRef<string | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 480, h: 270 });
   const [sourceRevision, setSourceRevision] = useState(0);
+  const desktopParityPlaybackActive = useDesktopParityMonitorPlayback({
+    consumer: 'record-monitor',
+    canvasRef,
+    canvasSize,
+  });
 
   // Responsive canvas sizing
   useEffect(() => {
@@ -142,6 +148,10 @@ export function RecordMonitor() {
   // Uses the shared compositing pipeline for full compositing:
   // intrinsic transforms + effects + titles + subtitles + safe zones.
   useEffect(() => {
+    if (desktopParityPlaybackActive) {
+      return;
+    }
+
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -291,7 +301,7 @@ export function RecordMonitor() {
       }
       activeAssetIdsRef.current.clear();
     };
-  }, [canvasSize, monitorTransport.colorProcessing, monitorTransport.renderScale, monitorTransport.useCache]);
+  }, [canvasSize, desktopParityPlaybackActive, monitorTransport.colorProcessing, monitorTransport.renderScale, monitorTransport.useCache]);
 
   // Auto-inspect clip at playhead (Premiere Pro behavior — Inspector shows
   // properties for the clip currently visible in the record monitor)

@@ -1,11 +1,19 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import { PROJECT_SCHEMA_VERSION, type EditorProject, type ProjectTemplate } from '@mcua/core';
+import {
+  DEFAULT_EDITORIAL_WORKSPACE_ID,
+  PROJECT_SCHEMA_VERSION,
+  type EditorProject,
+  type ProjectTemplate,
+} from '@mcua/core';
 import { mediaProbeEngine } from '../engine/MediaProbeEngine';
 import { mediaDatabaseEngine } from '../engine/MediaDatabaseEngine';
 import { videoSourceManager } from '../engine/VideoSourceManager';
 import { playbackEngine } from '../engine/PlaybackEngine';
 import { smartToolEngine } from '../engine/SmartToolEngine';
+import { editOpsEngine } from '../engine/EditOperationsEngine';
+import { findActiveMediaClip, getSourceTime } from '../engine/compositeRecordFrame';
+import { resolveEditorialFocusTrackIds } from '../lib/editorialTrackFocus';
 import {
   trackPatchingEngine,
   type SourceTrackDescriptor,
@@ -325,6 +333,21 @@ export interface WatchFolder {
 
 type SaveStatus = 'idle' | 'saved' | 'saving' | 'error';
 let loadProjectRequestSequence = 0;
+const MIN_CLIP_DURATION = 1 / 120;
+
+interface EditorialOperationSnapshot {
+  tracks: Track[];
+  selectedClipIds: string[];
+  selectedTrackId: string | null;
+  inspectedClipId: string | null;
+  duration: number;
+  playheadTime: number;
+  inPoint: number | null;
+  outPoint: number | null;
+  sourceInPoint: number | null;
+  sourceOutPoint: number | null;
+  sourcePlayhead: number;
+}
 
 // ─── Store ─────────────────────────────────────────────────────────────────────
 
@@ -384,6 +407,7 @@ interface EditorState {
 
   // Dialog visibility
   showNewProjectDialog: boolean;
+  newProjectDialogTemplate: ProjectTemplate;
   showSequenceDialog: boolean;
   showTitleTool: boolean;
   showSubtitleEditor: boolean;
@@ -551,6 +575,10 @@ interface EditorActions {
   appendAssetToTimeline: (assetId: string) => void;
   overwriteEdit: () => void;
   insertEdit: () => void;
+  liftEdit: () => void;
+  extractEdit: () => void;
+  liftMarkedRange: () => void;
+  extractMarkedRange: () => void;
   razorAtPlayhead: () => void;
   matchFrame: () => void;
   addMarkerAtPlayhead: (label?: string) => void;
@@ -586,7 +614,8 @@ interface EditorActions {
   importMediaFiles: (files: FileList, binId?: string) => void;
 
   // Dialogs
-  toggleNewProjectDialog: () => void;
+  openNewProjectDialog: (template?: ProjectTemplate) => void;
+  closeNewProjectDialog: () => void;
   toggleSequenceDialog: () => void;
   toggleTitleTool: () => void;
   toggleSubtitleEditor: () => void;
@@ -768,6 +797,34 @@ function createId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function clipDuration(clip: Clip): number {
+  return clip.endTime - clip.startTime;
+}
+
+function cloneClipForSnapshot(clip: Clip): Clip {
+  return {
+    ...clip,
+    waveformData: clip.waveformData ? [...clip.waveformData] : undefined,
+    intrinsicVideo: { ...clip.intrinsicVideo },
+    intrinsicAudio: { ...clip.intrinsicAudio },
+    timeRemap: {
+      ...clip.timeRemap,
+      keyframes: clip.timeRemap.keyframes.map((keyframe) => ({
+        ...keyframe,
+        bezierIn: keyframe.bezierIn ? { ...keyframe.bezierIn } : undefined,
+        bezierOut: keyframe.bezierOut ? { ...keyframe.bezierOut } : undefined,
+      })),
+    },
+  };
+}
+
+function cloneTrackForSnapshot(track: Track): Track {
+  return {
+    ...track,
+    clips: track.clips.map(cloneClipForSnapshot),
+  };
+}
+
 function findAssetById(bins: Bin[], assetId: string): MediaAsset | null {
   return collectAllAssets(bins).find((asset) => asset.id === assetId) ?? null;
 }
@@ -893,7 +950,91 @@ const DEMO_SMART_BINS: SmartBin[] = [
 
 // ─── Store creation ────────────────────────────────────────────────────────────
 export const useEditorStore = create<EditorState & EditorActions>()(
-  immer((set, get) => ({
+  immer((set, get) => {
+    const captureEditorialOperationSnapshot = (): EditorialOperationSnapshot => {
+      const state = get();
+      return {
+        tracks: state.tracks.map(cloneTrackForSnapshot),
+        selectedClipIds: [...state.selectedClipIds],
+        selectedTrackId: state.selectedTrackId,
+        inspectedClipId: state.inspectedClipId,
+        duration: state.duration,
+        playheadTime: state.playheadTime,
+        inPoint: state.inPoint,
+        outPoint: state.outPoint,
+        sourceInPoint: state.sourceInPoint,
+        sourceOutPoint: state.sourceOutPoint,
+        sourcePlayhead: state.sourcePlayhead,
+      };
+    };
+
+    const restoreEditorialOperationSnapshot = (snapshot: EditorialOperationSnapshot): void => {
+      set((s) => {
+        s.tracks = snapshot.tracks.map(cloneTrackForSnapshot);
+        s.selectedClipIds = [...snapshot.selectedClipIds];
+        s.selectedTrackId = snapshot.selectedTrackId;
+        s.inspectedClipId = snapshot.inspectedClipId;
+        s.duration = snapshot.duration;
+        s.playheadTime = snapshot.playheadTime;
+        s.inPoint = snapshot.inPoint;
+        s.outPoint = snapshot.outPoint;
+        s.sourceInPoint = snapshot.sourceInPoint;
+        s.sourceOutPoint = snapshot.sourceOutPoint;
+        s.sourcePlayhead = snapshot.sourcePlayhead;
+      });
+    };
+
+    const executeUndoableEditorialEdit = (
+      description: string,
+      runner: () => { success: boolean; description: string },
+    ): void => {
+      const beforeSnapshot = captureEditorialOperationSnapshot();
+      editEngine.execute({
+        description,
+        execute() {
+          restoreEditorialOperationSnapshot(beforeSnapshot);
+          const result = runner();
+          if (!result.success) {
+            restoreEditorialOperationSnapshot(beforeSnapshot);
+            throw new Error(result.description);
+          }
+        },
+        undo() {
+          restoreEditorialOperationSnapshot(beforeSnapshot);
+        },
+      });
+    };
+
+    const executeUndoableSelectionEdit = (
+      description: string,
+      runner: (selectedClipIds: string[]) => { success: boolean; description: string },
+    ): void => {
+      const selectedClipIds = [...get().selectedClipIds];
+      if (selectedClipIds.length === 0) {
+        return;
+      }
+
+      const beforeSnapshot = captureEditorialOperationSnapshot();
+      editEngine.execute({
+        description,
+        execute() {
+          restoreEditorialOperationSnapshot(beforeSnapshot);
+          const result = runner(selectedClipIds);
+          if (!result.success) {
+            restoreEditorialOperationSnapshot(beforeSnapshot);
+            throw new Error(result.description);
+          }
+          set((s) => {
+            s.inspectedClipId = null;
+          });
+        },
+        undo() {
+          restoreEditorialOperationSnapshot(beforeSnapshot);
+        },
+      });
+    };
+
+    return ({
     applyProjectSnapshot(project: EditorProject, options?: { markDirty?: boolean; lastSavedAt?: string | null }) {
       const hydrated = hydrateEditorStateFromProject(project);
       playbackEngine.pause();
@@ -1049,6 +1190,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     showWaveforms: true,
     snapToGrid: true,
     showNewProjectDialog: false,
+    newProjectDialogTemplate: 'film',
     showSequenceDialog: false,
     showTitleTool: false,
     showSubtitleEditor: false,
@@ -1127,7 +1269,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     soloSafeMode: false,
 
     // Workspace
-    activeWorkspaceId: 'source-record',
+    activeWorkspaceId: DEFAULT_EDITORIAL_WORKSPACE_ID,
 
     // Actions
     setPlayhead: (t) => set((s) => { s.playheadTime = Math.max(0, Math.min(t, s.duration)); }),
@@ -1255,10 +1397,17 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     }),
     slipClip: (clipId, delta) => set((s) => {
       for (const t of s.tracks) {
+        if (t.locked) {
+          continue;
+        }
         const c = t.clips.find(c => c.id === clipId);
         if (c) {
-          c.trimStart = Math.max(0, c.trimStart + delta);
-          c.trimEnd = Math.max(0, c.trimEnd - delta);
+          const clampedDelta = Math.max(-c.trimStart, Math.min(delta, c.trimEnd));
+          if (Math.abs(clampedDelta) < Number.EPSILON) {
+            return;
+          }
+          c.trimStart = Math.max(0, c.trimStart + clampedDelta);
+          c.trimEnd = Math.max(0, c.trimEnd - clampedDelta);
           return;
         }
       }
@@ -1630,6 +1779,48 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       if (maxEnd > s.duration) s.duration = maxEnd + 5;
       s.playheadTime = endTime;
     }),
+    liftEdit: () => {
+      const { inPoint, outPoint } = get();
+      const hasIn = inPoint !== null;
+      const hasOut = outPoint !== null;
+      if (hasIn || hasOut) {
+        if (hasIn && hasOut && outPoint! > inPoint!) {
+          get().liftMarkedRange();
+        }
+        return;
+      }
+
+      get().liftSelection();
+    },
+    extractEdit: () => {
+      const { inPoint, outPoint } = get();
+      const hasIn = inPoint !== null;
+      const hasOut = outPoint !== null;
+      if (hasIn || hasOut) {
+        if (hasIn && hasOut && outPoint! > inPoint!) {
+          get().extractMarkedRange();
+        }
+        return;
+      }
+
+      get().extractSelection();
+    },
+    liftMarkedRange: () => {
+      const { inPoint, outPoint } = get();
+      if (inPoint === null || outPoint === null || outPoint <= inPoint) {
+        return;
+      }
+
+      executeUndoableEditorialEdit('Lift marked range', () => editOpsEngine.lift());
+    },
+    extractMarkedRange: () => {
+      const { inPoint, outPoint } = get();
+      if (inPoint === null || outPoint === null || outPoint <= inPoint) {
+        return;
+      }
+
+      executeUndoableEditorialEdit('Extract marked range', () => editOpsEngine.extract());
+    },
 
     razorAtPlayhead: () => set((s) => {
       const splitTime = s.playheadTime;
@@ -1656,20 +1847,25 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         }
       }
     }),
-    matchFrame: () => set((s) => {
-      for (const track of s.tracks) {
-        const clip = track.clips.find((item) => item.startTime <= s.playheadTime && item.endTime >= s.playheadTime);
-        if (!clip?.assetId) {
-          continue;
-        }
-
-        const asset = findAssetById(s.bins, clip.assetId);
-        if (asset) {
-          s.sourceAsset = asset;
-        }
+    matchFrame: () => {
+      const state = get();
+      const clip = findActiveMediaClip(state.tracks, state.playheadTime);
+      if (!clip?.assetId) {
         return;
       }
-    }),
+
+      const asset = findAssetById(state.bins, clip.assetId);
+      if (!asset) {
+        return;
+      }
+
+      state.setSourceAsset(asset);
+      set((s) => {
+        s.sourcePlayhead = getSourceTime(clip, state.playheadTime);
+        s.inspectedClipId = clip.id;
+      });
+      usePlayerStore.getState().setActiveMonitor('source');
+    },
     addMarkerAtPlayhead: (label) => set((s) => {
       s.markers.push({
         id: createId('marker'),
@@ -1684,43 +1880,20 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       s.inPoint = null;
       s.outPoint = null;
     }),
-    liftSelection: () => set((s) => {
-      if (s.selectedClipIds.length === 0) {
-        return;
-      }
-      s.tracks.forEach((track) => {
-        track.clips = track.clips.filter((clip) => !s.selectedClipIds.includes(clip.id));
-      });
-      s.selectedClipIds = [];
-    }),
-    extractSelection: () => set((s) => {
-      if (s.selectedClipIds.length === 0) {
-        return;
-      }
-
-      s.tracks.forEach((track) => {
-        const removed = track.clips.filter((clip) => s.selectedClipIds.includes(clip.id));
-        if (removed.length === 0) {
-          return;
-        }
-
-        const removedDuration = removed.reduce((total, clip) => total + (clip.endTime - clip.startTime), 0);
-        const firstRemovedStart = Math.min(...removed.map((clip) => clip.startTime));
-        track.clips = track.clips
-          .filter((clip) => !s.selectedClipIds.includes(clip.id))
-          .map((clip) => {
-            if (clip.startTime <= firstRemovedStart) {
-              return clip;
-            }
-            return {
-              ...clip,
-              startTime: Math.max(firstRemovedStart, clip.startTime - removedDuration),
-              endTime: Math.max(firstRemovedStart, clip.endTime - removedDuration),
-            };
-          });
-      });
-      s.selectedClipIds = [];
-    }),
+    liftSelection: () => {
+      const clipCount = get().selectedClipIds.length;
+      executeUndoableSelectionEdit(
+        clipCount === 1 ? 'Lift selected clip' : `Lift ${clipCount} selected clips`,
+        (selectedClipIds) => editOpsEngine.liftSegment(selectedClipIds),
+      );
+    },
+    extractSelection: () => {
+      const clipCount = get().selectedClipIds.length;
+      executeUndoableSelectionEdit(
+        clipCount === 1 ? 'Extract selected clip' : `Extract ${clipCount} selected clips`,
+        (selectedClipIds) => editOpsEngine.extractSegment(selectedClipIds),
+      );
+    },
 
     // Bin operations
     addBin: (name, parentId) => set((s) => {
@@ -1842,26 +2015,47 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     }),
     slideClip: (clipId, delta) => set((s) => {
       for (const t of s.tracks) {
-        const idx = t.clips.findIndex(c => c.id === clipId);
-        if (idx >= 0) {
-          const clip = t.clips[idx];
-          // Slide adjusts content position within the clip without moving the clip itself
-          // The surrounding clips' in/out points shift to accommodate
-          const prev = idx > 0 ? t.clips[idx - 1] : null;
-          const next = idx < t.clips.length - 1 ? t.clips[idx + 1] : null;
+        if (t.locked) {
+          continue;
+        }
 
-          if (delta < 0) {
-            // Sliding left: trim prev clip shorter, next clip starts earlier
-            if (prev) prev.endTime = Math.max(prev.startTime + 0.1, prev.endTime + delta);
-            if (next) next.startTime = Math.max(clip!.endTime! + delta, clip!.endTime! - (next.endTime - next.startTime) + 0.1);
-          } else {
-            // Sliding right: trim next clip shorter, prev clip ends later
-            if (next) next.startTime = Math.min(next.endTime - 0.1, next.startTime + delta);
-            if (prev) prev.endTime = Math.min(clip!.startTime! + delta, clip!.startTime! + (prev.endTime - prev.startTime) - 0.1);
+        const orderedClips = [...t.clips].sort((a, b) => a.startTime - b.startTime);
+        const idx = orderedClips.findIndex(c => c.id === clipId);
+        if (idx >= 0) {
+          const clip = orderedClips[idx];
+          const prev = idx > 0 ? orderedClips[idx - 1] : null;
+          const next = idx < orderedClips.length - 1 ? orderedClips[idx + 1] : null;
+          if (!clip || !prev || !next) {
+            return;
           }
-          // Adjust the source offset (trim points)
-          clip!.trimStart! = Math.max(0, clip!.trimStart! + delta);
-          clip!.trimEnd! = Math.max(0, clip!.trimEnd! - delta);
+
+          const maxSlideLeft = Math.max(
+            0,
+            Math.min(
+              clip.startTime,
+              clipDuration(prev) - MIN_CLIP_DURATION,
+              next.trimStart,
+            ),
+          );
+          const maxSlideRight = Math.max(
+            0,
+            Math.min(
+              prev.trimEnd,
+              clipDuration(next) - MIN_CLIP_DURATION,
+            ),
+          );
+          const clampedDelta = Math.max(-maxSlideLeft, Math.min(delta, maxSlideRight));
+          if (Math.abs(clampedDelta) < Number.EPSILON) {
+            return;
+          }
+
+          clip.startTime += clampedDelta;
+          clip.endTime += clampedDelta;
+          prev.endTime = clip.startTime;
+          prev.trimEnd = Math.max(0, prev.trimEnd - clampedDelta);
+          next.startTime = clip.endTime;
+          next.trimStart = Math.max(0, next.trimStart + clampedDelta);
+          t.clips.sort((a, b) => a.startTime - b.startTime);
           return;
         }
       }
@@ -2041,12 +2235,10 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     // ─── Navigation (Avid parity) ─────────────────────────────────────────────
     goToNextEditPoint: () => set((s) => {
       const current = s.playheadTime;
-      const activeTrackIds = s.enabledTrackIds.length > 0
-        ? s.enabledTrackIds
-        : s.tracks.map((track) => track.id);
+      const activeTrackIds = new Set(resolveEditorialFocusTrackIds(s));
       let nearest = Infinity;
       for (const track of s.tracks) {
-        if (!activeTrackIds.includes(track.id)) continue;
+        if (!activeTrackIds.has(track.id) || track.locked || track.muted) continue;
         for (const clip of track.clips) {
           if (clip.startTime > current + 0.001 && clip.startTime < nearest) {
             nearest = clip.startTime;
@@ -2062,12 +2254,10 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     }),
     goToPrevEditPoint: () => set((s) => {
       const current = s.playheadTime;
-      const activeTrackIds = s.enabledTrackIds.length > 0
-        ? s.enabledTrackIds
-        : s.tracks.map((track) => track.id);
+      const activeTrackIds = new Set(resolveEditorialFocusTrackIds(s));
       let nearest = -Infinity;
       for (const track of s.tracks) {
-        if (!activeTrackIds.includes(track.id)) continue;
+        if (!activeTrackIds.has(track.id) || track.locked || track.muted) continue;
         for (const clip of track.clips) {
           if (clip.startTime < current - 0.001 && clip.startTime > nearest) {
             nearest = clip.startTime;
@@ -2124,7 +2314,8 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       });
 
       try {
-        const savedProject = await saveProjectToRepository(buildProjectFromEditorState(snapshot));
+        const projectToSave = buildProjectFromEditorState(snapshot);
+        const savedProject = await saveProjectToRepository(projectToSave) ?? projectToSave;
         set((s) => {
           s.projectId = savedProject.id;
           s.projectName = savedProject.name;
@@ -2365,7 +2556,11 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     },
 
     // Dialogs
-    toggleNewProjectDialog: () => set((s) => { s.showNewProjectDialog = !s.showNewProjectDialog; }),
+    openNewProjectDialog: (template) => set((s) => {
+      s.showNewProjectDialog = true;
+      s.newProjectDialogTemplate = template ?? 'film';
+    }),
+    closeNewProjectDialog: () => set((s) => { s.showNewProjectDialog = false; }),
     toggleSequenceDialog: () => set((s) => { s.showSequenceDialog = !s.showSequenceDialog; }),
     toggleTitleTool: () => set((s) => { s.showTitleTool = !s.showTitleTool; }),
     toggleSubtitleEditor: () => set((s) => { s.showSubtitleEditor = !s.showSubtitleEditor; }),
@@ -2439,7 +2634,8 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       const title = s.titleClips.find((t) => t.id === titleId);
       if (title) Object.assign(title, data);
     }),
-  }))
+    });
+  })
 );
 
 // ─── PlaybackEngine → Store sync ─────────────────────────────────────────────

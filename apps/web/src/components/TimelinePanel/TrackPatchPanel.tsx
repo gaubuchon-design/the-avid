@@ -41,16 +41,24 @@ function resolveTrackSignature(tracks: Track[]): string {
     .join('|');
 }
 
-function sourceChipStyle(active: boolean, sourceType: 'VIDEO' | 'AUDIO'): React.CSSProperties {
-  const accent = sourceType === 'VIDEO' ? 'var(--info)' : '#4ade80';
+function sourceChipStyle(options: {
+  selected: boolean;
+  patched: boolean;
+  sourceType: 'VIDEO' | 'AUDIO';
+}): React.CSSProperties {
+  const accent = options.sourceType === 'VIDEO' ? 'var(--info)' : '#4ade80';
   return {
-    minWidth: 28,
-    height: 16,
-    padding: '0 6px',
+    minWidth: 30,
+    height: 18,
+    padding: '0 7px',
     borderRadius: 999,
-    border: `1px solid ${accent}`,
-    background: active ? accent : 'transparent',
-    color: active ? '#08111c' : accent,
+    border: `1px solid ${options.selected ? accent : `${accent}88`}`,
+    background: options.selected
+      ? accent
+      : options.patched
+        ? `${accent}20`
+        : 'transparent',
+    color: options.selected ? '#08111c' : accent,
     fontSize: 8,
     fontWeight: 700,
     fontFamily: 'var(--font-mono)',
@@ -59,7 +67,25 @@ function sourceChipStyle(active: boolean, sourceType: 'VIDEO' | 'AUDIO'): React.
     alignItems: 'center',
     justifyContent: 'center',
     whiteSpace: 'nowrap',
-    opacity: active ? 1 : 0.92,
+    opacity: options.selected || options.patched ? 1 : 0.9,
+  };
+}
+
+function routeButtonStyle(active: boolean, tone: 'record' | 'sync', disabled = false): React.CSSProperties {
+  const accent = tone === 'record' ? 'var(--brand)' : '#f59e0b';
+  return {
+    width: 28,
+    height: 20,
+    borderRadius: 8,
+    border: `1px solid ${active ? accent : 'rgba(138, 156, 181, 0.14)'}`,
+    background: active ? `${accent}22` : 'transparent',
+    color: active ? accent : 'var(--text-tertiary)',
+    fontSize: 8,
+    fontWeight: 700,
+    fontFamily: 'var(--font-mono)',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    opacity: disabled ? 0.45 : 1,
+    padding: 0,
   };
 }
 
@@ -67,6 +93,7 @@ export function TrackPatchPanel() {
   const tracks = useEditorStore((state) => state.tracks);
   const sourceAsset = useEditorStore((state) => state.sourceAsset);
   const [revision, setRevision] = useState(0);
+  const [activeSourceTrackId, setActiveSourceTrackId] = useState<string | null>(null);
   const [dragSourceTrackId, setDragSourceTrackId] = useState<string | null>(null);
   const [dropTargetTrackId, setDropTargetTrackId] = useState<string | null>(null);
 
@@ -81,6 +108,9 @@ export function TrackPatchPanel() {
   useEffect(() => {
     if (!sourceAsset) {
       trackPatchingEngine.setSourceContext(null, []);
+      setActiveSourceTrackId(null);
+      setDragSourceTrackId(null);
+      setDropTargetTrackId(null);
       return;
     }
 
@@ -100,25 +130,11 @@ export function TrackPatchPanel() {
         trackPatchingEngine.enableRecordTrack(track.id);
       }
     }
+
+    setActiveSourceTrackId(null);
+    setDragSourceTrackId(null);
+    setDropTargetTrackId(null);
   }, [sourceAsset?.id, trackSignature, tracks, sourceAsset]);
-
-  useEffect(() => {
-    if (!dragSourceTrackId) {
-      return;
-    }
-
-    const handleWindowDrop = () => {
-      setDragSourceTrackId(null);
-      setDropTargetTrackId(null);
-    };
-
-    window.addEventListener('dragend', handleWindowDrop);
-    window.addEventListener('mouseup', handleWindowDrop);
-    return () => {
-      window.removeEventListener('dragend', handleWindowDrop);
-      window.removeEventListener('mouseup', handleWindowDrop);
-    };
-  }, [dragSourceTrackId]);
 
   const patches = trackPatchingEngine.getPatches();
   const sourceTracks = trackPatchingEngine.getSourceTracks();
@@ -130,22 +146,44 @@ export function TrackPatchPanel() {
   }
 
   const sourceTrackById = new Map(sourceTracks.map((track) => [track.id, track]));
+  const routingSourceTrackId = dragSourceTrackId ?? activeSourceTrackId;
+  const routingSourceTrack = routingSourceTrackId ? sourceTrackById.get(routingSourceTrackId) ?? null : null;
 
-  const handleSourceToggle = useCallback((descriptor: SourceTrackDescriptor) => {
-    const existingPatch = trackPatchingEngine.getPatches().find((patch) => patch.sourceTrackId === descriptor.id);
-    if (existingPatch) {
-      trackPatchingEngine.unpatchSource(descriptor.id);
+  const clearRoutingState = useCallback(() => {
+    setActiveSourceTrackId(null);
+    setDragSourceTrackId(null);
+    setDropTargetTrackId(null);
+  }, []);
+
+  const routeSourceToTrack = useCallback((sourceTrackId: string, recordTrackId: string) => {
+    const descriptor = sourceTrackById.get(sourceTrackId);
+    const recordTrack = tracks.find((track) => track.id === recordTrackId);
+    if (!descriptor || !recordTrack || recordTrack.locked || !isCompatibleTrack(recordTrack, descriptor.type)) {
+      clearRoutingState();
       return;
     }
 
-    const recordTrack = findBestRecordTrack(descriptor, tracks, trackPatchingEngine.getPatches());
-    if (!recordTrack) {
+    trackPatchingEngine.patchSourceToRecord(sourceTrackId, recordTrackId);
+    trackPatchingEngine.enableRecordTrack(recordTrackId);
+    clearRoutingState();
+  }, [clearRoutingState, sourceTrackById, tracks]);
+
+  const handleSourceSelect = useCallback((descriptor: SourceTrackDescriptor) => {
+    setDragSourceTrackId(null);
+    setDropTargetTrackId(null);
+
+    if (activeSourceTrackId === descriptor.id) {
+      setActiveSourceTrackId(null);
       return;
     }
 
-    trackPatchingEngine.patchSourceToRecord(descriptor.id, recordTrack.id);
-    trackPatchingEngine.enableRecordTrack(recordTrack.id);
-  }, [tracks]);
+    setActiveSourceTrackId(descriptor.id);
+  }, [activeSourceTrackId]);
+
+  const handleStartDrag = useCallback((sourceTrackId: string) => {
+    setDragSourceTrackId(sourceTrackId);
+    setDropTargetTrackId(null);
+  }, []);
 
   const handleRecordToggle = useCallback((trackId: string) => {
     trackPatchingEngine.toggleRecordTrack(trackId);
@@ -155,45 +193,30 @@ export function TrackPatchPanel() {
     trackPatchingEngine.toggleSyncLock(trackId);
   }, []);
 
-  const commitDrop = useCallback((recordTrackId: string) => {
-    if (!dragSourceTrackId) {
-      return;
+  const handleAutoPatch = useCallback(() => {
+    trackPatchingEngine.autoPatch(tracks);
+    for (const track of tracks) {
+      if (!track.locked) {
+        trackPatchingEngine.enableRecordTrack(track.id);
+      }
     }
-
-    const descriptor = sourceTrackById.get(dragSourceTrackId);
-    const recordTrack = tracks.find((track) => track.id === recordTrackId);
-    if (!descriptor || !recordTrack || recordTrack.locked || !isCompatibleTrack(recordTrack, descriptor.type)) {
-      setDragSourceTrackId(null);
-      setDropTargetTrackId(null);
-      return;
-    }
-
-    trackPatchingEngine.patchSourceToRecord(descriptor.id, recordTrack.id);
-    trackPatchingEngine.enableRecordTrack(recordTrack.id);
-    setDragSourceTrackId(null);
-    setDropTargetTrackId(null);
-  }, [dragSourceTrackId, sourceTrackById, tracks]);
-
-  const handleStartDrag = useCallback((sourceTrackId: string) => {
-    setDragSourceTrackId(sourceTrackId);
-    setDropTargetTrackId(null);
-  }, []);
+    clearRoutingState();
+  }, [clearRoutingState, tracks]);
 
   const handleRowDragOver = useCallback((recordTrackId: string) => {
-    if (!dragSourceTrackId) {
+    if (!routingSourceTrack) {
       return false;
     }
 
-    const descriptor = sourceTrackById.get(dragSourceTrackId);
     const recordTrack = tracks.find((track) => track.id === recordTrackId);
-    if (!descriptor || !recordTrack || recordTrack.locked || !isCompatibleTrack(recordTrack, descriptor.type)) {
+    if (!recordTrack || recordTrack.locked || !isCompatibleTrack(recordTrack, routingSourceTrack.type)) {
       setDropTargetTrackId(null);
       return false;
     }
 
     setDropTargetTrackId(recordTrackId);
     return true;
-  }, [dragSourceTrackId, sourceTrackById, tracks]);
+  }, [routingSourceTrack, tracks]);
 
   void revision;
 
@@ -202,7 +225,7 @@ export function TrackPatchPanel() {
       <div
         className="track-patch-panel"
         style={{
-          width: 96,
+          width: 132,
           display: 'flex',
           flexDirection: 'column',
           borderRight: '1px solid var(--border-subtle)',
@@ -235,7 +258,7 @@ export function TrackPatchPanel() {
     <div
       className="track-patch-panel"
       style={{
-        width: 96,
+        width: 132,
         display: 'flex',
         flexDirection: 'column',
         borderRight: '1px solid var(--border-subtle)',
@@ -266,41 +289,63 @@ export function TrackPatchPanel() {
             flexShrink: 0,
           }}
         >
-          Src
+          Patch
         </span>
+
         {sourceTracks.map((descriptor) => {
-          const isPatched = patchBySource.has(descriptor.id);
+          const patch = patchBySource.get(descriptor.id);
+          const selected = activeSourceTrackId === descriptor.id || dragSourceTrackId === descriptor.id;
+
           return (
             <button
               key={descriptor.id}
               type="button"
               draggable
-              onClick={() => handleSourceToggle(descriptor)}
+              onClick={() => handleSourceSelect(descriptor)}
               onMouseDown={() => handleStartDrag(descriptor.id)}
               onDragStart={() => handleStartDrag(descriptor.id)}
               onDragEnd={() => {
                 setDragSourceTrackId(null);
                 setDropTargetTrackId(null);
               }}
-              aria-label={`Patch source ${trackLabel(descriptor.type, descriptor.index)}`}
-              title={isPatched
-                ? `Unpatch ${trackLabel(descriptor.type, descriptor.index)}`
-                : `Patch ${trackLabel(descriptor.type, descriptor.index)} to the next compatible record track`}
-              style={sourceChipStyle(isPatched || dragSourceTrackId === descriptor.id, descriptor.type)}
+              aria-label={selected
+                ? `Source ${trackLabel(descriptor.type, descriptor.index)} is selected for routing`
+                : `Select source ${trackLabel(descriptor.type, descriptor.index)} for patching`}
+              title={patch
+                ? `${trackLabel(descriptor.type, descriptor.index)} is patched to ${tracks.find((track) => track.id === patch.recordTrackId)?.name ?? patch.recordTrackId}. Select to reroute or drag to move.`
+                : `Select ${trackLabel(descriptor.type, descriptor.index)}, then click a record slot.`}
+              style={sourceChipStyle({
+                selected,
+                patched: Boolean(patch),
+                sourceType: descriptor.type,
+              })}
             >
               {trackLabel(descriptor.type, descriptor.index)}
             </button>
           );
         })}
+
+        <button
+          type="button"
+          onClick={handleAutoPatch}
+          aria-label="Restore default track patching"
+          title="Restore default track patching"
+          style={{
+            ...routeButtonStyle(false, 'record'),
+            width: 32,
+            flexShrink: 0,
+          }}
+        >
+          Auto
+        </button>
       </div>
 
       {tracks.map((track) => {
         const patch = patchByRecord.get(track.id);
         const isEnabled = trackPatchingEngine.isRecordTrackEnabled(track.id);
         const isSyncLocked = trackPatchingEngine.isSyncLocked(track.id);
-        const descriptor = dragSourceTrackId ? sourceTrackById.get(dragSourceTrackId) ?? null : null;
-        const canDrop = Boolean(descriptor && !track.locked && isCompatibleTrack(track, descriptor.type));
-        const isDropTarget = dropTargetTrackId === track.id && canDrop;
+        const canRouteHere = Boolean(routingSourceTrack && !track.locked && isCompatibleTrack(track, routingSourceTrack.type));
+        const isDropTarget = dropTargetTrackId === track.id && canRouteHere;
         const patchLabel = patch ? trackLabel(patch.sourceTrackType, patch.sourceTrackIndex) : '--';
 
         return (
@@ -309,7 +354,7 @@ export function TrackPatchPanel() {
             style={{
               height: 'var(--track-h)',
               display: 'grid',
-              gridTemplateColumns: '1fr 22px',
+              gridTemplateColumns: '1fr 28px 28px',
               gap: 4,
               alignItems: 'center',
               padding: '0 4px',
@@ -321,10 +366,15 @@ export function TrackPatchPanel() {
               role="button"
               tabIndex={0}
               aria-label={`Patch target ${track.name}`}
+              onClick={() => {
+                if (routingSourceTrackId) {
+                  routeSourceToTrack(routingSourceTrackId, track.id);
+                }
+              }}
               onKeyDown={(event) => {
-                if ((event.key === 'Enter' || event.key === ' ') && dragSourceTrackId) {
+                if ((event.key === 'Enter' || event.key === ' ') && routingSourceTrackId) {
                   event.preventDefault();
-                  commitDrop(track.id);
+                  routeSourceToTrack(routingSourceTrackId, track.id);
                 }
               }}
               onDragOver={(event) => {
@@ -339,52 +389,69 @@ export function TrackPatchPanel() {
               }}
               onDrop={(event) => {
                 event.preventDefault();
-                commitDrop(track.id);
-              }}
-              onMouseEnter={() => {
                 if (dragSourceTrackId) {
-                  handleRowDragOver(track.id);
+                  routeSourceToTrack(dragSourceTrackId, track.id);
                 }
               }}
-              onMouseOver={() => {
-                if (dragSourceTrackId) {
+              onMouseEnter={() => {
+                if (routingSourceTrackId) {
                   handleRowDragOver(track.id);
                 }
               }}
               onMouseUp={() => {
                 if (dragSourceTrackId) {
-                  commitDrop(track.id);
+                  routeSourceToTrack(dragSourceTrackId, track.id);
                 }
               }}
               style={{
-                height: 18,
-                borderRadius: 10,
-                border: `1px dashed ${isDropTarget ? 'var(--brand)' : 'rgba(138, 156, 181, 0.2)'}`,
+                height: 22,
+                borderRadius: 11,
+                border: `1px dashed ${isDropTarget ? 'var(--brand)' : 'rgba(138, 156, 181, 0.18)'}`,
                 background: isDropTarget
                   ? 'rgba(91, 106, 245, 0.18)'
                   : patch
                     ? 'rgba(255, 255, 255, 0.04)'
-                    : 'transparent',
+                    : canRouteHere
+                      ? 'rgba(255, 255, 255, 0.02)'
+                      : 'transparent',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 padding: 0,
               }}
+              title={routingSourceTrack
+                ? `Route ${trackLabel(routingSourceTrack.type, routingSourceTrack.index)} to ${track.name}`
+                : patch
+                  ? `${patchLabel} is patched to ${track.name}`
+                  : `Select a source above, then click to route it to ${track.name}`}
             >
               {patch ? (
                 <button
                   type="button"
                   draggable
-                  onClick={() => trackPatchingEngine.unpatchSource(patch.sourceTrackId)}
-                  onMouseDown={() => handleStartDrag(patch.sourceTrackId)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    trackPatchingEngine.unpatchSource(patch.sourceTrackId);
+                    if (activeSourceTrackId === patch.sourceTrackId) {
+                      setActiveSourceTrackId(null);
+                    }
+                  }}
+                  onMouseDown={(event) => {
+                    event.stopPropagation();
+                    handleStartDrag(patch.sourceTrackId);
+                  }}
                   onDragStart={() => handleStartDrag(patch.sourceTrackId)}
                   onDragEnd={() => {
                     setDragSourceTrackId(null);
                     setDropTargetTrackId(null);
                   }}
                   aria-label={`Unpatch ${patchLabel} from ${track.name}`}
-                  title={`Drag ${patchLabel} to another record track or click to unpatch`}
-                  style={sourceChipStyle(dragSourceTrackId === patch.sourceTrackId, patch.sourceTrackType)}
+                  title={`Drag ${patchLabel} to another record track or click to clear it from ${track.name}`}
+                  style={sourceChipStyle({
+                    selected: dragSourceTrackId === patch.sourceTrackId || activeSourceTrackId === patch.sourceTrackId,
+                    patched: true,
+                    sourceType: patch.sourceTrackType,
+                  })}
                 >
                   {patchLabel}
                 </button>
@@ -394,12 +461,12 @@ export function TrackPatchPanel() {
                     fontSize: 8,
                     fontWeight: 700,
                     fontFamily: 'var(--font-mono)',
-                    color: isDropTarget ? 'var(--brand-bright)' : 'var(--text-tertiary)',
+                    color: canRouteHere ? 'var(--brand-bright)' : 'var(--text-tertiary)',
                     letterSpacing: '0.08em',
                     textTransform: 'uppercase',
                   }}
                 >
-                  {isDropTarget ? 'Drop' : '--'}
+                  {canRouteHere ? 'Route' : '--'}
                 </span>
               )}
             </div>
@@ -407,43 +474,23 @@ export function TrackPatchPanel() {
             <button
               type="button"
               onClick={() => handleRecordToggle(track.id)}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                handleSyncLockToggle(track.id);
-              }}
               aria-label={`${isEnabled ? 'Disable' : 'Enable'} ${track.name}`}
-              title={`${isEnabled ? 'Disable' : 'Enable'} ${track.name} (right click: sync lock)`}
-              style={{
-                width: 22,
-                height: 18,
-                border: '1px solid',
-                borderColor: isEnabled ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.1)',
-                borderRadius: 6,
-                background: isEnabled ? 'rgba(255,255,255,0.08)' : 'transparent',
-                color: isEnabled ? 'var(--text-primary)' : 'var(--text-tertiary)',
-                fontSize: 8,
-                fontWeight: 700,
-                fontFamily: 'var(--font-mono)',
-                cursor: track.locked ? 'not-allowed' : 'pointer',
-                position: 'relative',
-                padding: 0,
-              }}
+              title={`${isEnabled ? 'Disable' : 'Enable'} ${track.name} for edits`}
+              style={routeButtonStyle(isEnabled, 'record', track.locked)}
+              disabled={track.locked}
             >
-              {isSyncLocked && (
-                <span
-                  aria-hidden="true"
-                  style={{
-                    position: 'absolute',
-                    top: -1,
-                    right: -1,
-                    width: 5,
-                    height: 5,
-                    borderRadius: '50%',
-                    background: '#f59e0b',
-                  }}
-                />
-              )}
-              {track.name.slice(0, 2)}
+              REC
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleSyncLockToggle(track.id)}
+              aria-label={`Toggle sync lock for ${track.name}`}
+              title={`${isSyncLocked ? 'Disable' : 'Enable'} sync lock for ${track.name}`}
+              style={routeButtonStyle(isSyncLocked, 'sync', track.locked)}
+              disabled={track.locked}
+            >
+              SY
             </button>
           </div>
         );

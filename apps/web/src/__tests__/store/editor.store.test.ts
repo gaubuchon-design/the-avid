@@ -6,9 +6,12 @@ import {
   DEFAULT_TIME_REMAP,
   makeClip,
 } from '../../store/editor.store';
+import { editEngine } from '../../engine/EditEngine';
+import { usePlayerStore } from '../../store/player.store';
 
 // Capture the initial state once at module load (before any test mutates it).
 const initialState = useEditorStore.getState();
+const initialPlayerState = usePlayerStore.getState();
 
 function seedEditorialFixture() {
   const bins = [
@@ -141,6 +144,8 @@ describe('useEditorStore', () => {
     // Zustand v4's create() exposes getInitialState() but since this store
     // uses immer middleware we reset via setState with a captured snapshot.
     useEditorStore.setState(initialState, true);
+    usePlayerStore.setState(initialPlayerState, true);
+    editEngine.clear();
     seedEditorialFixture();
   });
 
@@ -153,6 +158,23 @@ describe('useEditorStore', () => {
     expect(state.isPlaying).toBe(false);
     expect(state.zoom).toBe(60);
     expect(state.duration).toBe(40);
+  });
+
+  it('opens the new project dialog with the requested template', () => {
+    useEditorStore.getState().openNewProjectDialog('commercial');
+
+    const state = useEditorStore.getState();
+    expect(state.showNewProjectDialog).toBe(true);
+    expect(state.newProjectDialogTemplate).toBe('commercial');
+  });
+
+  it('defaults the new project dialog to the film template and closes cleanly', () => {
+    useEditorStore.getState().openNewProjectDialog();
+    expect(useEditorStore.getState().newProjectDialogTemplate).toBe('film');
+    expect(useEditorStore.getState().showNewProjectDialog).toBe(true);
+
+    useEditorStore.getState().closeNewProjectDialog();
+    expect(useEditorStore.getState().showNewProjectDialog).toBe(false);
   });
 
   // ── Playhead ──────────────────────────────────────────────────────────
@@ -450,13 +472,779 @@ describe('useEditorStore', () => {
 
   // ── Slip Clip ─────────────────────────────────────────────────────────
 
-  it('should slip clip media offset', () => {
-    const clip = useEditorStore.getState().tracks[0]!.clips[0];
-    expect(clip!.trimStart!).toBe(0);
+  it('should slip clip media offset within available source handles', () => {
+    const [videoTrack, ...remainingTracks] = useEditorStore.getState().tracks;
+    const clip = videoTrack!.clips[0]!;
+    const sourceSpan = (clip.endTime - clip.startTime) + 4;
 
-    useEditorStore.getState().slipClip(clip!.id!, 2);
-    const updated = useEditorStore.getState().tracks[0]!.clips.find(c => c.id === clip!.id!);
-    expect(updated?.trimStart).toBe(2);
+    useEditorStore.setState({
+      tracks: [
+        {
+          ...videoTrack!,
+          clips: [
+            {
+              ...clip,
+              trimStart: 1,
+              trimEnd: 3,
+            },
+            ...videoTrack!.clips.slice(1),
+          ],
+        },
+        ...remainingTracks,
+      ],
+    });
+
+    useEditorStore.getState().slipClip(clip.id, 10);
+
+    const updated = useEditorStore.getState().tracks[0]!.clips.find((candidate) => candidate.id === clip.id);
+    expect(updated?.startTime).toBe(0);
+    expect(updated?.endTime).toBe(10);
+    expect(updated?.trimStart).toBe(4);
+    expect(updated?.trimEnd).toBe(0);
+    expect((updated!.endTime - updated!.startTime) + updated!.trimStart + updated!.trimEnd).toBe(sourceSpan);
+  });
+
+  it('slides a clip by adjusting neighbor boundaries instead of retiming its source', () => {
+    useEditorStore.setState({
+      tracks: [
+        {
+          id: 'v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [
+            makeClip({
+              id: 'left',
+              trackId: 'v1',
+              name: 'Left',
+              startTime: 0,
+              endTime: 5,
+              trimStart: 0,
+              trimEnd: 1,
+              type: 'video',
+            }),
+            makeClip({
+              id: 'middle',
+              trackId: 'v1',
+              name: 'Middle',
+              startTime: 5,
+              endTime: 10,
+              trimStart: 2,
+              trimEnd: 3,
+              type: 'video',
+            }),
+            makeClip({
+              id: 'right',
+              trackId: 'v1',
+              name: 'Right',
+              startTime: 10,
+              endTime: 15,
+              trimStart: 2,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+      ],
+    });
+
+    useEditorStore.getState().slideClip('middle', 3);
+
+    const [left, middle, right] = useEditorStore.getState().tracks[0]!.clips;
+    expect(left!.startTime).toBe(0);
+    expect(left!.endTime).toBe(6);
+    expect(left!.trimEnd).toBe(0);
+    expect(middle!.startTime).toBe(6);
+    expect(middle!.endTime).toBe(11);
+    expect(middle!.trimStart).toBe(2);
+    expect(middle!.trimEnd).toBe(3);
+    expect(right!.startTime).toBe(11);
+    expect(right!.endTime).toBe(15);
+    expect(right!.trimStart).toBe(3);
+  });
+
+  it('match frame loads the topmost media clip into the source monitor', () => {
+    const baseAsset = {
+      id: 'asset-video-1',
+      name: 'Interview',
+      type: 'VIDEO' as const,
+      status: 'READY' as const,
+      tags: [],
+      isFavorite: false,
+    };
+    const overlayAsset = {
+      id: 'asset-video-2',
+      name: 'B-roll',
+      type: 'VIDEO' as const,
+      status: 'READY' as const,
+      tags: [],
+      isFavorite: false,
+    };
+
+    usePlayerStore.setState({ activeMonitor: 'record' });
+    useEditorStore.setState({
+      bins: [
+        {
+          id: 'b-master',
+          name: 'Master',
+          color: '#5b6af5',
+          children: [],
+          assets: [baseAsset, overlayAsset],
+          isOpen: true,
+        },
+      ],
+      tracks: [
+        {
+          id: 'v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [
+            makeClip({
+              id: 'clip-v1',
+              assetId: baseAsset.id,
+              trackId: 'v1',
+              name: 'Timeline Clip',
+              startTime: 10,
+              endTime: 14,
+              trimStart: 3,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+        {
+          id: 'v2',
+          name: 'V2',
+          type: 'VIDEO',
+          sortOrder: 1,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#818cf8',
+          clips: [
+            makeClip({
+              id: 'clip-v2',
+              assetId: overlayAsset.id,
+              trackId: 'v2',
+              name: 'Overlay Clip',
+              startTime: 10,
+              endTime: 14,
+              trimStart: 7,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+        {
+          id: 'g1',
+          name: 'G1',
+          type: 'GRAPHIC',
+          sortOrder: 2,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#f59e0b',
+          clips: [
+            makeClip({
+              id: 'clip-title',
+              assetId: 'title-1',
+              trackId: 'g1',
+              name: 'Title Overlay',
+              startTime: 10,
+              endTime: 14,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+      ],
+      playheadTime: 11.5,
+      sourceAsset: null,
+      sourcePlayhead: 0,
+      inspectedClipId: null,
+    });
+
+    useEditorStore.getState().matchFrame();
+
+    const state = useEditorStore.getState();
+    expect(state.sourceAsset?.id).toBe(overlayAsset.id);
+    expect(state.sourcePlayhead).toBe(8.5);
+    expect(state.inspectedClipId).toBe('clip-v2');
+    expect(usePlayerStore.getState().activeMonitor).toBe('source');
+  });
+
+  it('lifts selected clips without rippling and restores them on undo', () => {
+    useEditorStore.setState({
+      tracks: [
+        {
+          id: 'v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [
+            makeClip({
+              id: 'left',
+              trackId: 'v1',
+              name: 'Left',
+              startTime: 0,
+              endTime: 5,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+            makeClip({
+              id: 'middle',
+              trackId: 'v1',
+              name: 'Middle',
+              startTime: 5,
+              endTime: 10,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+            makeClip({
+              id: 'right',
+              trackId: 'v1',
+              name: 'Right',
+              startTime: 12,
+              endTime: 17,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+      ],
+      selectedClipIds: ['middle'],
+      inspectedClipId: 'middle',
+      duration: 17,
+    });
+
+    useEditorStore.getState().liftSelection();
+
+    let clips = useEditorStore.getState().tracks[0]!.clips;
+    expect(clips.map((clip) => clip.id)).toEqual(['left', 'right']);
+    expect(clips[1]!.startTime).toBe(12);
+    expect(useEditorStore.getState().selectedClipIds).toEqual([]);
+    expect(useEditorStore.getState().inspectedClipId).toBeNull();
+    expect(editEngine.undoCount).toBe(1);
+
+    expect(editEngine.undo()).toBe(true);
+
+    clips = useEditorStore.getState().tracks[0]!.clips;
+    expect(clips.map((clip) => clip.id)).toEqual(['left', 'middle', 'right']);
+    expect(clips[1]!.startTime).toBe(5);
+    expect(useEditorStore.getState().selectedClipIds).toEqual(['middle']);
+    expect(useEditorStore.getState().inspectedClipId).toBe('middle');
+  });
+
+  it('extracts selected clips with ripple and restores them on undo', () => {
+    useEditorStore.setState({
+      tracks: [
+        {
+          id: 'v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [
+            makeClip({
+              id: 'left',
+              trackId: 'v1',
+              name: 'Left',
+              startTime: 0,
+              endTime: 5,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+            makeClip({
+              id: 'middle',
+              trackId: 'v1',
+              name: 'Middle',
+              startTime: 5,
+              endTime: 10,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+            makeClip({
+              id: 'right',
+              trackId: 'v1',
+              name: 'Right',
+              startTime: 10,
+              endTime: 15,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+      ],
+      selectedClipIds: ['middle'],
+      inspectedClipId: 'middle',
+      duration: 15,
+    });
+
+    useEditorStore.getState().extractSelection();
+
+    let clips = useEditorStore.getState().tracks[0]!.clips;
+    expect(clips.map((clip) => [clip.id, clip.startTime, clip.endTime])).toEqual([
+      ['left', 0, 5],
+      ['right', 5, 10],
+    ]);
+    expect(useEditorStore.getState().duration).toBe(12);
+    expect(useEditorStore.getState().selectedClipIds).toEqual([]);
+    expect(useEditorStore.getState().inspectedClipId).toBeNull();
+    expect(editEngine.undoCount).toBe(1);
+
+    expect(editEngine.undo()).toBe(true);
+
+    clips = useEditorStore.getState().tracks[0]!.clips;
+    expect(clips.map((clip) => [clip.id, clip.startTime, clip.endTime])).toEqual([
+      ['left', 0, 5],
+      ['middle', 5, 10],
+      ['right', 10, 15],
+    ]);
+    expect(useEditorStore.getState().duration).toBe(15);
+    expect(useEditorStore.getState().selectedClipIds).toEqual(['middle']);
+    expect(useEditorStore.getState().inspectedClipId).toBe('middle');
+  });
+
+  it('lifts a marked range without rippling and restores it on undo', () => {
+    useEditorStore.setState({
+      tracks: [
+        {
+          id: 'v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [
+            makeClip({
+              id: 'clip-spanning',
+              trackId: 'v1',
+              name: 'Spanning',
+              startTime: 0,
+              endTime: 12,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+      ],
+      playheadTime: 6,
+      inPoint: 4,
+      outPoint: 8,
+      duration: 14,
+    });
+
+    useEditorStore.getState().liftMarkedRange();
+
+    let clips = useEditorStore.getState().tracks[0]!.clips;
+    expect(clips).toHaveLength(2);
+    expect(clips.map((clip) => [clip.startTime, clip.endTime])).toEqual([
+      [0, 4],
+      [8, 12],
+    ]);
+    expect(useEditorStore.getState().playheadTime).toBe(4);
+    expect(useEditorStore.getState().inPoint).toBeNull();
+    expect(useEditorStore.getState().outPoint).toBeNull();
+    expect(editEngine.undoCount).toBe(1);
+
+    expect(editEngine.undo()).toBe(true);
+
+    clips = useEditorStore.getState().tracks[0]!.clips;
+    expect(clips).toHaveLength(1);
+    expect(clips[0]!.startTime).toBe(0);
+    expect(clips[0]!.endTime).toBe(12);
+    expect(useEditorStore.getState().playheadTime).toBe(6);
+    expect(useEditorStore.getState().inPoint).toBe(4);
+    expect(useEditorStore.getState().outPoint).toBe(8);
+  });
+
+  it('extracts a marked range with ripple and restores it on undo', () => {
+    useEditorStore.setState({
+      tracks: [
+        {
+          id: 'v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [
+            makeClip({
+              id: 'clip-left',
+              trackId: 'v1',
+              name: 'Left',
+              startTime: 0,
+              endTime: 4,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+            makeClip({
+              id: 'clip-right',
+              trackId: 'v1',
+              name: 'Right',
+              startTime: 8,
+              endTime: 12,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+      ],
+      playheadTime: 7,
+      inPoint: 4,
+      outPoint: 8,
+      duration: 14,
+    });
+
+    useEditorStore.getState().extractMarkedRange();
+
+    let clips = useEditorStore.getState().tracks[0]!.clips;
+    expect(clips.map((clip) => [clip.id, clip.startTime, clip.endTime])).toEqual([
+      ['clip-left', 0, 4],
+      ['clip-right', 4, 8],
+    ]);
+    expect(useEditorStore.getState().playheadTime).toBe(4);
+    expect(useEditorStore.getState().duration).toBe(10);
+    expect(useEditorStore.getState().inPoint).toBeNull();
+    expect(useEditorStore.getState().outPoint).toBeNull();
+    expect(editEngine.undoCount).toBe(1);
+
+    expect(editEngine.undo()).toBe(true);
+
+    clips = useEditorStore.getState().tracks[0]!.clips;
+    expect(clips.map((clip) => [clip.id, clip.startTime, clip.endTime])).toEqual([
+      ['clip-left', 0, 4],
+      ['clip-right', 8, 12],
+    ]);
+    expect(useEditorStore.getState().playheadTime).toBe(7);
+    expect(useEditorStore.getState().duration).toBe(14);
+    expect(useEditorStore.getState().inPoint).toBe(4);
+    expect(useEditorStore.getState().outPoint).toBe(8);
+  });
+
+  it('does not fall back to selection lift when only one record mark is set', () => {
+    useEditorStore.setState({
+      tracks: [
+        {
+          id: 'v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [
+            makeClip({
+              id: 'clip-a',
+              trackId: 'v1',
+              name: 'A',
+              startTime: 0,
+              endTime: 5,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+            makeClip({
+              id: 'clip-b',
+              trackId: 'v1',
+              name: 'B',
+              startTime: 5,
+              endTime: 10,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+      ],
+      selectedClipIds: ['clip-b'],
+      inPoint: 5,
+      outPoint: null,
+      duration: 12,
+    });
+
+    useEditorStore.getState().liftEdit();
+
+    const state = useEditorStore.getState();
+    expect(state.tracks[0]!.clips.map((clip) => clip.id)).toEqual(['clip-a', 'clip-b']);
+    expect(state.selectedClipIds).toEqual(['clip-b']);
+    expect(state.inPoint).toBe(5);
+    expect(state.outPoint).toBeNull();
+    expect(editEngine.undoCount).toBe(0);
+  });
+
+  it('does not fall back to selection extract when only one record mark is set', () => {
+    useEditorStore.setState({
+      tracks: [
+        {
+          id: 'v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [
+            makeClip({
+              id: 'clip-a',
+              trackId: 'v1',
+              name: 'A',
+              startTime: 0,
+              endTime: 5,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+            makeClip({
+              id: 'clip-b',
+              trackId: 'v1',
+              name: 'B',
+              startTime: 5,
+              endTime: 10,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+      ],
+      selectedClipIds: ['clip-b'],
+      inPoint: null,
+      outPoint: 10,
+      duration: 12,
+    });
+
+    useEditorStore.getState().extractEdit();
+
+    const state = useEditorStore.getState();
+    expect(state.tracks[0]!.clips.map((clip) => clip.id)).toEqual(['clip-a', 'clip-b']);
+    expect(state.selectedClipIds).toEqual(['clip-b']);
+    expect(state.inPoint).toBeNull();
+    expect(state.outPoint).toBe(10);
+    expect(editEngine.undoCount).toBe(0);
+  });
+
+  it('navigates to the next edit point using only enabled unlocked tracks', () => {
+    useEditorStore.setState({
+      tracks: [
+        {
+          id: 'locked-track',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: true,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [
+            makeClip({
+              id: 'locked-clip',
+              trackId: 'locked-track',
+              name: 'Locked',
+              startTime: 1,
+              endTime: 2,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+        {
+          id: 'active-track',
+          name: 'V2',
+          type: 'VIDEO',
+          sortOrder: 1,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#818cf8',
+          clips: [
+            makeClip({
+              id: 'active-clip',
+              trackId: 'active-track',
+              name: 'Active',
+              startTime: 3,
+              endTime: 6,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+      ],
+      enabledTrackIds: ['locked-track', 'active-track'],
+      playheadTime: 0,
+    });
+
+    useEditorStore.getState().goToNextEditPoint();
+    expect(useEditorStore.getState().playheadTime).toBe(3);
+
+    useEditorStore.setState({ playheadTime: 6.5 });
+    useEditorStore.getState().goToPrevEditPoint();
+    expect(useEditorStore.getState().playheadTime).toBe(6);
+  });
+
+  it('prefers the selected track for edit-point navigation over other enabled tracks', () => {
+    useEditorStore.setState({
+      tracks: [
+        {
+          id: 'v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [
+            makeClip({
+              id: 'v1-clip',
+              trackId: 'v1',
+              name: 'V1 Clip',
+              startTime: 2,
+              endTime: 6,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+        {
+          id: 'v2',
+          name: 'V2',
+          type: 'VIDEO',
+          sortOrder: 1,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#818cf8',
+          clips: [
+            makeClip({
+              id: 'v2-clip',
+              trackId: 'v2',
+              name: 'V2 Clip',
+              startTime: 5,
+              endTime: 9,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+      ],
+      enabledTrackIds: ['v1', 'v2'],
+      selectedTrackId: 'v2',
+      playheadTime: 0,
+    });
+
+    useEditorStore.getState().goToNextEditPoint();
+    expect(useEditorStore.getState().playheadTime).toBe(5);
+  });
+
+  it('falls back to the monitored video track for edit-point navigation when no targets are enabled', () => {
+    useEditorStore.setState({
+      tracks: [
+        {
+          id: 'v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [
+            makeClip({
+              id: 'v1-clip',
+              trackId: 'v1',
+              name: 'V1 Clip',
+              startTime: 2,
+              endTime: 6,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+        {
+          id: 'v2',
+          name: 'V2',
+          type: 'VIDEO',
+          sortOrder: 1,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#818cf8',
+          clips: [
+            makeClip({
+              id: 'v2-clip',
+              trackId: 'v2',
+              name: 'V2 Clip',
+              startTime: 5,
+              endTime: 9,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+      ],
+      enabledTrackIds: [],
+      selectedTrackId: null,
+      videoMonitorTrackId: 'v2',
+      playheadTime: 0,
+    });
+
+    useEditorStore.getState().goToNextEditPoint();
+    expect(useEditorStore.getState().playheadTime).toBe(5);
   });
 
   // ── Delete Selected Clips ───────────────────────────────────────────────

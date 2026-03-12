@@ -1,8 +1,11 @@
 import type { ProjectTemplate } from '@mcua/core';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useEditorStore } from '../../store/editor.store';
-import { createProjectInRepository } from '../../lib/projectRepository';
+import {
+  createProjectInRepository,
+  listProjectSummariesFromRepository,
+} from '../../lib/projectRepository';
 import {
   FRAME_RATE_OPTIONS,
   RESOLUTION_PRESETS,
@@ -10,25 +13,18 @@ import {
 } from '../../lib/timecode';
 import {
   buildProjectCreationOptions,
+  buildSuggestedProjectName,
   EDITORIAL_TEMPLATE_OPTIONS,
   getProjectCreationTemplateConfig,
+  getProjectCreationTemplateVisual,
 } from '../../lib/projectCreation';
+import { ProjectGlyph } from '../Projects/ProjectGlyph';
 
 interface SequenceState {
   fps: number;
   resolutionIndex: number;
   dropFrame: boolean;
 }
-
-const TEMPLATE_COPY: Record<ProjectTemplate, { badge: string; accent: string }> = {
-  film: { badge: 'Offline edit', accent: '#5b6af5' },
-  documentary: { badge: 'Story cut', accent: '#f59e0b' },
-  commercial: { badge: 'Client review', accent: '#22c55e' },
-  podcast: { badge: 'Audio-first', accent: '#06b6d4' },
-  sports: { badge: 'Legacy', accent: '#fb7185' },
-  social: { badge: 'Legacy', accent: '#a855f7' },
-  news: { badge: 'Legacy', accent: '#94a3b8' },
-};
 
 function getResolutionIndex(template: ProjectTemplate): number {
   const templateConfig = getProjectCreationTemplateConfig(template);
@@ -65,40 +61,47 @@ const S = {
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
-    background: 'rgba(6, 10, 18, 0.82)',
-    backdropFilter: 'blur(10px)',
-    WebkitBackdropFilter: 'blur(10px)',
+    background: 'rgba(4, 8, 14, 0.78)',
+    backdropFilter: 'blur(16px)',
+    WebkitBackdropFilter: 'blur(16px)',
   },
   dialog: {
-    width: 'min(980px, calc(100vw - 48px))',
-    maxHeight: 'calc(100vh - 48px)',
-    display: 'grid',
-    gridTemplateColumns: 'minmax(280px, 0.95fr) minmax(360px, 1.05fr)',
-    background: 'linear-gradient(180deg, rgba(18, 25, 40, 0.98), rgba(10, 14, 22, 0.98))',
-    border: '1px solid rgba(138, 156, 181, 0.2)',
+    width: 'min(720px, calc(100vw - 40px))',
+    maxHeight: 'calc(100vh - 40px)',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    background: 'linear-gradient(180deg, rgba(12, 17, 25, 0.98), rgba(8, 12, 19, 0.98))',
+    border: '1px solid rgba(138, 156, 181, 0.16)',
     borderRadius: 24,
     boxShadow: '0 28px 80px rgba(0, 0, 0, 0.52)',
     overflow: 'hidden',
+    outline: 'none',
   },
-  rail: {
+  header: {
     display: 'flex',
-    flexDirection: 'column' as const,
-    gap: 18,
-    padding: '28px 24px 24px',
-    background: 'linear-gradient(180deg, rgba(18, 31, 54, 0.92), rgba(11, 18, 30, 0.98))',
-    borderRight: '1px solid rgba(138, 156, 181, 0.14)',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 16,
+    padding: '24px 24px 18px',
+    borderBottom: '1px solid rgba(138, 156, 181, 0.12)',
   },
   body: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    minHeight: 0,
-  },
-  bodyScroll: {
     flex: 1,
     overflowY: 'auto' as const,
-    padding: '28px 28px 24px',
+    padding: '20px 24px 24px',
+    display: 'grid',
+    gap: 18,
   },
-  sectionLabel: {
+  footer: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+    padding: '16px 24px 20px',
+    borderTop: '1px solid rgba(138, 156, 181, 0.12)',
+    background: 'rgba(8, 12, 19, 0.9)',
+  },
+  eyebrow: {
     display: 'block',
     marginBottom: 8,
     fontSize: 10,
@@ -110,90 +113,16 @@ const S = {
   title: {
     margin: 0,
     fontFamily: 'var(--font-display)',
-    fontSize: 30,
-    fontWeight: 700,
-    color: 'var(--text-primary)',
+    fontSize: 28,
     lineHeight: 1.05,
+    color: 'var(--text-primary)',
   },
   subtitle: {
     margin: '10px 0 0',
-    fontSize: 14,
+    fontSize: 13,
     lineHeight: 1.6,
     color: 'var(--text-secondary)',
-  },
-  templateGrid: {
-    display: 'grid',
-    gap: 12,
-  },
-  templateCard: (selected: boolean, accent: string) => ({
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: 10,
-    padding: '16px 16px 15px',
-    borderRadius: 18,
-    border: `1px solid ${selected ? accent : 'rgba(138, 156, 181, 0.14)'}`,
-    background: selected
-      ? `linear-gradient(180deg, ${accent}24, rgba(255, 255, 255, 0.02))`
-      : 'rgba(255, 255, 255, 0.02)',
-    boxShadow: selected ? `inset 0 0 0 1px ${accent}33` : 'none',
-    textAlign: 'left' as const,
-    cursor: 'pointer',
-  }),
-  templateBadge: (accent: string) => ({
-    display: 'inline-flex',
-    alignItems: 'center',
-    width: 'fit-content',
-    padding: '4px 8px',
-    borderRadius: 999,
-    background: `${accent}22`,
-    color: accent,
-    fontSize: 10,
-    fontWeight: 700,
-    letterSpacing: '0.08em',
-    textTransform: 'uppercase' as const,
-  }),
-  templateName: {
-    fontSize: 16,
-    fontWeight: 700,
-    color: 'var(--text-primary)',
-  },
-  templateDesc: {
-    fontSize: 13,
-    lineHeight: 1.5,
-    color: 'var(--text-secondary)',
-  },
-  summary: {
-    padding: '16px 16px 18px',
-    borderRadius: 18,
-    background: 'rgba(255, 255, 255, 0.03)',
-    border: '1px solid rgba(138, 156, 181, 0.14)',
-  },
-  summaryRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    gap: 12,
-    padding: '8px 0',
-    fontSize: 12,
-    color: 'var(--text-secondary)',
-    borderBottom: '1px solid rgba(138, 156, 181, 0.08)',
-  },
-  summaryRowLast: {
-    borderBottom: 'none',
-  },
-  summaryValue: {
-    color: 'var(--text-primary)',
-    fontWeight: 600,
-    textAlign: 'right' as const,
-  },
-  topBar: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 16,
-    marginBottom: 24,
-  },
-  topBarCopy: {
-    maxWidth: 420,
+    maxWidth: 480,
   },
   closeButton: {
     width: 34,
@@ -203,45 +132,138 @@ const S = {
     background: 'rgba(255, 255, 255, 0.04)',
     color: 'var(--text-secondary)',
     cursor: 'pointer',
-    fontSize: 16,
-    lineHeight: 1,
-  },
-  fieldGrid: {
-    display: 'grid',
-    gap: 18,
+    flexShrink: 0,
   },
   fieldGroup: {
     display: 'grid',
     gap: 8,
   },
+  fieldLabel: {
+    display: 'block',
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: '0.12em',
+    textTransform: 'uppercase' as const,
+    color: 'var(--text-muted)',
+  },
   input: {
     width: '100%',
-    padding: '12px 14px',
+    padding: '13px 14px',
     borderRadius: 14,
     border: '1px solid var(--border-default)',
     background: 'rgba(9, 13, 20, 0.9)',
     color: 'var(--text-primary)',
-    fontSize: 14,
+    fontSize: 15,
     outline: 'none',
     transition: 'border-color 120ms ease',
   },
-  textarea: {
+  helper: {
+    fontSize: 11,
+    lineHeight: 1.5,
+    color: 'var(--text-muted)',
+  },
+  templateGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+    gap: 10,
+  },
+  templateButton: (selected: boolean, accent: string) => ({
+    display: 'grid',
+    gridTemplateColumns: '40px minmax(0, 1fr)',
+    gap: 12,
+    alignItems: 'center',
     width: '100%',
-    minHeight: 100,
-    padding: '12px 14px',
+    padding: '14px 14px',
+    borderRadius: 18,
+    border: `1px solid ${selected ? `${accent}66` : 'rgba(138, 156, 181, 0.14)'}`,
+    background: selected
+      ? `linear-gradient(180deg, ${accent}18, rgba(255, 255, 255, 0.03))`
+      : 'rgba(255, 255, 255, 0.02)',
+    boxShadow: selected ? `inset 0 0 0 1px ${accent}22` : 'none',
+    textAlign: 'left' as const,
+    cursor: 'pointer',
+  }),
+  templateIcon: (selected: boolean, accent: string) => ({
+    width: 40,
+    height: 40,
     borderRadius: 14,
-    border: '1px solid var(--border-default)',
-    background: 'rgba(9, 13, 20, 0.9)',
-    color: 'var(--text-primary)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: accent,
+    background: selected ? `${accent}22` : 'rgba(255, 255, 255, 0.04)',
+    border: `1px solid ${selected ? `${accent}44` : 'rgba(138, 156, 181, 0.12)'}`,
+  }),
+  templateMeta: {
+    display: 'grid',
+    gap: 4,
+    minWidth: 0,
+  },
+  templateName: {
     fontSize: 14,
-    outline: 'none',
-    resize: 'vertical' as const,
-    transition: 'border-color 120ms ease',
+    fontWeight: 700,
+    color: 'var(--text-primary)',
+  },
+  templateDesc: {
+    fontSize: 11,
+    lineHeight: 1.5,
+    color: 'var(--text-secondary)',
+  },
+  selectedTemplateCopy: {
+    padding: '12px 14px',
+    borderRadius: 16,
+    background: 'rgba(255, 255, 255, 0.03)',
+    border: '1px solid rgba(138, 156, 181, 0.12)',
+    fontSize: 12,
+    lineHeight: 1.6,
+    color: 'var(--text-secondary)',
+  },
+  chipRow: {
+    display: 'flex',
+    flexWrap: 'wrap' as const,
+    gap: 8,
+  },
+  chip: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '7px 10px',
+    borderRadius: 999,
+    background: 'rgba(255, 255, 255, 0.04)',
+    border: '1px solid rgba(138, 156, 181, 0.12)',
+    fontSize: 11,
+    color: 'var(--text-secondary)',
+  },
+  chipStrong: {
+    color: 'var(--text-primary)',
+    fontWeight: 600,
+  },
+  advancedToggle: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 8,
+    width: 'fit-content',
+    padding: '10px 12px',
+    borderRadius: 12,
+    border: '1px solid rgba(138, 156, 181, 0.16)',
+    background: 'rgba(255, 255, 255, 0.02)',
+    color: 'var(--text-secondary)',
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
+  advancedPanel: {
+    display: 'grid',
+    gap: 16,
+    padding: '16px',
+    borderRadius: 18,
+    background: 'rgba(255, 255, 255, 0.03)',
+    border: '1px solid rgba(138, 156, 181, 0.12)',
   },
   twoUp: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-    gap: 14,
+    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+    gap: 12,
   },
   select: {
     width: '100%',
@@ -259,10 +281,10 @@ const S = {
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 16,
-    padding: '14px 16px',
-    borderRadius: 16,
+    padding: '12px 14px',
+    borderRadius: 14,
     background: 'rgba(255, 255, 255, 0.03)',
-    border: '1px solid rgba(138, 156, 181, 0.14)',
+    border: '1px solid rgba(138, 156, 181, 0.12)',
   },
   switchLabel: {
     fontSize: 13,
@@ -271,7 +293,7 @@ const S = {
   },
   switchHelp: {
     marginTop: 4,
-    fontSize: 12,
+    fontSize: 11,
     lineHeight: 1.5,
     color: 'var(--text-secondary)',
   },
@@ -296,14 +318,26 @@ const S = {
     background: '#fff',
     transition: 'left 120ms ease',
   }),
-  footer: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 16,
-    padding: '18px 28px 22px',
-    borderTop: '1px solid rgba(138, 156, 181, 0.12)',
-    background: 'rgba(8, 12, 19, 0.9)',
+  textarea: {
+    width: '100%',
+    minHeight: 88,
+    padding: '12px 14px',
+    borderRadius: 14,
+    border: '1px solid var(--border-default)',
+    background: 'rgba(9, 13, 20, 0.9)',
+    color: 'var(--text-primary)',
+    fontSize: 14,
+    outline: 'none',
+    resize: 'vertical' as const,
+    transition: 'border-color 120ms ease',
+  },
+  error: {
+    padding: '12px 14px',
+    borderRadius: 14,
+    background: 'rgba(239, 68, 68, 0.12)',
+    border: '1px solid rgba(239, 68, 68, 0.22)',
+    color: '#fca5a5',
+    fontSize: 13,
   },
   footerNote: {
     fontSize: 12,
@@ -338,12 +372,17 @@ const S = {
 
 export function NewProjectDialog() {
   const navigate = useNavigate();
+  const dialogRef = useRef<HTMLDivElement | null>(null);
   const showDialog = useEditorStore((state) => state.showNewProjectDialog);
-  const toggleDialog = useEditorStore((state) => state.toggleNewProjectDialog);
+  const initialTemplate = useEditorStore((state) => state.newProjectDialogTemplate);
+  const closeDialog = useEditorStore((state) => state.closeNewProjectDialog);
 
   const [selectedTemplate, setSelectedTemplate] = useState<ProjectTemplate>('film');
   const [projectName, setProjectName] = useState('');
   const [projectDescription, setProjectDescription] = useState('');
+  const [existingProjectNames, setExistingProjectNames] = useState<string[]>([]);
+  const [isUsingSuggestedName, setIsUsingSuggestedName] = useState(true);
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [sequence, setSequence] = useState<SequenceState>(() => getInitialSequence('film'));
   const [isCreating, setIsCreating] = useState(false);
   const [creationError, setCreationError] = useState<string | null>(null);
@@ -352,30 +391,72 @@ export function NewProjectDialog() {
     () => getProjectCreationTemplateConfig(selectedTemplate),
     [selectedTemplate],
   );
+  const templateVisual = useMemo(
+    () => getProjectCreationTemplateVisual(selectedTemplate),
+    [selectedTemplate],
+  );
+  const suggestedProjectName = useMemo(
+    () => buildSuggestedProjectName(selectedTemplate, existingProjectNames),
+    [existingProjectNames, selectedTemplate],
+  );
   const selectedResolution = RESOLUTION_PRESETS[sequence.resolutionIndex] ?? RESOLUTION_PRESETS[0];
   const dropFrameSupported = supportsDropFrame(sequence.fps);
-  const canCreate = projectName.trim().length > 0 && !isCreating;
-
-  const resetDialog = useCallback(() => {
-    setSelectedTemplate('film');
-    setProjectName('');
-    setProjectDescription('');
-    setSequence(getInitialSequence('film'));
-    setIsCreating(false);
-    setCreationError(null);
-  }, []);
+  const finalProjectName = projectName.trim() || suggestedProjectName;
+  const canCreate = finalProjectName.length > 0 && !isCreating;
 
   const handleClose = useCallback(() => {
-    resetDialog();
-    toggleDialog();
-  }, [resetDialog, toggleDialog]);
+    setCreationError(null);
+    setIsCreating(false);
+    closeDialog();
+  }, [closeDialog]);
+
+  useEffect(() => {
+    if (!showDialog) {
+      return;
+    }
+
+    const template = initialTemplate ?? 'film';
+    setSelectedTemplate(template);
+    setSequence(getInitialSequence(template));
+    setProjectName(buildSuggestedProjectName(template));
+    setProjectDescription('');
+    setExistingProjectNames([]);
+    setIsUsingSuggestedName(true);
+    setShowAdvancedSettings(false);
+    setIsCreating(false);
+    setCreationError(null);
+
+    requestAnimationFrame(() => {
+      dialogRef.current?.focus();
+    });
+
+    void listProjectSummariesFromRepository()
+      .then((summaries) => {
+        setExistingProjectNames(summaries.map((project) => project.name));
+      })
+      .catch(() => {
+        setExistingProjectNames([]);
+      });
+  }, [initialTemplate, showDialog]);
+
+  useEffect(() => {
+    if (!showDialog || !isUsingSuggestedName) {
+      return;
+    }
+
+    setProjectName(suggestedProjectName);
+  }, [isUsingSuggestedName, showDialog, suggestedProjectName]);
 
   const handleSelectTemplate = useCallback((template: ProjectTemplate) => {
-    const defaults = getInitialSequence(template);
     setSelectedTemplate(template);
-    setSequence(defaults);
+    setSequence(getInitialSequence(template));
     setCreationError(null);
-  }, []);
+
+    if (isUsingSuggestedName || !projectName.trim()) {
+      setProjectName(buildSuggestedProjectName(template, existingProjectNames));
+      setIsUsingSuggestedName(true);
+    }
+  }, [existingProjectNames, isUsingSuggestedName, projectName]);
 
   const handleCreate = useCallback(async () => {
     if (!canCreate) {
@@ -389,7 +470,7 @@ export function NewProjectDialog() {
       const project = await createProjectInRepository(buildProjectCreationOptions({
         workspace: 'filmtv',
         template: selectedTemplate,
-        name: projectName.trim(),
+        name: finalProjectName,
         description: projectDescription.trim() || undefined,
         sequence: {
           fps: sequence.fps,
@@ -407,10 +488,10 @@ export function NewProjectDialog() {
     }
   }, [
     canCreate,
+    finalProjectName,
     handleClose,
     navigate,
     projectDescription,
-    projectName,
     selectedResolution.height,
     selectedResolution.width,
     selectedTemplate,
@@ -449,122 +530,126 @@ export function NewProjectDialog() {
       aria-modal="true"
       aria-label="Create editorial project"
     >
-      <div style={S.dialog}>
-        <aside style={S.rail}>
+      <div style={S.dialog} ref={dialogRef} tabIndex={-1}>
+        <div style={S.header}>
           <div>
-            <span style={S.sectionLabel}>Editorial Templates</span>
-            <h2 style={S.title}>Start an edit with clean defaults.</h2>
+            <span style={S.eyebrow}>New project</span>
+            <h2 style={S.title}>Create an editorial project</h2>
             <p style={S.subtitle}>
-              Pick the cut you are building, name it, and set the sequence once.
-              The editor always opens in the same editorial workspace.
+              Choose a template, name the project, and start editing. Sequence settings stay out of the way until you need them.
             </p>
           </div>
 
-          <div style={S.templateGrid}>
-            {EDITORIAL_TEMPLATE_OPTIONS.map((template) => {
-              const config = getProjectCreationTemplateConfig(template);
-              const accent = TEMPLATE_COPY[template].accent;
-              const selected = template === selectedTemplate;
-              return (
-                <button
-                  key={template}
-                  type="button"
-                  style={S.templateCard(selected, accent)}
-                  onClick={() => handleSelectTemplate(template)}
-                >
-                  <span style={S.templateBadge(accent)}>{TEMPLATE_COPY[template].badge}</span>
-                  <span style={S.templateName}>{config.name}</span>
-                  <span style={S.templateDesc}>{config.description}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          <div style={S.summary}>
-            <span style={S.sectionLabel}>Template Summary</span>
-            <div style={S.summaryRow}>
-              <span>Template</span>
-              <span style={S.summaryValue}>{templateConfig.name}</span>
-            </div>
-            <div style={S.summaryRow}>
-              <span>Workspace</span>
-              <span style={S.summaryValue}>Editorial</span>
-            </div>
-            <div style={S.summaryRow}>
-              <span>Layout</span>
-              <span style={S.summaryValue}>{templateConfig.composerLayout === 'source-record' ? 'Source / Record' : 'Record'}</span>
-            </div>
-            <div style={{ ...S.summaryRow, ...S.summaryRowLast }}>
-              <span>Default sequence</span>
-              <span style={S.summaryValue}>
-                {templateConfig.sequence.width} x {templateConfig.sequence.height}
-                {' · '}
-                {templateConfig.sequence.fps}
-                fps
-              </span>
-            </div>
-          </div>
-        </aside>
+          <button
+            type="button"
+            style={S.closeButton}
+            onClick={handleClose}
+            aria-label="Close project creation dialog"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
 
         <div style={S.body}>
-          <div style={S.bodyScroll}>
-            <div style={S.topBar}>
-              <div style={S.topBarCopy}>
-                <span style={S.sectionLabel}>Project Setup</span>
-                <h3 style={{ ...S.title, fontSize: 24 }}>Create editorial project</h3>
-                <p style={S.subtitle}>
-                  Keep this page tight: project identity on top, sequence settings below,
-                  and no workflow personas competing for space.
-                </p>
-              </div>
-              <button
-                type="button"
-                style={S.closeButton}
-                onClick={handleClose}
-                aria-label="Close project creation dialog"
-              >
-                X
-              </button>
+          <div style={S.fieldGroup}>
+            <label htmlFor="project-name" style={S.fieldLabel}>Project name</label>
+            <input
+              id="project-name"
+              type="text"
+              value={projectName}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                setProjectName(nextValue);
+                setIsUsingSuggestedName(nextValue.trim().length === 0 || nextValue === suggestedProjectName);
+              }}
+              placeholder={suggestedProjectName}
+              style={S.input}
+              autoFocus
+              onFocus={(event) => {
+                event.currentTarget.style.borderColor = 'var(--brand)';
+              }}
+              onBlur={(event) => resetBorder(event.target)}
+              maxLength={120}
+            />
+            <div style={S.helper}>
+              Suggested name: <strong style={{ color: 'var(--text-secondary)' }}>{suggestedProjectName}</strong>
             </div>
+          </div>
 
-            <div style={S.fieldGrid}>
-              <div style={S.fieldGroup}>
-                <label htmlFor="project-name" style={S.sectionLabel}>Project Name</label>
-                <input
-                  id="project-name"
-                  type="text"
-                  value={projectName}
-                  onChange={(event) => setProjectName(event.target.value)}
-                  placeholder={`${templateConfig.name} Cut`}
-                  style={S.input}
-                  autoFocus
-                  onFocus={(event) => {
-                    event.currentTarget.style.borderColor = 'var(--brand)';
-                  }}
-                  onBlur={(event) => resetBorder(event.target)}
-                  maxLength={120}
-                />
-              </div>
+          <div style={S.fieldGroup}>
+            <span style={S.fieldLabel}>Template</span>
+            <div style={S.templateGrid}>
+              {EDITORIAL_TEMPLATE_OPTIONS.map((template) => {
+                const config = getProjectCreationTemplateConfig(template);
+                const visual = getProjectCreationTemplateVisual(template);
+                const selected = template === selectedTemplate;
 
-              <div style={S.fieldGroup}>
-                <label htmlFor="project-description" style={S.sectionLabel}>Notes</label>
-                <textarea
-                  id="project-description"
-                  value={projectDescription}
-                  onChange={(event) => setProjectDescription(event.target.value)}
-                  placeholder="Optional editorial notes, client, or delivery context."
-                  style={S.textarea}
-                  onFocus={(event) => {
-                    event.currentTarget.style.borderColor = 'var(--brand)';
-                  }}
-                  onBlur={(event) => resetBorder(event.target)}
-                  maxLength={500}
-                />
-              </div>
+                return (
+                  <button
+                    key={template}
+                    type="button"
+                    style={S.templateButton(selected, visual.accent)}
+                    onClick={() => handleSelectTemplate(template)}
+                  >
+                    <span style={S.templateIcon(selected, visual.accent)}>
+                      <ProjectGlyph template={template} size={18} stroke={visual.accent} />
+                    </span>
+                    <span style={S.templateMeta}>
+                      <span style={S.templateName}>{config.name}</span>
+                      <span style={S.templateDesc}>{visual.quickStartDescription}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={S.selectedTemplateCopy}>
+              <strong style={{ color: templateVisual.accent }}>{templateConfig.name}</strong>
+              {' '}
+              {templateConfig.description}
+            </div>
+          </div>
 
+          <div style={S.chipRow} aria-label="Project defaults summary">
+            <span style={S.chip}>
+              Template
+              <strong style={S.chipStrong}>{templateConfig.name}</strong>
+            </span>
+            <span style={S.chip}>
+              Sequence
+              <strong style={S.chipStrong}>{selectedResolution.width} x {selectedResolution.height}</strong>
+            </span>
+            <span style={S.chip}>
+              Timebase
+              <strong style={S.chipStrong}>{sequence.fps}{sequence.dropFrame ? ' DF' : ' NDF'}</strong>
+            </span>
+            <span style={S.chip}>
+              Layout
+              <strong style={S.chipStrong}>
+                {templateConfig.composerLayout === 'source-record' ? 'Source / Record' : 'Record only'}
+              </strong>
+            </span>
+          </div>
+
+          <button
+            type="button"
+            style={S.advancedToggle}
+            aria-expanded={showAdvancedSettings}
+            onClick={() => setShowAdvancedSettings((current) => !current)}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              {showAdvancedSettings ? <polyline points="18 15 12 9 6 15" /> : <polyline points="6 9 12 15 18 9" />}
+            </svg>
+            {showAdvancedSettings ? 'Hide sequence settings' : 'Edit sequence settings'}
+          </button>
+
+          {showAdvancedSettings && (
+            <div style={S.advancedPanel}>
               <div style={S.twoUp}>
                 <div style={S.fieldGroup}>
-                  <label htmlFor="project-fps" style={S.sectionLabel}>Frame Rate</label>
+                  <label htmlFor="project-fps" style={S.fieldLabel}>Frame rate</label>
                   <select
                     id="project-fps"
                     value={sequence.fps}
@@ -587,7 +672,7 @@ export function NewProjectDialog() {
                 </div>
 
                 <div style={S.fieldGroup}>
-                  <label htmlFor="project-resolution" style={S.sectionLabel}>Resolution</label>
+                  <label htmlFor="project-resolution" style={S.fieldLabel}>Resolution</label>
                   <select
                     id="project-resolution"
                     value={sequence.resolutionIndex}
@@ -613,7 +698,7 @@ export function NewProjectDialog() {
                   <div style={S.switchLabel}>Drop-frame timecode</div>
                   <div style={S.switchHelp}>
                     {dropFrameSupported
-                      ? 'Available for NTSC frame rates. Enable it when the show clock must stay aligned to runtime.'
+                      ? 'Use it when runtime needs to stay aligned with the clock.'
                       : 'Unavailable for the current frame rate.'}
                   </div>
                 </div>
@@ -637,74 +722,54 @@ export function NewProjectDialog() {
                 </button>
               </div>
 
-              <div style={S.summary}>
-                <span style={S.sectionLabel}>Project Output</span>
-                <div style={S.summaryRow}>
-                  <span>Sequence</span>
-                  <span style={S.summaryValue}>
-                    {selectedResolution.width} x {selectedResolution.height}
-                  </span>
-                </div>
-                <div style={S.summaryRow}>
-                  <span>Timebase</span>
-                  <span style={S.summaryValue}>
-                    {sequence.fps}
-                    fps
-                    {sequence.dropFrame ? ' DF' : ' NDF'}
-                  </span>
-                </div>
-                <div style={S.summaryRow}>
-                  <span>Workspace</span>
-                  <span style={S.summaryValue}>Editorial</span>
-                </div>
-                <div style={{ ...S.summaryRow, ...S.summaryRowLast }}>
-                  <span>Monitor layout</span>
-                  <span style={S.summaryValue}>
-                    {templateConfig.composerLayout === 'source-record' ? 'Source / Record' : 'Record only'}
-                  </span>
-                </div>
-              </div>
-
-              {creationError && (
-                <div
-                  role="alert"
-                  style={{
-                    padding: '12px 14px',
-                    borderRadius: 14,
-                    background: 'rgba(239, 68, 68, 0.12)',
-                    border: '1px solid rgba(239, 68, 68, 0.22)',
-                    color: '#fca5a5',
-                    fontSize: 13,
+              <div style={S.fieldGroup}>
+                <label htmlFor="project-description" style={S.fieldLabel}>Notes</label>
+                <textarea
+                  id="project-description"
+                  value={projectDescription}
+                  onChange={(event) => setProjectDescription(event.target.value)}
+                  placeholder="Optional editorial notes, client, or delivery context."
+                  style={S.textarea}
+                  onFocus={(event) => {
+                    event.currentTarget.style.borderColor = 'var(--brand)';
                   }}
-                >
-                  {creationError}
-                </div>
-              )}
+                  onBlur={(event) => resetBorder(event.target)}
+                  maxLength={500}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
-          <footer style={S.footer}>
-            <div style={S.footerNote}>
-              Opens directly in the editorial page. Use Cmd/Ctrl+Enter to create.
+          {creationError && (
+            <div role="alert" style={S.error}>
+              {creationError}
             </div>
-            <div style={S.actions}>
-              <button type="button" style={S.buttonSecondary} onClick={handleClose}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                style={{
-                  ...S.buttonPrimary,
-                  ...(canCreate ? null : { opacity: 0.55, cursor: 'not-allowed' }),
-                }}
-                onClick={() => { void handleCreate(); }}
-                disabled={!canCreate}
-              >
-                {isCreating ? 'Creating...' : 'Create Project'}
-              </button>
-            </div>
-          </footer>
+          )}
         </div>
+
+        <footer style={S.footer}>
+          <div style={S.footerNote}>
+            Opens directly in the editorial workspace. Use Cmd/Ctrl+Enter to create.
+          </div>
+          <div style={S.actions}>
+            <button type="button" style={S.buttonSecondary} onClick={handleClose}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              style={{
+                ...S.buttonPrimary,
+                ...(canCreate ? null : { opacity: 0.55, cursor: 'not-allowed' }),
+              }}
+              onClick={() => {
+                void handleCreate();
+              }}
+              disabled={!canCreate}
+            >
+              {isCreating ? 'Creating...' : 'Create Project'}
+            </button>
+          </div>
+        </footer>
       </div>
     </div>
   );

@@ -10,13 +10,38 @@ const TRACK_TYPE_COLOR: Record<string, string> = {
   GRAPHIC: 'var(--track-gfx, #fb7185)',
 };
 
+function getTrackRoleLabel(track: Track): string {
+  switch (track.type) {
+    case 'VIDEO':
+      return 'Picture';
+    case 'AUDIO':
+      return 'Audio';
+    case 'GRAPHIC':
+      return 'Graphic';
+    case 'SUBTITLE':
+      return 'Subtitle';
+    case 'EFFECT':
+      return 'Effect';
+    default:
+      return 'Track';
+  }
+}
+
 interface TrackHeaderProps {
   track: Track;
 }
 
 const TrackHeader = memo(function TrackHeader({ track }: TrackHeaderProps) {
-  const { selectedTrackId, selectTrack, toggleMute, toggleSolo, toggleLock, videoMonitorTrackId, setVideoMonitorTrack } =
-    useEditorStore();
+  const {
+    selectedTrackId,
+    selectTrack,
+    toggleMute,
+    toggleSolo,
+    toggleLock,
+    videoMonitorTrackId,
+    setVideoMonitorTrack,
+  } = useEditorStore();
+
   const isSelected = selectedTrackId === track.id;
   const isVideoTrack = track.type === 'VIDEO' || track.type === 'GRAPHIC';
   const isMonitored = videoMonitorTrackId === track.id;
@@ -31,62 +56,67 @@ const TrackHeader = memo(function TrackHeader({ track }: TrackHeaderProps) {
       aria-label={`Track ${track.name}`}
       aria-selected={isSelected}
     >
-      {/* Figma-style colored track badge */}
-      <div className="track-badge" style={{ background: color }}>
-        {track.name}
+      <div className="track-main">
+        <div className="track-badge" style={{ background: color }}>
+          {track.name}
+        </div>
+        <div className="track-meta">
+          <span className="track-name" title={track.name}>
+            {track.name}
+          </span>
+          <span className="track-role">{getTrackRoleLabel(track)} track</span>
+        </div>
       </div>
-
-      {/* Secondary track name colored text */}
-      <span className="track-name" title={track.name} style={{ color }}>
-        {track.name}
-      </span>
 
       <div className="track-icons" role="group" aria-label={`${track.name} controls`}>
         {isVideoTrack && (
           <button
-            className={`track-icon-btn${isMonitored ? ' active' : ''}`}
+            className={`track-icon-btn monitor${isMonitored ? ' active' : ''}`}
             title={isMonitored ? 'Monitored video track' : 'Set monitored video track'}
             aria-label={isMonitored ? `${track.name} is the monitored video track` : `Monitor ${track.name}`}
             aria-pressed={isMonitored}
-            onClick={(e) => {
-              e.stopPropagation();
+            onClick={(event) => {
+              event.stopPropagation();
               setVideoMonitorTrack(track.id);
             }}
           >
-            MON
+            OUT
           </button>
         )}
+
         <button
-          className={`track-icon-btn${track.muted ? ' active' : ''}`}
+          className={`track-icon-btn mute${track.muted ? ' active' : ''}`}
           title={track.muted ? 'Unmute' : 'Mute'}
           aria-label={track.muted ? `Unmute ${track.name}` : `Mute ${track.name}`}
           aria-pressed={track.muted}
-          onClick={(e) => {
-            e.stopPropagation();
+          onClick={(event) => {
+            event.stopPropagation();
             toggleMute(track.id);
           }}
         >
           M
         </button>
+
         <button
           className={`track-icon-btn solo${track.solo ? ' active' : ''}`}
           title={track.solo ? 'Unsolo' : 'Solo'}
           aria-label={track.solo ? `Unsolo ${track.name}` : `Solo ${track.name}`}
           aria-pressed={track.solo}
-          onClick={(e) => {
-            e.stopPropagation();
+          onClick={(event) => {
+            event.stopPropagation();
             toggleSolo(track.id);
           }}
         >
           S
         </button>
+
         <button
           className={`track-icon-btn lock${track.locked ? ' active' : ''}`}
           title={track.locked ? 'Unlock' : 'Lock'}
           aria-label={track.locked ? `Unlock ${track.name}` : `Lock ${track.name}`}
           aria-pressed={track.locked}
-          onClick={(e) => {
-            e.stopPropagation();
+          onClick={(event) => {
+            event.stopPropagation();
             toggleLock(track.id);
           }}
         >
@@ -98,7 +128,7 @@ const TrackHeader = memo(function TrackHeader({ track }: TrackHeaderProps) {
 });
 
 export const TrackHeaders = memo(function TrackHeaders() {
-  const tracks = useEditorStore((s) => s.tracks);
+  const tracks = useEditorStore((state) => state.tracks);
 
   return (
     <div className="track-headers" role="rowgroup" aria-label="Track headers">

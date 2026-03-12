@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { playbackEngine } from '../../engine/PlaybackEngine';
 import {
+  clearInForActiveMonitor,
+  clearMarksForActiveMonitor,
+  clearOutForActiveMonitor,
+  goToInForActiveMonitor,
+  goToOutForActiveMonitor,
+  markClipForActiveMonitor,
   markInForActiveMonitor,
   markOutForActiveMonitor,
   matchFrameAtPlayhead,
@@ -62,6 +68,144 @@ describe('phase 1 editor monitor keyboard actions', () => {
     expect(state.outPoint).toBe(8.25);
     expect(state.sourceInPoint).toBeNull();
     expect(state.sourceOutPoint).toBeNull();
+  });
+
+  it('clears and recalls source marks when the source monitor is active', () => {
+    usePlayerStore.setState({ activeMonitor: 'source' });
+    useEditorStore.setState({
+      sourcePlayhead: 2,
+      playheadTime: 9,
+      sourceInPoint: 3,
+      sourceOutPoint: 7,
+      inPoint: 10,
+      outPoint: 14,
+    });
+
+    goToInForActiveMonitor();
+    expect(useEditorStore.getState().sourcePlayhead).toBe(3);
+    expect(useEditorStore.getState().playheadTime).toBe(9);
+
+    goToOutForActiveMonitor();
+    expect(useEditorStore.getState().sourcePlayhead).toBe(7);
+
+    clearInForActiveMonitor();
+    expect(useEditorStore.getState().sourceInPoint).toBeNull();
+    expect(useEditorStore.getState().inPoint).toBe(10);
+
+    clearOutForActiveMonitor();
+    expect(useEditorStore.getState().sourceOutPoint).toBeNull();
+    expect(useEditorStore.getState().outPoint).toBe(14);
+
+    useEditorStore.setState({ sourceInPoint: 1, sourceOutPoint: 5 });
+    clearMarksForActiveMonitor();
+    expect(useEditorStore.getState().sourceInPoint).toBeNull();
+    expect(useEditorStore.getState().sourceOutPoint).toBeNull();
+    expect(useEditorStore.getState().inPoint).toBe(10);
+    expect(useEditorStore.getState().outPoint).toBe(14);
+  });
+
+  it('clears and recalls record marks when the record monitor is active', () => {
+    usePlayerStore.setState({ activeMonitor: 'record' });
+    useEditorStore.setState({
+      sourcePlayhead: 4,
+      playheadTime: 9,
+      duration: 20,
+      sourceInPoint: 2,
+      sourceOutPoint: 6,
+      inPoint: 10,
+      outPoint: 14,
+    });
+
+    goToInForActiveMonitor();
+    expect(useEditorStore.getState().playheadTime).toBe(10);
+    expect(useEditorStore.getState().sourcePlayhead).toBe(4);
+
+    goToOutForActiveMonitor();
+    expect(useEditorStore.getState().playheadTime).toBe(14);
+
+    clearInForActiveMonitor();
+    expect(useEditorStore.getState().inPoint).toBeNull();
+    expect(useEditorStore.getState().sourceInPoint).toBe(2);
+
+    clearOutForActiveMonitor();
+    expect(useEditorStore.getState().outPoint).toBeNull();
+    expect(useEditorStore.getState().sourceOutPoint).toBe(6);
+
+    useEditorStore.setState({ inPoint: 1, outPoint: 5 });
+    clearMarksForActiveMonitor();
+    expect(useEditorStore.getState().inPoint).toBeNull();
+    expect(useEditorStore.getState().outPoint).toBeNull();
+    expect(useEditorStore.getState().sourceInPoint).toBe(2);
+    expect(useEditorStore.getState().sourceOutPoint).toBe(6);
+  });
+
+  it('marks the full loaded source clip when the source monitor is active', () => {
+    usePlayerStore.setState({ activeMonitor: 'source' });
+    useEditorStore.setState({
+      sourceAsset: {
+        id: 'asset-source',
+        name: 'Source',
+        type: 'VIDEO',
+        status: 'READY',
+        duration: 18,
+        tags: [],
+        isFavorite: false,
+      },
+      sourceInPoint: null,
+      sourceOutPoint: null,
+      inPoint: 2,
+      outPoint: 6,
+    });
+
+    expect(markClipForActiveMonitor()).toBe(true);
+
+    const state = useEditorStore.getState();
+    expect(state.sourceInPoint).toBe(0);
+    expect(state.sourceOutPoint).toBe(18);
+    expect(state.inPoint).toBe(2);
+    expect(state.outPoint).toBe(6);
+  });
+
+  it('marks the active timeline clip when the record monitor is active', () => {
+    usePlayerStore.setState({ activeMonitor: 'record' });
+    useEditorStore.setState({
+      tracks: [
+        {
+          id: 'v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [
+            makeClip({
+              id: 'clip-v1',
+              trackId: 'v1',
+              name: 'Timeline Clip',
+              startTime: 4,
+              endTime: 9,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+      ],
+      enabledTrackIds: ['v1'],
+      selectedTrackId: null,
+      playheadTime: 6,
+      inPoint: null,
+      outPoint: null,
+    });
+
+    expect(markClipForActiveMonitor()).toBe(true);
+
+    const state = useEditorStore.getState();
+    expect(state.inPoint).toBe(4);
+    expect(state.outPoint).toBe(9);
   });
 
   it('routes transport actions to the active monitor', () => {

@@ -46,6 +46,7 @@ export * from './collab';
 export * from './project-library';
 export * from './media-helpers';
 export * from './parity';
+export * from './editorial-experience';
 
 // ─── Vertical Modules ──────────────────────────────────────────────────────
 export * from './news';
@@ -72,6 +73,7 @@ export * from './nexis/NEXISAdmin';
 // Audio & Broadcast
 export * from './audio/BroadcastTrackPresets';
 export * from './audio/AudioDescriptionTrack';
+export * from './audio/channelLayout';
 
 // RBAC
 export * from './rbac/NewsroomRoles';

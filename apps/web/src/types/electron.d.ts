@@ -1,4 +1,11 @@
-import type { EditorMediaAsset, EditorProject } from '@mcua/core';
+import type {
+  EditorMediaAsset,
+  EditorProject,
+  FrameRange,
+  PlaybackStreamDescriptor,
+  PlaybackTelemetry,
+  TimelineRenderSnapshot,
+} from '@mcua/core';
 
 /** File filter for open/save dialogs (mirrors Electron.FileFilter) */
 export interface FileFilter {
@@ -102,6 +109,19 @@ export interface ExportTranscodeResult {
   outputAudioCodec?: string;
 }
 
+export interface DesktopParityPlaybackTransportView {
+  buffer: SharedArrayBuffer;
+  width: number;
+  height: number;
+  bytesPerPixel: number;
+  slots: number;
+}
+
+export interface DesktopParityPlaybackTransportDescriptor {
+  transportHandle: string;
+  view: DesktopParityPlaybackTransportView;
+}
+
 export interface DesktopBridge {
   // ─── System ───────────────────────────────────────────────────────────────
   getVersion: () => Promise<string>;
@@ -136,6 +156,29 @@ export interface DesktopBridge {
   // ─── File I/O ─────────────────────────────────────────────────────────────
   readTextFile: (filePath: string) => Promise<string>;
   writeTextFile: (filePath: string, contents: string) => Promise<boolean>;
+
+  // ─── Desktop Parity Playback ──────────────────────────────────────────────
+  parityPlayback?: {
+    syncProject: (project: EditorProject) => Promise<boolean>;
+    createTransport: (request: {
+      project: EditorProject;
+      snapshot?: TimelineRenderSnapshot;
+      sequenceId?: string;
+      revisionId?: string;
+    }) => Promise<DesktopParityPlaybackTransportDescriptor>;
+    getTransportView: (transportHandle: string) => Promise<DesktopParityPlaybackTransportView>;
+    attachStreams: (transportHandle: string, streams: PlaybackStreamDescriptor[]) => Promise<boolean>;
+    preroll: (transportHandle: string, range: FrameRange) => Promise<boolean>;
+    start: (transportHandle: string, frame: number) => Promise<boolean>;
+    stop: (transportHandle: string) => Promise<boolean>;
+    releaseTransport: (transportHandle: string) => Promise<boolean>;
+    play: (transportHandle: string, frame: number, playbackRate?: number) => Promise<boolean>;
+    syncFrame: (transportHandle: string, frame: number) => Promise<boolean>;
+    getTelemetry: (transportHandle: string) => Promise<PlaybackTelemetry>;
+    attachOutputDevice: (transportHandle: string, config: unknown) => Promise<boolean>;
+    detachOutputDevice: (transportHandle: string, deviceId?: string) => Promise<boolean>;
+    invalidateCaches: (projectId: string) => Promise<boolean>;
+  };
 
   // ─── IPC Events ───────────────────────────────────────────────────────────
   onNewProject: (callback: () => void) => () => void;

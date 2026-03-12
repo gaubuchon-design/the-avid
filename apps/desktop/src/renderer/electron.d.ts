@@ -1,4 +1,11 @@
-import type { EditorMediaAsset, EditorProject } from '@mcua/core';
+import type {
+  EditorMediaAsset,
+  EditorProject,
+  FrameRange,
+  PlaybackStreamDescriptor,
+  PlaybackTelemetry,
+  TimelineRenderSnapshot,
+} from '@mcua/core';
 
 // ─── Dialog Types ─────────────────────────────────────────────────────────────
 
@@ -229,6 +236,19 @@ interface RenderAccelResult {
   ffmpegArgs: string[];
 }
 
+interface ParityPlaybackTransportView {
+  buffer: SharedArrayBuffer;
+  width: number;
+  height: number;
+  bytesPerPixel: number;
+  slots: number;
+}
+
+interface ParityPlaybackTransportDescriptor {
+  transportHandle: string;
+  view: ParityPlaybackTransportView;
+}
+
 // ─── Desktop Bridge Interface ─────────────────────────────────────────────────
 
 interface DesktopBridge {
@@ -311,6 +331,28 @@ interface DesktopBridge {
     deviceStatus: (deviceId: string) => Promise<IOResult>;
     getTransportBuffer: (deviceId: string) => Promise<SharedArrayBuffer | null>;
     onFrameAvailable: (cb: (info: unknown) => void) => () => void;
+  };
+
+  parityPlayback: {
+    syncProject: (project: EditorProject) => Promise<boolean>;
+    createTransport: (request: {
+      project: EditorProject;
+      snapshot?: TimelineRenderSnapshot;
+      sequenceId?: string;
+      revisionId?: string;
+    }) => Promise<ParityPlaybackTransportDescriptor>;
+    getTransportView: (transportHandle: string) => Promise<ParityPlaybackTransportView>;
+    attachStreams: (transportHandle: string, streams: PlaybackStreamDescriptor[]) => Promise<boolean>;
+    preroll: (transportHandle: string, range: FrameRange) => Promise<boolean>;
+    start: (transportHandle: string, frame: number) => Promise<boolean>;
+    stop: (transportHandle: string) => Promise<boolean>;
+    releaseTransport: (transportHandle: string) => Promise<boolean>;
+    play: (transportHandle: string, frame: number, playbackRate?: number) => Promise<boolean>;
+    syncFrame: (transportHandle: string, frame: number) => Promise<boolean>;
+    getTelemetry: (transportHandle: string) => Promise<PlaybackTelemetry>;
+    attachOutputDevice: (transportHandle: string, config: unknown) => Promise<boolean>;
+    detachOutputDevice: (transportHandle: string, deviceId?: string) => Promise<boolean>;
+    invalidateCaches: (projectId: string) => Promise<boolean>;
   };
 
   // Streaming (NDI, SRT)

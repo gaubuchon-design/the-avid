@@ -3,6 +3,11 @@ import { EDLExporter } from '../media/EDLExporter';
 import { RelinkEngine } from '../media/RelinkEngine';
 import { MultiCamEngine } from '../editing/MultiCamEngine';
 import { createMultiCamSyncEngine } from '../editing/MultiCamSyncEngine';
+import {
+  getAudioChannelCountForLayout,
+  normalizeAudioChannelLayoutLabel,
+  pickDominantAudioChannelLayout,
+} from '../audio/channelLayout';
 import { flattenAssets } from '../project-library';
 import type {
   EditorBin,
@@ -12,7 +17,6 @@ import type {
 } from '../project-library';
 import type {
   AudioAutomationWrite,
-  AudioBusDefinition,
   AudioDecodeRequest,
   AudioMixCompilation,
   ChangeEvent,
@@ -59,6 +63,12 @@ import type {
   TranscodeRequest,
   VideoCompositingPort,
 } from './NLEPortContracts';
+import {
+  buildAudioMixTopology,
+  resolveAudioBusProcessingChain,
+  summarizeAudioBusProcessingPolicy,
+  type AudioTrackRoutingDescriptor,
+} from './audioMixTopology';
 
 function cloneValue<T>(value: T): T {
   if (typeof structuredClone === 'function') {
@@ -188,6 +198,91 @@ interface AudioMixState {
   snapshot: TimelineRenderSnapshot;
   compilation: AudioMixCompilation;
   automationWrites: AudioAutomationWrite[];
+}
+
+function uniqueLayouts(values: string[]): string[] {
+  return Array.from(new Set(values));
+}
+
+function createDefaultAutomationModes(trackLayouts: AudioTrackRoutingDescriptor[]): NonNullable<AudioMixCompilation['automationModes']> {
+  return trackLayouts.map((track) => ({
+    trackId: track.trackId,
+    mode: 'read',
+    touchedParameters: [],
+  }));
+}
+
+function applyAutomationWriteToCompilation(
+  compilation: AudioMixCompilation,
+  automation: AudioAutomationWrite,
+): AudioMixCompilation {
+  const existing = compilation.automationModes ?? [];
+  const nextEntry = existing.find((entry) => entry.trackId === automation.trackId);
+  const nextMode = automation.mode ?? 'write';
+  const nextParameters = uniqueLayouts([
+    ...(nextEntry?.touchedParameters ?? []),
+    automation.parameter,
+  ]) as NonNullable<AudioMixCompilation['automationModes']>[number]['touchedParameters'];
+
+  const automationModes = nextEntry
+    ? existing.map((entry) => entry.trackId === automation.trackId
+      ? { ...entry, mode: nextMode, touchedParameters: nextParameters }
+      : entry)
+    : [
+      ...existing,
+      {
+        trackId: automation.trackId,
+        mode: nextMode,
+        touchedParameters: [automation.parameter],
+      },
+    ];
+
+  return {
+    ...compilation,
+    automationModes,
+  };
+}
+
+function buildBusLoudnessMeasurements(
+  mix: AudioMixCompilation,
+  automationPointCount: number,
+  durationSeconds: number,
+  context: 'preview' | 'print',
+): NonNullable<LoudnessMeasurement['busMeasurements']> {
+  return mix.buses.map((bus, index) => {
+    const channelCount = bus.channelCount ?? getAudioChannelCountForLayout(bus.layout);
+    const policy = summarizeAudioBusProcessingPolicy(bus);
+    const activeStages = policy[context].activeStages;
+    const bypassedStages = policy[context].bypassedStages;
+    const limiterActive = activeStages.some((stage) => stage.kind === 'limiter');
+    const integratedLufs = -24
+      + Math.min(3, mix.trackCount * 0.2)
+      + Math.min(1.5, automationPointCount * 0.1)
+      + Math.min(1.25, (channelCount - 2) * 0.2)
+      - index * 0.18
+      + Math.min(0.22, activeStages.length * 0.07)
+      + (limiterActive ? -0.18 : 0.1);
+    const warnings: string[] = [];
+    if (bus.role === 'fold-down' && mix.containsContainerizedAudio) {
+      warnings.push('Derived stereo fold-down should be verified against facility downmix coefficients.');
+    }
+    if (bus.role === 'printmaster' && (mix.routingWarnings?.length ?? 0) > 0) {
+      warnings.push(...(mix.routingWarnings ?? []));
+    }
+    if (context === 'preview' && bypassedStages.length > 0) {
+      warnings.push(`Preview bypasses ${bypassedStages.map((stage) => stage.kind).join(', ')} on ${bus.id}.`);
+    }
+
+    return {
+      busId: bus.id,
+      layout: bus.layout,
+      integratedLufs: Number(integratedLufs.toFixed(2)),
+      shortTermLufs: Number((integratedLufs + Math.min(1.5, durationSeconds / 10)).toFixed(2)),
+      truePeakDbtp: Number((-2 + Math.min(0.75, channelCount * 0.08) - (limiterActive ? 0.4 : 0)).toFixed(2)),
+      meteringMode: bus.meteringMode,
+      warnings: warnings.length > 0 ? uniqueLayouts(warnings) : undefined,
+    };
+  });
 }
 
 interface ReferenceMulticamState {
@@ -696,9 +791,28 @@ export class ReferenceNLEParityRuntime {
       throw new Error(`Unknown transport: ${handle}`);
     }
 
+    const fps = Math.max(1, transport.snapshot.fps || 24);
     const prerollFrames = transport.prerollRange
       ? Math.max(0, transport.prerollRange.endFrame - transport.prerollRange.startFrame)
       : 0;
+    const videoStreamCount = transport.streams.filter((stream) => stream.mediaType === 'video').length;
+    const audioStreamCount = transport.streams.filter((stream) => stream.mediaType === 'audio').length;
+    const weightedPressure = videoStreamCount + (audioStreamCount * 0.35);
+    const streamPressure = weightedPressure >= 5
+      ? 'heavy'
+      : weightedPressure >= 2
+        ? 'multi'
+        : 'single';
+    const currentQuality = streamPressure === 'heavy'
+      ? 'draft'
+      : streamPressure === 'multi'
+        ? 'preview'
+        : 'full';
+    const cacheStrategy = streamPressure === 'heavy'
+      ? 'prefer-promoted-cache'
+      : streamPressure === 'multi'
+        ? 'promote-next-frames'
+        : 'source-only';
 
     return {
       activeStreamCount: transport.streams.length,
@@ -706,28 +820,55 @@ export class ReferenceNLEParityRuntime {
       audioUnderruns: transport.playing && transport.streams.some((stream) => stream.mediaType === 'audio') ? 0 : 0,
       maxDecodeLatencyMs: confidenceAsLatencyMs(transport.streams.length, prerollFrames),
       maxCompositeLatencyMs: confidenceAsLatencyMs(Math.max(1, transport.snapshot.videoLayerCount), prerollFrames / 2),
+      currentQuality,
+      cacheStrategy,
+      streamPressure,
+      frameBudgetMs: Math.round(1000 / fps),
+      lastFrameRenderLatencyMs: 0,
+      lastFrameCacheHitRate: 0,
+      promotedFrameCount: streamPressure === 'single' ? 0 : Math.max(1, Math.round(prerollFrames / 6)),
     };
   }
 
   private compileMix(snapshot: TimelineRenderSnapshot): AudioMixCompilation {
-    const buses: AudioBusDefinition[] = [
-      { id: 'master', name: 'Master', layout: 'stereo' },
-    ];
-
-    if (snapshot.audioTrackCount >= 4) {
-      buses.push({ id: 'dialogue', name: 'Dialogue', layout: 'stereo' });
-      buses.push({ id: 'music-effects', name: 'Music+Effects', layout: 'stereo' });
-    }
-
-    if (snapshot.audioTrackCount >= 8) {
-      buses.push({ id: 'surround', name: 'Surround', layout: '5.1' });
-    }
+    const project = this.projects.get(snapshot.projectId);
+    const assetMap = new Map((project ? flattenAssets(project.bins) : []).map((asset) => [asset.id, asset] as const));
+    const trackLayouts: AudioTrackRoutingDescriptor[] = project
+      ? project.tracks
+        .filter((track) => track.type === 'AUDIO')
+        .map((track) => {
+          const clipLayouts = track.clips.map((clip) => {
+            const asset = clip.assetId ? assetMap.get(clip.assetId) : undefined;
+            return normalizeAudioChannelLayoutLabel(
+              asset?.technicalMetadata?.audioChannelLayout,
+              asset?.technicalMetadata?.audioChannels,
+            );
+          });
+          const layout = pickDominantAudioChannelLayout(clipLayouts);
+          return {
+            trackId: track.id,
+            trackName: track.name,
+            layout,
+            channelCount: getAudioChannelCountForLayout(layout),
+            clipLayouts: uniqueLayouts(clipLayouts) as AudioTrackRoutingDescriptor['clipLayouts'],
+          };
+        })
+      : [];
+    const topology = buildAudioMixTopology(trackLayouts);
 
     const compilation: AudioMixCompilation = {
       mixId: this.next(`mix-${snapshot.sequenceId}`),
       revisionId: snapshot.revisionId,
-      buses,
+      buses: topology.buses,
       trackCount: snapshot.audioTrackCount,
+      dominantLayout: topology.dominantLayout,
+      sourceLayouts: topology.sourceLayouts,
+      containsContainerizedAudio: topology.containsContainerizedAudio,
+      printMasterBusId: topology.printMasterBusId,
+      monitoringBusId: topology.monitoringBusId,
+      routingWarnings: topology.routingWarnings,
+      processingWarnings: topology.processingWarnings,
+      automationModes: createDefaultAutomationModes(trackLayouts),
     };
 
     this.audioMixes.set(compilation.mixId, {
@@ -745,14 +886,63 @@ export class ReferenceNLEParityRuntime {
       throw new Error(`Unknown mix: ${mixId}`);
     }
     mix.automationWrites.push(cloneValue(automation));
+    mix.compilation = applyAutomationWriteToCompilation(mix.compilation, automation);
     return cloneValue(mix.compilation);
   }
 
   private renderMixPreview(mixId: string, _timeRange: TimeRange): NativeResourceHandle {
-    if (!this.audioMixes.has(mixId)) {
+    const mix = this.audioMixes.get(mixId);
+    if (!mix) {
       throw new Error(`Unknown mix: ${mixId}`);
     }
-    return this.next(`mix-preview-${mixId}`);
+    const handle = this.next(`mix-preview-${mixId}`);
+    const previewBusMeasurements = buildBusLoudnessMeasurements(
+      mix.compilation,
+      mix.automationWrites.reduce((sum, write) => sum + write.points.length, 0),
+      Math.max(0.1, _timeRange.endSeconds - _timeRange.startSeconds),
+      'preview',
+    );
+    const printReferenceBusMeasurements = buildBusLoudnessMeasurements(
+      mix.compilation,
+      mix.automationWrites.reduce((sum, write) => sum + write.points.length, 0),
+      Math.max(0.1, _timeRange.endSeconds - _timeRange.startSeconds),
+      'print',
+    );
+    const busPolicies = mix.compilation.buses.map((bus) => {
+      const policy = summarizeAudioBusProcessingPolicy(bus);
+      return {
+        busId: bus.id,
+        requiresDedicatedPreviewRender: policy.requiresDedicatedPreviewRender,
+        requiresDedicatedPrintRender: policy.requiresDedicatedPrintRender,
+        previewBypassedProcessingChain: policy.preview.bypassedStages,
+        printBypassedProcessingChain: policy.print.bypassedStages,
+      };
+    });
+    this.storeArtifact(
+      `mix-preview/${sanitizeSegment(mixId)}.json`,
+      'audio-preview',
+      JSON.stringify({
+        mixId,
+        handle,
+        meteringContext: 'preview',
+        processingPolicy: {
+          requiresDedicatedPreviewRender: busPolicies.some((bus) => bus.requiresDedicatedPreviewRender),
+          requiresDedicatedPrintRender: busPolicies.some((bus) => bus.requiresDedicatedPrintRender),
+        },
+        buses: mix.compilation.buses.map((bus) => ({
+          ...bus,
+          previewProcessingChain: resolveAudioBusProcessingChain(bus, 'preview'),
+          printProcessingChain: resolveAudioBusProcessingChain(bus, 'print'),
+          processingPolicy: busPolicies.find((policy) => policy.busId === bus.id),
+        })),
+        previewBusMeasurements,
+        printReferenceBusMeasurements,
+        routingWarnings: mix.compilation.routingWarnings ?? [],
+        processingWarnings: mix.compilation.processingWarnings ?? [],
+        automationModes: mix.compilation.automationModes ?? [],
+      }, null, 2),
+    );
+    return handle;
   }
 
   private analyzeLoudness(mixId: string, timeRange: TimeRange): LoudnessMeasurement {
@@ -762,13 +952,34 @@ export class ReferenceNLEParityRuntime {
     }
 
     const duration = Math.max(0.1, timeRange.endSeconds - timeRange.startSeconds);
-    const automationInfluence = mix.automationWrites.reduce((sum, write) => sum + write.points.length, 0) * 0.1;
-    const integratedLufs = -24 + Math.min(3, mix.compilation.trackCount * 0.2) + Math.min(1.5, automationInfluence);
+    const automationPointCount = mix.automationWrites.reduce((sum, write) => sum + write.points.length, 0);
+    const busMeasurements = buildBusLoudnessMeasurements(mix.compilation, automationPointCount, duration, 'print');
+    const primaryBusMeasurement = busMeasurements.find((bus) => bus.busId === mix.compilation.printMasterBusId)
+      ?? busMeasurements.find((bus) => bus.busId === 'master')
+      ?? busMeasurements[0];
+    const analyzedLayout = primaryBusMeasurement?.layout ?? mix.compilation.dominantLayout ?? 'stereo';
+    const analyzedChannelCount = getAudioChannelCountForLayout(analyzedLayout);
+    const warnings = uniqueLayouts([
+      ...(mix.compilation.containsContainerizedAudio
+        ? ['Containerized multichannel audio detected; verify bus layout before turnover.']
+        : []),
+      ...(mix.compilation.routingWarnings ?? []),
+      ...(mix.compilation.processingWarnings ?? []),
+      ...busMeasurements.flatMap((bus) => bus.warnings ?? []),
+    ]);
 
     return {
-      integratedLufs: Number(integratedLufs.toFixed(2)),
-      shortTermLufs: Number((integratedLufs + Math.min(1.5, duration / 10)).toFixed(2)),
-      truePeakDbtp: Number((-2 + Math.min(0.5, mix.compilation.trackCount * 0.05)).toFixed(2)),
+      integratedLufs: primaryBusMeasurement?.integratedLufs ?? -24,
+      shortTermLufs: primaryBusMeasurement?.shortTermLufs ?? -22.5,
+      truePeakDbtp: primaryBusMeasurement?.truePeakDbtp ?? -1.5,
+      analyzedLayout,
+      analyzedChannelCount,
+      warnings,
+      diagnostics: [
+        ...(mix.compilation.routingWarnings ?? []),
+        ...(mix.compilation.processingWarnings ?? []),
+      ],
+      busMeasurements,
     };
   }
 

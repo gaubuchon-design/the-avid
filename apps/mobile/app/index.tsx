@@ -13,7 +13,11 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import type { ProjectSummary, ProjectTemplate } from '@mcua/core';
+import {
+  getEditorialSurfaceContract,
+  type ProjectSummary,
+  type ProjectTemplate,
+} from '@mcua/core';
 import { useAppTheme, useAuth } from './_layout';
 import type { AppTheme } from './_layout';
 import {
@@ -71,6 +75,8 @@ const TEMPLATE_COLOR_MAP: Record<ProjectTemplate, string> = {
   social: '#0ea5e9',
   news: '#ef4444',
 };
+
+const MOBILE_SURFACE_CONTRACT = getEditorialSurfaceContract('mobile');
 
 // ---------------------------------------------------------------------------
 // Project Card
@@ -398,7 +404,9 @@ export default function HomeScreen() {
     if (creating) return;
     setCreating(true);
     try {
-      const project = await createProjectInRepository({ template: 'social' });
+      const project = await createProjectInRepository({
+        template: MOBILE_SURFACE_CONTRACT.defaultProjectTemplate,
+      });
       await refreshProjects();
       router.push(`/editor/${project.id}`);
     } catch (err) {
@@ -505,7 +513,7 @@ export default function HomeScreen() {
           <Text style={[styles.subheading, { color: theme.colors.textSecondary }]}>
             {projects.length > 0
               ? `${projects.length} project${projects.length === 1 ? '' : 's'} in your library`
-              : 'Mobile review and rough-cut workspace'}
+              : MOBILE_SURFACE_CONTRACT.description}
           </Text>
         </View>
         <TouchableOpacity

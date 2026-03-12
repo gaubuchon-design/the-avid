@@ -2,6 +2,10 @@
 
 This program turns The Avid from a broad product foundation into a credible professional NLE that modernizes the Media Composer model instead of loosely imitating it.
 
+Related assessment:
+
+- `docs/MEDIA_COMPOSER_UNIFICATION_ASSESSMENT.md` captures the current cross-surface architecture verdict, remaining Media Composer parity gaps, and production-oriented Codex prompts for closing them.
+
 ## Starting Point
 
 The current repository already has meaningful value:

@@ -1,10 +1,11 @@
-import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   AAFExporter,
   ProToolsAAFExporter,
   type AudioAutomationWrite,
+  type AudioChannelLayout,
   type AudioDecodeRequest,
   type AudioMixCompilation,
   type CompositeFrameRequest,
@@ -39,7 +40,10 @@ import {
   type MulticamGroupResult,
   type MulticamPort,
   type NativeResourceHandle,
+  type PlaybackCacheStrategy,
+  type PlaybackQualityLevel,
   type PlaybackSessionDescriptor,
+  type PlaybackStreamPressure,
   type PlaybackStreamDescriptor,
   type PlaybackTelemetry,
   type ProfessionalAudioMixPort,
@@ -59,12 +63,22 @@ import {
   type VideoCompositingPort,
   type FrameRange,
   type MediaDecodeRequest,
+  getAudioChannelCountForLayout,
+  buildAudioMixTopology,
+  normalizeAudioChannelLayoutLabel,
+  pickDominantAudioChannelLayout,
+  resolveAudioBusProcessingChain,
+  summarizeAudioBusProcessingPolicy,
+  type AudioTrackRoutingDescriptor,
   MultiCamEngine,
   createMultiCamSyncEngine,
 } from '@mcua/core';
 import {
+  composeFrameArtifact,
   createProjectMediaPaths,
   ensureProjectMediaPaths,
+  extractAudioSliceArtifact,
+  extractVideoFrameArtifact,
   relinkProjectMedia,
   transcodeExportArtifact,
   writeConformExportPackage,
@@ -72,6 +86,8 @@ import {
   type ExportTranscodeRequest,
   type ProjectMediaPaths,
 } from '../mediaPipeline';
+import { FrameTransport, createFrameTransport } from '../videoIO/FrameTransport';
+import type { PlaybackConfig } from '../videoIO/types';
 
 export interface DesktopProjectBinding {
   project: EditorProject;
@@ -85,25 +101,44 @@ export interface DesktopMediaPipelineBindings {
   writeMediaIndexManifest: typeof writeMediaIndexManifest;
   transcodeExportArtifact: typeof transcodeExportArtifact;
   writeConformExportPackage: typeof writeConformExportPackage;
+  extractVideoFrameArtifact: typeof extractVideoFrameArtifact;
+  extractAudioSliceArtifact: typeof extractAudioSliceArtifact;
+  composeFrameArtifact: typeof composeFrameArtifact;
 }
 
 export interface DesktopFsBindings {
   copyFile: typeof copyFile;
   mkdir: typeof mkdir;
   readFile: typeof readFile;
+  rm: typeof rm;
   stat: typeof stat;
   writeFile: typeof writeFile;
+}
+
+export interface DesktopPlaybackOutputBindings {
+  startPlayback(config: PlaybackConfig): Promise<void> | void;
+  stopPlayback(deviceId: string): Promise<void> | void;
+  sendFrame(deviceId: string, frameData: Buffer): Promise<void> | void;
 }
 
 export interface DesktopNativeMediaManagementAdapterOptions {
   pipeline?: Partial<DesktopMediaPipelineBindings>;
   fs?: Partial<DesktopFsBindings>;
+  playbackOutput?: Partial<DesktopPlaybackOutputBindings>;
 }
 
 export interface DesktopNativeParityRuntimeOptions extends ReferenceNLEParityRuntimeOptions {
   projectBindings?: DesktopProjectBinding[];
   mediaAdapterOptions?: DesktopNativeMediaManagementAdapterOptions;
   referenceRuntime?: ReferenceNLEParityRuntime;
+}
+
+export interface DesktopPlaybackTransportView {
+  buffer: SharedArrayBuffer;
+  width: number;
+  height: number;
+  bytesPerPixel: number;
+  slots: number;
 }
 
 interface BoundDesktopProject {
@@ -119,12 +154,16 @@ const DEFAULT_PIPELINE_BINDINGS: DesktopMediaPipelineBindings = {
   writeMediaIndexManifest,
   transcodeExportArtifact,
   writeConformExportPackage,
+  extractVideoFrameArtifact,
+  extractAudioSliceArtifact,
+  composeFrameArtifact,
 };
 
 const DEFAULT_FS_BINDINGS: DesktopFsBindings = {
   copyFile,
   mkdir,
   readFile,
+  rm,
   stat,
   writeFile,
 };
@@ -189,6 +228,119 @@ function safeExtension(asset: EditorMediaAsset): string {
   return (asset.fileExtension ?? 'mov').replace(/^\./, '') || 'mov';
 }
 
+function formatTimecodeFromFrame(frame: number, fps: number): string {
+  const safeFps = Math.max(1, Math.round(fps || 24));
+  const totalFrames = Math.max(0, Math.round(frame));
+  const frames = totalFrames % safeFps;
+  const totalSeconds = Math.floor(totalFrames / safeFps);
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  return [hours, minutes, seconds, frames]
+    .map((value) => value.toString().padStart(2, '0'))
+    .join(':');
+}
+
+function createSolidBgraFrame(width: number, height: number, seedText: string): Buffer {
+  const safeWidth = Math.max(1, Math.round(width));
+  const safeHeight = Math.max(1, Math.round(height));
+  const digest = Buffer.from(seedText, 'utf8');
+  const buffer = Buffer.alloc(safeWidth * safeHeight * 4);
+  for (let index = 0; index < safeWidth * safeHeight; index += 1) {
+    const offset = index * 4;
+    const seed = digest[index % Math.max(digest.length, 1)] ?? 0x42;
+    buffer[offset] = seed;
+    buffer[offset + 1] = (seed + 41) % 256;
+    buffer[offset + 2] = (seed + 83) % 256;
+    buffer[offset + 3] = 255;
+  }
+  return buffer;
+}
+
+function parsePpmHeader(data: Uint8Array): { width: number; height: number; maxValue: number; pixelOffset: number } | null {
+  if (data[0] !== 0x50 || data[1] !== 0x36) {
+    return null;
+  }
+
+  let cursor = 2;
+  const tokens: string[] = [];
+  while (cursor < data.length && tokens.length < 3) {
+    while (cursor < data.length && /\s/.test(String.fromCharCode(data[cursor]!))) {
+      cursor += 1;
+    }
+    if (cursor >= data.length) {
+      break;
+    }
+    if (data[cursor] === 0x23) {
+      while (cursor < data.length && data[cursor] !== 0x0a) {
+        cursor += 1;
+      }
+      continue;
+    }
+
+    const start = cursor;
+    while (cursor < data.length && !/\s/.test(String.fromCharCode(data[cursor]!))) {
+      cursor += 1;
+    }
+    tokens.push(Buffer.from(data.subarray(start, cursor)).toString('ascii'));
+  }
+
+  while (cursor < data.length && /\s/.test(String.fromCharCode(data[cursor]!))) {
+    cursor += 1;
+  }
+
+  if (tokens.length < 3) {
+    return null;
+  }
+
+  const width = Number(tokens[0]);
+  const height = Number(tokens[1]);
+  const maxValue = Number(tokens[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || !Number.isFinite(maxValue) || width <= 0 || height <= 0) {
+    return null;
+  }
+
+  return {
+    width,
+    height,
+    maxValue,
+    pixelOffset: cursor,
+  };
+}
+
+function convertPpmToBgra(data: Uint8Array, fallbackWidth: number, fallbackHeight: number): { width: number; height: number; pixelData: Buffer } {
+  const header = parsePpmHeader(data);
+  if (!header) {
+    return {
+      width: fallbackWidth,
+      height: fallbackHeight,
+      pixelData: createSolidBgraFrame(fallbackWidth, fallbackHeight, 'invalid-ppm'),
+    };
+  }
+
+  const { width, height, pixelOffset } = header;
+  const expectedBytes = width * height * 3;
+  const rgb = data.subarray(pixelOffset, pixelOffset + expectedBytes);
+  if (rgb.length < expectedBytes) {
+    return {
+      width: fallbackWidth,
+      height: fallbackHeight,
+      pixelData: createSolidBgraFrame(fallbackWidth, fallbackHeight, 'short-ppm'),
+    };
+  }
+
+  const bgra = Buffer.alloc(width * height * 4);
+  for (let rgbOffset = 0, bgraOffset = 0; rgbOffset < expectedBytes; rgbOffset += 3, bgraOffset += 4) {
+    bgra[bgraOffset] = rgb[rgbOffset + 2] ?? 0;
+    bgra[bgraOffset + 1] = rgb[rgbOffset + 1] ?? 0;
+    bgra[bgraOffset + 2] = rgb[rgbOffset] ?? 0;
+    bgra[bgraOffset + 3] = 255;
+  }
+
+  return { width, height, pixelData: bgra };
+}
+
 function createHandle(prefix: string, projectId: string, sequence = Date.now()): string {
   return `${prefix}-${projectId}-${sequence.toString(36)}`;
 }
@@ -251,6 +403,77 @@ function inferPlaybackTarget(streams: PlaybackStreamDescriptor[]): CompositeFram
   return 'record-monitor';
 }
 
+function createPlaybackTelemetry(frameBudgetMs: number): PlaybackTelemetry {
+  return {
+    activeStreamCount: 0,
+    droppedVideoFrames: 0,
+    audioUnderruns: 0,
+    maxDecodeLatencyMs: 0,
+    maxCompositeLatencyMs: 0,
+    currentQuality: 'full',
+    cacheStrategy: 'source-only',
+    streamPressure: 'single',
+    frameBudgetMs,
+    lastFrameRenderLatencyMs: 0,
+    lastFrameCacheHitRate: 0,
+    promotedFrameCount: 0,
+  };
+}
+
+function createPlaybackPolicyState(frameBudgetMs: number): DesktopPlaybackPolicyState {
+  return {
+    currentQuality: 'full',
+    cacheStrategy: 'source-only',
+    streamPressure: 'single',
+    frameBudgetMs,
+    lastFrameRenderLatencyMs: 0,
+    lastFrameCacheHitRate: 0,
+    promotedFrameCount: 0,
+    promotionLookaheadFrames: 0,
+    overBudgetWindow: 0,
+    pendingPromotionKeys: new Set<string>(),
+  };
+}
+
+function demotePlaybackQuality(quality: PlaybackQualityLevel): PlaybackQualityLevel {
+  switch (quality) {
+    case 'full':
+      return 'preview';
+    case 'preview':
+      return 'draft';
+    default:
+      return 'draft';
+  }
+}
+
+function promotePlaybackQuality(quality: PlaybackQualityLevel): PlaybackQualityLevel {
+  switch (quality) {
+    case 'draft':
+      return 'preview';
+    case 'preview':
+      return 'full';
+    default:
+      return 'full';
+  }
+}
+
+function determineStreamPressure(
+  videoStreamCount: number,
+  audioStreamCount: number,
+  snapshot: TimelineRenderSnapshot,
+): PlaybackStreamPressure {
+  const weightedPressure = videoStreamCount
+    + (Math.max(0, audioStreamCount - 1) * 0.35)
+    + (Math.max(0, snapshot.videoLayerCount - 1) * 0.5);
+  if (weightedPressure >= 5) {
+    return 'heavy';
+  }
+  if (weightedPressure >= 2) {
+    return 'multi';
+  }
+  return 'single';
+}
+
 function escapeXmlAttribute(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -261,6 +484,100 @@ function escapeXmlAttribute(value: string): string {
 
 function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values));
+}
+
+interface ResolvedAudioTrackLayout {
+  trackId: string;
+  trackName: string;
+  layout: AudioChannelLayout;
+  channelCount: number;
+  clipLayouts: AudioChannelLayout[];
+}
+
+interface AudioSignalSummary {
+  averagePeak: number;
+  peakHold: number;
+}
+
+function resolveAudioTrackLayouts(project: EditorProject): ResolvedAudioTrackLayout[] {
+  const assetMap = new Map(flattenAssets(project.bins).map((asset) => [asset.id, asset] as const));
+
+  return project.tracks
+    .filter((track) => track.type === 'AUDIO')
+    .map((track) => {
+      const clipLayouts = track.clips.map((clip) => {
+        const asset = clip.assetId ? assetMap.get(clip.assetId) : undefined;
+        return normalizeAudioChannelLayoutLabel(
+          asset?.technicalMetadata?.audioChannelLayout,
+          asset?.technicalMetadata?.audioChannels,
+        );
+      });
+      const layout = pickDominantAudioChannelLayout(clipLayouts);
+      return {
+        trackId: track.id,
+        trackName: track.name,
+        layout,
+        channelCount: getAudioChannelCountForLayout(layout),
+        clipLayouts: uniqueStrings(clipLayouts) as AudioChannelLayout[],
+      };
+    });
+}
+
+function summarizeAudioSignal(project: EditorProject): AudioSignalSummary {
+  const peaks = flattenAssets(project.bins)
+    .filter((asset) => asset.type === 'AUDIO' || (asset.technicalMetadata?.audioChannels ?? 0) > 0)
+    .flatMap((asset) => asset.waveformMetadata?.peaks ?? asset.waveformData ?? []);
+
+  if (peaks.length === 0) {
+    return {
+      averagePeak: 0.35,
+      peakHold: 0.5,
+    };
+  }
+
+  return {
+    averagePeak: peaks.reduce((sum, value) => sum + value, 0) / peaks.length,
+    peakHold: peaks.reduce((max, value) => Math.max(max, value), 0),
+  };
+}
+
+function createDefaultAutomationModes(trackLayouts: ResolvedAudioTrackLayout[]): NonNullable<AudioMixCompilation['automationModes']> {
+  return trackLayouts.map((track) => ({
+    trackId: track.trackId,
+    mode: 'read',
+    touchedParameters: [],
+  }));
+}
+
+function applyAutomationWriteToCompilation(
+  compilation: AudioMixCompilation,
+  automation: AudioAutomationWrite,
+): AudioMixCompilation {
+  const existing = compilation.automationModes ?? [];
+  const nextEntry = existing.find((entry) => entry.trackId === automation.trackId);
+  const nextMode = automation.mode ?? 'write';
+  const touchedParameters = uniqueStrings([
+    ...(nextEntry?.touchedParameters ?? []),
+    automation.parameter,
+  ]) as NonNullable<AudioMixCompilation['automationModes']>[number]['touchedParameters'];
+
+  const automationModes = nextEntry
+    ? existing.map((entry) => entry.trackId === automation.trackId
+      ? { ...entry, mode: nextMode, touchedParameters }
+      : entry)
+    : [
+      ...existing,
+      {
+        trackId: automation.trackId,
+        mode: nextMode,
+        touchedParameters: [automation.parameter],
+      },
+    ];
+
+  return {
+    ...compilation,
+    automationModes,
+  };
 }
 
 function deriveMediaLocators(project: EditorProject): MediaLocator[] {
@@ -312,6 +629,113 @@ function buildInterchangeAssets(project: EditorProject): InterchangeAssetReferen
   }));
 }
 
+function timelineSecondsForFrame(frame: number, fps: number): number {
+  return Math.max(0, frame / Math.max(fps, 0.001));
+}
+
+function resolveClipSourceFrame(
+  clip: EditorProject['tracks'][number]['clips'][number],
+  timelineFrame: number,
+  fps: number,
+): number {
+  const clipStartFrame = Math.round(clip.startTime * fps);
+  const timelineOffsetFrames = Math.max(0, timelineFrame - clipStartFrame);
+  const trimStartFrames = Math.round((clip.trimStart ?? 0) * fps);
+  return trimStartFrames + timelineOffsetFrames;
+}
+
+function buildDecodeCacheKey(
+  snapshot: TimelineRenderSnapshot,
+  assetId: string,
+  frame: number,
+  variant: string,
+  pixelFormat: string | undefined,
+  width: number,
+  height: number,
+): string {
+  return [
+    snapshot.projectId,
+    snapshot.sequenceId,
+    snapshot.revisionId,
+    assetId,
+    frame,
+    variant,
+    pixelFormat ?? 'default',
+    width,
+    height,
+  ].join('::');
+}
+
+function buildAudioCacheKey(
+  snapshot: TimelineRenderSnapshot,
+  assetId: string,
+  request: AudioDecodeRequest,
+  channelCount: number,
+  sampleRate: number,
+): string {
+  return [
+    snapshot.projectId,
+    snapshot.sequenceId,
+    snapshot.revisionId,
+    assetId,
+    request.timeRange.startSeconds.toFixed(6),
+    request.timeRange.endSeconds.toFixed(6),
+    request.variant,
+    channelCount,
+    sampleRate,
+  ].join('::');
+}
+
+function buildCompositeCacheKey(
+  state: DesktopCompositorGraphState,
+  request: CompositeFrameRequest,
+  layers: ActiveVideoLayer[],
+): string {
+  return [
+    state.snapshot.projectId,
+    state.snapshot.sequenceId,
+    state.snapshot.revisionId,
+    request.target,
+    request.quality,
+    request.frame,
+    ...layers.map((layer) => `${layer.trackId}:${layer.assetId}:${layer.timelineFrame}:${layer.sourcePath}`),
+  ].join('::');
+}
+
+function activeVideoLayersForFrame(
+  project: EditorProject,
+  snapshot: TimelineRenderSnapshot,
+  frame: number,
+): ActiveVideoLayer[] {
+  const timelineSeconds = timelineSecondsForFrame(frame, snapshot.fps);
+  const assets = new Map(flattenAssets(project.bins).map((asset) => [asset.id, asset] as const));
+
+  return project.tracks
+    .filter((track) => track.type === 'VIDEO')
+    .sort((left, right) => left.sortOrder - right.sortOrder)
+    .flatMap((track) => {
+      const clip = track.clips
+        .filter((entry) => entry.type === 'video')
+        .find((entry) => timelineSeconds >= entry.startTime && timelineSeconds < entry.endTime);
+      if (!clip?.assetId) {
+        return [];
+      }
+
+      const asset = assets.get(clip.assetId);
+      const sourcePath = normalizeFilesystemPath(asset ? getMediaAssetPrimaryPath(asset) : undefined);
+      if (!sourcePath) {
+        return [];
+      }
+
+      return [{
+        trackId: track.id,
+        assetId: clip.assetId,
+        sourcePath,
+        timelineFrame: resolveClipSourceFrame(clip, frame, snapshot.fps),
+      }];
+    });
+}
+
 interface DesktopDecodeSessionState {
   handle: NativeResourceHandle;
   projectId: string;
@@ -319,6 +743,8 @@ interface DesktopDecodeSessionState {
   snapshot: TimelineRenderSnapshot;
   descriptor: PlaybackSessionDescriptor;
   prerollRanges: FrameRange[];
+  videoArtifacts: Record<string, DesktopDecodedVideoArtifact>;
+  audioArtifacts: Record<string, DesktopDecodedAudioArtifact>;
   releasedAt?: string;
 }
 
@@ -328,6 +754,7 @@ interface DesktopCompositorGraphState {
   snapshot: TimelineRenderSnapshot;
   compilation: RenderGraphCompilation;
   renderedFrames: number[];
+  renderedArtifacts: Record<string, DesktopRenderedCompositeArtifact>;
 }
 
 interface DesktopPlaybackTransportState {
@@ -343,6 +770,67 @@ interface DesktopPlaybackTransportState {
   graphId: string;
   telemetry: PlaybackTelemetry;
   lastCompositeHandle?: NativeResourceHandle;
+  lastCompositeArtifactPath?: string;
+  decodedVideoArtifacts: DesktopDecodedVideoArtifact[];
+  decodedAudioArtifacts: DesktopDecodedAudioArtifact[];
+  frameTransport: FrameTransport;
+  frameTransportView: DesktopPlaybackTransportView;
+  attachedOutputConfigs: PlaybackConfig[];
+  activeOutputDeviceIds: string[];
+  inFlightTasks: Set<Promise<void>>;
+  policy: DesktopPlaybackPolicyState;
+  scheduler: {
+    loopToken: number;
+    timer: ReturnType<typeof setTimeout> | null;
+    startedAtMs: number;
+    startFrame: number;
+    playbackRate: number;
+    lastRenderedFrame: number;
+    running: boolean;
+  } | null;
+}
+
+interface DesktopPlaybackPolicyState {
+  currentQuality: PlaybackQualityLevel;
+  cacheStrategy: PlaybackCacheStrategy;
+  streamPressure: PlaybackStreamPressure;
+  frameBudgetMs: number;
+  lastFrameRenderLatencyMs: number;
+  lastFrameCacheHitRate: number;
+  promotedFrameCount: number;
+  promotionLookaheadFrames: number;
+  overBudgetWindow: number;
+  pendingPromotionKeys: Set<string>;
+}
+
+interface DesktopDecodedVideoArtifact extends DecodedVideoFrame {
+  artifactPath: string;
+  sourcePath: string;
+  cacheHit: boolean;
+  decodeLatencyMs: number;
+}
+
+interface DesktopDecodedAudioArtifact extends DecodedAudioSlice {
+  artifactPath: string;
+  sourcePath: string;
+  cacheHit: boolean;
+  decodeLatencyMs: number;
+}
+
+interface DesktopRenderedCompositeArtifact extends CompositedVideoFrame {
+  artifactPath: string;
+  layerAssetIds: string[];
+  layerSourcePaths: string[];
+  layerTrackIds: string[];
+  cacheHit: boolean;
+  compositeLatencyMs: number;
+}
+
+interface ActiveVideoLayer {
+  trackId: string;
+  assetId: string;
+  sourcePath: string;
+  timelineFrame: number;
 }
 
 interface DesktopAudioMixState {
@@ -351,6 +839,7 @@ interface DesktopAudioMixState {
   manifestPath: string;
   snapshot: TimelineRenderSnapshot;
   compilation: AudioMixCompilation;
+  trackLayouts: ResolvedAudioTrackLayout[];
   automationWrites: AudioAutomationWrite[];
   previewHandles: NativeResourceHandle[];
   lastLoudness?: LoudnessMeasurement;
@@ -994,6 +1483,24 @@ export class DesktopNativeInterchangeAdapter implements InterchangePort {
         errors.push(`Failed to parse Pro Tools turnover validation report: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+
+    const handoffPath = pkg.artifactPaths.find((artifactPath) => artifactPath.endsWith('assistant-editor.handoff.json'));
+    if (handoffPath && await fileExists(this.fsBindings, handoffPath)) {
+      try {
+        const handoff = JSON.parse(await this.fsBindings.readFile(handoffPath, 'utf8')) as {
+          signOffStatus?: 'ready' | 'needs-review' | 'blocked';
+          blockers?: string[];
+          notes?: string[];
+        };
+        if (handoff.signOffStatus === 'blocked') {
+          errors.push(...(handoff.blockers ?? []).map((issue) => `Assistant-editor handoff: ${issue}`));
+        } else if (handoff.signOffStatus === 'needs-review') {
+          warnings.push(...(handoff.notes ?? []).map((note) => `Assistant-editor handoff: ${note}`));
+        }
+      } catch (error) {
+        errors.push(`Failed to parse assistant-editor handoff report: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   }
 
   private inferFormatFromSourcePath(sourcePath: string): InterchangeFormat {
@@ -1027,6 +1534,262 @@ export class DesktopNativeInterchangeAdapter implements InterchangePort {
     return attributes;
   }
 
+  private async evaluateAudioTurnoverPolicy(audioTurnoverPath: string): Promise<{
+    issues: string[];
+    warnings: string[];
+    facilityPolicy: {
+      printMasterConfigured: boolean;
+      foldDownConfigured: boolean;
+      printMasterProcessingComplete: boolean;
+      foldDownProcessingComplete: boolean;
+      previewPrintSeparationValid: boolean;
+      stemRolesAssigned: boolean;
+      assistantChecklistComplete: boolean;
+    };
+  } | null> {
+    if (!await fileExists(this.fsBindings, audioTurnoverPath)) {
+      return null;
+    }
+
+    const parsed = JSON.parse(await this.fsBindings.readFile(audioTurnoverPath, 'utf8')) as {
+      audioChannels?: number;
+      printMasterBusId?: string;
+      monitoringBusId?: string;
+      processingWarnings?: string[];
+      assistantEditorChecklist?: Array<{
+        id: string;
+        label?: string;
+        status?: 'complete' | 'needs-attention' | 'not-applicable';
+      }>;
+      buses?: Array<{
+        id: string;
+        role?: string;
+        stemRole?: string;
+        processingChain?: Array<{ kind?: string }>;
+        previewProcessingChain?: Array<{ kind?: string }>;
+        printProcessingChain?: Array<{ kind?: string }>;
+      }>;
+    };
+
+    const issues: string[] = [];
+    const warnings: string[] = [...(parsed.processingWarnings ?? [])];
+    const buses = parsed.buses ?? [];
+    const printMasterBus = buses.find((bus) => bus.id === parsed.printMasterBusId || bus.role === 'printmaster');
+    const foldDownBus = buses.find((bus) => bus.role === 'fold-down' || (parsed.monitoringBusId === 'fold-down' && bus.id === parsed.monitoringBusId));
+    const stemRolesAssigned = buses.filter((bus) => bus.role !== 'master').every((bus) => Boolean(bus.stemRole));
+    const printMasterProcessingComplete = Boolean(
+      printMasterBus?.printProcessingChain?.some((stage) => stage.kind === 'meter')
+      && printMasterBus.printProcessingChain.some((stage) => stage.kind === 'limiter'),
+    );
+    const foldDownProcessingComplete = Boolean(
+      !parsed.audioChannels || parsed.audioChannels <= 2 || (
+        foldDownBus?.printProcessingChain?.some((stage) => stage.kind === 'fold-down-matrix')
+        && foldDownBus.printProcessingChain.some((stage) => stage.kind === 'limiter')
+      )
+    );
+    const previewPrintSeparationValid = Boolean(
+      !printMasterBus?.previewProcessingChain?.some((stage) => stage.kind === 'meter' || stage.kind === 'limiter')
+      && !foldDownBus?.previewProcessingChain?.some((stage) => stage.kind === 'limiter')
+    );
+    const assistantChecklistComplete = (parsed.assistantEditorChecklist ?? []).every((item) => (
+      item.status === 'complete' || item.status === 'not-applicable'
+    ));
+
+    if (!parsed.printMasterBusId || !printMasterBus) {
+      issues.push('Audio turnover is missing a configured printmaster bus.');
+    } else if (printMasterBus.stemRole !== 'PRINTMASTER') {
+      issues.push('Printmaster bus is missing the PRINTMASTER stem role.');
+    } else if (!printMasterProcessingComplete) {
+      issues.push('Printmaster bus is missing required meter/limiter processing stages.');
+    }
+
+    if ((parsed.audioChannels ?? 2) > 2) {
+      if (parsed.monitoringBusId !== 'fold-down' || !foldDownBus) {
+        issues.push('Multichannel turnover is missing a configured fold-down monitoring bus.');
+      } else if (foldDownBus.stemRole !== 'FOLDDOWN') {
+        issues.push('Fold-down monitoring bus is missing the FOLDDOWN stem role.');
+      } else if (!foldDownProcessingComplete) {
+        issues.push('Fold-down monitoring bus is missing required matrix/limiter processing stages.');
+      }
+    }
+    if (!stemRolesAssigned) {
+      issues.push('One or more turnover buses are missing assistant-editor stem-role assignments.');
+    }
+    if (!previewPrintSeparationValid) {
+      issues.push('Turnover processing policy leaks print-only stages into the preview path.');
+    }
+    for (const item of parsed.assistantEditorChecklist ?? []) {
+      if (item.status === 'needs-attention') {
+        warnings.push(`Assistant-editor checklist: ${item.label ?? item.id} needs attention.`);
+      }
+    }
+
+    return {
+      issues,
+      warnings: uniqueStrings(warnings),
+      facilityPolicy: {
+        printMasterConfigured: Boolean(parsed.printMasterBusId && printMasterBus),
+        foldDownConfigured: (parsed.audioChannels ?? 2) <= 2 ? false : Boolean(parsed.monitoringBusId === 'fold-down' && foldDownBus),
+        printMasterProcessingComplete,
+        foldDownProcessingComplete,
+        previewPrintSeparationValid,
+        stemRolesAssigned,
+        assistantChecklistComplete,
+      },
+    };
+  }
+
+  private async buildAssistantEditorHandoff(
+    audioTurnoverPath: string,
+    validation: {
+      valid: boolean;
+      issues: string[];
+      warnings: string[];
+      facilityPolicy?: {
+        printMasterConfigured: boolean;
+        foldDownConfigured: boolean;
+        printMasterProcessingComplete: boolean;
+        foldDownProcessingComplete: boolean;
+        previewPrintSeparationValid: boolean;
+        stemRolesAssigned: boolean;
+        assistantChecklistComplete: boolean;
+      };
+    },
+  ): Promise<{
+    generatedAt: string;
+    signOffStatus: 'ready' | 'needs-review' | 'blocked';
+    readyForTurnover: boolean;
+    blockers: string[];
+    notes: string[];
+    recommendedActions: Array<{
+      severity: 'blocker' | 'review' | 'info';
+      category: 'validation' | 'checklist' | 'processing';
+      message: string;
+    }>;
+    facilityPolicy?: typeof validation.facilityPolicy;
+    processingIntent: {
+      previewContext: 'preview';
+      printContext: 'print';
+      requiresDedicatedPreviewRender: boolean;
+      requiresDedicatedPrintRender: boolean;
+      buses: Array<{
+        busId: string;
+        role?: string;
+        stemRole?: string;
+        previewProcessingKinds: string[];
+        printProcessingKinds: string[];
+        previewBypassedKinds: string[];
+        printBypassedKinds: string[];
+      }>;
+    };
+    signOffSummary: {
+      blockerCount: number;
+      reviewCount: number;
+      infoCount: number;
+    };
+    assistantEditorChecklist: Array<{
+      id: string;
+      label?: string;
+      status?: 'complete' | 'needs-attention' | 'not-applicable';
+    }>;
+  } | null> {
+    if (!await fileExists(this.fsBindings, audioTurnoverPath)) {
+      return null;
+    }
+
+    const parsed = JSON.parse(await this.fsBindings.readFile(audioTurnoverPath, 'utf8')) as {
+      assistantEditorChecklist?: Array<{
+        id: string;
+        label?: string;
+        status?: 'complete' | 'needs-attention' | 'not-applicable';
+      }>;
+      buses?: Array<{
+        id: string;
+        role?: string;
+        stemRole?: string;
+        previewProcessingChain?: Array<{ kind?: string }>;
+        printProcessingChain?: Array<{ kind?: string }>;
+        processingPolicy?: {
+          previewBypassedProcessingChain?: Array<{ kind?: string }>;
+          printBypassedProcessingChain?: Array<{ kind?: string }>;
+          requiresDedicatedPreviewRender?: boolean;
+          requiresDedicatedPrintRender?: boolean;
+        };
+      }>;
+    };
+
+    const recommendedActions = [
+      ...validation.issues.map((message) => ({
+        severity: 'blocker' as const,
+        category: 'validation' as const,
+        message,
+      })),
+      ...validation.warnings.map((message) => ({
+        severity: 'review' as const,
+        category: 'validation' as const,
+        message,
+      })),
+      ...(parsed.assistantEditorChecklist ?? [])
+        .filter((item) => item.status === 'needs-attention')
+        .map((item) => ({
+          severity: 'review' as const,
+          category: 'checklist' as const,
+          message: `${item.label ?? item.id} needs attention before turnover sign-off.`,
+        })),
+      ...((parsed.buses ?? []).flatMap((bus) => {
+        const previewBypassedKinds = (bus.processingPolicy?.previewBypassedProcessingChain ?? [])
+          .flatMap((stage) => stage.kind ? [stage.kind] : []);
+        if (previewBypassedKinds.length === 0) {
+          return [];
+        }
+        return [{
+          severity: 'info' as const,
+          category: 'processing' as const,
+          message: `${bus.id} previews without ${previewBypassedKinds.join(', ')}; verify the print render before turnover.`,
+        }];
+      })),
+    ];
+
+    const signOffStatus = validation.issues.length > 0
+      ? 'blocked'
+      : validation.warnings.length > 0 || (parsed.assistantEditorChecklist ?? []).some((item) => item.status === 'needs-attention')
+        ? 'needs-review'
+        : 'ready';
+
+    return {
+      generatedAt: new Date().toISOString(),
+      signOffStatus,
+      readyForTurnover: signOffStatus !== 'blocked',
+      blockers: validation.issues,
+      notes: validation.warnings,
+      recommendedActions,
+      facilityPolicy: validation.facilityPolicy,
+      processingIntent: {
+        previewContext: 'preview',
+        printContext: 'print',
+        requiresDedicatedPreviewRender: (parsed.buses ?? []).some((bus) => bus.processingPolicy?.requiresDedicatedPreviewRender),
+        requiresDedicatedPrintRender: (parsed.buses ?? []).some((bus) => bus.processingPolicy?.requiresDedicatedPrintRender),
+        buses: (parsed.buses ?? []).map((bus) => ({
+          busId: bus.id,
+          role: bus.role,
+          stemRole: bus.stemRole,
+          previewProcessingKinds: (bus.previewProcessingChain ?? []).flatMap((stage) => stage.kind ? [stage.kind] : []),
+          printProcessingKinds: (bus.printProcessingChain ?? []).flatMap((stage) => stage.kind ? [stage.kind] : []),
+          previewBypassedKinds: (bus.processingPolicy?.previewBypassedProcessingChain ?? [])
+            .flatMap((stage) => stage.kind ? [stage.kind] : []),
+          printBypassedKinds: (bus.processingPolicy?.printBypassedProcessingChain ?? [])
+            .flatMap((stage) => stage.kind ? [stage.kind] : []),
+        })),
+      },
+      signOffSummary: {
+        blockerCount: recommendedActions.filter((action) => action.severity === 'blocker').length,
+        reviewCount: recommendedActions.filter((action) => action.severity === 'review').length,
+        infoCount: recommendedActions.filter((action) => action.severity === 'info').length,
+      },
+      assistantEditorChecklist: parsed.assistantEditorChecklist ?? [],
+    };
+  }
+
   private async writeProToolsArtifacts(
     project: EditorProject,
     exportDir: string,
@@ -1038,15 +1801,39 @@ export class DesktopNativeInterchangeAdapter implements InterchangePort {
       companionPaths.push(audioTurnoverPath);
     }
 
+    const dominantLayout = pickDominantAudioChannelLayout(
+      resolveAudioTrackLayouts(project).map((track) => track.layout),
+    );
     const exporter = new ProToolsAAFExporter(project, {
       outputPath: path.join(exportDir, 'protools-turnover.aaf'),
       includeAutomation: true,
       includeRenderedEffects: true,
+      channelAssignment: dominantLayout,
     });
     const validation = exporter.validate();
+    const facilityPolicy = await this.evaluateAudioTurnoverPolicy(audioTurnoverPath);
+    const mergedValidation = {
+      ...validation,
+      valid: validation.valid && (facilityPolicy?.issues.length ?? 0) === 0,
+      issues: uniqueStrings([
+        ...validation.issues,
+        ...(facilityPolicy?.issues ?? []),
+      ]),
+      warnings: uniqueStrings([
+        ...validation.warnings,
+        ...(facilityPolicy?.warnings ?? []),
+      ]),
+      facilityPolicy: facilityPolicy?.facilityPolicy,
+    };
     const validationPath = path.join(exportDir, 'protools-turnover.validation.json');
-    await this.fsBindings.writeFile(validationPath, JSON.stringify(validation, null, 2), 'utf8');
+    await this.fsBindings.writeFile(validationPath, JSON.stringify(mergedValidation, null, 2), 'utf8');
     companionPaths.push(validationPath);
+    const handoffSummary = await this.buildAssistantEditorHandoff(audioTurnoverPath, mergedValidation);
+    if (handoffSummary) {
+      const handoffPath = path.join(exportDir, 'assistant-editor.handoff.json');
+      await this.fsBindings.writeFile(handoffPath, JSON.stringify(handoffSummary, null, 2), 'utf8');
+      companionPaths.push(handoffPath);
+    }
 
     if (includeTurnoverExport) {
       const turnoverPath = path.join(exportDir, 'protools-turnover.aaf.json');
@@ -1124,12 +1911,17 @@ export class DesktopNativeInterchangeAdapter implements InterchangePort {
 }
 
 export class DesktopNativeDecodeAdapter implements ProfessionalMediaDecodePort {
+  private readonly pipeline: DesktopMediaPipelineBindings;
   private readonly fsBindings: DesktopFsBindings;
   private readonly bindings = new Map<string, BoundDesktopProject>();
   private readonly sessions = new Map<string, DesktopDecodeSessionState>();
   private sequence = 0;
 
   constructor(options: DesktopNativeMediaManagementAdapterOptions = {}) {
+    this.pipeline = {
+      ...DEFAULT_PIPELINE_BINDINGS,
+      ...options.pipeline,
+    };
     this.fsBindings = {
       ...DEFAULT_FS_BINDINGS,
       ...options.fs,
@@ -1137,8 +1929,8 @@ export class DesktopNativeDecodeAdapter implements ProfessionalMediaDecodePort {
   }
 
   async bindProject(binding: DesktopProjectBinding): Promise<void> {
-    const mediaPaths = DEFAULT_PIPELINE_BINDINGS.createProjectMediaPaths(binding.projectPackagePath);
-    await DEFAULT_PIPELINE_BINDINGS.ensureProjectMediaPaths(mediaPaths);
+    const mediaPaths = this.pipeline.createProjectMediaPaths(binding.projectPackagePath);
+    await this.pipeline.ensureProjectMediaPaths(mediaPaths);
     this.bindings.set(binding.project.id, {
       project: cloneValue(binding.project),
       packagePath: binding.projectPackagePath,
@@ -1168,6 +1960,8 @@ export class DesktopNativeDecodeAdapter implements ProfessionalMediaDecodePort {
       snapshot: cloneValue(snapshot),
       descriptor: cloneValue(descriptor),
       prerollRanges: [],
+      videoArtifacts: {},
+      audioArtifacts: {},
     };
 
     this.sessions.set(handle, state);
@@ -1185,54 +1979,161 @@ export class DesktopNativeDecodeAdapter implements ProfessionalMediaDecodePort {
     sessionHandle: NativeResourceHandle,
     request: MediaDecodeRequest,
   ): Promise<DecodedVideoFrame | null> {
-    const session = this.requireSession(sessionHandle);
-    const asset = this.requireProjectAsset(session.projectId, request.assetId);
-    const sourcePath = normalizeFilesystemPath(getMediaAssetPrimaryPath(asset));
-    if (!await fileExists(this.fsBindings, sourcePath)) {
+    const decoded = await this.materializeVideoArtifact(sessionHandle, request);
+    if (!decoded) {
       return null;
     }
 
-    await this.writeSessionManifest(session, {
-      lastVideoRequest: request,
-      lastVideoResolvedPath: sourcePath,
+    return {
+      assetId: decoded.assetId,
+      frame: decoded.frame,
+      ptsSeconds: decoded.ptsSeconds,
+      width: decoded.width,
+      height: decoded.height,
+      pixelFormat: decoded.pixelFormat,
+      colorSpace: decoded.colorSpace,
+      storage: decoded.storage,
+      handle: decoded.handle,
+    };
+  }
+
+  async materializeVideoArtifact(
+    sessionHandle: NativeResourceHandle,
+    request: MediaDecodeRequest,
+  ): Promise<DesktopDecodedVideoArtifact | null> {
+    const session = this.requireSession(sessionHandle);
+    const binding = this.requireBinding(session.projectId);
+    const asset = this.requireProjectAsset(session.projectId, request.assetId);
+    const sourcePath = normalizeFilesystemPath(getMediaAssetPrimaryPath(asset));
+    if (!sourcePath || !await fileExists(this.fsBindings, sourcePath)) {
+      return null;
+    }
+
+    const cacheKey = buildDecodeCacheKey(
+      session.snapshot,
+      request.assetId,
+      request.frame,
+      request.variant,
+      request.pixelFormat,
+      asset.technicalMetadata?.width ?? session.snapshot.output.width,
+      asset.technicalMetadata?.height ?? session.snapshot.output.height,
+    );
+    const existing = session.videoArtifacts[cacheKey];
+    if (existing && await fileExists(this.fsBindings, existing.artifactPath)) {
+      return cloneValue({
+        ...existing,
+        cacheHit: true,
+        decodeLatencyMs: 0,
+      });
+    }
+
+    this.sequence += 1;
+    const artifact = await this.pipeline.extractVideoFrameArtifact({
+      sourcePath,
+      outputDirectory: path.join(binding.mediaPaths.indexPath, 'decode-cache', 'video', sanitizeArtifactBase(request.assetId)),
+      cacheKey,
+      frame: request.frame,
+      fps: session.snapshot.fps,
+      width: asset.technicalMetadata?.width ?? session.snapshot.output.width,
+      height: asset.technicalMetadata?.height ?? session.snapshot.output.height,
+      pixelFormat: request.pixelFormat ?? 'rgb24',
+      preferHardware: request.priority === 'interactive',
     });
 
-    return {
+    const decoded: DesktopDecodedVideoArtifact = {
       assetId: request.assetId,
       frame: request.frame,
       ptsSeconds: request.frame / session.snapshot.fps,
-      width: asset.technicalMetadata?.width ?? session.snapshot.output.width,
-      height: asset.technicalMetadata?.height ?? session.snapshot.output.height,
-      pixelFormat: request.pixelFormat ?? 'yuv420p',
+      width: artifact.width,
+      height: artifact.height,
+      pixelFormat: artifact.pixelFormat,
       colorSpace: session.snapshot.output.colorSpace,
-      storage: request.priority === 'interactive' ? 'gpu' : 'cpu',
-      handle: `desktop-frame-${request.assetId}-${request.frame.toString(36)}`,
+      storage: artifact.storage,
+      handle: `desktop-frame-${sanitizeArtifactBase(request.assetId)}-${request.frame.toString(36)}-${this.sequence.toString(36)}`,
+      artifactPath: artifact.outputPath,
+      sourcePath,
+      cacheHit: artifact.cacheHit,
+      decodeLatencyMs: artifact.decodeLatencyMs,
     };
+    session.videoArtifacts[cacheKey] = decoded;
+    await this.writeSessionManifest(session, {
+      lastVideoRequest: request,
+      lastVideoResolvedPath: sourcePath,
+      lastVideoArtifactPath: decoded.artifactPath,
+    });
+    return cloneValue(decoded);
   }
 
   async decodeAudioSlice(
     sessionHandle: NativeResourceHandle,
     request: AudioDecodeRequest,
   ): Promise<DecodedAudioSlice | null> {
-    const session = this.requireSession(sessionHandle);
-    const asset = this.requireProjectAsset(session.projectId, request.assetId);
-    const sourcePath = normalizeFilesystemPath(getMediaAssetPrimaryPath(asset) ?? getMediaAssetPlaybackUrl(asset));
-    if (!await fileExists(this.fsBindings, sourcePath)) {
+    const decoded = await this.materializeAudioArtifact(sessionHandle, request);
+    if (!decoded) {
       return null;
     }
 
+    return {
+      assetId: decoded.assetId,
+      timeRange: cloneValue(decoded.timeRange),
+      sampleRate: decoded.sampleRate,
+      channelCount: decoded.channelCount,
+      handle: decoded.handle,
+    };
+  }
+
+  async materializeAudioArtifact(
+    sessionHandle: NativeResourceHandle,
+    request: AudioDecodeRequest,
+  ): Promise<DesktopDecodedAudioArtifact | null> {
+    const session = this.requireSession(sessionHandle);
+    const binding = this.requireBinding(session.projectId);
+    const asset = this.requireProjectAsset(session.projectId, request.assetId);
+    const sourcePath = normalizeFilesystemPath(getMediaAssetPrimaryPath(asset) ?? getMediaAssetPlaybackUrl(asset));
+    if (!sourcePath || !await fileExists(this.fsBindings, sourcePath)) {
+      return null;
+    }
+
+    const sampleRate = request.sampleRate ?? asset.technicalMetadata?.sampleRate ?? session.snapshot.sampleRate;
+    const channelCount = request.channels?.length ?? asset.technicalMetadata?.audioChannels ?? 2;
+    const cacheKey = buildAudioCacheKey(session.snapshot, request.assetId, request, channelCount, sampleRate);
+    const existing = session.audioArtifacts[cacheKey];
+    if (existing && await fileExists(this.fsBindings, existing.artifactPath)) {
+      return cloneValue({
+        ...existing,
+        cacheHit: true,
+        decodeLatencyMs: 0,
+      });
+    }
+
+    this.sequence += 1;
+    const artifact = await this.pipeline.extractAudioSliceArtifact({
+      sourcePath,
+      outputDirectory: path.join(binding.mediaPaths.indexPath, 'decode-cache', 'audio', sanitizeArtifactBase(request.assetId)),
+      cacheKey,
+      timeRange: cloneValue(request.timeRange),
+      sampleRate,
+      channelCount,
+    });
+
+    const decoded: DesktopDecodedAudioArtifact = {
+      assetId: request.assetId,
+      timeRange: cloneValue(request.timeRange),
+      sampleRate: artifact.sampleRate,
+      channelCount: artifact.channelCount,
+      handle: `desktop-audio-${sanitizeArtifactBase(request.assetId)}-${this.sequence.toString(36)}`,
+      artifactPath: artifact.outputPath,
+      sourcePath,
+      cacheHit: artifact.cacheHit,
+      decodeLatencyMs: artifact.decodeLatencyMs,
+    };
+    session.audioArtifacts[cacheKey] = decoded;
     await this.writeSessionManifest(session, {
       lastAudioRequest: request,
       lastAudioResolvedPath: sourcePath,
+      lastAudioArtifactPath: decoded.artifactPath,
     });
-
-    return {
-      assetId: request.assetId,
-      timeRange: cloneValue(request.timeRange),
-      sampleRate: request.sampleRate ?? asset.technicalMetadata?.sampleRate ?? session.snapshot.sampleRate,
-      channelCount: request.channels?.length ?? asset.technicalMetadata?.audioChannels ?? 2,
-      handle: `desktop-audio-${request.assetId}-${this.sequence.toString(36)}`,
-    };
+    return cloneValue(decoded);
   }
 
   async releaseSession(sessionHandle: NativeResourceHandle): Promise<void> {
@@ -1240,6 +2141,22 @@ export class DesktopNativeDecodeAdapter implements ProfessionalMediaDecodePort {
     session.releasedAt = new Date().toISOString();
     await this.writeSessionManifest(session);
     this.sessions.delete(sessionHandle);
+  }
+
+  async invalidateProjectCache(projectId: string): Promise<void> {
+    const binding = this.requireBinding(projectId);
+    await this.fsBindings.rm(path.join(binding.mediaPaths.indexPath, 'decode-cache'), { recursive: true, force: true });
+
+    for (const session of this.sessions.values()) {
+      if (session.projectId !== projectId) {
+        continue;
+      }
+      session.videoArtifacts = {};
+      session.audioArtifacts = {};
+      await this.writeSessionManifest(session, {
+        cacheInvalidatedAt: new Date().toISOString(),
+      });
+    }
   }
 
   private requireBinding(projectId: string): BoundDesktopProject {
@@ -1277,6 +2194,8 @@ export class DesktopNativeDecodeAdapter implements ProfessionalMediaDecodePort {
       snapshot: session.snapshot,
       descriptor: session.descriptor,
       prerollRanges: session.prerollRanges,
+      videoArtifacts: Object.values(session.videoArtifacts),
+      audioArtifacts: Object.values(session.audioArtifacts),
       releasedAt: session.releasedAt,
       ...extra,
     }, null, 2), 'utf8');
@@ -1392,12 +2311,17 @@ export class DesktopNativeChangeListAdapter implements ChangeListPort {
 }
 
 export class DesktopNativeVideoCompositingAdapter implements VideoCompositingPort {
+  private readonly pipeline: DesktopMediaPipelineBindings;
   private readonly fsBindings: DesktopFsBindings;
   private readonly bindings = new Map<string, BoundDesktopProject>();
   private readonly graphs = new Map<string, DesktopCompositorGraphState>();
   private sequence = 0;
 
   constructor(options: DesktopNativeMediaManagementAdapterOptions = {}) {
+    this.pipeline = {
+      ...DEFAULT_PIPELINE_BINDINGS,
+      ...options.pipeline,
+    };
     this.fsBindings = {
       ...DEFAULT_FS_BINDINGS,
       ...options.fs,
@@ -1405,8 +2329,8 @@ export class DesktopNativeVideoCompositingAdapter implements VideoCompositingPor
   }
 
   async bindProject(binding: DesktopProjectBinding): Promise<void> {
-    const mediaPaths = DEFAULT_PIPELINE_BINDINGS.createProjectMediaPaths(binding.projectPackagePath);
-    await DEFAULT_PIPELINE_BINDINGS.ensureProjectMediaPaths(mediaPaths);
+    const mediaPaths = this.pipeline.createProjectMediaPaths(binding.projectPackagePath);
+    await this.pipeline.ensureProjectMediaPaths(mediaPaths);
     this.bindings.set(binding.project.id, {
       project: cloneValue(binding.project),
       packagePath: binding.projectPackagePath,
@@ -1500,6 +2424,7 @@ export class DesktopNativeVideoCompositingAdapter implements VideoCompositingPor
       snapshot: cloneValue(snapshot),
       compilation: cloneValue(compilation),
       renderedFrames: [],
+      renderedArtifacts: {},
     };
 
     this.graphs.set(graphId, state);
@@ -1508,22 +2433,93 @@ export class DesktopNativeVideoCompositingAdapter implements VideoCompositingPor
   }
 
   async renderFrame(request: CompositeFrameRequest): Promise<CompositedVideoFrame> {
-    const state = this.requireGraph(request.graphId);
-    state.renderedFrames.push(request.frame);
-    const handle = `desktop-composite-${request.target}-${request.frame.toString(36)}`;
-    await this.writeGraphManifest(state, {
-      lastRenderRequest: request,
-      lastCompositeHandle: handle,
-    });
-
+    const rendered = await this.materializeCompositeArtifact(request);
     return {
-      graphId: request.graphId,
-      frame: request.frame,
+      graphId: rendered.graphId,
+      frame: rendered.frame,
+      width: rendered.width,
+      height: rendered.height,
+      colorSpace: rendered.colorSpace,
+      handle: rendered.handle,
+    };
+  }
+
+  async materializeCompositeArtifact(
+    request: CompositeFrameRequest,
+  ): Promise<DesktopRenderedCompositeArtifact> {
+    const state = this.requireGraph(request.graphId);
+    const binding = this.requireBinding(state.projectId);
+    const activeLayers = activeVideoLayersForFrame(binding.project, state.snapshot, request.frame);
+    const cacheKey = buildCompositeCacheKey(state, request, activeLayers);
+    const existing = state.renderedArtifacts[cacheKey];
+    if (existing && await fileExists(this.fsBindings, existing.artifactPath)) {
+      return cloneValue({
+        ...existing,
+        cacheHit: true,
+        compositeLatencyMs: 0,
+      });
+    }
+
+    const decodedLayers = await Promise.all(activeLayers.map(async (layer) => ({
+      layer,
+      artifact: await this.pipeline.extractVideoFrameArtifact({
+        sourcePath: layer.sourcePath,
+        outputDirectory: path.join(binding.mediaPaths.indexPath, 'decode-cache', 'video', sanitizeArtifactBase(layer.assetId)),
+        cacheKey: buildDecodeCacheKey(
+          state.snapshot,
+          layer.assetId,
+          layer.timelineFrame,
+          'source',
+          'rgb24',
+          state.snapshot.output.width,
+          state.snapshot.output.height,
+        ),
+        frame: layer.timelineFrame,
+        fps: state.snapshot.fps,
+        width: state.snapshot.output.width,
+        height: state.snapshot.output.height,
+        pixelFormat: 'rgb24',
+        preferHardware: request.quality !== 'draft',
+      }),
+    })));
+
+    const artifact = await this.pipeline.composeFrameArtifact({
+      outputDirectory: path.join(binding.mediaPaths.indexPath, 'render-cache', sanitizeArtifactBase(request.target)),
+      cacheKey,
       width: state.snapshot.output.width,
       height: state.snapshot.output.height,
       colorSpace: state.snapshot.output.colorSpace,
+      layers: decodedLayers.map(({ artifact: layerArtifact }) => ({
+        sourcePath: layerArtifact.outputPath,
+        opacity: 1,
+      })),
+    });
+
+    this.sequence += 1;
+    const handle = `desktop-composite-${request.target}-${request.frame.toString(36)}-${this.sequence.toString(36)}`;
+    const rendered: DesktopRenderedCompositeArtifact = {
+      graphId: request.graphId,
+      frame: request.frame,
+      width: artifact.width,
+      height: artifact.height,
+      colorSpace: artifact.colorSpace,
       handle,
+      artifactPath: artifact.outputPath,
+      layerAssetIds: activeLayers.map((layer) => layer.assetId),
+      layerSourcePaths: decodedLayers.map(({ artifact: layerArtifact }) => layerArtifact.outputPath),
+      layerTrackIds: activeLayers.map((layer) => layer.trackId),
+      cacheHit: artifact.cacheHit,
+      compositeLatencyMs: artifact.compositeLatencyMs,
     };
+    state.renderedArtifacts[cacheKey] = rendered;
+    state.renderedFrames.push(request.frame);
+    await this.writeGraphManifest(state, {
+      lastRenderRequest: request,
+      lastCompositeHandle: handle,
+      lastCompositeArtifactPath: rendered.artifactPath,
+    });
+
+    return cloneValue(rendered);
   }
 
   async invalidateGraph(graphId: string): Promise<void> {
@@ -1531,10 +2527,28 @@ export class DesktopNativeVideoCompositingAdapter implements VideoCompositingPor
     if (!state) {
       return;
     }
+    await Promise.all(Object.values(state.renderedArtifacts).map(async (artifact) => {
+      await this.fsBindings.rm(artifact.artifactPath, { force: true });
+    }));
     await this.writeGraphManifest(state, {
       invalidatedAt: new Date().toISOString(),
     });
     this.graphs.delete(graphId);
+  }
+
+  async invalidateProjectCache(projectId: string): Promise<void> {
+    const binding = this.requireBinding(projectId);
+    await this.fsBindings.rm(path.join(binding.mediaPaths.indexPath, 'render-cache'), { recursive: true, force: true });
+    for (const state of this.graphs.values()) {
+      if (state.projectId !== projectId) {
+        continue;
+      }
+      state.renderedArtifacts = {};
+      state.renderedFrames = [];
+      await this.writeGraphManifest(state, {
+        cacheInvalidatedAt: new Date().toISOString(),
+      });
+    }
   }
 
   private requireBinding(projectId: string): BoundDesktopProject {
@@ -1562,12 +2576,15 @@ export class DesktopNativeVideoCompositingAdapter implements VideoCompositingPor
       snapshot: state.snapshot,
       compilation: state.compilation,
       renderedFrames: state.renderedFrames,
+      renderedArtifacts: Object.values(state.renderedArtifacts),
       ...extra,
     }, null, 2), 'utf8');
   }
 }
 
 export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPort {
+  private readonly pipeline: DesktopMediaPipelineBindings;
+  private readonly outputBindings: Partial<DesktopPlaybackOutputBindings>;
   private readonly fsBindings: DesktopFsBindings;
   private readonly decodeAdapter: DesktopNativeDecodeAdapter;
   private readonly compositorAdapter: DesktopNativeVideoCompositingAdapter;
@@ -1580,6 +2597,13 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
     compositorAdapter: DesktopNativeVideoCompositingAdapter,
     options: DesktopNativeMediaManagementAdapterOptions = {},
   ) {
+    this.pipeline = {
+      ...DEFAULT_PIPELINE_BINDINGS,
+      ...options.pipeline,
+    };
+    this.outputBindings = {
+      ...options.playbackOutput,
+    };
     this.fsBindings = {
       ...DEFAULT_FS_BINDINGS,
       ...options.fs,
@@ -1589,13 +2613,92 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
   }
 
   async bindProject(binding: DesktopProjectBinding): Promise<void> {
-    const mediaPaths = DEFAULT_PIPELINE_BINDINGS.createProjectMediaPaths(binding.projectPackagePath);
-    await DEFAULT_PIPELINE_BINDINGS.ensureProjectMediaPaths(mediaPaths);
+    const mediaPaths = this.pipeline.createProjectMediaPaths(binding.projectPackagePath);
+    await this.pipeline.ensureProjectMediaPaths(mediaPaths);
     this.bindings.set(binding.project.id, {
       project: cloneValue(binding.project),
       packagePath: binding.projectPackagePath,
       mediaPaths,
     });
+  }
+
+  getTransportView(transportHandle: NativeResourceHandle): DesktopPlaybackTransportView {
+    const state = this.requireTransport(transportHandle);
+    return {
+      buffer: state.frameTransportView.buffer,
+      width: state.frameTransportView.width,
+      height: state.frameTransportView.height,
+      bytesPerPixel: state.frameTransportView.bytesPerPixel,
+      slots: state.frameTransportView.slots,
+    };
+  }
+
+  async attachOutputDevice(
+    transportHandle: NativeResourceHandle,
+    config: PlaybackConfig,
+  ): Promise<void> {
+    const state = this.requireTransport(transportHandle);
+    if (!state.attachedOutputConfigs.some((entry) => entry.deviceId === config.deviceId)) {
+      state.attachedOutputConfigs.push(cloneValue(config));
+      await this.writeTransportManifest(state, {
+        attachedOutputDevices: state.attachedOutputConfigs.map((entry) => entry.deviceId),
+      });
+    }
+  }
+
+  async detachOutputDevice(
+    transportHandle: NativeResourceHandle,
+    deviceId?: string,
+  ): Promise<void> {
+    const state = this.requireTransport(transportHandle);
+    const targetIds = deviceId
+      ? [deviceId]
+      : state.attachedOutputConfigs.map((config) => config.deviceId);
+
+    for (const targetId of targetIds) {
+      if (state.activeOutputDeviceIds.includes(targetId)) {
+        await this.outputBindings.stopPlayback?.(targetId);
+      }
+    }
+
+    state.activeOutputDeviceIds = state.activeOutputDeviceIds.filter((entry) => !targetIds.includes(entry));
+    state.attachedOutputConfigs = deviceId
+      ? state.attachedOutputConfigs.filter((entry) => entry.deviceId !== deviceId)
+      : [];
+    await this.writeTransportManifest(state, {
+      attachedOutputDevices: state.attachedOutputConfigs.map((entry) => entry.deviceId),
+      activeOutputDevices: state.activeOutputDeviceIds,
+    });
+  }
+
+  async invalidateProjectCache(projectId: string): Promise<void> {
+    const binding = this.requireBinding(projectId);
+    await this.fsBindings.rm(path.join(binding.mediaPaths.indexPath, 'render-cache'), { recursive: true, force: true });
+    await this.fsBindings.rm(path.join(binding.mediaPaths.indexPath, 'decode-cache'), { recursive: true, force: true });
+
+    for (const [handle, state] of this.transports.entries()) {
+      if (state.projectId !== projectId) {
+        continue;
+      }
+      state.lastCompositeHandle = undefined;
+      state.lastCompositeArtifactPath = undefined;
+      state.decodedVideoArtifacts = [];
+      state.decodedAudioArtifacts = [];
+      state.policy.promotedFrameCount = 0;
+      state.policy.lastFrameCacheHitRate = 0;
+      state.policy.lastFrameRenderLatencyMs = 0;
+      state.policy.overBudgetWindow = 0;
+      state.policy.pendingPromotionKeys.clear();
+      state.frameTransport.reset();
+      state.telemetry = {
+        ...createPlaybackTelemetry(state.policy.frameBudgetMs),
+        activeStreamCount: state.streams.length,
+      };
+      await this.writeTransportManifest(state, {
+        cacheInvalidatedAt: new Date().toISOString(),
+      });
+      this.transports.set(handle, state);
+    }
   }
 
   async createTransport(snapshot: TimelineRenderSnapshot): Promise<NativeResourceHandle> {
@@ -1611,6 +2714,14 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
       prerollFrames: 0,
     });
     const graph = await this.compositorAdapter.compileGraph(snapshot);
+    const frameTransportSlots = 3;
+    const frameTransport = createFrameTransport(
+      snapshot.output.width,
+      snapshot.output.height,
+      4,
+      frameTransportSlots,
+    );
+    const initialFrameBudgetMs = Math.round(1000 / Math.max(1, snapshot.fps || 24));
 
     const state: DesktopPlaybackTransportState = {
       handle,
@@ -1626,13 +2737,22 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
       playing: false,
       decodeSessionHandle,
       graphId: graph.graphId,
-      telemetry: {
-        activeStreamCount: 0,
-        droppedVideoFrames: 0,
-        audioUnderruns: 0,
-        maxDecodeLatencyMs: Math.max(4, snapshot.videoLayerCount * 3),
-        maxCompositeLatencyMs: Math.max(4, snapshot.videoLayerCount * 4),
+      telemetry: createPlaybackTelemetry(initialFrameBudgetMs),
+      decodedVideoArtifacts: [],
+      decodedAudioArtifacts: [],
+      frameTransport,
+      frameTransportView: {
+        buffer: frameTransport.getBuffer(),
+        width: snapshot.output.width,
+        height: snapshot.output.height,
+        bytesPerPixel: 4,
+        slots: frameTransportSlots,
       },
+      attachedOutputConfigs: [],
+      activeOutputDeviceIds: [],
+      inFlightTasks: new Set<Promise<void>>(),
+      policy: createPlaybackPolicyState(initialFrameBudgetMs),
+      scheduler: null,
     };
 
     this.transports.set(handle, state);
@@ -1650,6 +2770,7 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
     }
     state.streams = cloneValue(streams);
     state.telemetry.activeStreamCount = streams.length;
+    state.policy.pendingPromotionKeys.clear();
     await this.writeTransportManifest(state, {
       attachedStreams: state.streams,
     });
@@ -1670,6 +2791,65 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
 
   async start(transportHandle: NativeResourceHandle, frame: number): Promise<void> {
     const state = this.requireTransport(transportHandle);
+    await this.renderTransportFrame(state, frame);
+  }
+
+  async play(
+    transportHandle: NativeResourceHandle,
+    frame: number,
+    playbackRate = 1,
+  ): Promise<void> {
+    const state = this.requireTransport(transportHandle);
+    this.clearScheduler(state);
+    const loopToken = (state.scheduler?.loopToken ?? 0) + 1;
+    state.scheduler = {
+      loopToken,
+      timer: null,
+      startedAtMs: Date.now(),
+      startFrame: frame,
+      playbackRate: Math.max(0.125, playbackRate),
+      lastRenderedFrame: frame - 1,
+      running: true,
+    };
+    await this.writeTransportManifest(state, {
+      continuousPlayback: {
+        running: true,
+        startFrame: frame,
+        playbackRate: state.scheduler.playbackRate,
+      },
+    });
+    await this.tickPlaybackLoop(transportHandle, loopToken);
+  }
+
+  async syncPlaybackFrame(
+    transportHandle: NativeResourceHandle,
+    frame: number,
+  ): Promise<void> {
+    const state = this.requireTransport(transportHandle);
+    if (!state.scheduler?.running) {
+      await this.renderTransportFrame(state, frame);
+      return;
+    }
+
+    state.scheduler.startFrame = frame;
+    state.scheduler.startedAtMs = Date.now();
+    state.scheduler.lastRenderedFrame = frame - 1;
+    await this.writeTransportManifest(state, {
+      continuousPlayback: {
+        running: true,
+        startFrame: frame,
+        playbackRate: state.scheduler.playbackRate,
+        resyncedAt: new Date().toISOString(),
+      },
+    });
+    await this.tickPlaybackLoop(transportHandle, state.scheduler.loopToken);
+  }
+
+  private async renderTransportFrame(
+    state: DesktopPlaybackTransportState,
+    frame: number,
+  ): Promise<void> {
+    const renderStartedAt = Date.now();
     const target = inferPlaybackTarget(state.streams);
     const fps = state.snapshot.fps || 24;
     const prerollFrames = state.prerollRange
@@ -1677,20 +2857,21 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
       : 0;
     const videoStreams = state.streams.filter((stream) => stream.mediaType === 'video');
     const audioStreams = state.streams.filter((stream) => stream.mediaType === 'audio');
+    const policy = this.resolveAdaptivePolicy(state, videoStreams.length, audioStreams.length);
 
     const decodedVideo = await Promise.all(
       Array.from(new Set(videoStreams.map((stream) => stream.assetId))).map(async (assetId) => (
-        this.decodeAdapter.decodeVideoFrame(state.decodeSessionHandle, {
+        this.decodeAdapter.materializeVideoArtifact(state.decodeSessionHandle, {
           assetId,
           frame,
           variant: 'source',
-          priority: 'interactive',
+          priority: state.scheduler?.running ? 'interactive' : 'preroll',
         })
       )),
     );
     const decodedAudio = await Promise.all(
       Array.from(new Set(audioStreams.map((stream) => stream.assetId))).map(async (assetId) => (
-        this.decodeAdapter.decodeAudioSlice(state.decodeSessionHandle, {
+        this.decodeAdapter.materializeAudioArtifact(state.decodeSessionHandle, {
           assetId,
           timeRange: {
             startSeconds: frame / fps,
@@ -1700,46 +2881,163 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
         })
       )),
     );
-    const composite = await this.compositorAdapter.renderFrame({
+    const composite = await this.compositorAdapter.materializeCompositeArtifact({
       graphId: state.graphId,
       frame,
       target,
-      quality: videoStreams.length > 2 ? 'preview' : 'full',
+      quality: policy.currentQuality,
     });
+    const compositePixels = await this.loadCompositePixels(composite, state.snapshot.output.width, state.snapshot.output.height);
+    state.frameTransport.writeFrame(compositePixels.pixelData, {
+      width: compositePixels.width,
+      height: compositePixels.height,
+      frameNumber: frame,
+      timestamp: Date.now(),
+      timecode: formatTimecodeFromFrame(frame, state.snapshot.fps),
+    });
+
+    for (const outputConfig of state.attachedOutputConfigs) {
+      if (!state.activeOutputDeviceIds.includes(outputConfig.deviceId)) {
+        await this.outputBindings.startPlayback?.(outputConfig);
+        state.activeOutputDeviceIds.push(outputConfig.deviceId);
+      }
+      await this.outputBindings.sendFrame?.(outputConfig.deviceId, compositePixels.pixelData);
+    }
 
     state.playing = true;
     state.activeFrame = frame;
     state.lastCompositeHandle = composite.handle;
+    state.lastCompositeArtifactPath = composite.artifactPath;
+    state.decodedVideoArtifacts = decodedVideo.filter((item): item is DesktopDecodedVideoArtifact => item != null);
+    state.decodedAudioArtifacts = decodedAudio.filter((item): item is DesktopDecodedAudioArtifact => item != null);
+    const renderLatencyMs = Date.now() - renderStartedAt;
+    const decodeLatencyCandidates = [
+      ...state.decodedVideoArtifacts.map((item) => item.decodeLatencyMs),
+      ...state.decodedAudioArtifacts.map((item) => item.decodeLatencyMs),
+    ];
+    const cachedArtifactCount = state.decodedVideoArtifacts.filter((item) => item.cacheHit).length
+      + state.decodedAudioArtifacts.filter((item) => item.cacheHit).length
+      + (composite.cacheHit ? 1 : 0);
+    const totalArtifactCount = state.decodedVideoArtifacts.length + state.decodedAudioArtifacts.length + 1;
+    const cacheHitRate = totalArtifactCount > 0
+      ? Number((cachedArtifactCount / totalArtifactCount).toFixed(2))
+      : 0;
+    const droppedVideoFrames = state.telemetry.droppedVideoFrames + decodedVideo.filter((item) => item == null).length;
+    const audioUnderrunDelta = decodedAudio.filter((item) => item == null).length
+      + (audioStreams.length > 0 && renderLatencyMs > policy.frameBudgetMs * 1.25 ? 1 : 0);
+    const audioUnderruns = state.telemetry.audioUnderruns + audioUnderrunDelta;
+    state.policy.currentQuality = policy.currentQuality;
+    state.policy.cacheStrategy = policy.cacheStrategy;
+    state.policy.streamPressure = policy.streamPressure;
+    state.policy.frameBudgetMs = policy.frameBudgetMs;
+    state.policy.lastFrameRenderLatencyMs = renderLatencyMs;
+    state.policy.lastFrameCacheHitRate = cacheHitRate;
+    state.policy.promotionLookaheadFrames = policy.promotionLookaheadFrames;
+    state.policy.overBudgetWindow = renderLatencyMs > policy.frameBudgetMs
+      ? Math.min(6, state.policy.overBudgetWindow + 1)
+      : Math.max(0, state.policy.overBudgetWindow - 1);
     state.telemetry = {
       activeStreamCount: state.streams.length,
-      droppedVideoFrames: decodedVideo.filter((item) => item == null).length + Math.max(0, videoStreams.length - 2),
-      audioUnderruns: decodedAudio.filter((item) => item == null).length,
-      maxDecodeLatencyMs: Math.max(
-        4,
-        videoStreams.length * 8 + audioStreams.length * 4 + Math.round(prerollFrames * 0.5),
-      ),
-      maxCompositeLatencyMs: Math.max(
-        4,
-        state.snapshot.videoLayerCount * 5 + (target === 'multicam' ? 12 : 6) + Math.round(prerollFrames * 0.25),
-      ),
+      droppedVideoFrames,
+      audioUnderruns,
+      maxDecodeLatencyMs: Math.max(state.telemetry.maxDecodeLatencyMs, 0, ...decodeLatencyCandidates),
+      maxCompositeLatencyMs: Math.max(state.telemetry.maxCompositeLatencyMs, composite.compositeLatencyMs),
+      currentQuality: state.policy.currentQuality,
+      cacheStrategy: state.policy.cacheStrategy,
+      streamPressure: state.policy.streamPressure,
+      frameBudgetMs: state.policy.frameBudgetMs,
+      lastFrameRenderLatencyMs: state.policy.lastFrameRenderLatencyMs,
+      lastFrameCacheHitRate: state.policy.lastFrameCacheHitRate,
+      promotedFrameCount: state.policy.promotedFrameCount,
     };
 
     await this.writeTransportManifest(state, {
       lastStartFrame: frame,
       lastCompositeHandle: composite.handle,
+      lastCompositeArtifactPath: composite.artifactPath,
     });
+
+    this.queueLookaheadPromotion(state, frame, target, policy);
   }
 
   async stop(transportHandle: NativeResourceHandle): Promise<void> {
     const state = this.requireTransport(transportHandle);
+    this.clearScheduler(state);
+    await this.waitForInFlightTasks(state);
     state.playing = false;
+    for (const deviceId of state.activeOutputDeviceIds) {
+      await this.outputBindings.stopPlayback?.(deviceId);
+    }
+    state.activeOutputDeviceIds = [];
     await this.writeTransportManifest(state, {
       stoppedAt: new Date().toISOString(),
+      activeOutputDevices: state.activeOutputDeviceIds,
+      continuousPlayback: {
+        running: false,
+      },
     });
+  }
+
+  async releaseTransport(transportHandle: NativeResourceHandle): Promise<void> {
+    const state = this.requireTransport(transportHandle);
+    await this.stop(transportHandle);
+    state.frameTransport.reset();
+    await this.decodeAdapter.releaseSession(state.decodeSessionHandle);
+    await this.compositorAdapter.invalidateGraph(state.graphId);
+    await this.writeTransportManifest(state, {
+      releasedAt: new Date().toISOString(),
+      activeOutputDevices: [],
+    });
+    this.transports.delete(transportHandle);
   }
 
   async getTelemetry(transportHandle: NativeResourceHandle): Promise<PlaybackTelemetry> {
     return cloneValue(this.requireTransport(transportHandle).telemetry);
+  }
+
+  private resolveAdaptivePolicy(
+    state: DesktopPlaybackTransportState,
+    videoStreamCount: number,
+    audioStreamCount: number,
+  ): Omit<DesktopPlaybackPolicyState, 'lastFrameRenderLatencyMs' | 'lastFrameCacheHitRate' | 'promotedFrameCount' | 'overBudgetWindow' | 'pendingPromotionKeys'> {
+    const playbackRate = state.scheduler?.playbackRate ?? 1;
+    const frameBudgetMs = Math.max(1, Math.round(1000 / (Math.max(1, state.snapshot.fps || 24) * playbackRate)));
+    const streamPressure = determineStreamPressure(videoStreamCount, audioStreamCount, state.snapshot);
+    let currentQuality: PlaybackQualityLevel = streamPressure === 'heavy'
+      ? 'draft'
+      : streamPressure === 'multi'
+        ? 'preview'
+        : 'full';
+
+    if (state.policy.overBudgetWindow >= 2) {
+      currentQuality = demotePlaybackQuality(currentQuality);
+    }
+    if (
+      state.policy.lastFrameCacheHitRate >= 0.9
+      && state.policy.lastFrameRenderLatencyMs > 0
+      && state.policy.lastFrameRenderLatencyMs < frameBudgetMs * 0.6
+      && streamPressure !== 'heavy'
+    ) {
+      currentQuality = promotePlaybackQuality(currentQuality);
+    }
+
+    let cacheStrategy: PlaybackCacheStrategy = 'source-only';
+    let promotionLookaheadFrames = 0;
+    if (streamPressure === 'heavy' || state.policy.overBudgetWindow >= 3) {
+      cacheStrategy = 'prefer-promoted-cache';
+      promotionLookaheadFrames = 4;
+    } else if (streamPressure === 'multi' || state.policy.overBudgetWindow >= 1) {
+      cacheStrategy = 'promote-next-frames';
+      promotionLookaheadFrames = 2;
+    }
+
+    return {
+      currentQuality,
+      cacheStrategy,
+      streamPressure,
+      frameBudgetMs,
+      promotionLookaheadFrames,
+    };
   }
 
   private requireBinding(projectId: string): BoundDesktopProject {
@@ -1767,6 +3065,156 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
     return state;
   }
 
+  private clearScheduler(state: DesktopPlaybackTransportState): void {
+    if (state.scheduler?.timer) {
+      clearTimeout(state.scheduler.timer);
+    }
+    state.policy.pendingPromotionKeys.clear();
+    state.scheduler = null;
+  }
+
+  private launchTrackedTask(
+    state: DesktopPlaybackTransportState,
+    task: Promise<void>,
+  ): void {
+    state.inFlightTasks.add(task);
+    void task.finally(() => {
+      state.inFlightTasks.delete(task);
+    });
+  }
+
+  private async waitForInFlightTasks(state: DesktopPlaybackTransportState): Promise<void> {
+    if (state.inFlightTasks.size === 0) {
+      return;
+    }
+    await Promise.allSettled(Array.from(state.inFlightTasks));
+  }
+
+  private queueLookaheadPromotion(
+    state: DesktopPlaybackTransportState,
+    frame: number,
+    target: CompositeFrameRequest['target'],
+    policy: Pick<DesktopPlaybackPolicyState, 'currentQuality' | 'cacheStrategy' | 'promotionLookaheadFrames'>,
+  ): void {
+    if (!state.scheduler?.running || policy.promotionLookaheadFrames <= 0) {
+      return;
+    }
+
+    const videoAssetIds = Array.from(new Set(
+      state.streams
+        .filter((stream) => stream.mediaType === 'video')
+        .map((stream) => stream.assetId),
+    ));
+    if (videoAssetIds.length === 0) {
+      return;
+    }
+
+    for (let offset = 1; offset <= policy.promotionLookaheadFrames; offset += 1) {
+      const targetFrame = frame + offset;
+      const promotionKey = [
+        state.handle,
+        targetFrame,
+        target,
+        policy.currentQuality,
+        policy.cacheStrategy,
+      ].join(':');
+      if (state.policy.pendingPromotionKeys.has(promotionKey)) {
+        continue;
+      }
+      state.policy.pendingPromotionKeys.add(promotionKey);
+      this.launchTrackedTask(
+        state,
+        this.promoteLookaheadFrame(state.handle, targetFrame, target, policy.currentQuality, videoAssetIds, promotionKey),
+      );
+    }
+  }
+
+  private async promoteLookaheadFrame(
+    transportHandle: NativeResourceHandle,
+    frame: number,
+    target: CompositeFrameRequest['target'],
+    quality: PlaybackQualityLevel,
+    videoAssetIds: string[],
+    promotionKey: string,
+  ): Promise<void> {
+    const state = this.transports.get(transportHandle);
+    if (!state) {
+      return;
+    }
+
+    try {
+      await Promise.all(videoAssetIds.map(async (assetId) => (
+        this.decodeAdapter.materializeVideoArtifact(state.decodeSessionHandle, {
+          assetId,
+          frame,
+          variant: 'source',
+          priority: 'background',
+        })
+      )));
+      await this.compositorAdapter.materializeCompositeArtifact({
+        graphId: state.graphId,
+        frame,
+        target,
+        quality,
+      });
+
+      const currentState = this.transports.get(transportHandle);
+      if (!currentState) {
+        return;
+      }
+      currentState.policy.promotedFrameCount += 1;
+      currentState.telemetry.promotedFrameCount = currentState.policy.promotedFrameCount;
+      await this.writeTransportManifest(currentState, {
+        playbackPolicy: this.serializePlaybackPolicy(currentState),
+      });
+    } catch {
+      // Promotion is opportunistic; the realtime path remains authoritative.
+    } finally {
+      const currentState = this.transports.get(transportHandle);
+      currentState?.policy.pendingPromotionKeys.delete(promotionKey);
+    }
+  }
+
+  private async tickPlaybackLoop(
+    transportHandle: NativeResourceHandle,
+    loopToken: number,
+  ): Promise<void> {
+    const state = this.requireTransport(transportHandle);
+    const scheduler = state.scheduler;
+    if (!scheduler || !scheduler.running || scheduler.loopToken !== loopToken) {
+      return;
+    }
+
+    const fps = Math.max(1, state.snapshot.fps || 24);
+    const elapsedFrames = Math.max(
+      0,
+      Math.floor(((Date.now() - scheduler.startedAtMs) * fps * scheduler.playbackRate) / 1000),
+    );
+    const nextFrame = scheduler.startFrame + elapsedFrames;
+    if (nextFrame > scheduler.lastRenderedFrame + 1) {
+      state.telemetry.droppedVideoFrames += nextFrame - scheduler.lastRenderedFrame - 1;
+    }
+
+    await this.renderTransportFrame(state, nextFrame);
+    const latestState = this.requireTransport(transportHandle);
+    if (!latestState.scheduler || latestState.scheduler.loopToken !== loopToken || !latestState.scheduler.running) {
+      return;
+    }
+    latestState.scheduler.lastRenderedFrame = nextFrame;
+    const nextFrameNumber = nextFrame + 1;
+    const nextFrameAtMs = latestState.scheduler.startedAtMs
+      + (((nextFrameNumber - latestState.scheduler.startFrame) / (fps * latestState.scheduler.playbackRate)) * 1000);
+    const delayMs = Math.max(0, Math.round(nextFrameAtMs - Date.now()));
+    latestState.scheduler.timer = setTimeout(() => {
+      const activeState = this.transports.get(transportHandle);
+      if (!activeState) {
+        return;
+      }
+      const task = this.tickPlaybackLoop(transportHandle, loopToken);
+      this.launchTrackedTask(activeState, task);
+    }, delayMs);
+  }
+
   private async writeTransportManifest(
     state: DesktopPlaybackTransportState,
     extra: Record<string, unknown> = {},
@@ -1783,8 +3231,63 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
       playing: state.playing,
       telemetry: state.telemetry,
       lastCompositeHandle: state.lastCompositeHandle,
+      lastCompositeArtifactPath: state.lastCompositeArtifactPath,
+      decodedVideoArtifacts: state.decodedVideoArtifacts,
+      decodedAudioArtifacts: state.decodedAudioArtifacts,
+      frameTransport: {
+        width: state.frameTransportView.width,
+        height: state.frameTransportView.height,
+        bytesPerPixel: state.frameTransportView.bytesPerPixel,
+        slots: state.frameTransportView.slots,
+        byteLength: state.frameTransportView.buffer.byteLength,
+      },
+      playbackPolicy: this.serializePlaybackPolicy(state),
+      attachedOutputDevices: state.attachedOutputConfigs.map((entry) => entry.deviceId),
+      activeOutputDevices: state.activeOutputDeviceIds,
+      continuousPlayback: state.scheduler
+        ? {
+            running: state.scheduler.running,
+            startFrame: state.scheduler.startFrame,
+            lastRenderedFrame: state.scheduler.lastRenderedFrame,
+            playbackRate: state.scheduler.playbackRate,
+          }
+        : { running: false },
       ...extra,
     }, null, 2), 'utf8');
+  }
+
+  private serializePlaybackPolicy(
+    state: DesktopPlaybackTransportState,
+  ): Omit<DesktopPlaybackPolicyState, 'pendingPromotionKeys'> & { pendingPromotionCount: number } {
+    return {
+      currentQuality: state.policy.currentQuality,
+      cacheStrategy: state.policy.cacheStrategy,
+      streamPressure: state.policy.streamPressure,
+      frameBudgetMs: state.policy.frameBudgetMs,
+      lastFrameRenderLatencyMs: state.policy.lastFrameRenderLatencyMs,
+      lastFrameCacheHitRate: state.policy.lastFrameCacheHitRate,
+      promotedFrameCount: state.policy.promotedFrameCount,
+      promotionLookaheadFrames: state.policy.promotionLookaheadFrames,
+      overBudgetWindow: state.policy.overBudgetWindow,
+      pendingPromotionCount: state.policy.pendingPromotionKeys.size,
+    };
+  }
+
+  private async loadCompositePixels(
+    composite: DesktopRenderedCompositeArtifact,
+    fallbackWidth: number,
+    fallbackHeight: number,
+  ): Promise<{ width: number; height: number; pixelData: Buffer }> {
+    try {
+      const encoded = await this.fsBindings.readFile(composite.artifactPath);
+      return convertPpmToBgra(encoded, fallbackWidth, fallbackHeight);
+    } catch {
+      return {
+        width: fallbackWidth,
+        height: fallbackHeight,
+        pixelData: createSolidBgraFrame(fallbackWidth, fallbackHeight, composite.handle),
+      };
+    }
   }
 }
 
@@ -1817,22 +3320,45 @@ export class DesktopNativeAudioMixAdapter implements ProfessionalAudioMixPort {
     await this.fsBindings.mkdir(mixDir, { recursive: true });
 
     this.sequence += 1;
-    const buses = [
-      { id: 'master', name: 'Master', layout: 'stereo' as const },
-      ...(snapshot.audioTrackCount >= 2 ? [
-        { id: 'dialogue', name: 'Dialogue', layout: 'stereo' as const },
-        { id: 'music-effects', name: 'Music+Effects', layout: 'stereo' as const },
-      ] : []),
-      ...(snapshot.audioTrackCount >= 6 ? [
-        { id: 'surround', name: 'Surround', layout: '5.1' as const },
-      ] : []),
-    ];
+    const trackLayouts = resolveAudioTrackLayouts(binding.project);
+    const topology = buildAudioMixTopology(trackLayouts as AudioTrackRoutingDescriptor[]);
+    const buses = topology.buses.map((bus) => {
+      const sourceTrackIds = bus.sourceTrackIds ?? trackLayouts
+        .filter((track) => (
+          bus.role === 'master'
+          || bus.role === 'printmaster'
+          || (bus.role === 'dialogue' && track.layout === 'mono')
+          || (bus.role === 'music-effects' && track.layout === 'stereo')
+          || (bus.role === 'surround' && (track.layout === '5.1' || track.layout === '7.1'))
+          || (bus.role === 'fold-down' && (track.layout === '5.1' || track.layout === '7.1'))
+        ))
+        .map((track) => track.trackId);
+      const sourceLayouts = bus.sourceLayouts ?? uniqueStrings(
+        trackLayouts
+          .filter((track) => sourceTrackIds.includes(track.trackId))
+          .flatMap((track) => track.clipLayouts),
+      ) as AudioChannelLayout[];
+
+      return {
+        ...bus,
+        sourceTrackIds,
+        sourceLayouts,
+      };
+    });
 
     const compilation: AudioMixCompilation = {
       mixId: `desktop-mix-${snapshot.projectId}-${this.sequence.toString(36)}`,
       revisionId: snapshot.revisionId,
       buses,
       trackCount: snapshot.audioTrackCount,
+      dominantLayout: topology.dominantLayout,
+      sourceLayouts: topology.sourceLayouts,
+      containsContainerizedAudio: topology.containsContainerizedAudio,
+      printMasterBusId: topology.printMasterBusId,
+      monitoringBusId: topology.monitoringBusId,
+      routingWarnings: topology.routingWarnings,
+      processingWarnings: topology.processingWarnings,
+      automationModes: createDefaultAutomationModes(trackLayouts),
     };
 
     const state: DesktopAudioMixState = {
@@ -1844,6 +3370,7 @@ export class DesktopNativeAudioMixAdapter implements ProfessionalAudioMixPort {
       ),
       snapshot: cloneValue(snapshot),
       compilation: cloneValue(compilation),
+      trackLayouts,
       automationWrites: [],
       previewHandles: [],
     };
@@ -1859,6 +3386,7 @@ export class DesktopNativeAudioMixAdapter implements ProfessionalAudioMixPort {
   ): Promise<AudioMixCompilation> {
     const state = this.requireMix(mixId);
     state.automationWrites.push(cloneValue(automation));
+    state.compilation = applyAutomationWriteToCompilation(state.compilation, automation);
     await this.writeMixManifest(state, {
       lastAutomationWrite: automation,
     });
@@ -1877,12 +3405,63 @@ export class DesktopNativeAudioMixAdapter implements ProfessionalAudioMixPort {
     this.sequence += 1;
     const handle = `desktop-mix-preview-${sanitizeArtifactBase(mixId)}-${this.sequence.toString(36)}`;
     state.previewHandles.push(handle);
+    const previewBusMeasurements = this.buildBusMeasurements(state, timeRange, 'preview');
+    const printReferenceBusMeasurements = this.buildBusMeasurements(state, timeRange, 'print');
+    const stemPolicies = state.compilation.buses.map((bus) => {
+      const policy = summarizeAudioBusProcessingPolicy(bus);
+      return {
+        busId: bus.id,
+        requiresDedicatedPreviewRender: policy.requiresDedicatedPreviewRender,
+        requiresDedicatedPrintRender: policy.requiresDedicatedPrintRender,
+        previewBypassedProcessingChain: policy.preview.bypassedStages,
+        printBypassedProcessingChain: policy.print.bypassedStages,
+      };
+    });
 
     const previewPath = path.join(previewDir, `${sanitizeArtifactBase(mixId)}-${this.sequence.toString(36)}.json`);
     await this.fsBindings.writeFile(previewPath, JSON.stringify({
       mixId,
       timeRange,
       handle,
+      dominantLayout: state.compilation.dominantLayout,
+      containsContainerizedAudio: state.compilation.containsContainerizedAudio ?? false,
+      stems: state.compilation.buses.map((bus) => {
+        const policy = stemPolicies.find((entry) => entry.busId === bus.id);
+        return {
+          busId: bus.id,
+          name: bus.name,
+          role: bus.role,
+          stemRole: bus.stemRole,
+          layout: bus.layout,
+          meteringMode: bus.meteringMode,
+          channelCount: bus.channelCount ?? getAudioChannelCountForLayout(bus.layout),
+          sourceTrackIds: bus.sourceTrackIds ?? [],
+          sendTargets: bus.sendTargets ?? [],
+          processingChain: bus.processingChain ?? [],
+          previewProcessingChain: resolveAudioBusProcessingChain(bus, 'preview'),
+          printProcessingChain: resolveAudioBusProcessingChain(bus, 'print'),
+          processingPolicy: policy,
+        };
+      }),
+      routingPlan: {
+        printMasterBusId: state.compilation.printMasterBusId,
+        monitoringBusId: state.compilation.monitoringBusId,
+        warnings: state.compilation.routingWarnings ?? [],
+      },
+      processing: {
+        previewContext: 'preview',
+        printContext: 'print',
+        requiresDedicatedPreviewRender: stemPolicies.some((stem) => stem.requiresDedicatedPreviewRender),
+        requiresDedicatedPrintRender: stemPolicies.some((stem) => stem.requiresDedicatedPrintRender),
+        warnings: state.compilation.processingWarnings ?? [],
+      },
+      metering: {
+        context: 'preview',
+        standard: 'EBU R128',
+        buses: previewBusMeasurements,
+        printReferenceBuses: printReferenceBusMeasurements,
+      },
+      automationModes: state.compilation.automationModes ?? [],
       automationWrites: state.automationWrites,
     }, null, 2), 'utf8');
     await this.writeMixManifest(state, {
@@ -1894,24 +3473,33 @@ export class DesktopNativeAudioMixAdapter implements ProfessionalAudioMixPort {
 
   async analyzeLoudness(mixId: string, timeRange: TimeRange): Promise<LoudnessMeasurement> {
     const state = this.requireMix(mixId);
-    const binding = this.requireBinding(state.projectId);
-    const peaks = flattenAssets(binding.project.bins)
-      .filter((asset) => asset.type === 'AUDIO' || (asset.technicalMetadata?.audioChannels ?? 0) > 0)
-      .flatMap((asset) => asset.waveformMetadata?.peaks ?? asset.waveformData ?? []);
-    const averagePeak = peaks.length > 0
-      ? peaks.reduce((sum, value) => sum + value, 0) / peaks.length
-      : 0.35;
-    const duration = Math.max(0.1, timeRange.endSeconds - timeRange.startSeconds);
-    const automationDensity = state.automationWrites.reduce((sum, write) => sum + write.points.length, 0);
-    const integratedLufs = -24
-      + Math.min(4.5, state.compilation.trackCount * 0.35)
-      + Math.min(2.5, averagePeak * 2.5)
-      + Math.min(2, automationDensity * 0.12);
+    const busMeasurements = this.buildBusMeasurements(state, timeRange, 'print');
+    const primaryMeasurement = busMeasurements.find((bus) => bus.busId === state.compilation.printMasterBusId)
+      ?? busMeasurements.find((bus) => bus.busId === 'master')
+      ?? busMeasurements[0];
+    const analyzedLayout = primaryMeasurement?.layout ?? state.compilation.dominantLayout ?? 'stereo';
+    const analyzedChannelCount = getAudioChannelCountForLayout(analyzedLayout);
+    const warnings = uniqueStrings([
+      ...(state.compilation.containsContainerizedAudio
+        ? ['Containerized multichannel audio detected; verify stem routing before turnover.']
+        : []),
+      ...(state.compilation.routingWarnings ?? []),
+      ...(state.compilation.processingWarnings ?? []),
+      ...busMeasurements.flatMap((bus) => bus.warnings ?? []),
+    ]);
 
     const result: LoudnessMeasurement = {
-      integratedLufs: Number(integratedLufs.toFixed(2)),
-      shortTermLufs: Number((integratedLufs + Math.min(1.5, duration / 4)).toFixed(2)),
-      truePeakDbtp: Number((-2 + Math.min(0.95, averagePeak * 0.75)).toFixed(2)),
+      integratedLufs: primaryMeasurement?.integratedLufs ?? -24,
+      shortTermLufs: primaryMeasurement?.shortTermLufs ?? -22.5,
+      truePeakDbtp: primaryMeasurement?.truePeakDbtp ?? -1.5,
+      analyzedLayout,
+      analyzedChannelCount,
+      warnings,
+      diagnostics: [
+        ...(state.compilation.routingWarnings ?? []),
+        ...(state.compilation.processingWarnings ?? []),
+      ],
+      busMeasurements,
     };
 
     state.lastLoudness = result;
@@ -1937,6 +3525,74 @@ export class DesktopNativeAudioMixAdapter implements ProfessionalAudioMixPort {
     return state;
   }
 
+  private buildBusMeasurements(
+    state: DesktopAudioMixState,
+    timeRange: TimeRange,
+    context: 'preview' | 'print',
+  ): NonNullable<LoudnessMeasurement['busMeasurements']> {
+    const binding = this.requireBinding(state.projectId);
+    const signalSummary = summarizeAudioSignal(binding.project);
+    const duration = Math.max(0.1, timeRange.endSeconds - timeRange.startSeconds);
+    const automationDensity = state.automationWrites.reduce((sum, write) => sum + write.points.length, 0);
+
+    return state.compilation.buses.map((bus, index) => {
+      const channelCount = bus.channelCount ?? getAudioChannelCountForLayout(bus.layout);
+      const policy = summarizeAudioBusProcessingPolicy(bus);
+      const activeStages = policy[context].activeStages;
+      const bypassedStages = policy[context].bypassedStages;
+      const limiterActive = activeStages.some((stage) => stage.kind === 'limiter');
+      const dynamicsActive = activeStages.some((stage) => stage.kind === 'dynamics');
+      const matrixActive = activeStages.some((stage) => stage.kind === 'fold-down-matrix');
+      let integratedLufs = -24
+        + Math.min(4.5, (bus.sourceTrackIds?.length ?? state.compilation.trackCount) * 0.35)
+        + Math.min(2.5, signalSummary.averagePeak * 2.5)
+        + Math.min(2, automationDensity * 0.12)
+        + Math.min(1.5, (channelCount - 2) * 0.22)
+        - index * 0.14
+        + Math.min(0.3, activeStages.length * 0.08)
+        + (limiterActive ? -0.22 : 0.12)
+        + (dynamicsActive ? -0.08 : 0)
+        + (matrixActive ? -0.1 : 0);
+
+      if (bus.role === 'dialogue') {
+        integratedLufs -= 0.5;
+      } else if (bus.role === 'music-effects') {
+        integratedLufs -= 0.25;
+      } else if (bus.role === 'fold-down') {
+        integratedLufs -= 0.85;
+      } else if (bus.role === 'printmaster') {
+        integratedLufs += 0.1;
+      }
+
+      const warnings: string[] = [];
+      if (bus.role === 'fold-down' && state.compilation.containsContainerizedAudio) {
+        warnings.push('Stereo fold-down is derived from multichannel source material; verify downmix coefficients.');
+      }
+      if (bus.role === 'printmaster' && (state.compilation.routingWarnings?.length ?? 0) > 0) {
+        warnings.push(...(state.compilation.routingWarnings ?? []));
+      }
+      if (context === 'preview' && bypassedStages.length > 0) {
+        warnings.push(`Preview bypasses ${bypassedStages.map((stage) => stage.kind).join(', ')} on ${bus.id}.`);
+      }
+
+      return {
+        busId: bus.id,
+        layout: bus.layout,
+        integratedLufs: Number(integratedLufs.toFixed(2)),
+        shortTermLufs: Number((integratedLufs + Math.min(1.5, duration / 4)).toFixed(2)),
+        truePeakDbtp: Number((
+          -2
+          + Math.min(0.95, signalSummary.peakHold * 0.75)
+          - (bus.role === 'fold-down' ? 0.2 : 0)
+          - (limiterActive ? 0.45 : 0)
+          - (matrixActive ? 0.12 : 0)
+        ).toFixed(2)),
+        meteringMode: bus.meteringMode,
+        warnings: warnings.length > 0 ? uniqueStrings(warnings) : undefined,
+      };
+    });
+  }
+
   private async writeMixManifest(
     state: DesktopAudioMixState,
     extra: Record<string, unknown> = {},
@@ -1946,6 +3602,7 @@ export class DesktopNativeAudioMixAdapter implements ProfessionalAudioMixPort {
       projectId: state.projectId,
       snapshot: state.snapshot,
       compilation: state.compilation,
+      trackLayouts: state.trackLayouts,
       automationWrites: state.automationWrites,
       previewHandles: state.previewHandles,
       lastLoudness: state.lastLoudness,
@@ -2510,6 +4167,49 @@ export class DesktopNativeParityRuntime {
 
     this.referenceRuntime.registerProject(project);
     return this.referenceRuntime.buildSnapshotForProject(projectId, sequenceId, revisionId);
+  }
+
+  getPlaybackTransportView(transportHandle: NativeResourceHandle): DesktopPlaybackTransportView {
+    return this.playbackAdapter.getTransportView(transportHandle);
+  }
+
+  async attachPlaybackOutputDevice(
+    transportHandle: NativeResourceHandle,
+    config: PlaybackConfig,
+  ): Promise<void> {
+    await this.playbackAdapter.attachOutputDevice(transportHandle, config);
+  }
+
+  async playPlaybackTransport(
+    transportHandle: NativeResourceHandle,
+    frame: number,
+    playbackRate?: number,
+  ): Promise<void> {
+    await this.playbackAdapter.play(transportHandle, frame, playbackRate);
+  }
+
+  async syncPlaybackTransportFrame(
+    transportHandle: NativeResourceHandle,
+    frame: number,
+  ): Promise<void> {
+    await this.playbackAdapter.syncPlaybackFrame(transportHandle, frame);
+  }
+
+  async detachPlaybackOutputDevice(
+    transportHandle: NativeResourceHandle,
+    deviceId?: string,
+  ): Promise<void> {
+    await this.playbackAdapter.detachOutputDevice(transportHandle, deviceId);
+  }
+
+  async releasePlaybackTransport(transportHandle: NativeResourceHandle): Promise<void> {
+    await this.playbackAdapter.releaseTransport(transportHandle);
+  }
+
+  async invalidatePlaybackCaches(projectId: string): Promise<void> {
+    await this.decodeAdapter.invalidateProjectCache(projectId);
+    await this.compositorAdapter.invalidateProjectCache(projectId);
+    await this.playbackAdapter.invalidateProjectCache(projectId);
   }
 
   private syncReferenceProject(projectId: string): void {

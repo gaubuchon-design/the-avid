@@ -111,7 +111,7 @@ describe('phase 1 track patch panel', () => {
     });
   });
 
-  it('quick-patches an unpatched source chip to the next compatible record track', async () => {
+  it('routes a selected source chip to the clicked record track', async () => {
     useEditorStore.setState({
       tracks: [
         {
@@ -162,15 +162,70 @@ describe('phase 1 track patch panel', () => {
       trackPatchingEngine.unpatchSource('src-v1');
     });
 
-    const sourceChip = container.querySelector('[aria-label="Patch source V1"]');
+    const sourceChip = container.querySelector('[aria-label="Select source V1 for patching"]');
+    const target = container.querySelector('[aria-label="Patch target V2"]');
+
     expect(sourceChip).toBeInstanceOf(HTMLButtonElement);
+    expect(target).toBeInstanceOf(HTMLDivElement);
 
     await act(async () => {
       sourceChip?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    expect(trackPatchingEngine.getRecordTrackForSource('src-v1')).toBe('t-v1');
-    expect(trackPatchingEngine.isRecordTrackEnabled('t-v1')).toBe(true);
+    await act(async () => {
+      target?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(trackPatchingEngine.getRecordTrackForSource('src-v1')).toBe('t-v2');
+    expect(trackPatchingEngine.isRecordTrackEnabled('t-v2')).toBe(true);
+    expect(trackPatchingEngine.getSourceTrackForRecord('t-v1')).toBeNull();
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('toggles sync lock from the visible sync button', async () => {
+    useEditorStore.setState({
+      tracks: [
+        {
+          id: 't-v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [],
+        },
+      ],
+      sourceAsset: {
+        id: 'asset-video',
+        name: 'Clip',
+        type: 'VIDEO',
+        status: 'READY',
+        tags: [],
+        isFavorite: false,
+      },
+    });
+
+    const container = document.createElement('div');
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<TrackPatchPanel />);
+    });
+
+    const syncButton = container.querySelector('[aria-label="Toggle sync lock for V1"]');
+    expect(syncButton).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      syncButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(trackPatchingEngine.isSyncLocked('t-v1')).toBe(true);
 
     await act(async () => {
       root.unmount();

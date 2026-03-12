@@ -1,12 +1,17 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { editEngine } from '../../engine/EditEngine';
 import { trackPatchingEngine } from '../../engine/TrackPatchingEngine';
 import { makeClip, useEditorStore } from '../../store/editor.store';
+import { usePlayerStore } from '../../store/player.store';
 
 const initialState = useEditorStore.getState();
+const initialPlayerState = usePlayerStore.getState();
 
 describe('phase 1 editorial parity', () => {
   beforeEach(() => {
     useEditorStore.setState(initialState, true);
+    usePlayerStore.setState(initialPlayerState, true);
+    editEngine.clear();
     trackPatchingEngine.reset();
   });
 
@@ -218,5 +223,251 @@ describe('phase 1 editorial parity', () => {
     expect(track2!.clips[0]!.name).toBe('Patched Shot');
     expect(track2!.clips[0]!.startTime).toBe(4);
     expect(track2!.clips[0]!.endTime).toBe(7);
+  });
+
+  it('match frame opens the source monitor on the topmost active media clip', () => {
+    const baseAsset = {
+      id: 'asset-video-1',
+      name: 'Interview',
+      type: 'VIDEO' as const,
+      status: 'READY' as const,
+      tags: [],
+      isFavorite: false,
+    };
+    const overlayAsset = {
+      id: 'asset-video-2',
+      name: 'B-roll',
+      type: 'VIDEO' as const,
+      status: 'READY' as const,
+      tags: [],
+      isFavorite: false,
+    };
+
+    usePlayerStore.setState({ activeMonitor: 'record' });
+    useEditorStore.setState({
+      bins: [
+        {
+          id: 'b-master',
+          name: 'Master',
+          color: '#5b6af5',
+          children: [],
+          assets: [baseAsset, overlayAsset],
+          isOpen: true,
+        },
+      ],
+      tracks: [
+        {
+          id: 'v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [
+            makeClip({
+              id: 'clip-v1',
+              assetId: baseAsset.id,
+              trackId: 'v1',
+              name: 'Base Clip',
+              startTime: 10,
+              endTime: 14,
+              trimStart: 3,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+        {
+          id: 'v2',
+          name: 'V2',
+          type: 'VIDEO',
+          sortOrder: 1,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#818cf8',
+          clips: [
+            makeClip({
+              id: 'clip-v2',
+              assetId: overlayAsset.id,
+              trackId: 'v2',
+              name: 'Overlay Clip',
+              startTime: 10,
+              endTime: 14,
+              trimStart: 7,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+        {
+          id: 'g1',
+          name: 'G1',
+          type: 'GRAPHIC',
+          sortOrder: 2,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#f59e0b',
+          clips: [
+            makeClip({
+              id: 'clip-title',
+              assetId: 'title-1',
+              trackId: 'g1',
+              name: 'Title Overlay',
+              startTime: 10,
+              endTime: 14,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+      ],
+      playheadTime: 11.5,
+      sourceAsset: null,
+      sourcePlayhead: 0,
+      inspectedClipId: null,
+    });
+
+    useEditorStore.getState().matchFrame();
+
+    const state = useEditorStore.getState();
+    expect(state.sourceAsset?.id).toBe(overlayAsset.id);
+    expect(state.sourcePlayhead).toBe(8.5);
+    expect(state.inspectedClipId).toBe('clip-v2');
+    expect(usePlayerStore.getState().activeMonitor).toBe('source');
+  });
+
+  it('extracts selected segments with ripple and supports undo', () => {
+    useEditorStore.setState({
+      tracks: [
+        {
+          id: 'v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [
+            makeClip({
+              id: 'left',
+              trackId: 'v1',
+              name: 'Left',
+              startTime: 0,
+              endTime: 5,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+            makeClip({
+              id: 'middle',
+              trackId: 'v1',
+              name: 'Middle',
+              startTime: 5,
+              endTime: 10,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+            makeClip({
+              id: 'right',
+              trackId: 'v1',
+              name: 'Right',
+              startTime: 10,
+              endTime: 15,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+      ],
+      selectedClipIds: ['middle'],
+      duration: 15,
+    });
+
+    useEditorStore.getState().extractSelection();
+
+    let clips = useEditorStore.getState().tracks[0]!.clips;
+    expect(clips.map((clip) => [clip.id, clip.startTime, clip.endTime])).toEqual([
+      ['left', 0, 5],
+      ['right', 5, 10],
+    ]);
+    expect(editEngine.undoCount).toBe(1);
+
+    expect(editEngine.undo()).toBe(true);
+
+    clips = useEditorStore.getState().tracks[0]!.clips;
+    expect(clips.map((clip) => [clip.id, clip.startTime, clip.endTime])).toEqual([
+      ['left', 0, 5],
+      ['middle', 5, 10],
+      ['right', 10, 15],
+    ]);
+  });
+
+  it('extracts a marked record range and clears the marks after the edit', () => {
+    useEditorStore.setState({
+      tracks: [
+        {
+          id: 'v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [
+            makeClip({
+              id: 'left',
+              trackId: 'v1',
+              name: 'Left',
+              startTime: 0,
+              endTime: 4,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+            makeClip({
+              id: 'right',
+              trackId: 'v1',
+              name: 'Right',
+              startTime: 8,
+              endTime: 12,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+      ],
+      enabledTrackIds: ['v1'],
+      playheadTime: 6,
+      inPoint: 4,
+      outPoint: 8,
+      duration: 14,
+    });
+
+    useEditorStore.getState().extractMarkedRange();
+
+    const state = useEditorStore.getState();
+    expect(state.tracks[0]!.clips.map((clip) => [clip.id, clip.startTime, clip.endTime])).toEqual([
+      ['left', 0, 4],
+      ['right', 4, 8],
+    ]);
+    expect(state.playheadTime).toBe(4);
+    expect(state.inPoint).toBeNull();
+    expect(state.outPoint).toBeNull();
+    expect(editEngine.undoCount).toBe(1);
   });
 });

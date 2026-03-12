@@ -1,5 +1,6 @@
 import { playbackEngine } from '../engine/PlaybackEngine';
 import { findActiveMediaClip, getSourceTime } from '../engine/compositeRecordFrame';
+import { resolveEditorialFocusTrackIds } from './editorialTrackFocus';
 import type { Bin, MediaAsset } from '../store/editor.store';
 import { useEditorStore } from '../store/editor.store';
 import { usePlayerStore } from '../store/player.store';
@@ -115,6 +116,106 @@ export function markOutForActiveMonitor(): void {
   }
 
   editorState.setOutPoint(editorState.playheadTime);
+}
+
+export function clearMarksForActiveMonitor(): void {
+  const playerState = usePlayerStore.getState();
+  const editorState = useEditorStore.getState();
+
+  if (playerState.activeMonitor === 'source') {
+    editorState.clearSourceInOut();
+    return;
+  }
+
+  editorState.clearInOut();
+}
+
+export function clearInForActiveMonitor(): void {
+  const playerState = usePlayerStore.getState();
+  const editorState = useEditorStore.getState();
+
+  if (playerState.activeMonitor === 'source') {
+    editorState.setSourceInPoint(null);
+    return;
+  }
+
+  editorState.setInPoint(null);
+}
+
+export function clearOutForActiveMonitor(): void {
+  const playerState = usePlayerStore.getState();
+  const editorState = useEditorStore.getState();
+
+  if (playerState.activeMonitor === 'source') {
+    editorState.setSourceOutPoint(null);
+    return;
+  }
+
+  editorState.setOutPoint(null);
+}
+
+export function goToInForActiveMonitor(): void {
+  const playerState = usePlayerStore.getState();
+  const editorState = useEditorStore.getState();
+
+  if (playerState.activeMonitor === 'source') {
+    if (editorState.sourceInPoint !== null) {
+      editorState.setSourcePlayhead(editorState.sourceInPoint);
+    }
+    return;
+  }
+
+  if (editorState.inPoint !== null) {
+    editorState.setPlayhead(editorState.inPoint);
+  }
+}
+
+export function goToOutForActiveMonitor(): void {
+  const playerState = usePlayerStore.getState();
+  const editorState = useEditorStore.getState();
+
+  if (playerState.activeMonitor === 'source') {
+    if (editorState.sourceOutPoint !== null) {
+      editorState.setSourcePlayhead(editorState.sourceOutPoint);
+    }
+    return;
+  }
+
+  if (editorState.outPoint !== null) {
+    editorState.setPlayhead(editorState.outPoint);
+  }
+}
+
+export function markClipForActiveMonitor(): boolean {
+  const playerState = usePlayerStore.getState();
+  const editorState = useEditorStore.getState();
+
+  if (playerState.activeMonitor === 'source') {
+    const sourceDuration = editorState.sourceAsset?.duration;
+    if (sourceDuration === undefined || sourceDuration === null || sourceDuration <= 0) {
+      return false;
+    }
+
+    editorState.setSourceInPoint(0);
+    editorState.setSourceOutPoint(sourceDuration);
+    return true;
+  }
+
+  const focusTrackIds = new Set(resolveEditorialFocusTrackIds(editorState));
+  const candidateTracks = editorState.tracks.filter((track) => focusTrackIds.has(track.id));
+
+  for (const track of candidateTracks) {
+    const clip = track.clips.find((item) => item.startTime <= editorState.playheadTime && item.endTime >= editorState.playheadTime);
+    if (!clip) {
+      continue;
+    }
+
+    editorState.setInPoint(clip.startTime);
+    editorState.setOutPoint(clip.endTime);
+    return true;
+  }
+
+  return false;
 }
 
 export function matchFrameAtPlayhead(): boolean {

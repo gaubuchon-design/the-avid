@@ -25,6 +25,12 @@ import { TrackerPanel } from '../components/TrackerPanel/TrackerPanel';
 import { TrackingOverlay } from '../components/TrackerPanel/TrackingOverlay';
 import { type EditorPage as PageId } from '../components/PageNavigation/PageNavigation';
 import {
+  clearInForActiveMonitor,
+  clearMarksForActiveMonitor,
+  clearOutForActiveMonitor,
+  goToInForActiveMonitor,
+  goToOutForActiveMonitor,
+  markClipForActiveMonitor,
   markInForActiveMonitor,
   markOutForActiveMonitor,
   playForwardForActiveMonitor,
@@ -38,6 +44,7 @@ import { subscribeSmartToolStateToStore } from '../lib/smartToolStateBridge';
 import { subscribeTrimHistoryToEditEngine } from '../lib/trimHistoryBridge';
 import { subscribeTrimStateToStore } from '../lib/trimStateBridge';
 import { subscribeTrackPatchingStateToStore } from '../lib/trackPatchingStateBridge';
+import { resolveEditorialFocusTrackIds } from '../lib/editorialTrackFocus';
 import { MediaPage } from './MediaPage';
 
 // Playback is driven by PlaybackEngine (RAF-based) via editor.store.ts togglePlay().
@@ -68,16 +75,13 @@ export function EditorPage() {
   // ─── Register core keyboard actions with the KeyboardEngine ──────────
   const insertEdit = useEditorStore((s) => s.insertEdit);
   const overwriteEdit = useEditorStore((s) => s.overwriteEdit);
-  const setInPoint = useEditorStore((s) => s.setInPoint);
-  const setOutPoint = useEditorStore((s) => s.setOutPoint);
-  const clearInOut = useEditorStore((s) => s.clearInOut);
   const goToStart = useEditorStore((s) => s.goToStart);
   const goToEnd = useEditorStore((s) => s.goToEnd);
   const goToNextEditPoint = useEditorStore((s) => s.goToNextEditPoint);
   const goToPrevEditPoint = useEditorStore((s) => s.goToPrevEditPoint);
   const deleteSelectedClips = useEditorStore((s) => s.deleteSelectedClips);
-  const liftSelection = useEditorStore((s) => s.liftSelection);
-  const extractSelection = useEditorStore((s) => s.extractSelection);
+  const liftEdit = useEditorStore((s) => s.liftEdit);
+  const extractEdit = useEditorStore((s) => s.extractEdit);
   const setActiveTool = useEditorStore((s) => s.setActiveTool);
   const toggleSmartToolLiftOverwrite = useEditorStore((s) => s.toggleSmartToolLiftOverwrite);
   const toggleSmartToolExtractSplice = useEditorStore((s) => s.toggleSmartToolExtractSplice);
@@ -96,43 +100,9 @@ export function EditorPage() {
     const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
     setPlayhead(Math.max(safeTime - 1 / 24, 0));
   }, []);
-  const markClipAtPlayhead = useCallback(() => {
-    const state = useEditorStore.getState();
-    const targetedTracks = state.tracks.filter((track) => state.enabledTrackIds.includes(track.id));
-    const candidateTracks = state.selectedTrackId
-      ? [state.tracks.find((track) => track.id === state.selectedTrackId)].filter(Boolean)
-      : (targetedTracks.length > 0 ? targetedTracks : state.tracks);
-
-    for (const track of candidateTracks) {
-      const clip = track?.clips.find((item) => item.startTime <= state.playheadTime && item.endTime >= state.playheadTime);
-      if (!clip) {
-        continue;
-      }
-      state.setInPoint(clip.startTime);
-      state.setOutPoint(clip.endTime);
-      return;
-    }
-  }, []);
-  const clearIn = useCallback(() => setInPoint(null), [setInPoint]);
-  const clearOut = useCallback(() => setOutPoint(null), [setOutPoint]);
-  const goToIn = useCallback(() => {
-    const { inPoint, setPlayhead } = useEditorStore.getState();
-    if (inPoint !== null) {
-      setPlayhead(inPoint);
-    }
-  }, []);
-  const goToOut = useCallback(() => {
-    const { outPoint, setPlayhead } = useEditorStore.getState();
-    if (outPoint !== null) {
-      setPlayhead(outPoint);
-    }
-  }, []);
   const enterTrimMode = useCallback(() => {
     const state = useEditorStore.getState();
-    const targetedTrackIds = state.enabledTrackIds.length > 0
-      ? state.enabledTrackIds
-      : state.tracks.filter((track) => !track.locked).map((track) => track.id);
-    const activeTrackIds = state.selectedTrackId ? [state.selectedTrackId] : targetedTrackIds;
+    const activeTrackIds = resolveEditorialFocusTrackIds(state);
 
     setActiveTool('trim');
     trimEngine.enterTrimMode(activeTrackIds, state.playheadTime, TrimSide.BOTH);
@@ -168,17 +138,17 @@ export function EditorPage() {
   useKeyboardAction('transport.goToEnd', goToEnd, [goToEnd]);
   useKeyboardAction('mark.in', markInForActiveMonitor, []);
   useKeyboardAction('mark.out', markOutForActiveMonitor, []);
-  useKeyboardAction('mark.clip', markClipAtPlayhead, [markClipAtPlayhead]);
-  useKeyboardAction('mark.clipAlt', markClipAtPlayhead, [markClipAtPlayhead]);
-  useKeyboardAction('mark.clearBoth', clearInOut, [clearInOut]);
-  useKeyboardAction('mark.clearIn', clearIn, [clearIn]);
-  useKeyboardAction('mark.clearOut', clearOut, [clearOut]);
-  useKeyboardAction('mark.goToIn', goToIn, [goToIn]);
-  useKeyboardAction('mark.goToOut', goToOut, [goToOut]);
+  useKeyboardAction('mark.clip', markClipForActiveMonitor, []);
+  useKeyboardAction('mark.clipAlt', markClipForActiveMonitor, []);
+  useKeyboardAction('mark.clearBoth', clearMarksForActiveMonitor, []);
+  useKeyboardAction('mark.clearIn', clearInForActiveMonitor, []);
+  useKeyboardAction('mark.clearOut', clearOutForActiveMonitor, []);
+  useKeyboardAction('mark.goToIn', goToInForActiveMonitor, []);
+  useKeyboardAction('mark.goToOut', goToOutForActiveMonitor, []);
   useKeyboardAction('edit.spliceIn', insertEdit, [insertEdit]);
   useKeyboardAction('edit.overwrite', overwriteEdit, [overwriteEdit]);
-  useKeyboardAction('edit.lift', liftSelection, [liftSelection]);
-  useKeyboardAction('edit.extract', extractSelection, [extractSelection]);
+  useKeyboardAction('edit.lift', liftEdit, [liftEdit]);
+  useKeyboardAction('edit.extract', extractEdit, [extractEdit]);
   useKeyboardAction('edit.undo', () => editEngine.undo(), []);
   useKeyboardAction('edit.redo', () => editEngine.redo(), []);
   useKeyboardAction('edit.delete', deleteSelectedClips, [deleteSelectedClips]);
