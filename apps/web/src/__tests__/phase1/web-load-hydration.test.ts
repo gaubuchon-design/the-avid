@@ -153,7 +153,7 @@ describe('phase 1 web-load hydration', () => {
     expect(state.saveStatus).toBe('saved');
   });
 
-  it('persists restored collaboration snapshots so reopen loads restored timeline state', async () => {
+  it('persists restored version snapshots so reopen loads restored timeline state', async () => {
     const repository = new Map<string, EditorProject>();
     const project = makeProject('project-reopen', 'Original Clip');
     repository.set(project.id, project);

@@ -19,12 +19,12 @@ describe('editorUrlState', () => {
   });
 
   it('resolves supported workspaces', () => {
-    expect(resolveWorkspaceParam('sports')).toBe('sports');
-    expect(resolveWorkspaceParam('marketing')).toBe('marketing');
+    expect(resolveWorkspaceParam('filmtv')).toBe('filmtv');
   });
 
   it('falls back to film/tv for unsupported workspaces', () => {
     expect(resolveWorkspaceParam(null)).toBe('filmtv');
+    expect(resolveWorkspaceParam('sports')).toBe('filmtv');
     expect(resolveWorkspaceParam('newsroom')).toBe('filmtv');
   });
 });

@@ -1,3 +1,4 @@
+import type { ProjectTemplate } from '@mcua/core';
 import React, { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useEditorStore } from '../../store/editor.store';
@@ -9,77 +10,51 @@ import {
 } from '../../lib/timecode';
 import {
   buildProjectCreationOptions,
-  type EditorialWorkspacePreset,
+  EDITORIAL_TEMPLATE_OPTIONS,
+  getProjectCreationTemplateConfig,
 } from '../../lib/projectCreation';
 
-// ─── Types ──────────────────────────────────────────────────────────────────────
-
-type WorkspacePersona = EditorialWorkspacePreset;
-
-interface PersonaConfig {
-  icon: string;
-  name: string;
-  desc: string;
-  fps: number;
-  dropFrame?: boolean;
-  resolution: { width: number; height: number };
-}
-
-interface SequenceSettings {
+interface SequenceState {
   fps: number;
   resolutionIndex: number;
   dropFrame: boolean;
 }
 
-type DialogStep = 0 | 1 | 2;
-
-// ─── Persona Definitions ────────────────────────────────────────────────────────
-
-const PERSONA_MAP: Record<WorkspacePersona, PersonaConfig> = {
-  filmtv: {
-    icon: '\uD83C\uDFAC',
-    name: 'Film & TV',
-    desc: 'Full timeline, color grading, audio mixing',
-    fps: 23.976,
-    resolution: { width: 1920, height: 1080 },
-  },
-  news: {
-    icon: '\uD83D\uDCE1',
-    name: 'News',
-    desc: 'Rundown, script panel, fast turnaround',
-    fps: 29.97,
-    dropFrame: true,
-    resolution: { width: 1920, height: 1080 },
-  },
-  sports: {
-    icon: '\u26A1',
-    name: 'Sports',
-    desc: 'Multi-cam, slow-mo, instant replay',
-    fps: 59.94,
-    dropFrame: true,
-    resolution: { width: 3840, height: 2160 },
-  },
-  creator: {
-    icon: '\uD83D\uDCF1',
-    name: 'Creator',
-    desc: 'Social formats, templates, quick export',
-    fps: 30,
-    resolution: { width: 1080, height: 1920 },
-  },
-  marketing: {
-    icon: '\uD83C\uDFF7',
-    name: 'Marketing',
-    desc: 'Multi-variant, A/B testing, brand assets',
-    fps: 30,
-    resolution: { width: 1920, height: 1080 },
-  },
+const TEMPLATE_COPY: Record<ProjectTemplate, { badge: string; accent: string }> = {
+  film: { badge: 'Offline edit', accent: '#5b6af5' },
+  documentary: { badge: 'Story cut', accent: '#f59e0b' },
+  commercial: { badge: 'Client review', accent: '#22c55e' },
+  podcast: { badge: 'Audio-first', accent: '#06b6d4' },
+  sports: { badge: 'Legacy', accent: '#fb7185' },
+  social: { badge: 'Legacy', accent: '#a855f7' },
+  news: { badge: 'Legacy', accent: '#94a3b8' },
 };
 
-const PERSONA_KEYS: WorkspacePersona[] = ['filmtv', 'news', 'sports', 'creator', 'marketing'];
+function getResolutionIndex(template: ProjectTemplate): number {
+  const templateConfig = getProjectCreationTemplateConfig(template);
+  const index = RESOLUTION_PRESETS.findIndex((preset) => (
+    preset.width === templateConfig.sequence.width
+    && preset.height === templateConfig.sequence.height
+  ));
+  return index >= 0 ? index : 0;
+}
 
-const STEP_LABELS = ['Workspace', 'Details', 'Sequence'] as const;
+function getInitialSequence(template: ProjectTemplate): SequenceState {
+  const templateConfig = getProjectCreationTemplateConfig(template);
+  return {
+    fps: templateConfig.sequence.fps,
+    resolutionIndex: getResolutionIndex(template),
+    dropFrame: templateConfig.sequence.dropFrame,
+  };
+}
 
-// ─── Inline Styles ──────────────────────────────────────────────────────────────
+function resetBorder(target: EventTarget | null): void {
+  const element = target as HTMLElement | null;
+  if (!element) {
+    return;
+  }
+  element.style.borderColor = 'var(--border-default)';
+}
 
 const S = {
   overlay: {
@@ -89,803 +64,381 @@ const S = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: 'rgba(0, 0, 0, 0.7)',
-    backdropFilter: 'blur(8px)',
-    WebkitBackdropFilter: 'blur(8px)',
+    padding: 24,
+    background: 'rgba(6, 10, 18, 0.82)',
+    backdropFilter: 'blur(10px)',
+    WebkitBackdropFilter: 'blur(10px)',
   },
-
   dialog: {
-    width: 560,
-    maxHeight: 'calc(100vh - 80px)',
-    background: 'var(--bg-surface)',
-    border: '1px solid var(--border-default)',
-    borderRadius: 'var(--radius-lg)',
-    boxShadow: '0 24px 64px rgba(0, 0, 0, 0.6)',
-    display: 'flex',
-    flexDirection: 'column' as const,
+    width: 'min(980px, calc(100vw - 48px))',
+    maxHeight: 'calc(100vh - 48px)',
+    display: 'grid',
+    gridTemplateColumns: 'minmax(280px, 0.95fr) minmax(360px, 1.05fr)',
+    background: 'linear-gradient(180deg, rgba(18, 25, 40, 0.98), rgba(10, 14, 22, 0.98))',
+    border: '1px solid rgba(138, 156, 181, 0.2)',
+    borderRadius: 24,
+    boxShadow: '0 28px 80px rgba(0, 0, 0, 0.52)',
     overflow: 'hidden',
   },
-
-  header: {
+  rail: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: 18,
+    padding: '28px 24px 24px',
+    background: 'linear-gradient(180deg, rgba(18, 31, 54, 0.92), rgba(11, 18, 30, 0.98))',
+    borderRight: '1px solid rgba(138, 156, 181, 0.14)',
+  },
+  body: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    minHeight: 0,
+  },
+  bodyScroll: {
+    flex: 1,
+    overflowY: 'auto' as const,
+    padding: '28px 28px 24px',
+  },
+  sectionLabel: {
+    display: 'block',
+    marginBottom: 8,
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: '0.12em',
+    textTransform: 'uppercase' as const,
+    color: 'var(--text-muted)',
+  },
+  title: {
+    margin: 0,
+    fontFamily: 'var(--font-display)',
+    fontSize: 30,
+    fontWeight: 700,
+    color: 'var(--text-primary)',
+    lineHeight: 1.05,
+  },
+  subtitle: {
+    margin: '10px 0 0',
+    fontSize: 14,
+    lineHeight: 1.6,
+    color: 'var(--text-secondary)',
+  },
+  templateGrid: {
+    display: 'grid',
+    gap: 12,
+  },
+  templateCard: (selected: boolean, accent: string) => ({
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: 10,
+    padding: '16px 16px 15px',
+    borderRadius: 18,
+    border: `1px solid ${selected ? accent : 'rgba(138, 156, 181, 0.14)'}`,
+    background: selected
+      ? `linear-gradient(180deg, ${accent}24, rgba(255, 255, 255, 0.02))`
+      : 'rgba(255, 255, 255, 0.02)',
+    boxShadow: selected ? `inset 0 0 0 1px ${accent}33` : 'none',
+    textAlign: 'left' as const,
+    cursor: 'pointer',
+  }),
+  templateBadge: (accent: string) => ({
+    display: 'inline-flex',
+    alignItems: 'center',
+    width: 'fit-content',
+    padding: '4px 8px',
+    borderRadius: 999,
+    background: `${accent}22`,
+    color: accent,
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase' as const,
+  }),
+  templateName: {
+    fontSize: 16,
+    fontWeight: 700,
+    color: 'var(--text-primary)',
+  },
+  templateDesc: {
+    fontSize: 13,
+    lineHeight: 1.5,
+    color: 'var(--text-secondary)',
+  },
+  summary: {
+    padding: '16px 16px 18px',
+    borderRadius: 18,
+    background: 'rgba(255, 255, 255, 0.03)',
+    border: '1px solid rgba(138, 156, 181, 0.14)',
+  },
+  summaryRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    gap: 12,
+    padding: '8px 0',
+    fontSize: 12,
+    color: 'var(--text-secondary)',
+    borderBottom: '1px solid rgba(138, 156, 181, 0.08)',
+  },
+  summaryRowLast: {
+    borderBottom: 'none',
+  },
+  summaryValue: {
+    color: 'var(--text-primary)',
+    fontWeight: 600,
+    textAlign: 'right' as const,
+  },
+  topBar: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 16,
+    marginBottom: 24,
+  },
+  topBarCopy: {
+    maxWidth: 420,
+  },
+  closeButton: {
+    width: 34,
+    height: 34,
+    border: 'none',
+    borderRadius: 999,
+    background: 'rgba(255, 255, 255, 0.04)',
+    color: 'var(--text-secondary)',
+    cursor: 'pointer',
+    fontSize: 16,
+    lineHeight: 1,
+  },
+  fieldGrid: {
+    display: 'grid',
+    gap: 18,
+  },
+  fieldGroup: {
+    display: 'grid',
+    gap: 8,
+  },
+  input: {
+    width: '100%',
+    padding: '12px 14px',
+    borderRadius: 14,
+    border: '1px solid var(--border-default)',
+    background: 'rgba(9, 13, 20, 0.9)',
+    color: 'var(--text-primary)',
+    fontSize: 14,
+    outline: 'none',
+    transition: 'border-color 120ms ease',
+  },
+  textarea: {
+    width: '100%',
+    minHeight: 100,
+    padding: '12px 14px',
+    borderRadius: 14,
+    border: '1px solid var(--border-default)',
+    background: 'rgba(9, 13, 20, 0.9)',
+    color: 'var(--text-primary)',
+    fontSize: 14,
+    outline: 'none',
+    resize: 'vertical' as const,
+    transition: 'border-color 120ms ease',
+  },
+  twoUp: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: 14,
+  },
+  select: {
+    width: '100%',
+    padding: '12px 14px',
+    borderRadius: 14,
+    border: '1px solid var(--border-default)',
+    background: 'rgba(9, 13, 20, 0.9)',
+    color: 'var(--text-primary)',
+    fontSize: 14,
+    outline: 'none',
+    appearance: 'none' as const,
+  },
+  switchRow: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '16px 20px 12px',
-    borderBottom: '1px solid var(--border-subtle)',
+    gap: 16,
+    padding: '14px 16px',
+    borderRadius: 16,
+    background: 'rgba(255, 255, 255, 0.03)',
+    border: '1px solid rgba(138, 156, 181, 0.14)',
   },
-
-  headerTitle: {
-    fontFamily: 'var(--font-display)',
-    fontSize: 15,
-    fontWeight: 700,
-    color: 'var(--text-primary)',
-    letterSpacing: '0.01em',
-  },
-
-  closeBtn: {
-    background: 'none',
-    border: 'none',
-    color: 'var(--text-muted)',
-    fontSize: 18,
-    cursor: 'pointer',
-    padding: 4,
-    lineHeight: 1,
-    borderRadius: 'var(--radius-md)',
-    transition: 'color 150ms, background 150ms',
-  },
-
-  stepBar: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    padding: '12px 20px',
-    borderBottom: '1px solid var(--border-subtle)',
-  },
-
-  stepDot: (active: boolean, completed: boolean) => ({
-    width: 8,
-    height: 8,
-    borderRadius: '50%',
-    background: active
-      ? 'var(--brand)'
-      : completed
-        ? 'var(--brand-bright)'
-        : 'var(--bg-overlay)',
-    transition: 'background 200ms, transform 200ms',
-    transform: active ? 'scale(1.25)' : 'scale(1)',
-  }),
-
-  stepLabel: (active: boolean) => ({
-    fontSize: 10,
+  switchLabel: {
+    fontSize: 13,
     fontWeight: 600,
-    letterSpacing: '0.06em',
-    textTransform: 'uppercase' as const,
-    color: active ? 'var(--text-primary)' : 'var(--text-muted)',
-    transition: 'color 200ms',
-  }),
-
-  stepConnector: {
-    width: 24,
-    height: 1,
-    background: 'var(--border-default)',
+    color: 'var(--text-primary)',
+  },
+  switchHelp: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 1.5,
+    color: 'var(--text-secondary)',
+  },
+  switchTrack: (enabled: boolean, disabled: boolean) => ({
+    width: 42,
+    height: 24,
+    border: 'none',
+    borderRadius: 999,
+    background: enabled ? 'var(--brand)' : 'rgba(138, 156, 181, 0.26)',
+    opacity: disabled ? 0.45 : 1,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    position: 'relative' as const,
     flexShrink: 0,
-  },
-
-  body: {
-    flex: 1,
-    overflow: 'auto',
-    padding: '20px',
-    minHeight: 280,
-  },
-
+  }),
+  switchThumb: (enabled: boolean) => ({
+    position: 'absolute' as const,
+    top: 3,
+    left: enabled ? 21 : 3,
+    width: 18,
+    height: 18,
+    borderRadius: '50%',
+    background: '#fff',
+    transition: 'left 120ms ease',
+  }),
   footer: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '12px 20px 16px',
-    borderTop: '1px solid var(--border-subtle)',
+    gap: 16,
+    padding: '18px 28px 22px',
+    borderTop: '1px solid rgba(138, 156, 181, 0.12)',
+    background: 'rgba(8, 12, 19, 0.9)',
   },
-
-  // Step 1 — Persona cards
-  personaGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(3, 1fr)',
+  footerNote: {
+    fontSize: 12,
+    lineHeight: 1.5,
+    color: 'var(--text-secondary)',
+  },
+  actions: {
+    display: 'flex',
     gap: 10,
   },
-
-  personaCard: (selected: boolean) => ({
-    display: 'flex',
-    flexDirection: 'column' as const,
-    alignItems: 'center',
-    gap: 6,
-    padding: '16px 10px 14px',
-    borderRadius: 'var(--radius-md)',
-    border: `1.5px solid ${selected ? 'var(--brand)' : 'var(--border-default)'}`,
-    background: selected ? 'var(--accent-muted)' : 'var(--bg-raised)',
-    cursor: 'pointer',
-    transition: 'all 150ms',
-    textAlign: 'center' as const,
-  }),
-
-  personaIcon: {
-    fontSize: 28,
-    lineHeight: 1,
-  },
-
-  personaName: {
-    fontSize: 12,
-    fontWeight: 600,
-    color: 'var(--text-primary)',
-    lineHeight: 1.2,
-  },
-
-  personaDesc: {
-    fontSize: 10,
+  buttonSecondary: {
+    padding: '10px 14px',
+    borderRadius: 12,
+    border: '1px solid rgba(138, 156, 181, 0.18)',
+    background: 'rgba(255, 255, 255, 0.02)',
     color: 'var(--text-secondary)',
-    lineHeight: 1.3,
-  },
-
-  // Step 2 — Project details
-  fieldGroup: {
-    marginBottom: 16,
-  },
-
-  label: {
-    display: 'block',
-    fontSize: 10,
-    fontWeight: 600,
-    letterSpacing: '0.06em',
-    textTransform: 'uppercase' as const,
-    color: 'var(--text-secondary)',
-    marginBottom: 6,
-  },
-
-  input: {
-    width: '100%',
-    background: 'var(--bg-void)',
-    border: '1px solid var(--border-default)',
-    borderRadius: 'var(--radius-md)',
-    color: 'var(--text-primary)',
     fontSize: 13,
-    padding: '8px 10px',
-    outline: 'none',
-    fontFamily: 'inherit',
-    transition: 'border-color 100ms',
-  },
-
-  textarea: {
-    width: '100%',
-    background: 'var(--bg-void)',
-    border: '1px solid var(--border-default)',
-    borderRadius: 'var(--radius-md)',
-    color: 'var(--text-primary)',
-    fontSize: 13,
-    padding: '8px 10px',
-    outline: 'none',
-    fontFamily: 'inherit',
-    resize: 'vertical' as const,
-    minHeight: 64,
-    transition: 'border-color 100ms',
-  },
-
-  tagContainer: {
-    display: 'flex',
-    flexWrap: 'wrap' as const,
-    gap: 6,
-    marginTop: 6,
-  },
-
-  tag: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 4,
-    padding: '2px 8px',
-    borderRadius: 'var(--radius-md)',
-    background: 'var(--accent-muted)',
-    color: 'var(--brand-bright)',
-    fontSize: 11,
-    fontWeight: 500,
-  },
-
-  tagRemove: {
-    background: 'none',
-    border: 'none',
-    color: 'var(--brand-bright)',
-    cursor: 'pointer',
-    fontSize: 12,
-    lineHeight: 1,
-    padding: 0,
-    opacity: 0.7,
-  },
-
-  // Step 3 — Sequence settings
-  settingsRow: {
-    display: 'flex',
-    gap: 12,
-    marginBottom: 16,
-  },
-
-  settingsField: {
-    flex: 1,
-  },
-
-  select: {
-    width: '100%',
-    background: 'var(--bg-void)',
-    border: '1px solid var(--border-default)',
-    borderRadius: 'var(--radius-md)',
-    color: 'var(--text-primary)',
-    fontSize: 13,
-    padding: '8px 10px',
-    outline: 'none',
-    fontFamily: 'inherit',
-    cursor: 'pointer',
-    transition: 'border-color 100ms',
-    appearance: 'none' as const,
-    backgroundImage:
-      'url("data:image/svg+xml,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 16 16\' fill=\'%238a9cb5\'%3e%3cpath d=\'M4.5 6l3.5 4 3.5-4z\'/%3e%3c/svg%3e")',
-    backgroundRepeat: 'no-repeat',
-    backgroundPosition: 'right 8px center',
-    backgroundSize: 12,
-    paddingRight: 28,
-  },
-
-  toggleRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '10px 12px',
-    background: 'var(--bg-raised)',
-    borderRadius: 'var(--radius-md)',
-    border: '1px solid var(--border-subtle)',
-  },
-
-  toggleLabel: {
-    fontSize: 12,
-    fontWeight: 500,
-    color: 'var(--text-primary)',
-  },
-
-  toggleDesc: {
-    fontSize: 10,
-    color: 'var(--text-secondary)',
-    marginTop: 2,
-  },
-
-  toggleTrack: (on: boolean, disabled: boolean) => ({
-    width: 36,
-    height: 20,
-    borderRadius: 10,
-    background: on ? 'var(--brand)' : 'var(--bg-overlay)',
-    position: 'relative' as const,
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    opacity: disabled ? 0.35 : 1,
-    transition: 'background 200ms',
-    flexShrink: 0,
-    border: 'none',
-    padding: 0,
-  }),
-
-  toggleThumb: (on: boolean) => ({
-    position: 'absolute' as const,
-    top: 2,
-    left: on ? 18 : 2,
-    width: 16,
-    height: 16,
-    borderRadius: '50%',
-    background: '#fff',
-    transition: 'left 200ms',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-  }),
-
-  previewBox: {
-    marginTop: 16,
-    padding: '12px 14px',
-    background: 'var(--bg-raised)',
-    borderRadius: 'var(--radius-md)',
-    border: '1px solid var(--border-subtle)',
-  },
-
-  previewTitle: {
-    fontSize: 10,
     fontWeight: 600,
-    letterSpacing: '0.06em',
-    textTransform: 'uppercase' as const,
-    color: 'var(--text-muted)',
-    marginBottom: 8,
+    cursor: 'pointer',
   },
-
-  previewValue: {
-    fontFamily: 'var(--font-mono)',
-    fontSize: 12,
-    color: 'var(--text-secondary)',
-    lineHeight: 1.7,
-  },
-
-  // Buttons
-  btnPrimary: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '8px 18px',
-    borderRadius: 'var(--radius-md)',
-    fontSize: 12,
-    fontWeight: 600,
+  buttonPrimary: {
+    padding: '10px 16px',
+    borderRadius: 12,
     border: 'none',
     background: 'var(--brand)',
     color: '#fff',
+    fontSize: 13,
+    fontWeight: 700,
     cursor: 'pointer',
-    transition: 'background 150ms, box-shadow 150ms',
-    whiteSpace: 'nowrap' as const,
-  },
-
-  btnPrimaryDisabled: {
-    opacity: 0.5,
-    cursor: 'not-allowed',
-  },
-
-  btnSecondary: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '8px 14px',
-    borderRadius: 'var(--radius-md)',
-    fontSize: 12,
-    fontWeight: 500,
-    border: '1px solid var(--border-default)',
-    background: 'var(--bg-elevated)',
-    color: 'var(--text-secondary)',
-    cursor: 'pointer',
-    transition: 'background 150ms, color 150ms',
-    whiteSpace: 'nowrap' as const,
-  },
-
-  btnGhost: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '8px 14px',
-    borderRadius: 'var(--radius-md)',
-    fontSize: 12,
-    fontWeight: 500,
-    border: 'none',
-    background: 'transparent',
-    color: 'var(--text-muted)',
-    cursor: 'pointer',
-    transition: 'color 150ms',
-    whiteSpace: 'nowrap' as const,
   },
 } as const;
 
-// ─── Component ──────────────────────────────────────────────────────────────────
-
 export function NewProjectDialog() {
   const navigate = useNavigate();
-  const showDialog = useEditorStore((s) => s.showNewProjectDialog);
-  const toggleDialog = useEditorStore((s) => s.toggleNewProjectDialog);
+  const showDialog = useEditorStore((state) => state.showNewProjectDialog);
+  const toggleDialog = useEditorStore((state) => state.toggleNewProjectDialog);
 
-  // ── Local State ─────────────────────────────────────────────────────────────
-
-  const [step, setStep] = useState<DialogStep>(0);
-  const [persona, setPersona] = useState<WorkspacePersona | null>(null);
-
-  // Step 2 fields
+  const [selectedTemplate, setSelectedTemplate] = useState<ProjectTemplate>('film');
   const [projectName, setProjectName] = useState('');
   const [projectDescription, setProjectDescription] = useState('');
-  const [tags, setTags] = useState<string[]>([]);
-  const [tagInput, setTagInput] = useState('');
-
-  // Step 3 fields
-  const [sequence, setSequence] = useState<SequenceSettings>({
-    fps: 23.976,
-    resolutionIndex: 0,
-    dropFrame: false,
-  });
-
+  const [sequence, setSequence] = useState<SequenceState>(() => getInitialSequence('film'));
   const [isCreating, setIsCreating] = useState(false);
+  const [creationError, setCreationError] = useState<string | null>(null);
 
-  // ── Derived Values ──────────────────────────────────────────────────────────
-
-  const selectedResolution = RESOLUTION_PRESETS[sequence.resolutionIndex];
-  const dropFrameAvailable = supportsDropFrame(sequence.fps);
-
-  const canProceed = useMemo(() => {
-    switch (step) {
-      case 0:
-        return persona !== null;
-      case 1:
-        return projectName.trim().length > 0;
-      case 2:
-        return true;
-      default:
-        return false;
-    }
-  }, [step, persona, projectName]);
-
-  // ── Handlers ────────────────────────────────────────────────────────────────
-
-  const handleSelectPersona = useCallback((key: WorkspacePersona) => {
-    setPersona(key);
-    const config = PERSONA_MAP[key];
-    const resIdx = RESOLUTION_PRESETS.findIndex(
-      (r) => r.width === config.resolution.width && r.height === config.resolution.height
-    );
-    setSequence({
-      fps: config.fps,
-      resolutionIndex: resIdx >= 0 ? resIdx : 0,
-      dropFrame: config.dropFrame ?? false,
-    });
-  }, []);
-
-  const handleNext = useCallback(() => {
-    if (step < 2) {
-      setStep((step + 1) as DialogStep);
-    }
-  }, [step]);
-
-  const handleBack = useCallback(() => {
-    if (step > 0) {
-      setStep((step - 1) as DialogStep);
-    }
-  }, [step]);
-
-  const handleAddTag = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter' || e.key === ',') {
-        e.preventDefault();
-        const value = tagInput.trim().replace(/,/g, '');
-        if (value && !tags.includes(value) && tags.length < 10) {
-          setTags((prev) => [...prev, value]);
-        }
-        setTagInput('');
-      }
-    },
-    [tagInput, tags]
+  const templateConfig = useMemo(
+    () => getProjectCreationTemplateConfig(selectedTemplate),
+    [selectedTemplate],
   );
+  const selectedResolution = RESOLUTION_PRESETS[sequence.resolutionIndex] ?? RESOLUTION_PRESETS[0];
+  const dropFrameSupported = supportsDropFrame(sequence.fps);
+  const canCreate = projectName.trim().length > 0 && !isCreating;
 
-  const handleRemoveTag = useCallback((tag: string) => {
-    setTags((prev) => prev.filter((t) => t !== tag));
-  }, []);
-
-  const handleFpsChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    const fps = parseFloat(e.target.value);
-    setSequence((prev) => ({
-      ...prev,
-      fps,
-      dropFrame: supportsDropFrame(fps) ? prev.dropFrame : false,
-    }));
-  }, []);
-
-  const handleResolutionChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSequence((prev) => ({
-      ...prev,
-      resolutionIndex: parseInt(e.target.value, 10),
-    }));
-  }, []);
-
-  const handleToggleDropFrame = useCallback(() => {
-    if (!dropFrameAvailable) return;
-    setSequence((prev) => ({ ...prev, dropFrame: !prev.dropFrame }));
-  }, [dropFrameAvailable]);
-
-  const handleClose = useCallback(() => {
-    toggleDialog();
-    // Reset on close
-    setStep(0);
-    setPersona(null);
+  const resetDialog = useCallback(() => {
+    setSelectedTemplate('film');
     setProjectName('');
     setProjectDescription('');
-    setTags([]);
-    setTagInput('');
-    setSequence({ fps: 23.976, resolutionIndex: 0, dropFrame: false });
+    setSequence(getInitialSequence('film'));
     setIsCreating(false);
-  }, [toggleDialog]);
+    setCreationError(null);
+  }, []);
+
+  const handleClose = useCallback(() => {
+    resetDialog();
+    toggleDialog();
+  }, [resetDialog, toggleDialog]);
+
+  const handleSelectTemplate = useCallback((template: ProjectTemplate) => {
+    const defaults = getInitialSequence(template);
+    setSelectedTemplate(template);
+    setSequence(defaults);
+    setCreationError(null);
+  }, []);
 
   const handleCreate = useCallback(async () => {
-    if (!persona || !projectName.trim() || isCreating) return;
+    if (!canCreate) {
+      return;
+    }
 
     setIsCreating(true);
+    setCreationError(null);
+
     try {
       const project = await createProjectInRepository(buildProjectCreationOptions({
-        workspace: persona,
+        workspace: 'filmtv',
+        template: selectedTemplate,
         name: projectName.trim(),
         description: projectDescription.trim() || undefined,
-        tags: tags.length > 0 ? tags : undefined,
-        sequence: selectedResolution
-          ? {
-              fps: sequence.fps,
-              width: selectedResolution.width,
-              height: selectedResolution.height,
-              dropFrame: sequence.dropFrame,
-            }
-          : {
-              fps: sequence.fps,
-              dropFrame: sequence.dropFrame,
-            },
+        sequence: {
+          fps: sequence.fps,
+          width: selectedResolution.width,
+          height: selectedResolution.height,
+          dropFrame: sequence.dropFrame,
+        },
       }));
 
       handleClose();
-      navigate(`/editor/${project.id}?workspace=${persona}`);
-    } catch (err) {
-      console.error('[NewProjectDialog] Failed to create project:', err);
+      navigate(`/editor/${project.id}`);
+    } catch (error) {
       setIsCreating(false);
+      setCreationError(error instanceof Error ? error.message : 'Failed to create project.');
     }
-  }, [persona, projectName, projectDescription, tags, isCreating, handleClose, navigate, selectedResolution, sequence.dropFrame, sequence.fps]);
+  }, [
+    canCreate,
+    handleClose,
+    navigate,
+    projectDescription,
+    projectName,
+    selectedResolution.height,
+    selectedResolution.width,
+    selectedTemplate,
+    sequence.dropFrame,
+    sequence.fps,
+  ]);
 
-  const handleOverlayClick = useCallback(
-    (e: React.MouseEvent) => {
-      if (e.target === e.currentTarget) {
-        handleClose();
-      }
-    },
-    [handleClose]
-  );
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        handleClose();
-      }
-    },
-    [handleClose]
-  );
-
-  // ── Render Guards ───────────────────────────────────────────────────────────
-
-  if (!showDialog) return null;
-
-  // ── Sub-Renders ─────────────────────────────────────────────────────────────
-
-  const renderStepIndicator = () => (
-    <div style={S.stepBar}>
-      {STEP_LABELS.map((label, i) => (
-        <React.Fragment key={label}>
-          {i > 0 && <div style={S.stepConnector} />}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
-            <div style={S.stepDot(i === step, i < step)} />
-            <span style={S.stepLabel(i === step)}>{label}</span>
-          </div>
-        </React.Fragment>
-      ))}
-    </div>
-  );
-
-  const renderPersonaStep = () => (
-    <div>
-      <p
-        style={{
-          fontSize: 12,
-          color: 'var(--text-secondary)',
-          marginBottom: 16,
-          lineHeight: 1.5,
-        }}
-      >
-        Choose a workspace that matches your production workflow.
-        Each persona pre-configures panels, tools, and sequence defaults.
-      </p>
-      <div style={S.personaGrid}>
-        {PERSONA_KEYS.map((key) => {
-          const cfg = PERSONA_MAP[key];
-          const selected = persona === key;
-          return (
-            <button
-              key={key}
-              type="button"
-              style={S.personaCard(selected)}
-              onClick={() => handleSelectPersona(key)}
-              onMouseEnter={(e) => {
-                if (!selected) {
-                  (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-strong)';
-                  (e.currentTarget as HTMLElement).style.background = 'var(--bg-elevated)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!selected) {
-                  (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-default)';
-                  (e.currentTarget as HTMLElement).style.background = 'var(--bg-raised)';
-                }
-              }}
-            >
-              <span style={S.personaIcon}>{cfg.icon}</span>
-              <span style={S.personaName}>{cfg.name}</span>
-              <span style={S.personaDesc}>{cfg.desc}</span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-
-  const renderDetailsStep = () => (
-    <div>
-      <div style={S.fieldGroup}>
-        <label style={S.label} htmlFor="npd-name">
-          Project Name
-        </label>
-        <input
-          id="npd-name"
-          type="text"
-          style={S.input}
-          placeholder="Untitled Project"
-          value={projectName}
-          onChange={(e) => setProjectName(e.target.value)}
-          onFocus={(e) => {
-            (e.target as HTMLInputElement).style.borderColor = 'var(--brand)';
-          }}
-          onBlur={(e) => {
-            (e.target as HTMLInputElement).style.borderColor = 'var(--border-default)';
-          }}
-          autoFocus
-          maxLength={120}
-        />
-      </div>
-
-      <div style={S.fieldGroup}>
-        <label style={S.label} htmlFor="npd-desc">
-          Description
-        </label>
-        <textarea
-          id="npd-desc"
-          style={S.textarea}
-          placeholder="Optional project description..."
-          value={projectDescription}
-          onChange={(e) => setProjectDescription(e.target.value)}
-          onFocus={(e) => {
-            (e.target as HTMLTextAreaElement).style.borderColor = 'var(--brand)';
-          }}
-          onBlur={(e) => {
-            (e.target as HTMLTextAreaElement).style.borderColor = 'var(--border-default)';
-          }}
-          rows={3}
-          maxLength={500}
-        />
-      </div>
-
-      <div style={S.fieldGroup}>
-        <label style={S.label} htmlFor="npd-tags">
-          Tags
-        </label>
-        <input
-          id="npd-tags"
-          type="text"
-          style={S.input}
-          placeholder="Type a tag and press Enter..."
-          value={tagInput}
-          onChange={(e) => setTagInput(e.target.value)}
-          onKeyDown={handleAddTag}
-          onFocus={(e) => {
-            (e.target as HTMLInputElement).style.borderColor = 'var(--brand)';
-          }}
-          onBlur={(e) => {
-            (e.target as HTMLInputElement).style.borderColor = 'var(--border-default)';
-          }}
-          maxLength={40}
-        />
-        {tags.length > 0 && (
-          <div style={S.tagContainer}>
-            {tags.map((tag) => (
-              <span key={tag} style={S.tag}>
-                {tag}
-                <button
-                  type="button"
-                  style={S.tagRemove}
-                  onClick={() => handleRemoveTag(tag)}
-                  aria-label={`Remove tag ${tag}`}
-                >
-                  \u00D7
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const renderSequenceStep = () => (
-    <div>
-      <div style={S.settingsRow}>
-        <div style={S.settingsField}>
-          <label style={S.label} htmlFor="npd-fps">
-            Frame Rate
-          </label>
-          <select
-            id="npd-fps"
-            style={S.select}
-            value={sequence.fps}
-            onChange={handleFpsChange}
-          >
-            {FRAME_RATE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div style={S.settingsField}>
-          <label style={S.label} htmlFor="npd-res">
-            Resolution
-          </label>
-          <select
-            id="npd-res"
-            style={S.select}
-            value={sequence.resolutionIndex}
-            onChange={handleResolutionChange}
-          >
-            {RESOLUTION_PRESETS.map((preset, i) => (
-              <option key={`${preset.width}x${preset.height}`} value={i}>
-                {preset.label} ({preset.width}\u00D7{preset.height})
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      <div style={S.toggleRow}>
-        <div>
-          <div style={S.toggleLabel}>Drop-Frame Timecode</div>
-          <div style={S.toggleDesc}>
-            {dropFrameAvailable
-              ? 'Available for NTSC frame rates (29.97, 59.94)'
-              : 'Not available for the selected frame rate'}
-          </div>
-        </div>
-        <button
-          type="button"
-          style={S.toggleTrack(sequence.dropFrame, !dropFrameAvailable)}
-          onClick={handleToggleDropFrame}
-          role="switch"
-          aria-checked={sequence.dropFrame}
-          aria-label="Toggle drop-frame timecode"
-        >
-          <div style={S.toggleThumb(sequence.dropFrame)} />
-        </button>
-      </div>
-
-      <div style={S.previewBox}>
-        <div style={S.previewTitle}>Sequence Summary</div>
-        <div style={S.previewValue}>
-          {selectedResolution
-            ? `${selectedResolution.width} \u00D7 ${selectedResolution.height}`
-            : 'Custom'}{' '}
-          &middot;{' '}
-          {FRAME_RATE_OPTIONS.find((o) => o.value === sequence.fps)?.label ?? `${sequence.fps}`}
-          {sequence.dropFrame ? ' DF' : ' NDF'}
-          <br />
-          Workspace: {persona ? PERSONA_MAP[persona].name : '\u2014'}
-          {projectName.trim() ? (
-            <>
-              <br />
-              Project: {projectName.trim()}
-            </>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderStepContent = () => {
-    switch (step) {
-      case 0:
-        return renderPersonaStep();
-      case 1:
-        return renderDetailsStep();
-      case 2:
-        return renderSequenceStep();
-      default:
-        return null;
+  const handleOverlayClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.target === event.currentTarget) {
+      handleClose();
     }
-  };
+  }, [handleClose]);
 
-  // ── Main Render ─────────────────────────────────────────────────────────────
+  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      handleClose();
+      return;
+    }
+
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault();
+      void handleCreate();
+    }
+  }, [handleClose, handleCreate]);
+
+  if (!showDialog) {
+    return null;
+  }
 
   return (
     <div
@@ -894,116 +447,263 @@ export function NewProjectDialog() {
       onKeyDown={handleKeyDown}
       role="dialog"
       aria-modal="true"
-      aria-label="New Project"
+      aria-label="Create editorial project"
     >
       <div style={S.dialog}>
-        {/* Header */}
-        <div style={S.header}>
-          <span style={S.headerTitle}>New Project</span>
-          <button
-            type="button"
-            style={S.closeBtn}
-            onClick={handleClose}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)';
-              (e.currentTarget as HTMLElement).style.background = 'var(--bg-hover)';
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.color = 'var(--text-muted)';
-              (e.currentTarget as HTMLElement).style.background = 'none';
-            }}
-            aria-label="Close dialog"
-          >
-            \u2715
-          </button>
-        </div>
-
-        {/* Step Indicator */}
-        {renderStepIndicator()}
-
-        {/* Body */}
-        <div style={S.body}>{renderStepContent()}</div>
-
-        {/* Footer */}
-        <div style={S.footer}>
+        <aside style={S.rail}>
           <div>
-            {step > 0 ? (
+            <span style={S.sectionLabel}>Editorial Templates</span>
+            <h2 style={S.title}>Start an edit with clean defaults.</h2>
+            <p style={S.subtitle}>
+              Pick the cut you are building, name it, and set the sequence once.
+              The editor always opens in the same editorial workspace.
+            </p>
+          </div>
+
+          <div style={S.templateGrid}>
+            {EDITORIAL_TEMPLATE_OPTIONS.map((template) => {
+              const config = getProjectCreationTemplateConfig(template);
+              const accent = TEMPLATE_COPY[template].accent;
+              const selected = template === selectedTemplate;
+              return (
+                <button
+                  key={template}
+                  type="button"
+                  style={S.templateCard(selected, accent)}
+                  onClick={() => handleSelectTemplate(template)}
+                >
+                  <span style={S.templateBadge(accent)}>{TEMPLATE_COPY[template].badge}</span>
+                  <span style={S.templateName}>{config.name}</span>
+                  <span style={S.templateDesc}>{config.description}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={S.summary}>
+            <span style={S.sectionLabel}>Template Summary</span>
+            <div style={S.summaryRow}>
+              <span>Template</span>
+              <span style={S.summaryValue}>{templateConfig.name}</span>
+            </div>
+            <div style={S.summaryRow}>
+              <span>Workspace</span>
+              <span style={S.summaryValue}>Editorial</span>
+            </div>
+            <div style={S.summaryRow}>
+              <span>Layout</span>
+              <span style={S.summaryValue}>{templateConfig.composerLayout === 'source-record' ? 'Source / Record' : 'Record'}</span>
+            </div>
+            <div style={{ ...S.summaryRow, ...S.summaryRowLast }}>
+              <span>Default sequence</span>
+              <span style={S.summaryValue}>
+                {templateConfig.sequence.width} x {templateConfig.sequence.height}
+                {' · '}
+                {templateConfig.sequence.fps}
+                fps
+              </span>
+            </div>
+          </div>
+        </aside>
+
+        <div style={S.body}>
+          <div style={S.bodyScroll}>
+            <div style={S.topBar}>
+              <div style={S.topBarCopy}>
+                <span style={S.sectionLabel}>Project Setup</span>
+                <h3 style={{ ...S.title, fontSize: 24 }}>Create editorial project</h3>
+                <p style={S.subtitle}>
+                  Keep this page tight: project identity on top, sequence settings below,
+                  and no workflow personas competing for space.
+                </p>
+              </div>
               <button
                 type="button"
-                style={S.btnGhost}
-                onClick={handleBack}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)';
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.color = 'var(--text-muted)';
-                }}
-              >
-                Back
-              </button>
-            ) : (
-              <button
-                type="button"
-                style={S.btnGhost}
+                style={S.closeButton}
                 onClick={handleClose}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)';
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.color = 'var(--text-muted)';
-                }}
+                aria-label="Close project creation dialog"
               >
+                X
+              </button>
+            </div>
+
+            <div style={S.fieldGrid}>
+              <div style={S.fieldGroup}>
+                <label htmlFor="project-name" style={S.sectionLabel}>Project Name</label>
+                <input
+                  id="project-name"
+                  type="text"
+                  value={projectName}
+                  onChange={(event) => setProjectName(event.target.value)}
+                  placeholder={`${templateConfig.name} Cut`}
+                  style={S.input}
+                  autoFocus
+                  onFocus={(event) => {
+                    event.currentTarget.style.borderColor = 'var(--brand)';
+                  }}
+                  onBlur={(event) => resetBorder(event.target)}
+                  maxLength={120}
+                />
+              </div>
+
+              <div style={S.fieldGroup}>
+                <label htmlFor="project-description" style={S.sectionLabel}>Notes</label>
+                <textarea
+                  id="project-description"
+                  value={projectDescription}
+                  onChange={(event) => setProjectDescription(event.target.value)}
+                  placeholder="Optional editorial notes, client, or delivery context."
+                  style={S.textarea}
+                  onFocus={(event) => {
+                    event.currentTarget.style.borderColor = 'var(--brand)';
+                  }}
+                  onBlur={(event) => resetBorder(event.target)}
+                  maxLength={500}
+                />
+              </div>
+
+              <div style={S.twoUp}>
+                <div style={S.fieldGroup}>
+                  <label htmlFor="project-fps" style={S.sectionLabel}>Frame Rate</label>
+                  <select
+                    id="project-fps"
+                    value={sequence.fps}
+                    onChange={(event) => {
+                      const fps = Number.parseFloat(event.target.value);
+                      setSequence((current) => ({
+                        ...current,
+                        fps,
+                        dropFrame: supportsDropFrame(fps) ? current.dropFrame : false,
+                      }));
+                    }}
+                    style={S.select}
+                  >
+                    {FRAME_RATE_OPTIONS.map((option) => (
+                      <option key={option.label} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={S.fieldGroup}>
+                  <label htmlFor="project-resolution" style={S.sectionLabel}>Resolution</label>
+                  <select
+                    id="project-resolution"
+                    value={sequence.resolutionIndex}
+                    onChange={(event) => {
+                      setSequence((current) => ({
+                        ...current,
+                        resolutionIndex: Number.parseInt(event.target.value, 10),
+                      }));
+                    }}
+                    style={S.select}
+                  >
+                    {RESOLUTION_PRESETS.map((preset, index) => (
+                      <option key={`${preset.width}x${preset.height}`} value={index}>
+                        {preset.label} ({preset.width} x {preset.height})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div style={S.switchRow}>
+                <div>
+                  <div style={S.switchLabel}>Drop-frame timecode</div>
+                  <div style={S.switchHelp}>
+                    {dropFrameSupported
+                      ? 'Available for NTSC frame rates. Enable it when the show clock must stay aligned to runtime.'
+                      : 'Unavailable for the current frame rate.'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  style={S.switchTrack(sequence.dropFrame, !dropFrameSupported)}
+                  onClick={() => {
+                    if (!dropFrameSupported) {
+                      return;
+                    }
+                    setSequence((current) => ({
+                      ...current,
+                      dropFrame: !current.dropFrame,
+                    }));
+                  }}
+                  role="switch"
+                  aria-checked={sequence.dropFrame}
+                  aria-label="Toggle drop-frame timecode"
+                >
+                  <span style={S.switchThumb(sequence.dropFrame)} />
+                </button>
+              </div>
+
+              <div style={S.summary}>
+                <span style={S.sectionLabel}>Project Output</span>
+                <div style={S.summaryRow}>
+                  <span>Sequence</span>
+                  <span style={S.summaryValue}>
+                    {selectedResolution.width} x {selectedResolution.height}
+                  </span>
+                </div>
+                <div style={S.summaryRow}>
+                  <span>Timebase</span>
+                  <span style={S.summaryValue}>
+                    {sequence.fps}
+                    fps
+                    {sequence.dropFrame ? ' DF' : ' NDF'}
+                  </span>
+                </div>
+                <div style={S.summaryRow}>
+                  <span>Workspace</span>
+                  <span style={S.summaryValue}>Editorial</span>
+                </div>
+                <div style={{ ...S.summaryRow, ...S.summaryRowLast }}>
+                  <span>Monitor layout</span>
+                  <span style={S.summaryValue}>
+                    {templateConfig.composerLayout === 'source-record' ? 'Source / Record' : 'Record only'}
+                  </span>
+                </div>
+              </div>
+
+              {creationError && (
+                <div
+                  role="alert"
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: 14,
+                    background: 'rgba(239, 68, 68, 0.12)',
+                    border: '1px solid rgba(239, 68, 68, 0.22)',
+                    color: '#fca5a5',
+                    fontSize: 13,
+                  }}
+                >
+                  {creationError}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <footer style={S.footer}>
+            <div style={S.footerNote}>
+              Opens directly in the editorial page. Use Cmd/Ctrl+Enter to create.
+            </div>
+            <div style={S.actions}>
+              <button type="button" style={S.buttonSecondary} onClick={handleClose}>
                 Cancel
               </button>
-            )}
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {step < 2 ? (
               <button
                 type="button"
                 style={{
-                  ...S.btnPrimary,
-                  ...(canProceed ? {} : S.btnPrimaryDisabled),
+                  ...S.buttonPrimary,
+                  ...(canCreate ? null : { opacity: 0.55, cursor: 'not-allowed' }),
                 }}
-                disabled={!canProceed}
-                onClick={handleNext}
-                onMouseEnter={(e) => {
-                  if (canProceed) {
-                    (e.currentTarget as HTMLElement).style.background = 'var(--brand-bright)';
-                    (e.currentTarget as HTMLElement).style.boxShadow = '0 0 16px rgba(109,76,250,0.3)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.background = 'var(--brand)';
-                  (e.currentTarget as HTMLElement).style.boxShadow = 'none';
-                }}
-              >
-                Next
-              </button>
-            ) : (
-              <button
-                type="button"
-                style={{
-                  ...S.btnPrimary,
-                  ...(isCreating ? S.btnPrimaryDisabled : {}),
-                }}
-                disabled={isCreating}
-                onClick={handleCreate}
-                onMouseEnter={(e) => {
-                  if (!isCreating) {
-                    (e.currentTarget as HTMLElement).style.background = 'var(--brand-bright)';
-                    (e.currentTarget as HTMLElement).style.boxShadow = '0 0 16px rgba(109,76,250,0.3)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.background = 'var(--brand)';
-                  (e.currentTarget as HTMLElement).style.boxShadow = 'none';
-                }}
+                onClick={() => { void handleCreate(); }}
+                disabled={!canCreate}
               >
                 {isCreating ? 'Creating...' : 'Create Project'}
               </button>
-            )}
-          </div>
+            </div>
+          </footer>
         </div>
       </div>
     </div>

@@ -27,12 +27,11 @@ export type { ProjectMediaSettings } from '../engine/MediaDatabaseEngine';
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 export type TrackType = 'VIDEO' | 'AUDIO' | 'EFFECT' | 'SUBTITLE' | 'GRAPHIC';
-export type PanelType = 'edit' | 'color' | 'audio' | 'effects' | 'publish' | 'timeline' | 'script' | 'review' | 'news';
+export type PanelType = 'edit' | 'color' | 'audio' | 'effects' | 'publish' | 'timeline' | 'script' | 'review';
 export type ToolbarTab = 'media' | 'effects';
 export type WorkspaceTab = 'video' | 'audio' | 'color' | 'info' | 'effects';
 export type TimelineViewMode = 'timeline' | 'list' | 'waveform';
 export type EditTool = 'select' | 'trim' | 'razor' | 'slip' | 'slide';
-export type SearchFilterType = 'semantic' | 'phonetic' | 'visual';
 export type AlphaMode = 'straight' | 'premultiplied' | 'ignore' | 'auto';
 export type CompositeMode =
   | 'source-over' | 'multiply' | 'screen' | 'overlay'
@@ -190,22 +189,6 @@ export interface SmartBin {
   color: string;
   rules: SmartBinRule[];
   matchAll: boolean; // true = AND, false = OR
-}
-
-export interface CollabUser {
-  id: string;
-  displayName: string;
-  avatarUrl?: string;
-  color: string;
-  playheadTime?: number;
-}
-
-export interface AIJob {
-  id: string;
-  type: string;
-  status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
-  progress?: number;
-  resultSummary?: string;
 }
 
 export interface TranscriptCue {
@@ -412,25 +395,16 @@ interface EditorState {
   activeInspectorTab: WorkspaceTab;
   toolbarTab: ToolbarTab;
   showInspector: boolean;
-  showAIPanel: boolean;
-  showTranscriptPanel: boolean;
-  showCollabPanel: boolean;
   showExportPanel: boolean;
   showSettingsPanel: boolean;
   isFullscreen: boolean;
 
-  // Collaboration
-  collabUsers: CollabUser[];
-
-  // AI
-  aiJobs: AIJob[];
   transcript: TranscriptCue[];
   reviewComments: ReviewComment[];
   approvals: Approval[];
   publishJobs: PublishJob[];
   desktopJobs: DesktopJob[];
   watchFolders: WatchFolder[];
-  tokenBalance: number;
 
   // Playback
   volume: number;
@@ -447,9 +421,6 @@ interface EditorState {
 
   // Timeline index panel
   showIndex: boolean;
-
-  // AI search filter
-  searchFilterType: SearchFilterType;
   isCommandPaletteOpen: boolean;
 
   // Source/Record Monitor (Avid-style dual monitor)
@@ -559,9 +530,6 @@ interface EditorActions {
   setInspectorTab: (t: WorkspaceTab) => void;
   setToolbarTab: (t: ToolbarTab) => void;
   toggleInspector: () => void;
-  toggleAIPanel: () => void;
-  toggleTranscriptPanel: () => void;
-  toggleCollabPanel: () => void;
   toggleExportPanel: () => void;
   toggleSettingsPanel: () => void;
   toggleCommandPalette: (open?: boolean) => void;
@@ -576,7 +544,6 @@ interface EditorActions {
   // Tools
   setActiveTool: (tool: EditTool) => void;
   toggleIndex: () => void;
-  setSearchFilterType: (t: SearchFilterType) => void;
 
   // Clip operations
   deleteSelectedClips: () => void;
@@ -985,15 +952,12 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         s.sourceAsset = hydrated.sourceAsset;
         s.inPoint = null;
         s.outPoint = null;
-        s.collabUsers = hydrated.collabUsers;
-        s.aiJobs = hydrated.aiJobs;
         s.transcript = hydrated.transcript;
         s.reviewComments = hydrated.reviewComments;
         s.approvals = hydrated.approvals;
         s.publishJobs = hydrated.publishJobs;
         s.desktopJobs = [];
         s.watchFolders = hydrated.watchFolders;
-        s.tokenBalance = hydrated.tokenBalance;
         s.trackHeights = hydrated.trackHeights;
         s.clipTextDisplay = hydrated.clipTextDisplay;
         s.composerLayout = hydrated.composerLayout;
@@ -1094,31 +1058,21 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     activeInspectorTab: 'video',
     toolbarTab: 'media',
     showInspector: true,
-    showAIPanel: false,
-    showTranscriptPanel: false,
-    showCollabPanel: false,
     showExportPanel: false,
     showSettingsPanel: false,
     isFullscreen: false,
-    collabUsers: [
-      { id: 'u1', displayName: 'Sarah K.', color: '#7c5cfc' },
-      { id: 'u2', displayName: 'Marcus T.', color: '#2bb672' },
-    ],
-    aiJobs: [],
     transcript: INITIAL_TRANSCRIPT,
     reviewComments: INITIAL_REVIEW_COMMENTS,
     approvals: INITIAL_APPROVALS,
     publishJobs: [],
     desktopJobs: [],
     watchFolders: [],
-    tokenBalance: 487,
     volume: 0.8,
     isMuted: false,
     timelineViewMode: 'timeline' as TimelineViewMode,
     clipGroups: {},
     activeTool: 'select' as EditTool,
     showIndex: false,
-    searchFilterType: 'semantic' as SearchFilterType,
     isCommandPaletteOpen: false,
 
     // Source/Record Monitor (Avid-style dual monitor)
@@ -1387,9 +1341,6 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     setInspectorTab: (t) => set((s) => { s.activeInspectorTab = t; }),
     setToolbarTab: (t) => set((s) => { s.toolbarTab = t; }),
     toggleInspector: () => set((s) => { s.showInspector = !s.showInspector; }),
-    toggleAIPanel: () => set((s) => { s.showAIPanel = !s.showAIPanel; }),
-    toggleTranscriptPanel: () => set((s) => { s.showTranscriptPanel = !s.showTranscriptPanel; }),
-    toggleCollabPanel: () => set((s) => { s.showCollabPanel = !s.showCollabPanel; }),
     toggleExportPanel: () => set((s) => { s.showExportPanel = !s.showExportPanel; }),
     toggleSettingsPanel: () => set((s) => { s.showSettingsPanel = !s.showSettingsPanel; }),
     toggleCommandPalette: (open) => set((s) => {
@@ -1402,7 +1353,6 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     // Tools
     setActiveTool: (tool) => set((s) => { s.activeTool = tool; }),
     toggleIndex: () => set((s) => { s.showIndex = !s.showIndex; }),
-    setSearchFilterType: (t) => set((s) => { s.searchFilterType = t; }),
 
     // Clip operations
     deleteSelectedClips: () => set((s) => {

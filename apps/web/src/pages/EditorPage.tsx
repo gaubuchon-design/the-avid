@@ -1,5 +1,4 @@
-import React, { useEffect, useState, useCallback, Suspense, lazy } from 'react';
-import { LoadingSpinner } from '../components/LoadingSpinner';
+import React, { useEffect, useState, useCallback } from 'react';
 import { ErrorBoundary, PanelErrorBoundary } from '../components/ErrorBoundary';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { TrimSide, trimEngine } from '../engine/TrimEngine';
@@ -9,9 +8,6 @@ import { BinPanel } from '../components/Bins/BinPanel';
 import { ComposerPanel } from '../components/ComposerPanel/ComposerPanel';
 import { TimelinePanel } from '../components/TimelinePanel/TimelinePanel';
 import { InspectorPanel } from '../components/Editor/InspectorPanel';
-import { AIPanel } from '../components/AIPanel/AIPanel';
-import { TranscriptPanel } from '../components/TranscriptPanel/TranscriptPanel';
-import { CommandPalette } from '../components/AIPanel/CommandPalette';
 import { ExportPanel } from '../components/ExportPanel/ExportPanel';
 import { StatusBar } from '../components/Editor/StatusBar';
 import { EditorWorkbenchBar } from '../components/Editor/EditorWorkbenchBar';
@@ -21,15 +17,12 @@ import { TitleTool } from '../components/TitleTool/TitleTool';
 import { SubtitleEditor } from '../components/SubtitleEditor/SubtitleEditor';
 import { useEditorStore } from '../store/editor.store';
 import { useGlobalKeyboard } from '../hooks/useGlobalKeyboard';
-import { useEditorCollabLifecycle } from '../hooks/useEditorCollabLifecycle';
-import { useEditorCollabPresenceSync } from '../hooks/useEditorCollabPresenceSync';
 import { UserSettingsPanel } from '../components/UserSettings/UserSettingsPanel';
 import { useKeyboardAction } from '../hooks/useKeyboardAction';
 import { editEngine } from '../engine/EditEngine';
 import { AlphaImportDialog } from '../components/AlphaImportDialog/AlphaImportDialog';
 import { TrackerPanel } from '../components/TrackerPanel/TrackerPanel';
 import { TrackingOverlay } from '../components/TrackerPanel/TrackingOverlay';
-import { type WorkspacePreset, workspacePresets } from '../App';
 import { type EditorPage as PageId } from '../components/PageNavigation/PageNavigation';
 import {
   markInForActiveMonitor,
@@ -40,89 +33,21 @@ import {
   togglePlayForActiveMonitor,
 } from '../lib/editorMonitorActions';
 import { buildProjectPersistenceSnapshot, getProjectPersistenceHash } from '../lib/editorProjectState';
-import { isLegacyExportPageParam, resolveEditorPageParam, resolveWorkspaceParam } from '../lib/editorUrlState';
+import { isLegacyExportPageParam, resolveEditorPageParam } from '../lib/editorUrlState';
 import { subscribeSmartToolStateToStore } from '../lib/smartToolStateBridge';
 import { subscribeTrimHistoryToEditEngine } from '../lib/trimHistoryBridge';
 import { subscribeTrimStateToStore } from '../lib/trimStateBridge';
 import { subscribeTrackPatchingStateToStore } from '../lib/trackPatchingStateBridge';
 import { MediaPage } from './MediaPage';
 
-// Lazy-loaded vertical panels
-// NOTE: These lazy imports are intentionally separate from the ones in App.tsx.
-// App.tsx uses its lazy references for the route-level panel registry, while
-// EditorPage uses its own so each code-split boundary resolves independently.
-const RundownPanel = lazy(() => import('../components/RundownPanel/RundownPanel').then(m => ({ default: m.RundownPanel })));
-const StoryScriptPanel = lazy(() => import('../components/StoryScriptPanel/StoryScriptPanel').then(m => ({ default: m.StoryScriptPanel })));
-const SportsPanel = lazy(() => import('../components/SportsPanel/SportsPanel').then(m => ({ default: m.SportsPanel })));
-const CreatorPanel = lazy(() => import('../components/CreatorPanel/CreatorPanel').then(m => ({ default: m.CreatorPanel })));
-const BrandPanel = lazy(() => import('../components/BrandPanel/BrandPanel').then(m => ({ default: m.BrandPanel })));
-const MultiCamPanel = lazy(() => import('../components/MultiCamPanel/MultiCamPanel').then(m => ({ default: m.MultiCamPanel })));
-const AccessibilityPanel = lazy(() => import('../components/AccessibilityPanel/AccessibilityPanel').then(m => ({ default: m.AccessibilityPanel })));
-const SportsWorkspace = lazy(() => import('../components/SportsWorkspace/SportsWorkspace').then(m => ({ default: m.SportsWorkspace })));
-
 // Playback is driven by PlaybackEngine (RAF-based) via editor.store.ts togglePlay().
 // Keyboard dispatch is centralized in useGlobalKeyboard() — called once from EditorPage.
 
-// ─── Vertical Side Panel ────────────────────────────────────────────────────
-
-function VerticalSidePanel({ workspace }: { workspace: WorkspacePreset }) {
-  switch (workspace) {
-    case 'news':
-      return (
-        <PanelErrorBoundary panelName="News Vertical Panel">
-          <Suspense fallback={<LoadingSpinner />}>
-            <PanelErrorBoundary panelName="RundownPanel">
-              <RundownPanel />
-            </PanelErrorBoundary>
-            <PanelErrorBoundary panelName="StoryScriptPanel">
-              <StoryScriptPanel />
-            </PanelErrorBoundary>
-          </Suspense>
-        </PanelErrorBoundary>
-      );
-    case 'sports':
-      return (
-        <PanelErrorBoundary panelName="Sports Panel">
-          <Suspense fallback={<LoadingSpinner />}>
-            <SportsPanel />
-          </Suspense>
-        </PanelErrorBoundary>
-      );
-    case 'creator':
-      return (
-        <PanelErrorBoundary panelName="Creator Vertical Panel">
-          <Suspense fallback={<LoadingSpinner />}>
-            <PanelErrorBoundary panelName="CreatorPanel">
-              <CreatorPanel />
-            </PanelErrorBoundary>
-            <PanelErrorBoundary panelName="AccessibilityPanel">
-              <AccessibilityPanel />
-            </PanelErrorBoundary>
-          </Suspense>
-        </PanelErrorBoundary>
-      );
-    case 'marketing':
-      return (
-        <PanelErrorBoundary panelName="Brand Panel">
-          <Suspense fallback={<LoadingSpinner />}>
-            <BrandPanel />
-          </Suspense>
-        </PanelErrorBoundary>
-      );
-    default:
-      return null;
-  }
-}
-
 export function EditorPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  useEditorCollabLifecycle(projectId);
-  useEditorCollabPresenceSync(projectId);
   const [searchParams, setSearchParams] = useSearchParams();
-  const showAIPanel = useEditorStore((s) => s.showAIPanel);
   const showExportPanel = useEditorStore((s) => s.showExportPanel);
   const showSettingsPanel = useEditorStore((s) => s.showSettingsPanel);
-  const showTranscriptPanel = useEditorStore((s) => s.showTranscriptPanel);
   const showInspector = useEditorStore((s) => s.showInspector);
   const showNewProjectDialog = useEditorStore((s) => s.showNewProjectDialog);
   const showSequenceDialog = useEditorStore((s) => s.showSequenceDialog);
@@ -136,9 +61,6 @@ export function EditorPage() {
   const tracks = useEditorStore((s) => s.tracks);
 
   const [showTracker, setShowTracker] = useState(false);
-  const [showCommandPalette, setShowCommandPalette] = useState(false);
-  const [workspace, setWorkspace] = useState<WorkspacePreset>(() => resolveWorkspaceParam(searchParams.get('workspace')));
-  const [showMultiCam, setShowMultiCam] = useState(false);
   const [activePage, setActivePage] = useState<PageId>(() => resolveEditorPageParam(searchParams.get('page')));
   // Centralized keyboard dispatch — routes keys based on active monitor
   useGlobalKeyboard();
@@ -380,11 +302,6 @@ export function EditorPage() {
     }, { replace: true });
   }, [setSearchParams]);
 
-  const handleWorkspaceChange = useCallback((nextWorkspace: WorkspacePreset) => {
-    setWorkspace(nextWorkspace);
-    updateSearchParam('workspace', nextWorkspace === 'filmtv' ? null : nextWorkspace);
-  }, [updateSearchParam]);
-
   const handlePageChange = useCallback((nextPage: PageId) => {
     setActivePage(nextPage);
     updateSearchParam('page', nextPage === 'edit' ? null : nextPage);
@@ -405,24 +322,13 @@ export function EditorPage() {
       useEditorStore.setState({ showExportPanel: true });
     }
 
-    const nextWorkspace = resolveWorkspaceParam(searchParams.get('workspace'));
-    if (nextWorkspace !== workspace) {
-      setWorkspace(nextWorkspace);
+    if (searchParams.has('workspace')) {
+      updateSearchParam('workspace', null);
     }
-  }, [activePage, searchParams, updateSearchParam, workspace]);
+  }, [activePage, searchParams, updateSearchParam]);
 
-  // ⌘K / Ctrl+K to open command palette
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setShowCommandPalette(prev => !prev);
-      }
-      // ⌘M / Ctrl+M to toggle multicam
-      if ((e.metaKey || e.ctrlKey) && e.key === 'm') {
-        e.preventDefault();
-        setShowMultiCam(prev => !prev);
-      }
       // ⌘T / Ctrl+T to toggle planar tracker panel
       if ((e.metaKey || e.ctrlKey) && e.key === 't') {
         e.preventDefault();
@@ -439,18 +345,12 @@ export function EditorPage() {
     return () => window.removeEventListener('keydown', handler);
   }, [handlePageChange]);
 
-  const hasVerticalPanel = workspace !== 'filmtv' && workspace !== 'sports';
-  const isSportsWorkspace = workspace === 'sports';
-
   return (
     <div className="editor-shell" onContextMenu={e => e.preventDefault()}>
       <Toolbar />
       <EditorWorkbenchBar
         activePage={activePage}
         onPageChange={handlePageChange}
-        workspace={workspace}
-        onWorkspaceChange={handleWorkspaceChange}
-        presets={workspacePresets}
       />
 
       {/* Page-specific content */}
@@ -460,81 +360,41 @@ export function EditorPage() {
         </ErrorBoundary>
       )}
       {activePage === 'edit' && (
-        isSportsWorkspace ? (
-          <Suspense fallback={<LoadingSpinner />}>
-            <SportsWorkspace />
-          </Suspense>
-        ) : (
-          <>
-            <div className={`workspace${showInspector ? '' : ' no-inspector'}`}>
-              <div className="left-panels">
-                <PanelErrorBoundary panelName="BinPanel">
-                  <BinPanel />
-                </PanelErrorBoundary>
-                {showTranscriptPanel && (
-                  <PanelErrorBoundary panelName="TranscriptPanel">
-                    <TranscriptPanel />
-                  </PanelErrorBoundary>
-                )}
-              </div>
-              <div className="canvas-area" style={{ position: 'relative' }}>
-                <PanelErrorBoundary panelName="ComposerPanel">
-                  {showMultiCam ? (
-                    <Suspense fallback={<LoadingSpinner />}>
-                      <MultiCamPanel />
-                    </Suspense>
-                  ) : (
-                    <ComposerPanel />
-                  )}
-                </PanelErrorBoundary>
-                {/* Tracking ROI overlay on top of monitor canvas */}
-                {showTracker && (
-                  <PanelErrorBoundary panelName="TrackingOverlay">
-                    <TrackingOverlay width={1920} height={1080} />
-                  </PanelErrorBoundary>
-                )}
-                {showAIPanel && (
-                  <PanelErrorBoundary panelName="AIPanel">
-                    <AIPanel />
-                  </PanelErrorBoundary>
-                )}
-              </div>
-              {/* Planar tracker side panel */}
+        <>
+          <div className={`workspace${showInspector ? '' : ' no-inspector'}`}>
+            <div className="left-panels">
+              <PanelErrorBoundary panelName="BinPanel">
+                <BinPanel />
+              </PanelErrorBoundary>
+            </div>
+            <div className="canvas-area" style={{ position: 'relative' }}>
+              <PanelErrorBoundary panelName="ComposerPanel">
+                <ComposerPanel />
+              </PanelErrorBoundary>
               {showTracker && (
-                <PanelErrorBoundary panelName="TrackerPanel">
-                  <TrackerPanel />
-                </PanelErrorBoundary>
-              )}
-              {hasVerticalPanel && (
-                <div className="vertical-panel" style={{
-                  width: 340,
-                  overflowY: 'auto',
-                  borderLeft: '1px solid var(--border-subtle)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                }}>
-                  <VerticalSidePanel workspace={workspace} />
-                </div>
-              )}
-              {showInspector && (
-                <PanelErrorBoundary panelName="InspectorPanel">
-                  <InspectorPanel />
+                <PanelErrorBoundary panelName="TrackingOverlay">
+                  <TrackingOverlay width={1920} height={1080} />
                 </PanelErrorBoundary>
               )}
             </div>
-            <PanelErrorBoundary panelName="TimelinePanel">
-              <TimelinePanel />
-            </PanelErrorBoundary>
-          </>
-        )
+            {showTracker && (
+              <PanelErrorBoundary panelName="TrackerPanel">
+                <TrackerPanel />
+              </PanelErrorBoundary>
+            )}
+            {showInspector && (
+              <PanelErrorBoundary panelName="InspectorPanel">
+                <InspectorPanel />
+              </PanelErrorBoundary>
+            )}
+          </div>
+          <PanelErrorBoundary panelName="TimelinePanel">
+            <TimelinePanel />
+          </PanelErrorBoundary>
+        </>
       )}
 
       <StatusBar />
-
-      {/* Command Palette (⌘K) */}
-      {showCommandPalette && (
-        <CommandPalette onClose={() => setShowCommandPalette(false)} />
-      )}
 
       {showExportPanel && (
         <div

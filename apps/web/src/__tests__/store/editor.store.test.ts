@@ -4,10 +4,136 @@ import {
   DEFAULT_INTRINSIC_VIDEO,
   DEFAULT_INTRINSIC_AUDIO,
   DEFAULT_TIME_REMAP,
+  makeClip,
 } from '../../store/editor.store';
 
 // Capture the initial state once at module load (before any test mutates it).
 const initialState = useEditorStore.getState();
+
+function seedEditorialFixture() {
+  const bins = [
+    {
+      id: 'b-master',
+      name: 'Master',
+      color: '#5b6af5',
+      isOpen: true,
+      children: [],
+      assets: [
+        {
+          id: 'asset-video-long',
+          name: 'Dialogue Long Take',
+          type: 'VIDEO' as const,
+          duration: 45,
+          status: 'READY' as const,
+          tags: ['dialogue', 'interview'],
+          isFavorite: true,
+        },
+        {
+          id: 'asset-video-short',
+          name: 'B-Roll',
+          type: 'VIDEO' as const,
+          duration: 12,
+          status: 'READY' as const,
+          tags: ['broll'],
+          isFavorite: false,
+        },
+        {
+          id: 'asset-audio',
+          name: 'Room Tone',
+          type: 'AUDIO' as const,
+          duration: 60,
+          status: 'READY' as const,
+          tags: ['dialogue', 'audio'],
+          isFavorite: false,
+        },
+      ],
+    },
+  ];
+
+  useEditorStore.setState({
+    duration: 40,
+    tracks: [
+      {
+        id: 't-v1',
+        name: 'V1',
+        type: 'VIDEO',
+        sortOrder: 0,
+        muted: false,
+        locked: false,
+        solo: false,
+        volume: 1,
+        color: '#5b6af5',
+        clips: [
+          makeClip({
+            id: 'c1',
+            trackId: 't-v1',
+            name: 'Clip One',
+            startTime: 0,
+            endTime: 10,
+            trimStart: 0,
+            trimEnd: 0,
+            type: 'video',
+          }),
+          makeClip({
+            id: 'c2',
+            trackId: 't-v1',
+            name: 'Clip Two',
+            startTime: 15,
+            endTime: 25,
+            trimStart: 0,
+            trimEnd: 0,
+            type: 'video',
+          }),
+        ],
+      },
+      {
+        id: 't-v2',
+        name: 'V2',
+        type: 'VIDEO',
+        sortOrder: 1,
+        muted: false,
+        locked: false,
+        solo: false,
+        volume: 1,
+        color: '#818cf8',
+        clips: [
+          makeClip({
+            id: 'c3',
+            trackId: 't-v2',
+            name: 'Overlay',
+            startTime: 5,
+            endTime: 12,
+            trimStart: 0,
+            trimEnd: 0,
+            type: 'video',
+          }),
+        ],
+      },
+      {
+        id: 't-a1',
+        name: 'A1',
+        type: 'AUDIO',
+        sortOrder: 2,
+        muted: false,
+        locked: false,
+        solo: false,
+        volume: 0.85,
+        color: '#e05b8e',
+        clips: [],
+      },
+    ],
+    bins,
+    selectedBinId: 'b-master',
+    activeBinAssets: bins[0]!.assets,
+    smartBins: [
+      { id: 'sb1', name: 'All Video', color: '#5bbfc7', rules: [{ field: 'type', operator: 'equals', value: 'VIDEO' }], matchAll: true },
+      { id: 'sb2', name: 'Favorites', color: '#f59e0b', rules: [{ field: 'favorite', operator: 'is', value: 'true' }], matchAll: true },
+      { id: 'sb3', name: 'Long Takes', color: '#22c55e', rules: [{ field: 'duration', operator: 'greaterThan', value: '30' }], matchAll: true },
+      { id: 'sb4', name: 'Dialogue Clips', color: '#ec4899', rules: [{ field: 'tag', operator: 'contains', value: 'dialogue' }], matchAll: true },
+      { id: 'sb5', name: 'Ready Media', color: '#94a3b8', rules: [{ field: 'status', operator: 'equals', value: 'READY' }], matchAll: true },
+    ],
+  });
+}
 
 describe('useEditorStore', () => {
   beforeEach(() => {
@@ -15,6 +141,7 @@ describe('useEditorStore', () => {
     // Zustand v4's create() exposes getInitialState() but since this store
     // uses immer middleware we reset via setState with a captured snapshot.
     useEditorStore.setState(initialState, true);
+    seedEditorialFixture();
   });
 
   // ── Baseline ──────────────────────────────────────────────────────────
@@ -240,18 +367,6 @@ describe('useEditorStore', () => {
 
   // ── UI toggles ────────────────────────────────────────────────────────
 
-  it('should toggle AI panel', () => {
-    expect(useEditorStore.getState().showAIPanel).toBe(false);
-    useEditorStore.getState().toggleAIPanel();
-    expect(useEditorStore.getState().showAIPanel).toBe(true);
-  });
-
-  it('should toggle collab panel', () => {
-    expect(useEditorStore.getState().showCollabPanel).toBe(false);
-    useEditorStore.getState().toggleCollabPanel();
-    expect(useEditorStore.getState().showCollabPanel).toBe(true);
-  });
-
   it('should set active panel', () => {
     useEditorStore.getState().setActivePanel('color');
     expect(useEditorStore.getState().activePanel).toBe('color');
@@ -417,14 +532,6 @@ describe('useEditorStore', () => {
     expect(useEditorStore.getState().inPoint).toBeNull();
   });
 
-  // ── Search Filter Type ──────────────────────────────────────────────────
-
-  it('should set search filter type', () => {
-    expect(useEditorStore.getState().searchFilterType).toBe('semantic');
-    useEditorStore.getState().setSearchFilterType('phonetic');
-    expect(useEditorStore.getState().searchFilterType).toBe('phonetic');
-  });
-
   // ── Add Bin ─────────────────────────────────────────────────────────────
 
   it('should add a bin at root level', () => {
@@ -526,13 +633,4 @@ describe('useEditorStore', () => {
     }
   });
 
-  // ── Toggle Transcript Panel ────────────────────────────────────────────
-
-  it('should toggle transcript panel', () => {
-    expect(useEditorStore.getState().showTranscriptPanel).toBe(false);
-    useEditorStore.getState().toggleTranscriptPanel();
-    expect(useEditorStore.getState().showTranscriptPanel).toBe(true);
-    useEditorStore.getState().toggleTranscriptPanel();
-    expect(useEditorStore.getState().showTranscriptPanel).toBe(false);
-  });
 });

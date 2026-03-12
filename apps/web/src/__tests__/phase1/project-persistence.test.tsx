@@ -5,13 +5,12 @@ import { createRoot } from 'react-dom/client';
 import { EditorWorkbenchBar } from '../../components/Editor/EditorWorkbenchBar';
 import { StatusBar } from '../../components/Editor/StatusBar';
 import { TrimStatusOverlay } from '../../components/Editor/TrimStatusOverlay';
-import { CollabPanel } from '../../components/CollabPanel/CollabPanel';
 import { TrackHeaders } from '../../components/TimelinePanel/TrackHeaders';
 import { TrackPatchPanel } from '../../components/TimelinePanel/TrackPatchPanel';
-import { CollaboratorPlayheadIndicators } from '../../components/TimelinePanel/CollaboratorPlayheadIndicators';
 import { Toolbar } from '../../components/Toolbar/Toolbar';
 import { SourceMonitor } from '../../components/SourceMonitor/SourceMonitor';
 import { RecordMonitor } from '../../components/RecordMonitor/RecordMonitor';
+import { VersionHistoryPanel } from '../../components/VersionHistory/VersionHistoryPanel';
 import { trackPatchingEngine } from '../../engine/TrackPatchingEngine';
 import { useGlobalKeyboard } from '../../hooks/useGlobalKeyboard';
 import { useCollabStore } from '../../store/collab.store';
@@ -323,14 +322,11 @@ describe('phase 1 project persistence', () => {
         },
       ],
       markers: [],
-      collabUsers: [],
-      aiJobs: [],
       transcript: [],
       reviewComments: [],
       approvals: [],
       publishJobs: [],
       watchFolders: [],
-      tokenBalance: 100,
       subtitleTracks: [
         { id: 'sub-1', name: 'English', language: 'en', cues: [{ id: 'cue-1', start: 0, end: 2, text: 'Hi' }] },
       ],
@@ -545,7 +541,7 @@ describe('phase 1 project persistence', () => {
     });
   });
 
-  it('renders collaborator track-focus badges with playhead context in track headers', async () => {
+  it('keeps track headers focused on editorial controls even when legacy collaboration state is present', async () => {
     useEditorStore.setState({
       sequenceSettings: {
         ...useEditorStore.getState().sequenceSettings,
@@ -620,224 +616,13 @@ describe('phase 1 project persistence', () => {
     });
 
     const v1PresenceGroup = container.querySelector('[aria-label="V1 collaborator presence"]');
-    expect(v1PresenceGroup).toBeInstanceOf(HTMLDivElement);
-    expect(v1PresenceGroup?.textContent).toContain('00:00:04:00');
-    expect(v1PresenceGroup?.textContent).toContain('RP');
-    expect(v1PresenceGroup?.textContent).toContain('CM');
-
-    const a1PresenceGroup = container.querySelector('[aria-label="A1 collaborator presence"]');
-    expect(a1PresenceGroup).toBeNull();
+    expect(v1PresenceGroup).toBeNull();
+    expect(container.textContent).toContain('V1');
+    expect(container.textContent).toContain('A1');
 
     await act(async () => {
       root.unmount();
     });
-  });
-
-  it('renders collaborator playhead indicators across the ruler and canvas timeline space', async () => {
-    useEditorStore.setState({
-      sequenceSettings: {
-        ...useEditorStore.getState().sequenceSettings,
-        fps: 24,
-      },
-      zoom: 30,
-      scrollLeft: 12,
-      duration: 20,
-      playheadTime: 0,
-      selectedTrackId: null,
-    });
-    useCollabStore.setState({
-      connected: true,
-      currentUserId: 'u-self',
-      onlineUsers: [
-        {
-          id: 'u-self',
-          name: 'You',
-          color: '#5b6af5',
-          cursorFrame: 0,
-          cursorTrackId: 't-v1',
-          playheadTime: 0,
-          isOnline: true,
-        },
-        {
-          id: 'u-robin',
-          name: 'Robin Producer',
-          color: '#1f9de8',
-          cursorFrame: 96,
-          cursorTrackId: 't-v1',
-          playheadTime: 4,
-          isOnline: true,
-        },
-        {
-          id: 'u-casey',
-          name: 'Casey Mixer',
-          color: '#f59e0b',
-          cursorFrame: 48,
-          cursorTrackId: 't-a1',
-          isOnline: false,
-        },
-      ],
-    });
-
-    const container = document.createElement('div');
-    const root = createRoot(container);
-
-    await act(async () => {
-      root.render(
-        <div style={{ position: 'relative', width: 600, height: 180 }}>
-          <CollaboratorPlayheadIndicators zoom={30} scrollLeft={12} fps={24} />
-        </div>,
-      );
-    });
-
-    const robinIndicator = container.querySelector('[aria-label="Follow Robin Producer playhead at 00:00:04:00"]');
-    const caseyIndicator = container.querySelector('[aria-label="Follow Casey Mixer playhead at 00:00:02:00"]');
-
-    expect(robinIndicator).toBeInstanceOf(HTMLButtonElement);
-    expect(caseyIndicator).toBeInstanceOf(HTMLButtonElement);
-    expect(robinIndicator).toHaveTextContent('RP');
-    expect(caseyIndicator).toHaveTextContent('CM');
-    expect(robinIndicator).toHaveStyle({ left: '108px' });
-    expect(caseyIndicator).toHaveStyle({ left: '48px' });
-    expect(caseyIndicator).toHaveAttribute('tabindex', '0');
-    expect(robinIndicator).toHaveAttribute('tabindex', '-1');
-
-    await act(async () => {
-      caseyIndicator?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    expect(useEditorStore.getState().playheadTime).toBe(2);
-    expect(useEditorStore.getState().selectedTrackId).toBe('t-a1');
-
-    await act(async () => {
-      (caseyIndicator as HTMLButtonElement | null)?.focus();
-      caseyIndicator?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-    });
-
-    expect(caseyIndicator).toHaveAttribute('tabindex', '-1');
-    expect(robinIndicator).toHaveAttribute('tabindex', '0');
-
-    await act(async () => {
-      robinIndicator?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    });
-
-    expect(useEditorStore.getState().playheadTime).toBe(4);
-    expect(useEditorStore.getState().selectedTrackId).toBe('t-v1');
-
-    await act(async () => {
-      robinIndicator?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
-    });
-
-    expect(caseyIndicator).toHaveAttribute('tabindex', '0');
-    expect(robinIndicator).toHaveAttribute('tabindex', '-1');
-
-    await act(async () => {
-      caseyIndicator?.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
-    });
-
-    expect(caseyIndicator).toHaveAttribute('tabindex', '-1');
-    expect(robinIndicator).toHaveAttribute('tabindex', '0');
-
-    await act(async () => {
-      robinIndicator?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
-    });
-
-    expect(caseyIndicator).toHaveAttribute('tabindex', '0');
-    expect(robinIndicator).toHaveAttribute('tabindex', '-1');
-
-    await act(async () => {
-      caseyIndicator?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-    });
-
-    expect(caseyIndicator).toHaveAttribute('tabindex', '-1');
-    expect(robinIndicator).toHaveAttribute('tabindex', '0');
-
-    await act(async () => {
-      robinIndicator?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    });
-
-    expect(caseyIndicator).toHaveAttribute('tabindex', '0');
-    expect(robinIndicator).toHaveAttribute('tabindex', '-1');
-
-    await act(async () => {
-      caseyIndicator?.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
-    });
-
-    expect(useEditorStore.getState().playheadTime).toBe(2);
-    expect(useEditorStore.getState().selectedTrackId).toBe('t-a1');
-
-    await act(async () => {
-      useCollabStore.setState((state) => ({
-        ...state,
-        onlineUsers: [
-          ...state.onlineUsers,
-          {
-            id: 'u-avery',
-            name: 'Avery Editor',
-            color: '#14b8a6',
-            cursorFrame: 24,
-            cursorTrackId: 't-v1',
-            playheadTime: 1,
-            isOnline: true,
-          },
-        ],
-      }));
-    });
-
-    const averyIndicator = container.querySelector('[aria-label="Follow Avery Editor playhead at 00:00:01:00"]');
-    const caseyIndicatorAfterJoin = container.querySelector('[aria-label="Follow Casey Mixer playhead at 00:00:02:00"]');
-    expect(averyIndicator).toHaveAttribute('tabindex', '-1');
-    expect(caseyIndicatorAfterJoin).toHaveAttribute('tabindex', '0');
-
-    await act(async () => {
-      useCollabStore.setState((state) => ({
-        ...state,
-        onlineUsers: state.onlineUsers.map((user) => {
-          if (user.id === 'u-casey') {
-            return { ...user, playheadTime: 6, cursorFrame: 144 };
-          }
-          if (user.id === 'u-robin') {
-            return { ...user, playheadTime: 3, cursorFrame: 72 };
-          }
-          return user;
-        }),
-      }));
-    });
-
-    const caseyIndicatorAfterReorder = container.querySelector('[aria-label="Follow Casey Mixer playhead at 00:00:06:00"]');
-    const robinIndicatorAfterReorder = container.querySelector('[aria-label="Follow Robin Producer playhead at 00:00:03:00"]');
-    expect(caseyIndicatorAfterReorder).toHaveAttribute('tabindex', '0');
-    expect(robinIndicatorAfterReorder).toHaveAttribute('tabindex', '-1');
-    const robinFocusSpy = vi.spyOn(robinIndicatorAfterReorder as HTMLButtonElement, 'focus');
-
-    await act(async () => {
-      (caseyIndicatorAfterReorder as HTMLButtonElement | null)?.focus();
-      robinFocusSpy.mockClear();
-      useCollabStore.setState((state) => ({
-        ...state,
-        onlineUsers: state.onlineUsers.filter((user) => user.id !== 'u-casey'),
-      }));
-    });
-
-    const robinIndicatorAfterCaseyLeave = container.querySelector('[aria-label="Follow Robin Producer playhead at 00:00:03:00"]');
-    const averyIndicatorAfterCaseyLeave = container.querySelector('[aria-label="Follow Avery Editor playhead at 00:00:01:00"]');
-    expect(robinIndicatorAfterCaseyLeave).toHaveAttribute('tabindex', '0');
-    expect(averyIndicatorAfterCaseyLeave).toHaveAttribute('tabindex', '-1');
-    expect(robinFocusSpy).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      useCollabStore.setState((state) => ({
-        ...state,
-        onlineUsers: state.onlineUsers.filter((user) => user.id !== 'u-robin'),
-      }));
-    });
-
-    const averyIndicatorAfterRobinLeave = container.querySelector('[aria-label="Follow Avery Editor playhead at 00:00:01:00"]');
-    expect(averyIndicatorAfterRobinLeave).toHaveAttribute('tabindex', '0');
-
-    await act(async () => {
-      root.unmount();
-    });
-    container.remove();
   });
 
   it('renders save and checkpoint affordances in the workbench shell', async () => {
@@ -858,39 +643,22 @@ describe('phase 1 project persistence', () => {
         <EditorWorkbenchBar
           activePage="edit"
           onPageChange={() => {}}
-          workspace="filmtv"
-          onWorkspaceChange={() => {}}
-          presets={{
-            filmtv: { label: 'Film / TV', panels: [] },
-            news: { label: 'News', panels: [] },
-            sports: { label: 'Sports', panels: [] },
-            creator: { label: 'Creator', panels: [] },
-            marketing: { label: 'Marketing', panels: [] },
-          }}
         />,
       );
     });
 
     const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Save');
-    const checkpointButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Checkpoint');
 
     expect(container.textContent).toContain('Unsaved changes');
+    expect(container.textContent).toContain('Shell Save Test');
     expect(saveButton).toBeInstanceOf(HTMLButtonElement);
-    expect(checkpointButton).toBeInstanceOf(HTMLButtonElement);
 
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
     expect(repositoryMocks.saveProjectToRepository).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      checkpointButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    expect(repositoryMocks.saveProjectToRepository).toHaveBeenCalledTimes(2);
-    expect(useCollabStore.getState().versions.length).toBe(versionsBefore + 1);
-    expect(useCollabStore.getState().versions[0]?.snapshotData.id).toBe('project-shell');
+    expect(useCollabStore.getState().versions.length).toBe(versionsBefore);
 
     await act(async () => {
       root.unmount();
@@ -1101,7 +869,7 @@ describe('phase 1 project persistence', () => {
     });
   });
 
-  it('restores a version through the rendered collaboration panel flow', async () => {
+  it('restores a version through the rendered version-history panel flow', async () => {
     repositoryMocks.saveProjectToRepository.mockImplementation(async (project: EditorProject) => project);
 
     useEditorStore.setState({
@@ -1147,7 +915,7 @@ describe('phase 1 project persistence', () => {
       hasUnsavedChanges: false,
     });
     useCollabStore.setState({ activeTab: 'versions' });
-    useCollabStore.getState().saveVersion('Rendered Restore', 'Saved from collab panel');
+    useCollabStore.getState().saveVersion('Rendered Restore', 'Saved from version history');
 
     useEditorStore.setState({
       projectName: 'Diverged Collab Restore',
@@ -1173,7 +941,7 @@ describe('phase 1 project persistence', () => {
     await act(async () => {
       root.render(
         <>
-          <CollabPanel />
+          <VersionHistoryPanel />
           <StatusBar />
         </>,
       );
@@ -1250,7 +1018,7 @@ describe('phase 1 project persistence', () => {
     const root = createRoot(container);
 
     await act(async () => {
-      root.render(<CollabPanel />);
+      root.render(<VersionHistoryPanel />);
     });
 
     expect(container.textContent).toContain('Restore point');
@@ -1358,7 +1126,7 @@ describe('phase 1 project persistence', () => {
     const root = createRoot(container);
 
     await act(async () => {
-      root.render(<CollabPanel />);
+      root.render(<VersionHistoryPanel />);
     });
 
     expect(container.textContent).toContain('Session retention');

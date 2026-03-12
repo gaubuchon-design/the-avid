@@ -24,16 +24,15 @@ export function StatusBar() {
   const monitorTrackLabel = videoMonitorTrackId
     ? (tracks.find((track) => track.id === videoMonitorTrackId)?.name ?? videoMonitorTrackId)
     : 'AUTO';
-  const isDesktop = Boolean(window.electronAPI);
   const saveLabel = saveStatus === 'saving'
     ? 'Saving...'
     : saveStatus === 'error'
       ? 'Save error'
       : hasUnsavedChanges
         ? 'Unsaved changes'
-      : lastSavedAt
-        ? `Saved ${new Date(lastSavedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-        : (isDesktop ? 'Local project package' : 'Connected');
+        : lastSavedAt
+          ? `Saved ${new Date(lastSavedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+        : 'Editorial project ready';
   const projectFormatLabel = projectSettings
     ? `${projectSettings.width}x${projectSettings.height} · ${projectSettings.frameRate}fps · ${projectSettings.exportFormat.toUpperCase()}`
     : '';
@@ -42,9 +41,6 @@ export function StatusBar() {
     <div className="status-bar">
       <div className="status-item">
         <div className={`status-dot${isPlaying ? ' warning' : ''}`} />
-        <span>{isDesktop ? 'Desktop mode' : 'Connected'}</span>
-      </div>
-      <div className="status-item">
         <span>Monitor: {activeMonitor.toUpperCase()} {monitorTrackLabel}</span>
       </div>
       <div className="status-item">

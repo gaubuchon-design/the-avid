@@ -2,24 +2,24 @@ import { describe, expect, it } from 'vitest';
 import { buildProjectCreationOptions } from '../../lib/projectCreation';
 
 describe('project creation presets', () => {
-  it('maps creator workspace defaults into real project settings', () => {
+  it('maps editorial workspace defaults into real project settings', () => {
     const options = buildProjectCreationOptions({
-      workspace: 'creator',
+      workspace: 'filmtv',
       name: 'Short Cut',
     });
 
-    expect(options.template).toBe('social');
-    expect(options.frameRate).toBe(30);
-    expect(options.width).toBe(1080);
-    expect(options.height).toBe(1920);
+    expect(options.template).toBe('film');
+    expect(options.frameRate).toBe(23.976);
+    expect(options.width).toBe(1920);
+    expect(options.height).toBe(1080);
     expect(options.dropFrame).toBe(false);
-    expect(options.activeWorkspaceId).toBe('effects');
+    expect(options.activeWorkspaceId).toBe('source-record');
     expect(options.seedContent).toBe(false);
   });
 
-  it('lets explicit sequence choices override workspace defaults', () => {
+  it('lets explicit sequence choices override editorial defaults', () => {
     const options = buildProjectCreationOptions({
-      workspace: 'news',
+      workspace: 'filmtv',
       sequence: {
         fps: 25,
         width: 2048,
@@ -28,7 +28,7 @@ describe('project creation presets', () => {
       },
     });
 
-    expect(options.template).toBe('news');
+    expect(options.template).toBe('film');
     expect(options.frameRate).toBe(25);
     expect(options.width).toBe(2048);
     expect(options.height).toBe(1080);
@@ -39,7 +39,7 @@ describe('project creation presets', () => {
   it('keeps template-specific workstation defaults when a dashboard card overrides the UI workspace preset', () => {
     const options = buildProjectCreationOptions({
       template: 'podcast',
-      workspace: 'creator',
+      workspace: 'filmtv',
     });
 
     expect(options.template).toBe('podcast');

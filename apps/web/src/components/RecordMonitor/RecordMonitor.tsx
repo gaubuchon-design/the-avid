@@ -5,7 +5,12 @@ import { useTitleStore } from '../../store/title.store';
 import { TrimStatusOverlay } from '../Editor/TrimStatusOverlay';
 import { PlaybackFallbackDiagnostics } from '../Diagnostics/PlaybackFallbackDiagnostics';
 import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
-import { renderPlaybackSnapshotFrame } from '../../engine/playbackSnapshotFrame';
+import {
+  buildPlaybackSnapshotRenderRevision,
+  getCachedPlaybackSnapshotCanvas,
+  renderPlaybackSnapshotFrame,
+  renderPlaybackSnapshotFrameAsync,
+} from '../../engine/playbackSnapshotFrame';
 import {
   findActiveClip,
   inspectPlaybackVideoLayerAvailability,
@@ -61,6 +66,20 @@ function updateCachedCanvasFrame(
   cacheRef.current = cachedFrame;
 }
 
+function drawCanvasFrame(
+  targetCanvas: HTMLCanvasElement,
+  sourceCanvas: HTMLCanvasElement,
+): boolean {
+  const ctx = targetCanvas.getContext('2d');
+  if (!ctx) {
+    return false;
+  }
+
+  ctx.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
+  ctx.drawImage(sourceCanvas, 0, 0, targetCanvas.width, targetCanvas.height);
+  return true;
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function RecordMonitor() {
@@ -84,6 +103,8 @@ export function RecordMonitor() {
   const rafRef = useRef<number>();
   const activeAssetIdsRef = useRef<Set<string>>(new Set());
   const cachedFrameRef = useRef<HTMLCanvasElement | null>(null);
+  const inFlightFrameRevisionRef = useRef<string | null>(null);
+  const requestedFrameRevisionRef = useRef<string | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 480, h: 270 });
   const [sourceRevision, setSourceRevision] = useState(0);
 
@@ -177,6 +198,25 @@ export function RecordMonitor() {
         && layerAvailability.pendingVideoLayers > 0
         && cachedFrameRef.current;
 
+      const fullQualityFrameRevision = buildPlaybackSnapshotRenderRevision({
+        snapshot,
+        width: renderWidth,
+        height: renderHeight,
+        currentTitle: titleState.currentTitle,
+        isTitleEditing: titleState.isEditing,
+        colorProcessing: 'post',
+        useCache: true,
+      });
+      requestedFrameRevisionRef.current = fullQualityFrameRevision;
+
+      const cachedFullQualityFrame = getCachedPlaybackSnapshotCanvas(fullQualityFrameRevision);
+      if (cachedFullQualityFrame && (!canHoldPreviousFrame || layerAvailability.pendingVideoLayers === 0)) {
+        drawCanvasFrame(canvas, cachedFullQualityFrame);
+        updateCachedCanvasFrame(canvas, cachedFrameRef);
+        rafRef.current = requestAnimationFrame(render);
+        return;
+      }
+
       if (canHoldPreviousFrame) {
         const ctx = canvas.getContext('2d');
         if (ctx && cachedFrameRef.current) {
@@ -200,6 +240,44 @@ export function RecordMonitor() {
 
       if (layerAvailability.totalVideoLayers > 0 && layerAvailability.pendingVideoLayers === 0) {
         updateCachedCanvasFrame(canvas, cachedFrameRef);
+      }
+
+      if (!inFlightFrameRevisionRef.current) {
+        inFlightFrameRevisionRef.current = fullQualityFrameRevision;
+        void renderPlaybackSnapshotFrameAsync({
+          snapshot,
+          width: renderWidth,
+          height: renderHeight,
+          currentTitle: titleState.currentTitle,
+          isTitleEditing: titleState.isEditing,
+          colorProcessing: 'post',
+          useCache: true,
+        }).then((result) => {
+          if (inFlightFrameRevisionRef.current === result.frameRevision) {
+            inFlightFrameRevisionRef.current = null;
+          }
+
+          if (
+            !result.canvas
+            || requestedFrameRevisionRef.current !== result.frameRevision
+            || layerAvailability.pendingVideoLayers > 0
+          ) {
+            return;
+          }
+
+          const visibleCanvas = canvasRef.current;
+          if (!visibleCanvas) {
+            return;
+          }
+
+          if (drawCanvasFrame(visibleCanvas, result.canvas)) {
+            updateCachedCanvasFrame(visibleCanvas, cachedFrameRef);
+          }
+        }).catch(() => {
+          if (inFlightFrameRevisionRef.current === fullQualityFrameRevision) {
+            inFlightFrameRevisionRef.current = null;
+          }
+        });
       }
 
       rafRef.current = requestAnimationFrame(render);

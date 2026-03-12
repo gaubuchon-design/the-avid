@@ -7,18 +7,15 @@ import {
 } from '../lib/projectRepository';
 import {
   buildProjectCreationOptions,
-  type EditorialWorkspacePreset,
 } from '../lib/projectCreation';
 import { NewProjectDialog } from '../components/NewProjectDialog/NewProjectDialog';
 import { useEditorStore } from '../store/editor.store';
 
-const TEMPLATE_OPTIONS: Array<{ template: ProjectTemplate; label: string; desc: string; icon: string; workspace?: string }> = [
-  { template: 'film', label: 'Blank Timeline', desc: '1920x1080 · 24fps', icon: '🎬', workspace: 'filmtv' },
-  { template: 'social', label: 'Social Vertical', desc: '1080x1920 · 30fps', icon: '📱', workspace: 'creator' },
-  { template: 'podcast', label: 'Podcast Edit', desc: 'Audio-first layout', icon: '🎙', workspace: 'creator' },
-  { template: 'sports', label: 'Sports Reel', desc: 'Action-optimized', icon: '⚡', workspace: 'sports' },
-  { template: 'news', label: 'News Package', desc: 'Rundown-ready', icon: '📡', workspace: 'news' },
-  { template: 'commercial', label: 'Brand Campaign', desc: 'Multi-variant', icon: '🏷', workspace: 'marketing' },
+const TEMPLATE_OPTIONS: Array<{ template: ProjectTemplate; label: string; desc: string; icon: string }> = [
+  { template: 'film', label: 'Blank Timeline', desc: '1080p · 23.976fps', icon: '🎬' },
+  { template: 'documentary', label: 'Documentary Cut', desc: '4K story edit', icon: '🎞' },
+  { template: 'commercial', label: 'Commercial Spot', desc: '4K client review', icon: '📺' },
+  { template: 'podcast', label: 'Podcast Episode', desc: 'Audio-first editorial', icon: '🎙' },
 ];
 
 function iconForProject(icon: string): string {
@@ -145,13 +142,15 @@ export function DashboardPage() {
   });
 
   const continueProject = filteredProjects[0] ?? projects[0] ?? null;
-  const totalTokens = projects.reduce((sum, project) => sum + project.tokenBalance, 0);
+  const recentProjectsCount = projects.filter((project) => {
+    return Date.now() - new Date(project.updatedAt).getTime() < 1000 * 60 * 60 * 24 * 7;
+  }).length;
   const totalExportsPending = projects.filter((project) => project.progress < 100).length;
   const totalDuration = projects.reduce((sum, project) => sum + project.durationSeconds, 0);
   const recentActivity = projects.slice(0, 4).map((project, index) => ({
-    user: index % 2 === 0 ? 'Sarah K.' : index % 3 === 0 ? 'You' : 'Marcus T.',
+    user: index % 2 === 0 ? 'Assistant editor' : index % 3 === 0 ? 'You' : 'Lead editor',
     color: index % 2 === 0 ? '#7c5cfc' : index % 3 === 0 ? '#4f63f5' : '#25a865',
-    action: index === 0 ? 'autosaved a timeline revision' : index === 1 ? 'queued an AI pass' : index === 2 ? 'updated a review note' : 'shared the latest cut',
+    action: index === 0 ? 'autosaved a cut revision' : index === 1 ? 'updated sequence notes' : index === 2 ? 'trimmed a review cut' : 'prepared an export',
     project: project.name,
     time: formatRelativeDate(project.updatedAt),
   }));
@@ -159,7 +158,7 @@ export function DashboardPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const createAndOpenProject = async (template: ProjectTemplate, workspace?: string) => {
+  const createAndOpenProject = async (template: ProjectTemplate) => {
     // Prevent duplicate creation when rapidly clicking
     if (isCreating) return;
     setIsCreating(true);
@@ -167,11 +166,10 @@ export function DashboardPage() {
     try {
       const project = await createProjectInRepository(buildProjectCreationOptions({
         template,
-        workspace: workspace as EditorialWorkspacePreset | undefined,
+        workspace: 'filmtv',
       }));
       await refreshProjects();
-      const ws = workspace ? `?workspace=${workspace}` : '';
-      navigate(`/editor/${project.id}${ws}`);
+      navigate(`/editor/${project.id}`);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'Failed to create project');
     } finally {
@@ -184,7 +182,7 @@ export function DashboardPage() {
       <div className="dashboard-header">
         <div className="dashboard-logo">The <em>Avid</em></div>
         <nav className="dashboard-nav" style={{ marginLeft: 16 }} role="tablist" aria-label="Dashboard sections">
-          {['Projects', 'Templates', 'Marketplace', 'Team'].map((item) => (
+          {['Projects', 'Templates'].map((item) => (
             <button key={item}
               className={`dashboard-nav-item${navItem === item ? ' active' : ''}`}
               onClick={() => setNavItem(item)}
@@ -194,7 +192,7 @@ export function DashboardPage() {
               tabIndex={navItem === item ? 0 : -1}
               type="button"
               onKeyDown={(e) => {
-                const items = ['Projects', 'Templates', 'Marketplace', 'Team'];
+                const items = ['Projects', 'Templates'];
                 const idx = items.indexOf(item);
                 if (e.key === 'ArrowRight' && idx < items.length - 1) {
                   e.preventDefault();
@@ -296,7 +294,7 @@ export function DashboardPage() {
           ) : (
             [
               [`${projects.length}`, 'Projects', 'var(--brand-bright)'],
-              [`${totalTokens}`, 'AI Tokens', 'var(--success)'],
+              [`${recentProjectsCount}`, 'Updated This Week', 'var(--success)'],
               [`${totalExportsPending}`, 'Pending Cuts', 'var(--warning)'],
               [formatDuration(totalDuration), 'Timeline Time', 'var(--info)'],
             ].map(([value, label, color], index, entries) => (
@@ -469,8 +467,8 @@ export function DashboardPage() {
                   <div key={option.label}
                     role="button"
                     tabIndex={0}
-                    onClick={() => { void createAndOpenProject(option.template, option.workspace); }}
-                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void createAndOpenProject(option.template, option.workspace); } }}
+                    onClick={() => { void createAndOpenProject(option.template); }}
+                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void createAndOpenProject(option.template); } }}
                     style={{ display: 'flex', gap: 10, padding: '8px 12px', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', cursor: 'pointer', transition: 'all 150ms' }}
                     onMouseEnter={(event) => (event.currentTarget.style.borderColor = 'var(--border-strong)')}
                     onMouseLeave={(event) => (event.currentTarget.style.borderColor = 'var(--border-default)')}

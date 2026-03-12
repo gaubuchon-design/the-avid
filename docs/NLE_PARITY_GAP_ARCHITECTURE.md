@@ -61,6 +61,25 @@ Desktop should own the first full implementation of:
 
 Web should use the same contracts with reduced implementations where possible, typically proxy-first and explicitly unsupported for finishing cases.
 
+### 2a. Editorial preview path
+
+The web editor now treats monitor playback as two related but different problems:
+
+- an interactive transport frame that must never blank or stall during scrub/play
+- a higher-fidelity evaluated frame that can arrive asynchronously and be cached by render revision
+
+That split is deliberate. The current web pass keeps layered compositing live in the immediate transport path and upgrades the monitor with a cached post-color evaluated frame once it is ready. This is the right short-term direction for editorial usability because it removes monitor blackouts and avoids forcing the transport loop to wait on the heavier post-processing step.
+
+The longer-term NLE path is stricter:
+
+- decode into GPU-addressable frames/textures, not CPU `ImageData`
+- bind those frames directly into the compositor/effects/color graph
+- keep an evaluated-frame cache keyed by sequence revision, effect stack revision, grade revision, and output size
+- use a separate background render cache for effects that cannot meet realtime
+- never put `getImageData`/CPU readback on the transport-critical preview path
+
+This matches the external-tool/runtime direction we want from desktop-native parity: realtime preview should consume the same render graph as export, but with explicit quality levels and background cache promotion instead of blocking the monitor.
+
 ### 3. Media services separate from editorial state
 
 Relink, transcode, consolidate, waveform extraction, and interchange packaging should remain separate job surfaces. The editor graph should reference durable asset identity and resolved variants, not own the media jobs directly.

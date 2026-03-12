@@ -6,7 +6,9 @@ import {
   getPlaybackRealtimeFallbackStats,
   buildPlaybackSnapshotRenderRevision,
   evaluatePlaybackSnapshotImageData,
+  getCachedPlaybackSnapshotCanvas,
   renderPlaybackSnapshotFrame,
+  renderPlaybackSnapshotFrameAsync,
   resetPlaybackRealtimeFallbackStats,
   resetPlaybackSnapshotFrameCache,
 } from '../../engine/playbackSnapshotFrame';
@@ -90,6 +92,8 @@ function createMockCanvas(width = 320, height = 180): HTMLCanvasElement {
     width,
     height,
     getContext: vi.fn(() => ({
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
       getImageData: vi.fn(() => {
         const data = new Uint8ClampedArray(canvas.width * canvas.height * 4);
         for (let index = 0; index < data.length; index += 4) {
@@ -272,5 +276,36 @@ describe('phase 1 playback render parity', () => {
     expect(telemetry.totalTransportFrames).toBe(1);
     expect(telemetry.degradedTransportFrames).toBe(0);
     expect(telemetry.fallbackRate).toBe(0);
+  });
+
+  it('caches async evaluated monitor frames so playback can upgrade without recomputing the same revision', async () => {
+    const snapshot = makePlayingSnapshot('record-monitor');
+    const processSpy = vi.spyOn(colorEngine, 'processFrameAsync').mockResolvedValue(
+      new ImageData(new Uint8ClampedArray(320 * 180 * 4), 320, 180),
+    );
+
+    const first = await renderPlaybackSnapshotFrameAsync({
+      snapshot,
+      width: 320,
+      height: 180,
+      canvas: createMockCanvas(),
+      colorProcessing: 'post',
+      useCache: true,
+    });
+    const second = await renderPlaybackSnapshotFrameAsync({
+      snapshot,
+      width: 320,
+      height: 180,
+      colorProcessing: 'post',
+      useCache: true,
+    });
+
+    expect(first.cacheHit).toBe(false);
+    expect(getCachedPlaybackSnapshotCanvas(first.frameRevision)).toBeTruthy();
+    expect(second.cacheHit).toBe(true);
+    expect(second.frameRevision).toBe(first.frameRevision);
+    expect(processSpy).toHaveBeenCalledTimes(1);
+
+    processSpy.mockRestore();
   });
 });

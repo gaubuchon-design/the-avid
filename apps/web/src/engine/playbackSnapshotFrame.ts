@@ -44,6 +44,7 @@ export interface PlaybackRealtimeFallbackStats {
 
 let scratchCanvas: HTMLCanvasElement | null = null;
 const playbackFrameCache = new Map<string, ImageData>();
+const playbackCanvasCache = new Map<string, HTMLCanvasElement>();
 const PLAYBACK_FRAME_CACHE_LIMIT = 24;
 const realtimeFallbackStats = new Map<PlaybackConsumer, PlaybackRealtimeFallbackStats>([
   ['record-monitor', createEmptyRealtimeFallbackStats('record-monitor')],
@@ -75,6 +76,24 @@ function cloneImageData(imageData: ImageData): ImageData {
   return new ImageData(new Uint8ClampedArray(imageData.data), imageData.width, imageData.height);
 }
 
+function cloneCanvas(sourceCanvas: HTMLCanvasElement): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  const clone = document.createElement('canvas');
+  clone.width = sourceCanvas.width;
+  clone.height = sourceCanvas.height;
+  const ctx = clone.getContext('2d');
+  if (!ctx) {
+    return null;
+  }
+
+  ctx.clearRect(0, 0, clone.width, clone.height);
+  ctx.drawImage(sourceCanvas, 0, 0, clone.width, clone.height);
+  return clone;
+}
+
 function rememberCachedFrame(frameRevision: string, imageData: ImageData): void {
   if (playbackFrameCache.has(frameRevision)) {
     playbackFrameCache.delete(frameRevision);
@@ -88,6 +107,24 @@ function rememberCachedFrame(frameRevision: string, imageData: ImageData): void 
       break;
     }
     playbackFrameCache.delete(oldestKey);
+  }
+}
+
+function rememberCachedCanvas(frameRevision: string, canvas: HTMLCanvasElement): void {
+  const cachedCanvas = cloneCanvas(canvas) ?? canvas;
+
+  if (playbackCanvasCache.has(frameRevision)) {
+    playbackCanvasCache.delete(frameRevision);
+  }
+
+  playbackCanvasCache.set(frameRevision, cachedCanvas);
+
+  while (playbackCanvasCache.size > PLAYBACK_FRAME_CACHE_LIMIT) {
+    const oldestKey = playbackCanvasCache.keys().next().value;
+    if (!oldestKey) {
+      break;
+    }
+    playbackCanvasCache.delete(oldestKey);
   }
 }
 
@@ -141,6 +178,18 @@ function shouldUsePlaybackFrameCache(options: PlaybackSnapshotFrameOptions): boo
   }
 
   if (options.snapshot.isPlaying) {
+    return false;
+  }
+
+  if (options.isTitleEditing && options.currentTitle) {
+    return false;
+  }
+
+  return true;
+}
+
+function shouldUsePlaybackCanvasCache(options: PlaybackSnapshotFrameOptions): boolean {
+  if (options.useCache === false) {
     return false;
   }
 
@@ -224,6 +273,41 @@ function compositeSnapshotToCanvas(
   });
 
   return ctx;
+}
+
+function drawCanvasToTarget(
+  targetCanvas: HTMLCanvasElement,
+  sourceCanvas: HTMLCanvasElement,
+): boolean {
+  const ctx = targetCanvas.getContext('2d');
+  if (!ctx) {
+    return false;
+  }
+
+  if (targetCanvas.width !== sourceCanvas.width) {
+    targetCanvas.width = sourceCanvas.width;
+  }
+  if (targetCanvas.height !== sourceCanvas.height) {
+    targetCanvas.height = sourceCanvas.height;
+  }
+
+  ctx.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
+  ctx.drawImage(sourceCanvas, 0, 0, targetCanvas.width, targetCanvas.height);
+  return true;
+}
+
+function createAsyncRenderCanvas(
+  width: number,
+  height: number,
+): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
 }
 
 export function evaluatePlaybackSnapshotImageData(
@@ -353,12 +437,88 @@ export function renderPlaybackSnapshotFrame(options: PlaybackSnapshotFrameOption
   };
 }
 
+export function getCachedPlaybackSnapshotCanvas(frameRevision: string): HTMLCanvasElement | null {
+  return playbackCanvasCache.get(frameRevision) ?? null;
+}
+
+export async function renderPlaybackSnapshotFrameAsync(
+  options: PlaybackSnapshotFrameOptions,
+): Promise<PlaybackSnapshotFrameResult> {
+  const frameRevision = buildPlaybackSnapshotRenderRevision(options);
+  const canUseCache = shouldUsePlaybackCanvasCache(options);
+  const cachedCanvas = canUseCache ? playbackCanvasCache.get(frameRevision) ?? null : null;
+
+  if (cachedCanvas) {
+    if (options.canvas && drawCanvasToTarget(options.canvas, cachedCanvas)) {
+      return {
+        canvas: options.canvas,
+        frameRevision,
+        cacheHit: true,
+        degradedToPreColor: false,
+      };
+    }
+
+    return {
+      canvas: cachedCanvas,
+      frameRevision,
+      cacheHit: true,
+      degradedToPreColor: false,
+    };
+  }
+
+  const canvas = options.canvas ?? createAsyncRenderCanvas(options.width, options.height);
+  if (!canvas) {
+    return {
+      canvas: null,
+      frameRevision,
+      cacheHit: false,
+      degradedToPreColor: false,
+    };
+  }
+
+  const ctx = compositeSnapshotToCanvas(canvas, {
+    ...options,
+    colorProcessing: 'pre',
+  });
+  if (!ctx) {
+    return {
+      canvas: null,
+      frameRevision,
+      cacheHit: false,
+      degradedToPreColor: false,
+    };
+  }
+
+  let degradedToPreColor = false;
+  if ((options.colorProcessing ?? 'pre') === 'post') {
+    try {
+      const imageData = ctx.getImageData(0, 0, options.width, options.height);
+      const processedImage = await colorEngine.processFrameAsync(imageData);
+      ctx.putImageData(processedImage, 0, 0);
+    } catch {
+      degradedToPreColor = shouldUseRealtimePreColorFallback(options);
+    }
+  }
+
+  if (canUseCache) {
+    rememberCachedCanvas(frameRevision, canvas);
+  }
+
+  return {
+    canvas,
+    frameRevision,
+    cacheHit: false,
+    degradedToPreColor,
+  };
+}
+
 export function capturePlaybackSnapshotImageData(options: PlaybackSnapshotFrameOptions): ImageData | null {
   return evaluatePlaybackSnapshotImageData(options).imageData;
 }
 
 export function resetPlaybackSnapshotFrameCache(): void {
   playbackFrameCache.clear();
+  playbackCanvasCache.clear();
 }
 
 export function resetPlaybackRealtimeFallbackStats(): void {

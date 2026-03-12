@@ -10,10 +10,8 @@ import {
   type TrackPatch,
 } from '../engine/TrackPatchingEngine';
 import type {
-  AIJob,
   Approval,
   Bin,
-  CollabUser,
   Marker,
   MediaAsset,
   ProjectSettings,
@@ -38,14 +36,11 @@ export interface EditorProjectPersistenceSource {
   tracks: Track[];
   markers: Marker[];
   bins: Bin[];
-  collabUsers: CollabUser[];
-  aiJobs: AIJob[];
   transcript: TranscriptCue[];
   reviewComments: ReviewComment[];
   approvals: Approval[];
   publishJobs: PublishJob[];
   watchFolders: WatchFolder[];
-  tokenBalance: number;
   subtitleTracks: EditorProject['workstationState']['subtitleTracks'];
   titleClips: EditorProject['workstationState']['titleClips'];
   trackHeights: Record<string, number>;
@@ -77,14 +72,11 @@ export interface EditorProjectPersistenceSnapshot {
   tracks: Track[];
   markers: Marker[];
   bins: Bin[];
-  collabUsers: CollabUser[];
-  aiJobs: AIJob[];
   transcript: TranscriptCue[];
   reviewComments: ReviewComment[];
   approvals: Approval[];
   publishJobs: PublishJob[];
   watchFolders: WatchFolder[];
-  tokenBalance: number;
   subtitleTracks: EditorProject['workstationState']['subtitleTracks'];
   titleClips: EditorProject['workstationState']['titleClips'];
   trackHeights: Record<string, number>;
@@ -118,14 +110,11 @@ export interface HydratedEditorProjectState {
   tracks: Track[];
   markers: Marker[];
   bins: Bin[];
-  collabUsers: CollabUser[];
-  aiJobs: AIJob[];
   transcript: TranscriptCue[];
   reviewComments: ReviewComment[];
   approvals: Approval[];
   publishJobs: PublishJob[];
   watchFolders: WatchFolder[];
-  tokenBalance: number;
   subtitleTracks: EditorProject['workstationState']['subtitleTracks'];
   titleClips: EditorProject['workstationState']['titleClips'];
   trackHeights: Record<string, number>;
@@ -162,23 +151,6 @@ function resolveExportFormat(format: string): EditorProject['settings']['exportF
     default:
       return 'mov';
   }
-}
-
-function serializeAIJobs(aiJobs: AIJob[]): EditorProject['aiJobs'] {
-  return aiJobs.map((job) => {
-    const existing = job as AIJob & Partial<EditorProject['aiJobs'][number]>;
-    return {
-      id: job.id,
-      type: job.type,
-      label: existing.label ?? job.type,
-      status: job.status,
-      progress: job.progress,
-      resultSummary: job.resultSummary,
-      cost: existing.cost ?? 0,
-      createdAt: existing.createdAt ?? DEFAULT_TIMESTAMP,
-      completedAt: existing.completedAt,
-    };
-  });
 }
 
 function serializeReviewComments(reviewComments: ReviewComment[]): EditorProject['reviewComments'] {
@@ -439,14 +411,11 @@ export function buildProjectPersistenceSnapshot(
     tracks: state.tracks as Track[],
     markers: state.markers,
     bins: state.bins,
-    collabUsers: state.collabUsers,
-    aiJobs: state.aiJobs,
     transcript: state.transcript,
     reviewComments: state.reviewComments,
     approvals: state.approvals,
     publishJobs: state.publishJobs,
     watchFolders: state.watchFolders,
-    tokenBalance: state.tokenBalance,
     subtitleTracks: state.subtitleTracks,
     titleClips: state.titleClips,
     trackHeights: { ...state.trackHeights },
@@ -484,14 +453,11 @@ export function getProjectPersistenceHash(snapshot: EditorProjectPersistenceSnap
     tracks: snapshot.tracks,
     markers: snapshot.markers,
     bins: snapshot.bins,
-    collaborators: snapshot.collabUsers,
-    aiJobs: serializeAIJobs(snapshot.aiJobs),
     transcript: snapshot.transcript,
     reviewComments: serializeReviewComments(snapshot.reviewComments),
     approvals: serializeApprovals(snapshot.approvals),
     publishJobs: serializePublishJobs(snapshot.publishJobs),
     watchFolders: serializeWatchFolders(snapshot.watchFolders),
-    tokenBalance: snapshot.tokenBalance,
     workstationState: serializeWorkstationState(snapshot),
     editorialState: {
       selectedBinId: resolveSelectedBinId(snapshot.bins, snapshot.selectedBinId),
@@ -536,14 +502,14 @@ export function buildProjectFromEditorState(
     tracks: snapshot.tracks as Track[],
     markers: snapshot.markers,
     bins: snapshot.bins,
-    collaborators: snapshot.collabUsers,
-    aiJobs: serializeAIJobs(snapshot.aiJobs),
+    collaborators: [],
+    aiJobs: [],
     transcript: snapshot.transcript,
     reviewComments: serializeReviewComments(snapshot.reviewComments),
     approvals: serializeApprovals(snapshot.approvals),
     publishJobs: serializePublishJobs(snapshot.publishJobs),
     watchFolders: serializeWatchFolders(snapshot.watchFolders),
-    tokenBalance: snapshot.tokenBalance,
+    tokenBalance: 0,
     workstationState: serializeWorkstationState(snapshot),
     editorialState: {
       selectedBinId: resolveSelectedBinId(snapshot.bins, snapshot.selectedBinId),
@@ -607,14 +573,11 @@ export function hydrateEditorStateFromProject(project: EditorProject): HydratedE
     tracks,
     markers: project.markers as Marker[],
     bins,
-    collabUsers: project.collaborators as CollabUser[],
-    aiJobs: project.aiJobs as AIJob[],
     transcript: project.transcript as TranscriptCue[],
     reviewComments: project.reviewComments as ReviewComment[],
     approvals: project.approvals as Approval[],
     publishJobs: project.publishJobs as PublishJob[],
     watchFolders: project.watchFolders as WatchFolder[],
-    tokenBalance: project.tokenBalance,
     subtitleTracks: project.workstationState.subtitleTracks,
     titleClips: project.workstationState.titleClips,
     trackHeights: { ...project.workstationState.trackHeights },
