@@ -1,4 +1,5 @@
 import { audioEngine } from '../engine/AudioEngine';
+import { getClipSourceTime } from '../engine/clipTiming';
 import type { Clip, Track } from '../store/editor.store';
 
 export interface TimelineMonitorMediaSource {
@@ -17,7 +18,7 @@ interface MonitorAudioChannelState {
 const monitorAudioChannels = new Map<string, MonitorAudioChannelState>();
 
 function getSourceTime(clip: Clip, timelineTime: number): number {
-  return clip.trimStart + (timelineTime - clip.startTime);
+  return getClipSourceTime(clip, timelineTime);
 }
 
 function findActiveClipInTracks(tracks: Track[], time: number, allowedTypes: Track['type'][]): TimelineMonitorMediaSource | null {

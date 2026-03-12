@@ -9,6 +9,7 @@
 import { videoSourceManager } from './VideoSourceManager';
 import { effectsEngine } from './EffectsEngine';
 import type { Track, Clip, IntrinsicVideoProps, SequenceSettings, AlphaMode, CompositeMode } from '../store/editor.store';
+import { getClipSourceTime } from './clipTiming';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -152,54 +153,14 @@ class FrameCompositorClass {
    * trim offsets and the clip's native frame rate vs sequence frame rate.
    */
   private getSourceTime(clip: Clip, timelineTime: number, seqFps: number, clipFps?: number): number {
-    const clipOffset = timelineTime - clip.startTime;
     const rate = clipFps && clipFps !== seqFps ? clipFps / seqFps : 1;
 
-    // If time remap is enabled, evaluate keyframes
-    if (clip.timeRemap.enabled && clip.timeRemap.keyframes.length >= 2) {
-      return this.evaluateTimeRemap(clip, clipOffset);
+    if (rate === 1 || clip.timeRemap.enabled) {
+      return getClipSourceTime(clip, timelineTime);
     }
 
+    const clipOffset = timelineTime - clip.startTime;
     return clip.trimStart + clipOffset * rate;
-  }
-
-  /**
-   * Evaluate time remap keyframes to get source time.
-   */
-  private evaluateTimeRemap(clip: Clip, clipOffset: number): number {
-    const kfs = clip.timeRemap.keyframes;
-    const absTime = clip.startTime + clipOffset;
-
-    // Before first keyframe
-    if (absTime <= kfs[0]!.timelineTime) return kfs[0]!.sourceTime;
-    // After last keyframe
-    if (absTime >= kfs[kfs.length - 1]!.timelineTime) return kfs[kfs.length - 1]!.sourceTime;
-
-    // Find surrounding keyframes
-    for (let i = 0; i < kfs.length - 1; i++) {
-      const a = kfs[i], b = kfs[i + 1];
-      if (absTime >= a!.timelineTime! && absTime <= b!.timelineTime!) {
-        const t = (absTime - a!.timelineTime!) / (b!.timelineTime! - a!.timelineTime!);
-
-        if (a!.interpolation! === 'hold') return a!.sourceTime!;
-        if (a!.interpolation! === 'linear') {
-          return a!.sourceTime! + t * (b!.sourceTime! - a!.sourceTime!);
-        }
-        // Bezier interpolation (cubic approximation)
-        if (a!.interpolation! === 'bezier') {
-          const ct = this.cubicBezier(t, a!.bezierOut?.y! ?? t, b!.bezierIn?.y! ?? t);
-          return a!.sourceTime! + ct * (b!.sourceTime! - a!.sourceTime!);
-        }
-      }
-    }
-
-    return clip.trimStart + clipOffset;
-  }
-
-  private cubicBezier(t: number, p1: number, p2: number): number {
-    // Simplified cubic bezier with control points
-    const u = 1 - t;
-    return 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t;
   }
 
   /**

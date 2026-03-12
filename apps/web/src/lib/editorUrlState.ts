@@ -1,8 +1,12 @@
 import type { WorkspacePreset } from '../App';
 import type { EditorPage } from '../components/PageNavigation/PageNavigation';
 
-const VALID_EDITOR_PAGES: ReadonlySet<EditorPage> = new Set<EditorPage>(['media', 'cut', 'edit', 'color', 'deliver']);
+const VALID_EDITOR_PAGES: ReadonlySet<EditorPage> = new Set<EditorPage>(['media', 'edit']);
 const VALID_WORKSPACES: ReadonlySet<WorkspacePreset> = new Set<WorkspacePreset>(['filmtv', 'news', 'sports', 'creator', 'marketing']);
+
+export function isLegacyExportPageParam(param: string | null): boolean {
+  return param === 'deliver';
+}
 
 export function resolveEditorPageParam(param: string | null): EditorPage {
   return param && VALID_EDITOR_PAGES.has(param as EditorPage) ? (param as EditorPage) : 'edit';

@@ -272,7 +272,7 @@ export class PlaybackEngine {
 
   /** Emit the current frame to all subscribers. */
   private emit(): void {
-    const frame = Math.round(this.currentFrame);
+    const frame = this.currentFrame;
     this.subscribers.forEach((cb) => {
       try {
         cb(frame);

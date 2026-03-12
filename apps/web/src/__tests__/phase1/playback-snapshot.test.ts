@@ -195,4 +195,99 @@ describe('phase 1 playback snapshot contract', () => {
     expect(snapshot.subtitleCues[0]?.cue.id).toBe('cue-1');
     expect(snapshot.frameKey).toContain(':waveform:1');
   });
+
+  it('resolves time-remapped source positions inside the shared playback snapshot', () => {
+    const remappedClip = makeClip({
+      id: 'clip-remap',
+      trackId: 't-v1',
+      name: 'Speed Ramped',
+      startTime: 0,
+      endTime: 4,
+      trimStart: 0,
+      trimEnd: 0,
+      type: 'video',
+      assetId: 'asset-remap',
+    });
+
+    remappedClip.timeRemap = {
+      enabled: true,
+      frameBlending: 'frame-mix',
+      pitchCorrection: true,
+      keyframes: [
+        { timelineTime: 0, sourceTime: 2, interpolation: 'linear' },
+        { timelineTime: 4, sourceTime: 8, interpolation: 'linear' },
+      ],
+    };
+
+    const snapshot = buildPlaybackSnapshot({
+      ...baseSource,
+      playheadTime: 2,
+      tracks: [
+        {
+          ...baseSource.tracks[0]!,
+          clips: [remappedClip],
+        },
+      ],
+    }, 'record-monitor');
+
+    expect(snapshot.primaryVideoLayer?.sourceTime).toBe(5);
+  });
+
+  it('changes sequence revision when time-remap data changes', () => {
+    const linearClip = makeClip({
+      id: 'clip-linear',
+      trackId: 't-v1',
+      name: 'Linear',
+      startTime: 0,
+      endTime: 4,
+      trimStart: 0,
+      trimEnd: 0,
+      type: 'video',
+      assetId: 'asset-linear',
+    });
+    const remappedClip = makeClip({
+      id: 'clip-remapped',
+      trackId: 't-v1',
+      name: 'Remapped',
+      startTime: 0,
+      endTime: 4,
+      trimStart: 0,
+      trimEnd: 0,
+      type: 'video',
+      assetId: 'asset-linear',
+    });
+
+    remappedClip.timeRemap = {
+      enabled: true,
+      frameBlending: 'frame-mix',
+      pitchCorrection: true,
+      keyframes: [
+        { timelineTime: 0, sourceTime: 0, interpolation: 'linear' },
+        { timelineTime: 4, sourceTime: 7, interpolation: 'linear' },
+      ],
+    };
+
+    const linearSnapshot = buildPlaybackSnapshot({
+      ...baseSource,
+      playheadTime: 2,
+      tracks: [
+        {
+          ...baseSource.tracks[0]!,
+          clips: [linearClip],
+        },
+      ],
+    }, 'record-monitor');
+    const remappedSnapshot = buildPlaybackSnapshot({
+      ...baseSource,
+      playheadTime: 2,
+      tracks: [
+        {
+          ...baseSource.tracks[0]!,
+          clips: [remappedClip],
+        },
+      ],
+    }, 'record-monitor');
+
+    expect(remappedSnapshot.sequenceRevision).not.toBe(linearSnapshot.sequenceRevision);
+  });
 });

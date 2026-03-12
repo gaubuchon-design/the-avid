@@ -40,15 +40,12 @@ import {
   togglePlayForActiveMonitor,
 } from '../lib/editorMonitorActions';
 import { buildProjectPersistenceSnapshot, getProjectPersistenceHash } from '../lib/editorProjectState';
-import { resolveEditorPageParam, resolveWorkspaceParam } from '../lib/editorUrlState';
+import { isLegacyExportPageParam, resolveEditorPageParam, resolveWorkspaceParam } from '../lib/editorUrlState';
 import { subscribeSmartToolStateToStore } from '../lib/smartToolStateBridge';
 import { subscribeTrimHistoryToEditEngine } from '../lib/trimHistoryBridge';
 import { subscribeTrimStateToStore } from '../lib/trimStateBridge';
 import { subscribeTrackPatchingStateToStore } from '../lib/trackPatchingStateBridge';
 import { MediaPage } from './MediaPage';
-import { CutPage } from './CutPage';
-import { ColorPage } from './ColorPage';
-import { DeliverPage } from './DeliverPage';
 
 // Lazy-loaded vertical panels
 // NOTE: These lazy imports are intentionally separate from the ones in App.tsx.
@@ -394,16 +391,25 @@ export function EditorPage() {
   }, [updateSearchParam]);
 
   useEffect(() => {
-    const nextPage = resolveEditorPageParam(searchParams.get('page'));
+    const rawPageParam = searchParams.get('page');
+    const nextPage = resolveEditorPageParam(rawPageParam);
     if (nextPage !== activePage) {
       setActivePage(nextPage);
+    }
+
+    if (rawPageParam && rawPageParam !== nextPage) {
+      updateSearchParam('page', nextPage === 'edit' ? null : nextPage);
+    }
+
+    if (isLegacyExportPageParam(rawPageParam) && !useEditorStore.getState().showExportPanel) {
+      useEditorStore.setState({ showExportPanel: true });
     }
 
     const nextWorkspace = resolveWorkspaceParam(searchParams.get('workspace'));
     if (nextWorkspace !== workspace) {
       setWorkspace(nextWorkspace);
     }
-  }, [activePage, searchParams, workspace]);
+  }, [activePage, searchParams, updateSearchParam, workspace]);
 
   // ⌘K / Ctrl+K to open command palette
   useEffect(() => {
@@ -422,9 +428,9 @@ export function EditorPage() {
         e.preventDefault();
         setShowTracker(prev => !prev);
       }
-      // Shift+1-5 to switch pages (Resolve-style)
+      // Shift+1-2 to switch between media and edit
       if (e.shiftKey && !e.metaKey && !e.ctrlKey) {
-        const pageMap: Record<string, PageId> = { '!': 'media', '@': 'cut', '#': 'edit', '$': 'color', '%': 'deliver' };
+        const pageMap: Record<string, PageId> = { '!': 'media', '@': 'edit' };
         const page = pageMap[e.key];
         if (page) { e.preventDefault(); handlePageChange(page); }
       }
@@ -453,22 +459,6 @@ export function EditorPage() {
           <MediaPage />
         </ErrorBoundary>
       )}
-      {activePage === 'cut' && (
-        <ErrorBoundary resetKeys={[activePage]}>
-          <CutPage />
-        </ErrorBoundary>
-      )}
-      {activePage === 'color' && (
-        <ErrorBoundary resetKeys={[activePage]}>
-          <div style={{ gridRow: '2 / 5', overflow: 'hidden' }}><ColorPage /></div>
-        </ErrorBoundary>
-      )}
-      {activePage === 'deliver' && (
-        <ErrorBoundary resetKeys={[activePage]}>
-          <DeliverPage />
-        </ErrorBoundary>
-      )}
-
       {activePage === 'edit' && (
         isSportsWorkspace ? (
           <Suspense fallback={<LoadingSpinner />}>

@@ -9,6 +9,7 @@ import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
 import { renderPlaybackSnapshotFrame } from '../../engine/playbackSnapshotFrame';
 import {
   findActiveClip,
+  inspectPlaybackVideoLayerAvailability,
   syncVideoPlayback,
   pauseVideoSource,
   tryLoadClipSource,
@@ -20,6 +21,8 @@ import {
   releaseMonitorAudioOutput,
   syncMonitorAudioOutput,
 } from '../../lib/monitorPlayback';
+import { usePointerScrub } from '../../hooks/usePointerScrub';
+import { useMonitorTransportState } from '../../hooks/useMonitorTransportState';
 
 /**
  * MonitorArea — Full-record mode composited monitor.
@@ -28,18 +31,45 @@ import {
  * intrinsic transforms + effects + titles + subtitles + safe zones.
  * Identical output to RecordMonitor (dual mode).
  */
+
+function updateCachedCanvasFrame(
+  sourceCanvas: HTMLCanvasElement,
+  cacheRef: React.MutableRefObject<HTMLCanvasElement | null>,
+): void {
+  if (typeof document === 'undefined') {
+    return;
+  }
+
+  const cachedFrame = cacheRef.current ?? document.createElement('canvas');
+  cachedFrame.width = sourceCanvas.width;
+  cachedFrame.height = sourceCanvas.height;
+  const cachedCtx = cachedFrame.getContext('2d');
+  if (!cachedCtx) {
+    return;
+  }
+
+  cachedCtx.clearRect(0, 0, cachedFrame.width, cachedFrame.height);
+  cachedCtx.drawImage(sourceCanvas, 0, 0, cachedFrame.width, cachedFrame.height);
+  cacheRef.current = cachedFrame;
+}
+
 export function MonitorArea() {
   const {
-    isPlaying, togglePlay, playheadTime, setPlayhead, showSafeZones, duration,
-    tracks, selectedClipIds, inPoint, outPoint, isFullscreen,
+    isPlaying, togglePlay, playheadTime, setPlayhead, duration,
+    tracks, selectedClipIds, inPoint, outPoint,
     projectSettings,
   } = useEditorStore();
   const bins = useEditorStore((s) => s.bins);
   const sequenceFps = useEditorStore((s) => s.sequenceSettings.fps);
+  const audioScrubEnabled = useEditorStore((s) => s.audioScrubEnabled);
+  const setActiveMonitor = usePlayerStore((s) => s.setActiveMonitor);
+  const monitorTransport = useMonitorTransportState(playheadTime, isPlaying);
 
   const tc = new Timecode({ fps: projectSettings?.frameRate || 24 });
   const aspectRatio = projectSettings ? projectSettings.width / projectSettings.height : 16 / 9;
-  const totalClips = tracks.reduce((n, t) => n + t.clips.length, 0);
+  const viewingLabel = projectSettings
+    ? `${projectSettings.width}×${projectSettings.height} · ${sequenceFps || projectSettings.frameRate || 24}fps`
+    : '--';
   const trimActive = useEditorStore((s) => s.trimActive);
   const trimMode = useEditorStore((s) => s.trimMode);
   const trimSelectionLabel = useEditorStore((s) => s.trimSelectionLabel);
@@ -49,7 +79,8 @@ export function MonitorArea() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const scrubRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>();
-  const lastClipIdRef = useRef<string | null>(null);
+  const activeAssetIdsRef = useRef<Set<string>>(new Set());
+  const cachedFrameRef = useRef<HTMLCanvasElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 640, h: 360 });
   const [sourceRevision, setSourceRevision] = useState(0);
 
@@ -100,8 +131,14 @@ export function MonitorArea() {
 
     const render = () => {
       const { w, h } = canvasSize;
-      canvas.width = w;
-      canvas.height = h;
+      const renderWidth = Math.max(1, Math.round(w * monitorTransport.renderScale));
+      const renderHeight = Math.max(1, Math.round(h * monitorTransport.renderScale));
+      if (canvas.width !== renderWidth) {
+        canvas.width = renderWidth;
+      }
+      if (canvas.height !== renderHeight) {
+        canvas.height = renderHeight;
+      }
 
       // Read latest state (non-reactive inside RAF)
       const state = useEditorStore.getState();
@@ -121,37 +158,54 @@ export function MonitorArea() {
         projectSettings: state.projectSettings,
       }, 'program-monitor');
 
-      // Sync video playback for the active clip
-      const activeClip = snapshot.primaryVideoLayer?.clip ?? null;
-
-      // Handle clip transitions: pause old clip, start new
-      if (activeClip?.assetId !== lastClipIdRef.current) {
-        if (lastClipIdRef.current) {
-          pauseVideoSource(lastClipIdRef.current);
+      const nextAssetIds = new Set<string>();
+      for (const layer of snapshot.videoLayers) {
+        if (!layer.assetId) {
+          continue;
         }
-        lastClipIdRef.current = activeClip?.assetId ?? null;
+        nextAssetIds.add(layer.assetId);
+        if (!activeAssetIdsRef.current.has(layer.assetId)) {
+          tryLoadClipSource(layer.assetId, state.bins as any);
+        }
+        syncVideoPlayback(layer.clip, state.isPlaying, state.playheadTime, state.sequenceSettings.fps);
       }
 
-      // Sync playback for the active clip
-      if (activeClip) {
-        syncVideoPlayback(activeClip, state.isPlaying, state.playheadTime, state.sequenceSettings.fps);
+      for (const previousAssetId of activeAssetIdsRef.current) {
+        if (!nextAssetIds.has(previousAssetId)) {
+          pauseVideoSource(previousAssetId);
+        }
       }
+      activeAssetIdsRef.current = nextAssetIds;
 
-      // Try loading unloaded clip sources
-      if (activeClip?.assetId) {
-        tryLoadClipSource(activeClip.assetId, state.bins as any);
+      const layerAvailability = inspectPlaybackVideoLayerAvailability(snapshot);
+      const canHoldPreviousFrame = layerAvailability.totalVideoLayers > 0
+        && layerAvailability.pendingVideoLayers > 0
+        && cachedFrameRef.current;
+
+      if (canHoldPreviousFrame) {
+        const ctx = canvas.getContext('2d');
+        if (ctx && cachedFrameRef.current) {
+          ctx.clearRect(0, 0, renderWidth, renderHeight);
+          ctx.drawImage(cachedFrameRef.current, 0, 0, renderWidth, renderHeight);
+        }
+        rafRef.current = requestAnimationFrame(render);
+        return;
       }
 
       renderPlaybackSnapshotFrame({
         snapshot,
-        width: w,
-        height: h,
+        width: renderWidth,
+        height: renderHeight,
         canvas,
         currentTitle: titleState.currentTitle,
         isTitleEditing: titleState.isEditing,
-        colorProcessing: 'post',
-        useCache: !state.isPlaying,
+        colorProcessing: monitorTransport.colorProcessing,
+        useCache: monitorTransport.useCache,
       });
+
+      if (layerAvailability.totalVideoLayers > 0 && layerAvailability.pendingVideoLayers === 0) {
+        updateCachedCanvasFrame(canvas, cachedFrameRef);
+      }
 
       rafRef.current = requestAnimationFrame(render);
     };
@@ -159,8 +213,12 @@ export function MonitorArea() {
     rafRef.current = requestAnimationFrame(render);
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      for (const assetId of activeAssetIdsRef.current) {
+        pauseVideoSource(assetId);
+      }
+      activeAssetIdsRef.current.clear();
     };
-  }, [canvasSize]);
+  }, [canvasSize, monitorTransport.colorProcessing, monitorTransport.renderScale, monitorTransport.useCache]);
 
   // Auto-inspect clip at playhead (Premiere Pro behavior — Inspector shows
   // properties for the clip currently visible in the record monitor)
@@ -203,6 +261,7 @@ export function MonitorArea() {
     const rect = bar.getBoundingClientRect();
     const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const nextTime = pct * duration;
+    setActiveMonitor('record');
     setPlayhead(nextTime);
 
     if (!previewAudio || isPlaying) {
@@ -223,39 +282,18 @@ export function MonitorArea() {
     }
 
     previewMonitorAudioOutput('program-monitor', source.element, candidate.sourceTime);
-  }, [duration, isPlaying, setPlayhead]);
+  }, [duration, isPlaying, setActiveMonitor, setPlayhead]);
 
-  const handleScrub = useCallback((e: React.MouseEvent) => {
-    scrubToTime(e.clientX, true);
-  }, [scrubToTime]);
-
-  const dragListenersRef = useRef<{ onMove: (ev: MouseEvent) => void; onUp: () => void } | null>(null);
-
-  const handleScrubDrag = useCallback((e: React.MouseEvent) => {
-    handleScrub(e);
-    const bar = scrubRef.current;
-    if (!bar) return;
-    const onMove = (ev: MouseEvent) => {
-      scrubToTime(ev.clientX, true);
-    };
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      dragListenersRef.current = null;
-    };
-    dragListenersRef.current = { onMove, onUp };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  }, [handleScrub, scrubToTime]);
+  const scrubBindings = usePointerScrub({
+    disabled: duration <= 0,
+    onScrub: ({ clientX, phase }) => {
+      scrubToTime(clientX, audioScrubEnabled && phase === 'end');
+    },
+  });
 
   useEffect(() => {
     return () => {
       releaseMonitorAudioOutput('program-monitor');
-      if (dragListenersRef.current) {
-        window.removeEventListener('mousemove', dragListenersRef.current.onMove);
-        window.removeEventListener('mouseup', dragListenersRef.current.onUp);
-        dragListenersRef.current = null;
-      }
     };
   }, []);
 
@@ -322,7 +360,7 @@ export function MonitorArea() {
       <div
         className="composer-scrubbar"
         ref={scrubRef}
-        onMouseDown={handleScrubDrag}
+        {...scrubBindings}
         role="slider"
         aria-valuemin={0}
         aria-valuemax={100}
@@ -366,10 +404,11 @@ export function MonitorArea() {
 
       {/* Status bar */}
       <div className="composer-status-bar">
-        <span>Selected: {selectedClipIds.length}</span>
-        <span>Duration: {tc.secondsToTC(duration)}</span>
-        <span>Viewing: {totalClips > 0 ? `${projectSettings?.width}×${projectSettings?.height}` : '--'}</span>
-        <span>Trim: {trimActive ? `${trimMode.toUpperCase()} ${trimSelectionLabel} ${trimCounterFrames > 0 ? '+' : ''}${trimCounterFrames}f` : 'OFF'}</span>
+        <span>{viewingLabel}</span>
+        <span>{selectedClipIds.length} selected</span>
+        {trimActive && (
+          <span>Trim: {trimMode.toUpperCase()} {trimSelectionLabel} {trimCounterFrames > 0 ? '+' : ''}{trimCounterFrames}f</span>
+        )}
       </div>
     </div>
   );

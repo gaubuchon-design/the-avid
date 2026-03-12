@@ -7,6 +7,7 @@ import type {
   Track,
 } from '../store/editor.store';
 import type { ScopeType } from '../store/player.store';
+import { getClipSourceTime } from './clipTiming';
 
 export type PlaybackConsumer = 'record-monitor' | 'program-monitor' | 'scope' | 'export';
 
@@ -85,7 +86,7 @@ function resolveAspectRatio(source: PlaybackSnapshotSource): number {
 }
 
 function mapTimelineTimeToSourceTime(clip: Clip, playheadTime: number): number {
-  return clip.trimStart + (playheadTime - clip.startTime);
+  return getClipSourceTime(clip, playheadTime);
 }
 
 function buildVideoLayers(source: PlaybackSnapshotSource): PlaybackVideoLayer[] {
@@ -180,6 +181,8 @@ export function buildPlaybackSequenceRevision(source: PlaybackSnapshotSource): s
         trimEnd: clip.trimEnd,
         type: clip.type,
         intrinsicVideo: clip.intrinsicVideo,
+        timeRemap: clip.timeRemap,
+        blendMode: clip.blendMode ?? null,
       })),
     })),
     titleClips: source.titleClips,

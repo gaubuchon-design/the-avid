@@ -1,7 +1,7 @@
 import React, { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRoot } from 'react-dom/client';
-import { RecordMonitor } from '../../components/RecordMonitor/RecordMonitor';
+import { SourceMonitor } from '../../components/SourceMonitor/SourceMonitor';
 import { useEditorStore } from '../../store/editor.store';
 import { usePlayerStore } from '../../store/player.store';
 
@@ -26,7 +26,7 @@ function dispatchScrubEvent(target: EventTarget, type: 'down' | 'move' | 'up', c
   target.dispatchEvent(new MouseEvent(eventType, { bubbles: true, clientX }));
 }
 
-describe('record monitor scrub', () => {
+describe('source monitor scrub', () => {
   beforeEach(() => {
     useEditorStore.setState(initialEditorState, true);
     usePlayerStore.setState(initialPlayerState, true);
@@ -54,23 +54,29 @@ describe('record monitor scrub', () => {
     }
   });
 
-  it('scrubs the record playhead by dragging the monitor scrub bar', async () => {
+  it('scrubs the source playhead without requiring a loaded video element', async () => {
     useEditorStore.setState({
-      duration: 20,
-      playheadTime: 0,
-      inPoint: 2,
-      outPoint: 18,
+      sourceAsset: {
+        id: 'asset-source',
+        name: 'Source Clip',
+        type: 'VIDEO',
+        duration: 20,
+        status: 'READY',
+        tags: [],
+        isFavorite: false,
+      },
+      sourcePlayhead: 0,
     });
 
     const container = document.createElement('div');
     const root = createRoot(container);
 
     await act(async () => {
-      root.render(<RecordMonitor />);
+      root.render(<SourceMonitor />);
     });
     await flushAnimationFrames();
 
-    const scrubBar = container.querySelector('[aria-label="Record playback position"]') as HTMLDivElement | null;
+    const scrubBar = container.querySelector('[aria-label="Source playback position"]') as HTMLDivElement | null;
     expect(scrubBar).not.toBeNull();
 
     Object.defineProperty(scrubBar!, 'getBoundingClientRect', {
@@ -92,7 +98,7 @@ describe('record monitor scrub', () => {
     });
     await flushAnimationFrames();
 
-    expect(useEditorStore.getState().playheadTime).toBeCloseTo(5, 5);
+    expect(useEditorStore.getState().sourcePlayhead).toBeCloseTo(5, 5);
 
     await act(async () => {
       dispatchScrubEvent(globalThis, 'move', 70);
@@ -100,7 +106,7 @@ describe('record monitor scrub', () => {
     });
     await flushAnimationFrames();
 
-    expect(useEditorStore.getState().playheadTime).toBeCloseTo(12, 5);
+    expect(useEditorStore.getState().sourcePlayhead).toBeCloseTo(12, 5);
 
     await act(async () => {
       root.unmount();

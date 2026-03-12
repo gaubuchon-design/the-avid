@@ -407,6 +407,9 @@ export function TimelinePanel() {
               time={playheadTime}
               zoom={zoom}
               scrollLeft={scrollLeft}
+              duration={duration}
+              viewportRef={contentRef}
+              onScrub={setPlayhead}
             />
 
             {/* Remote collaborator playheads */}

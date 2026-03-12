@@ -6,6 +6,7 @@ import {
   previewMonitorAudioOutput,
   releaseMonitorAudioOutput,
 } from '../../lib/monitorPlayback';
+import { usePointerScrub } from '../../hooks/usePointerScrub';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -36,14 +37,11 @@ export function SourceMonitor() {
   const {
     isPlaying,
     speed,
-    currentFrame,
     showSafeZones,
     activeScope,
     sourceClipId,
     play,
     pause,
-    stop,
-    seekFrame,
     toggleSafeZones,
     setActiveScope,
     setActiveMonitor,
@@ -56,6 +54,14 @@ export function SourceMonitor() {
   const [videoReady, setVideoReady] = useState(false);
   const rafRef = useRef<number>();
   const syncRafRef = useRef<number>();
+  const cachedFrameRef = useRef<HTMLCanvasElement | null>(null);
+  const renderStateRef = useRef({
+    assetName: '',
+    fps: 24,
+    sourceInPoint: null as number | null,
+    sourceOutPoint: null as number | null,
+    sourcePlayhead: 0,
+  });
 
   // Get the source asset from editor store (master's approach with sourceAsset + sourcePlayhead)
   // Also support looking up by sourceClipId through bins (our hardened approach)
@@ -80,6 +86,17 @@ export function SourceMonitor() {
   const setSourceInPoint = useEditorStore((s) => s.setSourceInPoint);
   const setSourceOutPoint = useEditorStore((s) => s.setSourceOutPoint);
   const fps = useEditorStore((s) => s.sequenceSettings.fps);
+  const audioScrubEnabled = useEditorStore((s) => s.audioScrubEnabled);
+
+  useEffect(() => {
+    renderStateRef.current = {
+      assetName: sourceAsset?.name ?? '',
+      fps,
+      sourceInPoint,
+      sourceOutPoint,
+      sourcePlayhead,
+    };
+  }, [fps, sourceAsset?.name, sourceInPoint, sourceOutPoint, sourcePlayhead]);
 
   // Responsive canvas sizing
   useEffect(() => {
@@ -108,6 +125,7 @@ export function SourceMonitor() {
   // Load/update video element when source asset changes
   useEffect(() => {
     setVideoReady(false);
+    cachedFrameRef.current = null;
 
     if (!sourceAsset || !(sourceAsset.fileHandle || sourceAsset.playbackUrl)) {
       releaseMonitorAudioOutput('source-monitor');
@@ -172,10 +190,15 @@ export function SourceMonitor() {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       const { w, h } = canvasSize;
-      canvas.width = w;
-      canvas.height = h;
+      if (canvas.width !== w) {
+        canvas.width = w;
+      }
+      if (canvas.height !== h) {
+        canvas.height = h;
+      }
 
       const video = videoRef.current;
+      const renderState = renderStateRef.current;
       if (video && videoReady && video.readyState >= 2) {
         // Draw video frame
         ctx.fillStyle = '#000';
@@ -192,11 +215,40 @@ export function SourceMonitor() {
           drawX = Math.floor((w - drawW) / 2);
         }
         ctx.drawImage(video, drawX, drawY, drawW, drawH);
+        const cachedFrame = cachedFrameRef.current ?? document.createElement('canvas');
+        cachedFrame.width = w;
+        cachedFrame.height = h;
+        const cachedCtx = cachedFrame.getContext('2d');
+        if (cachedCtx) {
+          cachedCtx.fillStyle = '#000';
+          cachedCtx.fillRect(0, 0, w, h);
+          cachedCtx.drawImage(video, drawX, drawY, drawW, drawH);
+          cachedFrameRef.current = cachedFrame;
+        }
 
         // Draw in/out markers
-        drawMarkers(ctx, w, h);
+        drawMarkers(
+          ctx,
+          w,
+          h,
+          renderState.sourceInPoint,
+          renderState.sourceOutPoint,
+          renderState.fps,
+        );
+      } else if (cachedFrameRef.current) {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(cachedFrameRef.current, 0, 0, w, h);
+        drawMarkers(
+          ctx,
+          w,
+          h,
+          renderState.sourceInPoint,
+          renderState.sourceOutPoint,
+          renderState.fps,
+        );
       } else {
-        drawPlaceholder(ctx, w, h);
+        drawPlaceholder(ctx, w, h, renderState.assetName, renderState.sourcePlayhead, renderState.sourceInPoint, renderState.sourceOutPoint, renderState.fps);
       }
 
       rafRef.current = requestAnimationFrame(render);
@@ -206,16 +258,17 @@ export function SourceMonitor() {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [canvasSize, videoReady, sourceInPoint, sourceOutPoint, sourcePlayhead]);
+  }, [canvasSize, videoReady]);
 
   // Sync video seek with source playhead (when not playing)
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !videoReady) return;
-    if (!isPlaying && isFinite(sourcePlayhead) && Math.abs(video.currentTime - sourcePlayhead) > 0.05) {
+    const frameTolerance = fps > 0 ? 0.5 / fps : 0.02;
+    if (!isPlaying && isFinite(sourcePlayhead) && Math.abs(video.currentTime - sourcePlayhead) > frameTolerance) {
       video.currentTime = Math.max(0, sourcePlayhead);
     }
-  }, [sourcePlayhead, isPlaying, videoReady]);
+  }, [fps, isPlaying, sourcePlayhead, videoReady]);
 
   // Play/pause — properly cancel previous RAF sync loop before creating new one.
   // Also applies playback rate from playerStore.speed for JKL shuttle support.
@@ -285,24 +338,40 @@ export function SourceMonitor() {
     };
   }, []);
 
-  function drawMarkers(c: CanvasRenderingContext2D, cw: number, ch: number) {
-    if (sourceInPoint !== null) {
+  function drawMarkers(
+    c: CanvasRenderingContext2D,
+    cw: number,
+    ch: number,
+    activeInPoint: number | null,
+    activeOutPoint: number | null,
+    activeFps: number,
+  ) {
+    if (activeInPoint !== null) {
       c.fillStyle = 'rgba(59, 130, 246, 0.8)';
       c.font = '600 10px monospace';
       c.textAlign = 'left';
       c.textBaseline = 'alphabetic';
-      c.fillText('IN: ' + formatTimecode(sourceInPoint, fps), 10, ch - 10);
+      c.fillText('IN: ' + formatTimecode(activeInPoint, activeFps), 10, ch - 10);
     }
-    if (sourceOutPoint !== null) {
+    if (activeOutPoint !== null) {
       c.fillStyle = 'rgba(59, 130, 246, 0.8)';
       c.font = '600 10px monospace';
       c.textAlign = 'right';
       c.textBaseline = 'alphabetic';
-      c.fillText('OUT: ' + formatTimecode(sourceOutPoint, fps), cw - 10, ch - 10);
+      c.fillText('OUT: ' + formatTimecode(activeOutPoint, activeFps), cw - 10, ch - 10);
     }
   }
 
-  function drawPlaceholder(c: CanvasRenderingContext2D, cw: number, ch: number) {
+  function drawPlaceholder(
+    c: CanvasRenderingContext2D,
+    cw: number,
+    ch: number,
+    assetName: string,
+    activePlayhead: number,
+    activeInPoint: number | null,
+    activeOutPoint: number | null,
+    activeFps: number,
+  ) {
     c.fillStyle = '#000000';
     c.fillRect(0, 0, cw, ch);
     c.fillStyle = 'rgba(255, 255, 255, 0.12)';
@@ -312,13 +381,13 @@ export function SourceMonitor() {
     c.fillText('SOURCE', cw / 2, ch / 2 - 14);
     c.fillStyle = 'rgba(255, 255, 255, 0.25)';
     c.font = '500 13px monospace';
-    c.fillText(formatTimecode(sourcePlayhead, fps), cw / 2, ch / 2 + 16);
-    if (sourceAsset) {
+    c.fillText(formatTimecode(activePlayhead, activeFps), cw / 2, ch / 2 + 16);
+    if (assetName) {
       c.fillStyle = 'rgba(255, 255, 255, 0.4)';
       c.font = '400 11px system-ui';
-      c.fillText(sourceAsset.name, cw / 2, ch / 2 + 36);
+      c.fillText(assetName, cw / 2, ch / 2 + 36);
     }
-    drawMarkers(c, cw, ch);
+    drawMarkers(c, cw, ch, activeInPoint, activeOutPoint, activeFps);
   }
 
   // Transport handlers
@@ -378,51 +447,34 @@ export function SourceMonitor() {
 
   // Scrub bar interaction
   const scrubRef = useRef<HTMLDivElement>(null);
-  const dragListenersRef = useRef<{ onMove: (ev: MouseEvent) => void; onUp: () => void } | null>(null);
   const scrubToTime = useCallback((clientX: number, previewAudio: boolean) => {
     const bar = scrubRef.current;
     if (!bar || !sourceAsset?.duration) return;
     const rect = bar.getBoundingClientRect();
     const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const nextTime = pct * sourceAsset.duration;
+    setActiveMonitor('source');
     setSourcePlayhead(nextTime);
 
-    if (!previewAudio || isPlaying || !videoRef.current) {
+    const video = videoRef.current;
+    const frameTolerance = fps > 0 ? 0.5 / fps : 0.02;
+    if (!isPlaying && video && Math.abs(video.currentTime - nextTime) > frameTolerance) {
+      video.currentTime = nextTime;
+    }
+
+    if (!previewAudio || isPlaying || !video) {
       return;
     }
 
-    previewMonitorAudioOutput('source-monitor', videoRef.current, nextTime);
-  }, [isPlaying, setSourcePlayhead, sourceAsset?.duration]);
-  const handleScrub = useCallback((e: React.MouseEvent) => {
-    scrubToTime(e.clientX, true);
-  }, [scrubToTime]);
+    previewMonitorAudioOutput('source-monitor', video, nextTime);
+  }, [fps, isPlaying, setActiveMonitor, setSourcePlayhead, sourceAsset?.duration]);
 
-  const handleScrubDrag = useCallback((e: React.MouseEvent) => {
-    handleScrub(e);
-    const bar = scrubRef.current;
-    if (!bar || !sourceAsset?.duration) return;
-    const onMove = (ev: MouseEvent) => {
-      scrubToTime(ev.clientX, true);
-    };
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      dragListenersRef.current = null;
-    };
-    dragListenersRef.current = { onMove, onUp };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  }, [handleScrub, scrubToTime, sourceAsset?.duration]);
-
-  useEffect(() => {
-    return () => {
-      if (dragListenersRef.current) {
-        window.removeEventListener('mousemove', dragListenersRef.current.onMove);
-        window.removeEventListener('mouseup', dragListenersRef.current.onUp);
-        dragListenersRef.current = null;
-      }
-    };
-  }, []);
+  const scrubBindings = usePointerScrub({
+    disabled: !sourceAsset?.duration,
+    onScrub: ({ clientX, phase }) => {
+      scrubToTime(clientX, audioScrubEnabled && phase === 'end');
+    },
+  });
 
   const tc = formatTimecode(sourcePlayhead, fps);
   const dur = sourceAsset?.duration ?? 0;
@@ -451,7 +503,14 @@ export function SourceMonitor() {
           ref={canvasRef}
           width={canvasSize.w}
           height={canvasSize.h}
-          style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+          style={{
+            width: canvasSize.w,
+            height: canvasSize.h,
+            maxWidth: '100%',
+            maxHeight: '100%',
+            display: 'block',
+            margin: 'auto',
+          }}
         />
         {showSafeZones && (
           <div className="safe-zone">
@@ -466,7 +525,8 @@ export function SourceMonitor() {
         <div
           className="composer-scrubbar"
           ref={scrubRef}
-          onMouseDown={handleScrubDrag}
+          {...scrubBindings}
+          aria-label="Source playback position"
           style={{ height: 6, margin: '0 4px', cursor: 'pointer' }}
         >
           {inPct !== null && <div className="composer-scrubbar-mark in" style={{ left: `${inPct}%` }} />}

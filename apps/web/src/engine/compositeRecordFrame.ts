@@ -11,6 +11,7 @@ import { buildPlaybackSnapshot, type PlaybackSnapshot } from './PlaybackSnapshot
 import { renderTitle } from './TitleRenderer';
 import type { Track, Clip, IntrinsicVideoProps, SubtitleTrack, TitleClipData } from '../store/editor.store';
 import type { ScopeType } from '../store/player.store';
+import { getClipSourceTime } from './clipTiming';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,6 +40,12 @@ export interface PlaybackCompositingContext {
   currentTitle: any | null;
   isTitleEditing: boolean;
   overlayProcessing?: 'pre' | 'post';
+}
+
+export interface PlaybackVideoLayerAvailability {
+  totalVideoLayers: number;
+  drawableVideoLayers: number;
+  pendingVideoLayers: number;
 }
 
 let layerScratchCanvas: HTMLCanvasElement | null = null;
@@ -84,7 +91,7 @@ export function findActiveMediaClip(tracks: Track[], time: number): Clip | null 
 
 /** Map timeline time to source media time for a clip. */
 export function getSourceTime(clip: Clip, timelineTime: number): number {
-  return clip.trimStart + (timelineTime - clip.startTime);
+  return getClipSourceTime(clip, timelineTime);
 }
 
 // ─── Intrinsic Transform Application ──────────────────────────────────────────
@@ -183,6 +190,7 @@ export function syncVideoPlayback(
 
   const vid = source.element;
   const sourceTime = getSourceTime(clip, playheadTime);
+  const frameTolerance = fps > 0 ? Math.max(0.5 / fps, 0.02) : 0.02;
 
   if (isPlaying) {
     // During playback: use native video.play(), only correct excessive drift
@@ -199,7 +207,7 @@ export function syncVideoPlayback(
   } else {
     // When paused: stop video and seek to exact frame
     if (!vid.paused) vid.pause();
-    if (Math.abs(vid.currentTime - sourceTime) > 0.02) {
+    if (!vid.seeking && Math.abs(vid.currentTime - sourceTime) > frameTolerance) {
       vid.currentTime = sourceTime;
     }
   }
@@ -236,6 +244,39 @@ export function tryLoadClipSource(
     }
   };
   search(bins);
+}
+
+export function inspectPlaybackVideoLayerAvailability(
+  snapshot: PlaybackSnapshot,
+): PlaybackVideoLayerAvailability {
+  let totalVideoLayers = 0;
+  let drawableVideoLayers = 0;
+
+  for (const layer of snapshot.videoLayers) {
+    if (!layer.assetId) {
+      continue;
+    }
+
+    totalVideoLayers += 1;
+    const source = videoSourceManager.getSource(layer.assetId);
+    const vid = source?.element;
+    const isDrawable = Boolean(
+      vid
+      && source?.ready
+      && vid.readyState >= 2
+      && (snapshot.isPlaying || !vid.seeking),
+    );
+
+    if (isDrawable) {
+      drawableVideoLayers += 1;
+    }
+  }
+
+  return {
+    totalVideoLayers,
+    drawableVideoLayers,
+    pendingVideoLayers: totalVideoLayers - drawableVideoLayers,
+  };
 }
 
 // ─── Compositing Pipeline ─────────────────────────────────────────────────────
@@ -289,6 +330,10 @@ export function compositeRecordFrame(cx: CompositingContext): void {
 export function compositePlaybackSnapshot(cx: PlaybackCompositingContext): void {
   const { ctx, canvasW, canvasH, snapshot } = cx;
   const overlayProcessing = cx.overlayProcessing ?? 'post';
+  const compositorOwnsSeeking = !snapshot.isPlaying && (
+    snapshot.consumer === 'export' || snapshot.consumer === 'scope'
+  );
+  const frameTolerance = snapshot.fps > 0 ? Math.max(0.5 / snapshot.fps, 0.02) : 0.02;
 
   // 1. Clear to black
   ctx.fillStyle = '#000';
@@ -304,15 +349,10 @@ export function compositePlaybackSnapshot(cx: PlaybackCompositingContext): void 
     const vid = source?.element;
     if (!vid || !source.ready || vid.readyState < 2) continue;
 
-    // Seek to correct clip time (only when not playing — playback sync handles it otherwise)
-    if (!snapshot.isPlaying) {
-      if (!vid.seeking && Math.abs(vid.currentTime - layer.sourceTime) > 0.02) {
-        vid.currentTime = layer.sourceTime;
-      }
+    // Export/scope rendering drives its own seeking. Monitor rendering syncs earlier.
+    if (compositorOwnsSeeking && !vid.seeking && Math.abs(vid.currentTime - layer.sourceTime) > frameTolerance) {
+      vid.currentTime = layer.sourceTime;
     }
-
-    // Skip draw while video is seeking (keeps previous frame visible)
-    if (vid.seeking) continue;
 
     // 2a. Calculate letterboxed draw rect
     const videoAR = vid.videoWidth / vid.videoHeight;

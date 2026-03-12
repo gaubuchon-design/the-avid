@@ -83,4 +83,45 @@ describe('monitor playback helpers', () => {
     expect(candidate?.sourceTime).toBe(3.5);
     expect(candidate?.sourceKind).toBe('video');
   });
+
+  it('uses clip time-remap data when resolving monitor source time', () => {
+    const remappedClip = makeClip({
+      id: 'clip-remap',
+      trackId: 'v1',
+      name: 'Remapped Clip',
+      startTime: 0,
+      endTime: 4,
+      trimStart: 0,
+      trimEnd: 0,
+      type: 'video',
+      assetId: 'asset-remap',
+    });
+
+    remappedClip.timeRemap = {
+      enabled: true,
+      frameBlending: 'frame-mix',
+      pitchCorrection: true,
+      keyframes: [
+        { timelineTime: 0, sourceTime: 1, interpolation: 'linear' },
+        { timelineTime: 4, sourceTime: 9, interpolation: 'linear' },
+      ],
+    };
+
+    const candidate = findTimelineMonitorMediaSource([
+      {
+        id: 'v1',
+        name: 'V1',
+        type: 'VIDEO',
+        sortOrder: 0,
+        muted: false,
+        locked: false,
+        solo: false,
+        volume: 1,
+        color: '#5b6af5',
+        clips: [remappedClip],
+      },
+    ], 2);
+
+    expect(candidate?.sourceTime).toBe(5);
+  });
 });
