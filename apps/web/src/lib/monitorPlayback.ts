@@ -23,7 +23,12 @@ function getSourceTime(clip: Clip, timelineTime: number): number {
 function findActiveClipInTracks(tracks: Track[], time: number, allowedTypes: Track['type'][]): TimelineMonitorMediaSource | null {
   const orderedTracks = tracks
     .filter((track) => allowedTypes.includes(track.type) && !track.muted)
-    .sort((left, right) => left.sortOrder - right.sortOrder);
+    .sort((left, right) => {
+      if (allowedTypes.length === 1 && allowedTypes[0] === 'AUDIO') {
+        return left.sortOrder - right.sortOrder;
+      }
+      return right.sortOrder - left.sortOrder;
+    });
 
   for (const track of orderedTracks) {
     const clip = track.clips.find((candidate) => (
@@ -105,7 +110,7 @@ export function attachMonitorAudioOutput(
 export function findTimelineMonitorMediaSource(tracks: Track[], time: number): TimelineMonitorMediaSource | null {
   return (
     findActiveClipInTracks(tracks, time, ['AUDIO'])
-    ?? findActiveClipInTracks(tracks, time, ['VIDEO', 'GRAPHIC'])
+    ?? findActiveClipInTracks(tracks, time, ['VIDEO'])
   );
 }
 

@@ -41,19 +41,45 @@ export interface PlaybackCompositingContext {
   overlayProcessing?: 'pre' | 'post';
 }
 
+let layerScratchCanvas: HTMLCanvasElement | null = null;
+
 // ─── Exported Helpers ─────────────────────────────────────────────────────────
 
 /** Find the topmost visible video clip at a given timeline time. */
 export function findActiveClip(tracks: Track[], time: number): Clip | null {
   const videoTracks = tracks
     .filter((t) => (t.type === 'VIDEO' || t.type === 'GRAPHIC') && !t.muted)
-    .sort((a, b) => a.sortOrder - b.sortOrder);
+    .sort((a, b) => b.sortOrder - a.sortOrder);
 
   for (const track of videoTracks) {
     const clip = track.clips.find((c) => time >= c.startTime && time < c.endTime);
     if (clip?.assetId) return clip;
   }
   return null;
+}
+
+/** Find the topmost active timeline media clip, preferring real video over graphic overlays. */
+export function findActiveMediaClip(tracks: Track[], time: number): Clip | null {
+  const findOnTrackType = (trackType: Track['type']) => {
+    const orderedTracks = tracks
+      .filter((track) => track.type === trackType && !track.muted)
+      .sort((left, right) => right.sortOrder - left.sortOrder);
+
+    for (const track of orderedTracks) {
+      const clip = track.clips.find((candidate) => (
+        Boolean(candidate.assetId)
+        && time >= candidate.startTime
+        && time < candidate.endTime
+      ));
+      if (clip?.assetId) {
+        return clip;
+      }
+    }
+
+    return null;
+  };
+
+  return findOnTrackType('VIDEO') ?? findOnTrackType('GRAPHIC');
 }
 
 /** Map timeline time to source media time for a clip. */
@@ -91,6 +117,50 @@ function applyIntrinsicTransforms(
   if (props.opacity !== 100) {
     ctx.globalAlpha = props.opacity / 100;
   }
+}
+
+function getLayerRenderContext(
+  width: number,
+  height: number,
+): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  if (!layerScratchCanvas) {
+    layerScratchCanvas = document.createElement('canvas');
+  }
+
+  layerScratchCanvas.width = width;
+  layerScratchCanvas.height = height;
+  const layerCtx = layerScratchCanvas.getContext('2d');
+  if (!layerCtx) {
+    return null;
+  }
+
+  layerCtx.setTransform?.(1, 0, 0, 1, 0, 0);
+  layerCtx.clearRect(0, 0, width, height);
+  return {
+    canvas: layerScratchCanvas,
+    ctx: layerCtx,
+  };
+}
+
+function applyClipEffectsToLayer(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  clipId: string,
+  frameNumber: number,
+): void {
+  const clipEffects = effectsEngine.getClipEffects(clipId);
+  if (clipEffects.length === 0) {
+    return;
+  }
+
+  const imageData = ctx.getImageData(0, 0, width, height);
+  effectsEngine.processFrame(imageData, clipEffects, frameNumber);
+  ctx.putImageData(imageData, 0, 0);
 }
 
 // ─── Video Playback Sync ──────────────────────────────────────────────────────
@@ -244,11 +314,7 @@ export function compositePlaybackSnapshot(cx: PlaybackCompositingContext): void 
     // Skip draw while video is seeking (keeps previous frame visible)
     if (vid.seeking) continue;
 
-    // 2a. Apply intrinsic transforms
-    ctx.save();
-    applyIntrinsicTransforms(ctx, clip.intrinsicVideo, canvasW, canvasH);
-
-    // 2b. Draw video with letterboxing
+    // 2a. Calculate letterboxed draw rect
     const videoAR = vid.videoWidth / vid.videoHeight;
     let drawW = canvasW, drawH = canvasH, drawX = 0, drawY = 0;
     if (videoAR > snapshot.aspectRatio) {
@@ -258,19 +324,32 @@ export function compositePlaybackSnapshot(cx: PlaybackCompositingContext): void 
       drawW = Math.floor(canvasH * videoAR);
       drawX = Math.floor((canvasW - drawW) / 2);
     }
-    ctx.drawImage(vid, drawX, drawY, drawW, drawH);
 
-    ctx.restore();
-    drewVideo = true;
+    const layerRender = getLayerRenderContext(canvasW, canvasH);
+    const blendMode = (clip.blendMode ?? layer.trackBlendMode ?? 'source-over') as GlobalCompositeOperation;
 
-    // 2c. Apply clip effects (pixel-level processing after drawing)
-    const clipEffects = effectsEngine.getClipEffects(clip.id);
-    if (clipEffects.length > 0) {
-      const imageData = ctx.getImageData(0, 0, canvasW, canvasH);
-      const currentFrame = snapshot.frameNumber;
-      effectsEngine.processFrame(imageData, clipEffects, currentFrame);
-      ctx.putImageData(imageData, 0, 0);
+    if (layerRender) {
+      // Render the clip into an isolated layer so effects only touch that layer.
+      layerRender.ctx.save();
+      applyIntrinsicTransforms(layerRender.ctx, clip.intrinsicVideo, canvasW, canvasH);
+      layerRender.ctx.drawImage(vid, drawX, drawY, drawW, drawH);
+      layerRender.ctx.restore();
+
+      applyClipEffectsToLayer(layerRender.ctx, canvasW, canvasH, clip.id, snapshot.frameNumber);
+
+      ctx.save();
+      ctx.globalCompositeOperation = blendMode;
+      ctx.drawImage(layerRender.canvas, 0, 0, canvasW, canvasH);
+      ctx.restore();
+    } else {
+      ctx.save();
+      ctx.globalCompositeOperation = blendMode;
+      applyIntrinsicTransforms(ctx, clip.intrinsicVideo, canvasW, canvasH);
+      ctx.drawImage(vid, drawX, drawY, drawW, drawH);
+      ctx.restore();
     }
+
+    drewVideo = true;
   }
 
   if (overlayProcessing === 'post') {

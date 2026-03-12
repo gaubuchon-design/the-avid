@@ -531,6 +531,7 @@ export function buildProjectFromEditorState(
       height: snapshot.projectSettings.height,
       sampleRate: snapshot.sequenceSettings.sampleRate,
       exportFormat: resolveExportFormat(snapshot.projectSettings.exportFormat),
+      dropFrame: snapshot.sequenceSettings.dropFrame,
     },
     tracks: snapshot.tracks as Track[],
     markers: snapshot.markers,
@@ -595,7 +596,7 @@ export function hydrateEditorStateFromProject(project: EditorProject): HydratedE
     sequenceSettings: {
       name: 'Sequence 1',
       fps: project.settings.frameRate,
-      dropFrame: false,
+      dropFrame: project.settings.dropFrame ?? false,
       startTC: 0,
       width: project.settings.width,
       height: project.settings.height,

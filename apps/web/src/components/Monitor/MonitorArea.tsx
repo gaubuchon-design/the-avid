@@ -115,7 +115,7 @@ export function MonitorArea() {
         duration: state.duration,
         isPlaying: state.isPlaying,
         showSafeZones: state.showSafeZones,
-        activeMonitor: playerState.activeMonitor,
+        activeMonitor: 'record',
         activeScope: playerState.activeScope,
         sequenceSettings: state.sequenceSettings,
         projectSettings: state.projectSettings,

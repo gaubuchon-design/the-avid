@@ -306,6 +306,7 @@ export interface EditorProjectSettings {
   height: number;
   sampleRate: number;
   exportFormat: 'mp4' | 'mov' | 'webm' | 'mp3' | 'wav' | 'aiff';
+  dropFrame?: boolean;
 }
 
 export interface EditorSubtitleCueStyle {
@@ -459,6 +460,14 @@ export interface CreateProjectOptions {
   template?: ProjectTemplate;
   tags?: string[];
   seedContent?: boolean;
+  frameRate?: number;
+  width?: number;
+  height?: number;
+  sampleRate?: number;
+  exportFormat?: EditorProjectSettings['exportFormat'];
+  dropFrame?: boolean;
+  activeWorkspaceId?: string;
+  composerLayout?: EditorProjectWorkstationState['composerLayout'];
 }
 
 const STORAGE_KEY = 'the-avid.projects.v1';
@@ -1171,6 +1180,7 @@ function normalizeProject(project: EditorProject): EditorProject {
   const height = Number.isFinite(rawHeight) && rawHeight > 0 ? Math.round(rawHeight) : 1080;
   const rawSampleRate = project.settings?.sampleRate ?? 48000;
   const sampleRate = Number.isFinite(rawSampleRate) && rawSampleRate > 0 ? rawSampleRate : 48000;
+  const dropFrame = project.settings?.dropFrame === true;
 
   // Clamp progress to 0-100
   const rawProgress = typeof project.progress === 'number' ? project.progress : 0;
@@ -1220,6 +1230,7 @@ function normalizeProject(project: EditorProject): EditorProject {
       height,
       sampleRate,
       exportFormat: project.settings?.exportFormat ?? 'mov',
+      dropFrame,
     },
     tracks: cloneValue(project.tracks ?? []),
     markers: cloneValue(project.markers ?? []),
@@ -1345,6 +1356,7 @@ export function hydrateProject(project: Partial<EditorProject>): EditorProject {
       height: 1080,
       sampleRate: 48000,
       exportFormat: 'mov',
+      dropFrame: false,
     },
     tracks,
     markers: project.markers ?? [],
@@ -1392,6 +1404,11 @@ export function buildProject(options: CreateProjectOptions = {}): EditorProject 
   const template = options.template ?? 'film';
   const seedContent = options.seedContent ?? true;
   const meta = TEMPLATE_META[template];
+  const frameRate = options.frameRate ?? meta.resolution.frameRate;
+  const width = options.width ?? meta.resolution.width;
+  const height = options.height ?? meta.resolution.height;
+  const sampleRate = options.sampleRate ?? 48000;
+  const exportFormat = options.exportFormat ?? (template === 'podcast' ? 'wav' : 'mov');
   const bins = seedContent ? createTemplateBins(template) : [];
   const tracks = seedContent
     ? seedTracksFromBins(createTemplateTracks(template), bins)
@@ -1416,11 +1433,12 @@ export function buildProject(options: CreateProjectOptions = {}): EditorProject 
       ? Math.max(18, Math.min(100, Math.round(getProjectDuration({ tracks }) * 2)))
       : 0,
     settings: {
-      frameRate: meta.resolution.frameRate,
-      width: meta.resolution.width,
-      height: meta.resolution.height,
-      sampleRate: 48000,
-      exportFormat: template === 'podcast' ? 'wav' : 'mov',
+      frameRate,
+      width,
+      height,
+      sampleRate,
+      exportFormat,
+      dropFrame: options.dropFrame ?? false,
     },
     tracks,
     markers: seedContent
@@ -1462,8 +1480,8 @@ export function buildProject(options: CreateProjectOptions = {}): EditorProject 
       subtitleTracks: [],
       titleClips: [],
       trackHeights: {},
-      activeWorkspaceId: 'source-record',
-      composerLayout: 'source-record',
+      activeWorkspaceId: options.activeWorkspaceId ?? 'source-record',
+      composerLayout: options.composerLayout ?? 'source-record',
       showTrackingInfo: true,
       trackingInfoFields: ['master-tc', 'duration'],
       clipTextDisplay: 'name',

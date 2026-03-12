@@ -89,9 +89,17 @@ describe('phase 1 editor monitor keyboard actions', () => {
   });
 
   it('loads the record clip into the source monitor for match frame', () => {
-    const asset = {
+    const baseAsset = {
       id: 'asset-video-1',
       name: 'Interview',
+      type: 'VIDEO' as const,
+      status: 'READY' as const,
+      tags: [],
+      isFavorite: false,
+    };
+    const overlayAsset = {
+      id: 'asset-video-2',
+      name: 'B-roll',
       type: 'VIDEO' as const,
       status: 'READY' as const,
       tags: [],
@@ -106,7 +114,7 @@ describe('phase 1 editor monitor keyboard actions', () => {
           name: 'Master',
           color: '#5b6af5',
           children: [],
-          assets: [asset],
+          assets: [baseAsset, overlayAsset],
           isOpen: true,
         },
       ],
@@ -124,12 +132,60 @@ describe('phase 1 editor monitor keyboard actions', () => {
           clips: [
             makeClip({
               id: 'clip-v1',
-              assetId: asset.id,
+              assetId: baseAsset.id,
               trackId: 'v1',
               name: 'Timeline Clip',
               startTime: 10,
               endTime: 14,
               trimStart: 3,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+        {
+          id: 'v2',
+          name: 'V2',
+          type: 'VIDEO',
+          sortOrder: 1,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#818cf8',
+          clips: [
+            makeClip({
+              id: 'clip-v2',
+              assetId: overlayAsset.id,
+              trackId: 'v2',
+              name: 'Overlay Clip',
+              startTime: 10,
+              endTime: 14,
+              trimStart: 7,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+        {
+          id: 'g1',
+          name: 'G1',
+          type: 'GRAPHIC',
+          sortOrder: 2,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#f59e0b',
+          clips: [
+            makeClip({
+              id: 'clip-title',
+              assetId: 'title-1',
+              trackId: 'g1',
+              name: 'Title Overlay',
+              startTime: 10,
+              endTime: 14,
+              trimStart: 0,
               trimEnd: 0,
               type: 'video',
             }),
@@ -145,9 +201,9 @@ describe('phase 1 editor monitor keyboard actions', () => {
     expect(matchFrameAtPlayhead()).toBe(true);
 
     const state = useEditorStore.getState();
-    expect(state.sourceAsset?.id).toBe(asset.id);
-    expect(state.sourcePlayhead).toBe(4.5);
-    expect(state.inspectedClipId).toBe('clip-v1');
+    expect(state.sourceAsset?.id).toBe(overlayAsset.id);
+    expect(state.sourcePlayhead).toBe(8.5);
+    expect(state.inspectedClipId).toBe('clip-v2');
     expect(usePlayerStore.getState().activeMonitor).toBe('source');
   });
 });

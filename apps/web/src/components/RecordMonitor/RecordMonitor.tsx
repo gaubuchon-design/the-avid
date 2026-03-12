@@ -8,11 +8,11 @@ import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
 import { renderPlaybackSnapshotFrame } from '../../engine/playbackSnapshotFrame';
 import {
   findActiveClip,
-  getSourceTime,
   syncVideoPlayback,
   pauseVideoSource,
   tryLoadClipSource,
 } from '../../engine/compositeRecordFrame';
+import { matchFrameAtPlayhead } from '../../lib/editorMonitorActions';
 import { videoSourceManager } from '../../engine/VideoSourceManager';
 import {
   findTimelineMonitorMediaSource,
@@ -115,7 +115,7 @@ export function RecordMonitor() {
         duration: state.duration,
         isPlaying: state.isPlaying,
         showSafeZones: state.showSafeZones,
-        activeMonitor: playerState.activeMonitor,
+        activeMonitor: 'record',
         activeScope: playerState.activeScope,
         sequenceSettings: state.sequenceSettings,
         projectSettings: state.projectSettings,
@@ -241,19 +241,7 @@ export function RecordMonitor() {
   }, []);
 
   const handleMatchFrame = useCallback(() => {
-    const state = useEditorStore.getState();
-    const clip = findActiveClip(state.tracks, state.playheadTime);
-    if (clip?.assetId) {
-      const sourceTime = getSourceTime(clip, state.playheadTime);
-      const bin = state.bins.find((b) => b.assets.some((a) => a.id === clip.assetId));
-      const asset = bin?.assets.find((a) => a.id === clip.assetId);
-      if (asset) {
-        state.setSourceAsset(asset);
-        state.setSourcePlayhead(sourceTime);
-        state.setInspectedClip(clip.id);
-        usePlayerStore.getState().setActiveMonitor('source');
-      }
-    }
+    matchFrameAtPlayhead();
   }, []);
 
   const handleFocus = useCallback(() => {

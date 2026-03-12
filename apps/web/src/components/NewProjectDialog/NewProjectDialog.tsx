@@ -7,11 +7,14 @@ import {
   RESOLUTION_PRESETS,
   supportsDropFrame,
 } from '../../lib/timecode';
-import type { ProjectTemplate } from '@mcua/core';
+import {
+  buildProjectCreationOptions,
+  type EditorialWorkspacePreset,
+} from '../../lib/projectCreation';
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
-type WorkspacePersona = 'filmtv' | 'news' | 'sports' | 'creator' | 'marketing';
+type WorkspacePersona = EditorialWorkspacePreset;
 
 interface PersonaConfig {
   icon: string;
@@ -19,7 +22,6 @@ interface PersonaConfig {
   desc: string;
   fps: number;
   dropFrame?: boolean;
-  template: ProjectTemplate;
   resolution: { width: number; height: number };
 }
 
@@ -39,7 +41,6 @@ const PERSONA_MAP: Record<WorkspacePersona, PersonaConfig> = {
     name: 'Film & TV',
     desc: 'Full timeline, color grading, audio mixing',
     fps: 23.976,
-    template: 'film',
     resolution: { width: 1920, height: 1080 },
   },
   news: {
@@ -48,7 +49,6 @@ const PERSONA_MAP: Record<WorkspacePersona, PersonaConfig> = {
     desc: 'Rundown, script panel, fast turnaround',
     fps: 29.97,
     dropFrame: true,
-    template: 'news',
     resolution: { width: 1920, height: 1080 },
   },
   sports: {
@@ -57,7 +57,6 @@ const PERSONA_MAP: Record<WorkspacePersona, PersonaConfig> = {
     desc: 'Multi-cam, slow-mo, instant replay',
     fps: 59.94,
     dropFrame: true,
-    template: 'sports',
     resolution: { width: 3840, height: 2160 },
   },
   creator: {
@@ -65,7 +64,6 @@ const PERSONA_MAP: Record<WorkspacePersona, PersonaConfig> = {
     name: 'Creator',
     desc: 'Social formats, templates, quick export',
     fps: 30,
-    template: 'social',
     resolution: { width: 1080, height: 1920 },
   },
   marketing: {
@@ -73,7 +71,6 @@ const PERSONA_MAP: Record<WorkspacePersona, PersonaConfig> = {
     name: 'Marketing',
     desc: 'Multi-variant, A/B testing, brand assets',
     fps: 30,
-    template: 'commercial',
     resolution: { width: 1920, height: 1080 },
   },
 };
@@ -590,13 +587,23 @@ export function NewProjectDialog() {
 
     setIsCreating(true);
     try {
-      const config = PERSONA_MAP[persona];
-      const project = await createProjectInRepository({
+      const project = await createProjectInRepository(buildProjectCreationOptions({
+        workspace: persona,
         name: projectName.trim(),
         description: projectDescription.trim() || undefined,
-        template: config.template,
         tags: tags.length > 0 ? tags : undefined,
-      });
+        sequence: selectedResolution
+          ? {
+              fps: sequence.fps,
+              width: selectedResolution.width,
+              height: selectedResolution.height,
+              dropFrame: sequence.dropFrame,
+            }
+          : {
+              fps: sequence.fps,
+              dropFrame: sequence.dropFrame,
+            },
+      }));
 
       handleClose();
       navigate(`/editor/${project.id}?workspace=${persona}`);
@@ -604,7 +611,7 @@ export function NewProjectDialog() {
       console.error('[NewProjectDialog] Failed to create project:', err);
       setIsCreating(false);
     }
-  }, [persona, projectName, projectDescription, tags, isCreating, handleClose, navigate]);
+  }, [persona, projectName, projectDescription, tags, isCreating, handleClose, navigate, selectedResolution, sequence.dropFrame, sequence.fps]);
 
   const handleOverlayClick = useCallback(
     (e: React.MouseEvent) => {

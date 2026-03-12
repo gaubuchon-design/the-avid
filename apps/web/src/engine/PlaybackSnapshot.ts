@@ -14,6 +14,7 @@ export interface PlaybackVideoLayer {
   trackId: string;
   trackType: Track['type'];
   sortOrder: number;
+  trackBlendMode?: Track['blendMode'];
   clip: Clip;
   assetId: string | null;
   sourceTime: number;
@@ -90,7 +91,7 @@ function mapTimelineTimeToSourceTime(clip: Clip, playheadTime: number): number {
 function buildVideoLayers(source: PlaybackSnapshotSource): PlaybackVideoLayer[] {
   return source.tracks
     .filter((track) => (track.type === 'VIDEO' || track.type === 'GRAPHIC') && !track.muted)
-    .sort((a, b) => b.sortOrder - a.sortOrder)
+    .sort((a, b) => a.sortOrder - b.sortOrder)
     .flatMap((track) => {
       const clip = track.clips.find((candidate) => {
         return source.playheadTime >= candidate.startTime && source.playheadTime < candidate.endTime;
@@ -103,6 +104,7 @@ function buildVideoLayers(source: PlaybackSnapshotSource): PlaybackVideoLayer[] 
         trackId: track.id,
         trackType: track.type,
         sortOrder: track.sortOrder,
+        trackBlendMode: track.blendMode,
         clip,
         assetId: clip.assetId ?? null,
         sourceTime: mapTimelineTimeToSourceTime(clip, source.playheadTime),
@@ -113,7 +115,7 @@ function buildVideoLayers(source: PlaybackSnapshotSource): PlaybackVideoLayer[] 
 function buildTitleLayers(source: PlaybackSnapshotSource, fps: number): PlaybackTitleLayer[] {
   return source.tracks
     .filter((track) => track.type === 'GRAPHIC' && !track.muted)
-    .sort((a, b) => b.sortOrder - a.sortOrder)
+    .sort((a, b) => a.sortOrder - b.sortOrder)
     .flatMap((track) => {
       return track.clips.flatMap((clip) => {
         if (source.playheadTime < clip.startTime || source.playheadTime >= clip.endTime) {
@@ -197,7 +199,9 @@ export function buildPlaybackSnapshot(
   const frameNumber = Math.round(source.playheadTime * fps);
   const sequenceRevision = buildPlaybackSequenceRevision(source);
   const videoLayers = buildVideoLayers(source);
-  const primaryVideoLayer = [...videoLayers].sort((a, b) => a.sortOrder - b.sortOrder)[0] ?? null;
+  const primaryVideoLayer = [...videoLayers].reverse().find((layer) => layer.trackType === 'VIDEO')
+    ?? videoLayers[videoLayers.length - 1]
+    ?? null;
 
   return {
     consumer,

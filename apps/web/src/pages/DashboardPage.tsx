@@ -5,6 +5,10 @@ import {
   createProjectInRepository,
   listProjectSummariesFromRepository,
 } from '../lib/projectRepository';
+import {
+  buildProjectCreationOptions,
+  type EditorialWorkspacePreset,
+} from '../lib/projectCreation';
 import { NewProjectDialog } from '../components/NewProjectDialog/NewProjectDialog';
 import { useEditorStore } from '../store/editor.store';
 
@@ -13,8 +17,8 @@ const TEMPLATE_OPTIONS: Array<{ template: ProjectTemplate; label: string; desc: 
   { template: 'social', label: 'Social Vertical', desc: '1080x1920 · 30fps', icon: '📱', workspace: 'creator' },
   { template: 'podcast', label: 'Podcast Edit', desc: 'Audio-first layout', icon: '🎙', workspace: 'creator' },
   { template: 'sports', label: 'Sports Reel', desc: 'Action-optimized', icon: '⚡', workspace: 'sports' },
-  { template: 'film', label: 'News Package', desc: 'Rundown-ready', icon: '📡', workspace: 'news' },
-  { template: 'social', label: 'Brand Campaign', desc: 'Multi-variant', icon: '🏷', workspace: 'marketing' },
+  { template: 'news', label: 'News Package', desc: 'Rundown-ready', icon: '📡', workspace: 'news' },
+  { template: 'commercial', label: 'Brand Campaign', desc: 'Multi-variant', icon: '🏷', workspace: 'marketing' },
 ];
 
 function iconForProject(icon: string): string {
@@ -161,7 +165,10 @@ export function DashboardPage() {
     setIsCreating(true);
     setCreateError(null);
     try {
-      const project = await createProjectInRepository({ template });
+      const project = await createProjectInRepository(buildProjectCreationOptions({
+        template,
+        workspace: workspace as EditorialWorkspacePreset | undefined,
+      }));
       await refreshProjects();
       const ws = workspace ? `?workspace=${workspace}` : '';
       navigate(`/editor/${project.id}${ws}`);

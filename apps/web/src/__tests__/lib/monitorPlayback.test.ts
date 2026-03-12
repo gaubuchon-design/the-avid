@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { findTimelineMonitorMediaSource } from '../../lib/monitorPlayback';
 import { makeClip } from '../../store/editor.store';
 
-describe('monitorPlayback', () => {
-  it('prefers active audio track media for timeline monitor audio', () => {
-    const result = findTimelineMonitorMediaSource([
+describe('monitor playback helpers', () => {
+  it('prefers the topmost playable video source over graphic title overlays', () => {
+    const candidate = findTimelineMonitorMediaSource([
       {
         id: 'v1',
         name: 'V1',
@@ -17,79 +17,70 @@ describe('monitorPlayback', () => {
         color: '#5b6af5',
         clips: [
           makeClip({
-            id: 'clip-video',
+            id: 'clip-v1',
             trackId: 'v1',
-            assetId: 'asset-video',
-            name: 'Video',
+            name: 'Base Clip',
             startTime: 0,
-            endTime: 10,
-            trimStart: 1,
+            endTime: 5,
+            trimStart: 0,
             trimEnd: 0,
             type: 'video',
+            assetId: 'asset-base',
           }),
         ],
       },
       {
-        id: 'a1',
-        name: 'A1',
-        type: 'AUDIO',
+        id: 'v2',
+        name: 'V2',
+        type: 'VIDEO',
         sortOrder: 1,
         muted: false,
         locked: false,
         solo: false,
         volume: 1,
-        color: '#2bb672',
+        color: '#818cf8',
         clips: [
           makeClip({
-            id: 'clip-audio',
-            trackId: 'a1',
-            assetId: 'asset-audio',
-            name: 'Audio',
+            id: 'clip-v2',
+            trackId: 'v2',
+            name: 'Overlay Clip',
             startTime: 0,
-            endTime: 10,
-            trimStart: 4,
+            endTime: 5,
+            trimStart: 2,
             trimEnd: 0,
-            type: 'audio',
+            type: 'video',
+            assetId: 'asset-overlay',
           }),
         ],
       },
-    ], 3);
-
-    expect(result?.assetId).toBe('asset-audio');
-    expect(result?.sourceKind).toBe('audio');
-    expect(result?.sourceTime).toBe(7);
-  });
-
-  it('falls back to active video media when no audio clip is available', () => {
-    const result = findTimelineMonitorMediaSource([
       {
-        id: 'v1',
-        name: 'V1',
-        type: 'VIDEO',
-        sortOrder: 0,
+        id: 'g1',
+        name: 'G1',
+        type: 'GRAPHIC',
+        sortOrder: 2,
         muted: false,
         locked: false,
         solo: false,
         volume: 1,
-        color: '#5b6af5',
+        color: '#f59e0b',
         clips: [
           makeClip({
-            id: 'clip-video',
-            trackId: 'v1',
-            assetId: 'asset-video',
-            name: 'Video',
-            startTime: 5,
-            endTime: 12,
-            trimStart: 2,
+            id: 'clip-title',
+            trackId: 'g1',
+            name: 'Title Overlay',
+            startTime: 0,
+            endTime: 5,
+            trimStart: 0,
             trimEnd: 0,
             type: 'video',
+            assetId: 'title-overlay',
           }),
         ],
       },
-    ], 6.5);
+    ], 1.5);
 
-    expect(result?.assetId).toBe('asset-video');
-    expect(result?.sourceKind).toBe('video');
-    expect(result?.sourceTime).toBe(3.5);
+    expect(candidate?.assetId).toBe('asset-overlay');
+    expect(candidate?.sourceTime).toBe(3.5);
+    expect(candidate?.sourceKind).toBe('video');
   });
 });

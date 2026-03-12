@@ -27,7 +27,7 @@ These are intentionally platform-neutral. Desktop should be the first full imple
 
 This pass also adds a reference implementation runtime in `packages/core/src/parity/ReferenceNLEParityRuntime.ts`. It is not the final workstation engine, but it does make the architecture executable and testable across all nine ports.
 
-The next execution step is now underway in desktop: `apps/desktop/src/main/parity/DesktopNativeParityRuntime.ts` replaces the reference media-management, interchange, change-list, and professional-decode ports with desktop-backed adapters. The native media-management adapter uses the existing media pipeline for relink, media-index persistence, consolidate, and transcode orchestration. The native interchange adapter writes real conform-package directories on disk, then adds format-specific artifacts for EDL, OTIO, XML, AAF, and OMF. The native change-list adapter owns revision diffing and writes change-list artifacts into the project export structure while delegating EDL artifact generation through the desktop interchange adapter. The native decode adapter binds decode sessions to the project package, persists session manifests under the media index area, and resolves video/audio decode requests against real desktop media paths. The remaining ports still ride on the reference runtime until they are replaced in the same way.
+The desktop execution layer now replaces all nine parity ports in `apps/desktop/src/main/parity/DesktopNativeParityRuntime.ts`. Media management, interchange, change lists, and professional decode remain disk-backed as before. The remaining five ports are now desktop-native too: video compositing writes render-graph manifests per project package, realtime playback binds transports to decode sessions plus compositor graphs, professional audio mixing persists mix/preview state under the export tree, motion effects renders template jobs against the bound desktop package, and multicam orchestration now builds on the desktop playback adapter instead of the core reference runtime. The interchange path also moved one step closer to external-tool fidelity: AAF/OMF exports now emit Pro Tools turnover companions plus package-audit manifests, validation inspects the actual exported artifacts, and standalone interchange files can be imported even when the desktop package manifest is absent. The reference runtime still exists as a shared fallback and snapshot helper, but desktop parity wiring no longer delegates any of the nine ports to it.
 
 ## Gap Matrix
 
@@ -96,7 +96,7 @@ This ordering matters because multicam, titles, and interchange all depend on th
 - Shared contracts: `packages/core/src/parity/NLEPortContracts.ts`
 - Gap registry and phase mapping: `packages/core/src/parity/NLEParityScaffold.ts`
 - Reference runtime implementation: `packages/core/src/parity/ReferenceNLEParityRuntime.ts`
-- First desktop-native replacement: `apps/desktop/src/main/parity/DesktopNativeParityRuntime.ts`
+- Desktop-native parity runtime: `apps/desktop/src/main/parity/DesktopNativeParityRuntime.ts`
 - Tests for scaffold and runtime coverage: `packages/core/src/__tests__/NLEParityScaffold.test.ts` and `packages/core/src/__tests__/ReferenceNLEParityRuntime.test.ts`
 - Desktop adapter coverage: `apps/desktop/src/main/__tests__/DesktopNativeParityRuntime.test.ts`
 

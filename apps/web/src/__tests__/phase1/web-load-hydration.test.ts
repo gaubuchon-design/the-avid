@@ -99,6 +99,27 @@ describe('phase 1 web-load hydration', () => {
     useCollabStore.getState().refreshFromEngine();
   });
 
+  it('hydrates persisted sequence settings including drop-frame timecode', async () => {
+    const project = buildProject({
+      name: 'News Package',
+      template: 'news',
+      seedContent: false,
+      frameRate: 29.97,
+      width: 1280,
+      height: 720,
+      dropFrame: true,
+    });
+    repositoryMocks.getProjectFromRepository.mockResolvedValue(project);
+
+    await useEditorStore.getState().loadProject(project.id);
+
+    const state = useEditorStore.getState();
+    expect(state.sequenceSettings.fps).toBe(29.97);
+    expect(state.sequenceSettings.width).toBe(1280);
+    expect(state.sequenceSettings.height).toBe(720);
+    expect(state.sequenceSettings.dropFrame).toBe(true);
+  });
+
   it('keeps the latest repository hydration when earlier load requests resolve late', async () => {
     let resolveFirst: ((project: EditorProject) => void) | undefined;
     let resolveSecond: ((project: EditorProject) => void) | undefined;

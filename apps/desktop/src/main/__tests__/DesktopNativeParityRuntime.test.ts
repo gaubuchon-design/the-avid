@@ -273,7 +273,7 @@ describe('DesktopNativeParityRuntime', () => {
     tempDirs.length = 0;
   });
 
-  it('uses the desktop adapter for media management and preserves reference-backed ports for other subsystems', async () => {
+  it('replaces all nine parity ports with desktop-backed adapters', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'avid-desktop-runtime-'));
     tempDirs.push(root);
 
@@ -347,6 +347,13 @@ describe('DesktopNativeParityRuntime', () => {
       strictKeys: ['clip-name'],
     });
     const snapshot = runtime.buildSnapshotForProject(project.id, 'seq-1', 'rev-1');
+    const graph = await runtime.videoCompositing.compileGraph(snapshot);
+    const composite = await runtime.videoCompositing.renderFrame({
+      graphId: graph.graphId,
+      frame: 12,
+      target: 'record-monitor',
+      quality: 'full',
+    });
     const decodeSession = await runtime.mediaDecode.createSession(snapshot, {
       purpose: 'record-monitor',
       quality: 'full',
@@ -365,12 +372,57 @@ describe('DesktopNativeParityRuntime', () => {
       variant: 'source',
     });
     const transport = await runtime.realtimePlayback.createTransport(snapshot);
+    await runtime.realtimePlayback.attachStreams(transport, [
+      { streamId: 'program-video', assetId: 'asset-online', mediaType: 'video', role: 'program' },
+      { streamId: 'program-audio', assetId: 'asset-online', mediaType: 'audio', role: 'program' },
+      { streamId: 'angle-video', assetId: 'asset-offline', mediaType: 'video', role: 'multicam-angle' },
+    ]);
+    await runtime.realtimePlayback.preroll(transport, { startFrame: 0, endFrame: 24 });
+    await runtime.realtimePlayback.start(transport, 0);
+    const telemetry = await runtime.realtimePlayback.getTelemetry(transport);
+    await runtime.realtimePlayback.stop(transport);
     const loudnessMix = await runtime.professionalAudioMix.compileMix(snapshot);
+    await runtime.professionalAudioMix.writeAutomation(loudnessMix.mixId, {
+      trackId: 'A1',
+      parameter: 'gain',
+      points: [
+        { timeSeconds: 0, value: -2 },
+        { timeSeconds: 1.5, value: 0 },
+      ],
+    });
+    const audioPreview = await runtime.professionalAudioMix.renderPreview(loudnessMix.mixId, {
+      startSeconds: 0,
+      endSeconds: 3,
+    });
+    const loudness = await runtime.professionalAudioMix.analyzeLoudness(loudnessMix.mixId, {
+      startSeconds: 0,
+      endSeconds: 5,
+    });
+    const templatesBefore = await runtime.motionEffects.listTemplates();
+    await runtime.motionEffects.invalidateTemplate(templatesBefore[0]!.templateId);
+    const templatesAfter = await runtime.motionEffects.listTemplates();
+    const motionFrame = await runtime.motionEffects.renderMotionFrame({
+      templateId: templatesAfter[0]!.templateId,
+      frame: 18,
+      width: 1920,
+      height: 1080,
+      revisionId: snapshot.revisionId,
+    });
     const edlPackage = await runtime.interchange.exportPackage(snapshot, 'EDL');
     const aafPackage = await runtime.interchange.exportPackage(snapshot, 'AAF');
     const importedPackage = await runtime.interchange.importPackage(aafPackage.artifactPaths[0]!);
     const validation = await runtime.interchange.validatePackage(edlPackage);
     const edlContents = await readFile(edlPackage.artifactPaths[0]!, 'utf8');
+    const interchangeAuditPath = aafPackage.artifactPaths.find((artifactPath) => artifactPath.endsWith('desktop-interchange.audit.json'));
+    const interchangeAudit = JSON.parse(await readFile(interchangeAuditPath!, 'utf8')) as {
+      validation: { valid: boolean };
+      primaryArtifacts: string[];
+    };
+    const standaloneImportDir = path.join(root, 'standalone-import');
+    await mkdir(standaloneImportDir, { recursive: true });
+    const standaloneAafPath = path.join(standaloneImportDir, 'external-tool.aaf.json');
+    await writeFile(standaloneAafPath, await readFile(aafPackage.artifactPaths[0]!));
+    const standaloneImportedPackage = await runtime.interchange.importPackage(standaloneAafPath);
     const diff = await runtime.changeLists.diffSequence({
       sequenceId: 'seq-1',
       baseRevisionId: 'rev-1',
@@ -387,19 +439,54 @@ describe('DesktopNativeParityRuntime', () => {
       targetRevisionId: 'rev-2',
     });
     const changeListContents = await readFile(changeList.path, 'utf8');
+    const multicamGroup = await runtime.multicam.createGroup({
+      groupId: 'multicam-1',
+      projectId: project.id,
+      sequenceId: 'seq-1',
+      angles: [
+        { angleId: 'angle-a', assetId: 'asset-online', label: 'Cam A', syncSource: 'timecode' },
+        { angleId: 'angle-b', assetId: 'asset-offline', label: 'Cam B', syncSource: 'waveform' },
+      ],
+    });
+    const multiview = await runtime.multicam.prepareMultiview('multicam-1', {
+      startFrame: 0,
+      endFrame: 48,
+    });
+    const multicamCuts = await runtime.multicam.recordCuts('multicam-1', [
+      { frame: 0, angleId: 'angle-a' },
+      { frame: 24, angleId: 'angle-b' },
+    ]);
+    const multicamCommit = await runtime.multicam.commitProgramTrack('multicam-1', 'V2');
 
     expect(relinkResult.relinkedAssetIds).toEqual(['asset-offline']);
     expect(runtime.getProject(project.id)?.bins[0]?.assets.find((asset) => asset.id === 'asset-offline')?.status).toBe('READY');
+    expect(graph.graphId).toContain('desktop-graph-desktop-project-1');
+    expect(composite.handle).toContain('desktop-composite-record-monitor');
     expect(decodeSession).toContain('desktop-decode-desktop-project-1');
     expect(decodedFrame?.handle).toContain('desktop-frame-asset-online');
     expect(decodedFrame?.storage).toBe('gpu');
     expect(decodedAudio?.sampleRate).toBe(48000);
-    expect(transport).toContain('transport-seq-1');
+    expect(transport).toContain('desktop-transport-desktop-project-1');
+    expect(telemetry.activeStreamCount).toBe(3);
+    expect(telemetry.maxDecodeLatencyMs).toBeGreaterThan(0);
     expect(loudnessMix.trackCount).toBe(1);
+    expect(loudnessMix.mixId).toContain('desktop-mix-desktop-project-1');
+    expect(audioPreview).toContain('desktop-mix-preview');
+    expect(loudness.integratedLufs).toBeGreaterThan(-24);
+    expect(templatesBefore).toHaveLength(3);
+    expect(templatesAfter[0]?.version).not.toBe(templatesBefore[0]?.version);
+    expect(motionFrame.handle).toContain('desktop-motion-');
     expect(edlPackage.artifactPaths[0]).toContain('timeline.edl');
     expect(aafPackage.artifactPaths[0]).toContain('timeline.aaf.json');
+    expect(aafPackage.artifactPaths.some((artifactPath) => artifactPath.endsWith('protools-turnover.aaf.json'))).toBe(true);
+    expect(aafPackage.artifactPaths.some((artifactPath) => artifactPath.endsWith('protools-turnover.validation.json'))).toBe(true);
+    expect(aafPackage.artifactPaths.some((artifactPath) => artifactPath.endsWith('desktop-interchange.audit.json'))).toBe(true);
     expect(importedPackage.format).toBe('AAF');
+    expect(standaloneImportedPackage.format).toBe('AAF');
+    expect(standaloneImportedPackage.artifactPaths).toEqual([standaloneAafPath]);
     expect(validation.valid).toBe(true);
+    expect(interchangeAudit.validation.valid).toBe(true);
+    expect(interchangeAudit.primaryArtifacts.some((artifactPath) => artifactPath.endsWith('protools-turnover.aaf.json'))).toBe(true);
     expect(edlContents).toContain('TITLE: Desktop Native Runtime');
     expect(diff).toEqual([
       { type: 'replace', trackId: 'V1', frame: 96, detail: 'Replace shot with OfflineCam' },
@@ -407,7 +494,12 @@ describe('DesktopNativeParityRuntime', () => {
     expect(changeList.path).toContain('/change-lists/seq-1/rev-1-to-rev-2.txt');
     expect(changeEdl.path).toContain('timeline.edl');
     expect(changeListContents).toContain('REPLACE V1 @ 96: Replace shot with OfflineCam');
+    expect(multicamGroup.synced).toBe(true);
+    expect(multiview).toContain('desktop-multiview-multicam-1');
+    expect(multicamCuts).toContain('desktop-multicam-cuts-multicam-1');
+    expect(multicamCommit).toContain('desktop-multicam-commit-multicam-1');
 
+    await runtime.videoCompositing.invalidateGraph(graph.graphId);
     await runtime.mediaDecode.releaseSession(decodeSession);
   });
 });

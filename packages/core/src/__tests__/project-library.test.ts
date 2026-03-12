@@ -417,6 +417,27 @@ describe('buildProject', () => {
     expect(project.editorialState.selectedBinId).toBeNull();
   });
 
+  it('applies explicit creation settings to the persisted project model', () => {
+    const project = buildProject({
+      name: 'News Open',
+      template: 'news',
+      seedContent: false,
+      frameRate: 29.97,
+      width: 1280,
+      height: 720,
+      dropFrame: true,
+      activeWorkspaceId: 'effects',
+      composerLayout: 'full-frame',
+    });
+
+    expect(project.settings.frameRate).toBe(29.97);
+    expect(project.settings.width).toBe(1280);
+    expect(project.settings.height).toBe(720);
+    expect(project.settings.dropFrame).toBe(true);
+    expect(project.workstationState.activeWorkspaceId).toBe('effects');
+    expect(project.workstationState.composerLayout).toBe('full-frame');
+  });
+
   it('keeps the seed library populated with demo content', () => {
     const [seededProject] = buildSeedProjectLibrary();
 

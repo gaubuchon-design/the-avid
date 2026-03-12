@@ -187,8 +187,8 @@ describe('phase 1 playback snapshot contract', () => {
       showSafeZones: true,
     }, 'scope');
 
-    expect(snapshot.primaryVideoLayer?.clip.id).toBe('clip-v1');
-    expect(snapshot.videoLayers.map((layer) => layer.clip.id)).toEqual(['clip-title', 'clip-v2', 'clip-v1']);
+    expect(snapshot.primaryVideoLayer?.clip.id).toBe('clip-v2');
+    expect(snapshot.videoLayers.map((layer) => layer.clip.id)).toEqual(['clip-v1', 'clip-v2', 'clip-title']);
     expect(snapshot.titleLayers).toHaveLength(1);
     expect(snapshot.titleLayers[0]?.titleId).toBe('title-1');
     expect(snapshot.subtitleCues).toHaveLength(1);

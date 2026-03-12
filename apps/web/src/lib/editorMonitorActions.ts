@@ -1,4 +1,5 @@
 import { playbackEngine } from '../engine/PlaybackEngine';
+import { findActiveMediaClip, getSourceTime } from '../engine/compositeRecordFrame';
 import type { Bin, MediaAsset } from '../store/editor.store';
 import { useEditorStore } from '../store/editor.store';
 import { usePlayerStore } from '../store/player.store';
@@ -119,32 +120,19 @@ export function markOutForActiveMonitor(): void {
 export function matchFrameAtPlayhead(): boolean {
   const state = useEditorStore.getState();
   const { tracks, playheadTime, bins } = state;
-
-  const videoTracks = tracks
-    .filter((track) => (track.type === 'VIDEO' || track.type === 'GRAPHIC') && !track.muted)
-    .sort((a, b) => a.sortOrder - b.sortOrder);
-
-  for (const track of videoTracks) {
-    const clip = track.clips.find(
-      (candidate) => playheadTime >= candidate.startTime && playheadTime < candidate.endTime,
-    );
-
-    if (!clip?.assetId) {
-      continue;
-    }
-
-    const asset = findAssetInBins(bins, clip.assetId);
-    if (!asset) {
-      continue;
-    }
-
-    const sourceTime = clip.trimStart + (playheadTime - clip.startTime);
-    state.setSourceAsset(asset);
-    state.setSourcePlayhead(sourceTime);
-    state.setInspectedClip(clip.id);
-    usePlayerStore.getState().setActiveMonitor('source');
-    return true;
+  const clip = findActiveMediaClip(tracks, playheadTime);
+  if (!clip?.assetId) {
+    return false;
   }
 
-  return false;
+  const asset = findAssetInBins(bins, clip.assetId);
+  if (!asset) {
+    return false;
+  }
+
+  state.setSourceAsset(asset);
+  state.setSourcePlayhead(getSourceTime(clip, playheadTime));
+  state.setInspectedClip(clip.id);
+  usePlayerStore.getState().setActiveMonitor('source');
+  return true;
 }
