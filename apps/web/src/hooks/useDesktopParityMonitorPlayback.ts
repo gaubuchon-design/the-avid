@@ -6,6 +6,8 @@ import {
   type MutableRefObject,
   type RefObject,
 } from 'react';
+import { shallow } from 'zustand/shallow';
+import { useStoreWithEqualityFn } from 'zustand/traditional';
 import type {
   EditorProject,
   FrameRange,
@@ -53,6 +55,7 @@ interface UseDesktopParityMonitorPlaybackOptions {
   consumer: 'record-monitor' | 'program-monitor';
   canvasRef: RefObject<HTMLCanvasElement>;
   canvasSize: { w: number; h: number };
+  disabled?: boolean;
 }
 
 const HEADER_SIZE = 64;
@@ -310,7 +313,45 @@ export function createDesktopParityMonitorRequest(
 export function useDesktopParityMonitorPlayback(
   options: UseDesktopParityMonitorPlaybackOptions,
 ): boolean {
-  const editorState = useEditorStore();
+  const requestState = useStoreWithEqualityFn(useEditorStore, (state) => ({
+    projectId: state.projectId,
+    projectName: state.projectName,
+    projectTemplate: state.projectTemplate,
+    projectDescription: state.projectDescription,
+    projectTags: state.projectTags,
+    projectSchemaVersion: state.projectSchemaVersion,
+    projectCreatedAt: state.projectCreatedAt,
+    projectSettings: state.projectSettings,
+    sequenceSettings: state.sequenceSettings,
+    tracks: state.tracks,
+    markers: state.markers,
+    bins: state.bins,
+    transcript: state.transcript,
+    reviewComments: state.reviewComments,
+    approvals: state.approvals,
+    publishJobs: state.publishJobs,
+    watchFolders: state.watchFolders,
+    subtitleTracks: state.subtitleTracks,
+    titleClips: state.titleClips,
+    trackHeights: state.trackHeights,
+    activeWorkspaceId: state.activeWorkspaceId,
+    composerLayout: state.composerLayout,
+    showTrackingInfo: state.showTrackingInfo,
+    trackingInfoFields: state.trackingInfoFields,
+    clipTextDisplay: state.clipTextDisplay,
+    dupeDetectionEnabled: state.dupeDetectionEnabled,
+    versionHistoryRetentionPreference: state.versionHistoryRetentionPreference,
+    versionHistoryCompareMode: state.versionHistoryCompareMode,
+    sourceAsset: state.sourceAsset,
+    selectedBinId: state.selectedBinId,
+    enabledTrackIds: state.enabledTrackIds,
+    syncLockedTrackIds: state.syncLockedTrackIds,
+    videoMonitorTrackId: state.videoMonitorTrackId,
+    playheadTime: state.playheadTime,
+    duration: state.duration,
+    isPlaying: state.isPlaying,
+    showSafeZones: state.showSafeZones,
+  }), shallow);
   const desktopParityAvailable = resolveRuntimeSurface() === 'desktop'
     && Boolean(window.electronAPI?.parityPlayback);
   const cachedCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -334,20 +375,21 @@ export function useDesktopParityMonitorPlayback(
   const [bridgeFailed, setBridgeFailed] = useState(false);
 
   const request = useMemo(() => {
-    if (!desktopParityAvailable) {
+    if (!desktopParityAvailable || options.disabled) {
       return null;
     }
-    return createDesktopParityMonitorRequest(editorState, options.consumer, {
+    return createDesktopParityMonitorRequest(useEditorStore.getState(), options.consumer, {
       width: Math.max(1, Math.round(options.canvasSize.w)),
       height: Math.max(1, Math.round(options.canvasSize.h)),
     });
-  }, [desktopParityAvailable, editorState, options.canvasSize.h, options.canvasSize.w, options.consumer]);
+  }, [desktopParityAvailable, options.canvasSize.h, options.canvasSize.w, options.consumer, options.disabled, requestState]);
 
   useEffect(() => {
-    if (!desktopParityAvailable || !request || !window.electronAPI?.parityPlayback) {
+    if (!desktopParityAvailable || options.disabled || !request || !window.electronAPI?.parityPlayback) {
       configuredTransportRef.current = null;
       continuousPlaybackRef.current = null;
       setTransportState(null);
+      useEditorStore.getState().clearDesktopMonitorAudioPreview(options.consumer);
       return;
     }
 
@@ -377,6 +419,7 @@ export function useDesktopParityMonitorPlayback(
         if (!cancelled) {
           setBridgeFailed(true);
           setTransportState(null);
+          useEditorStore.getState().clearDesktopMonitorAudioPreview(options.consumer);
         }
       }
     };
@@ -394,11 +437,12 @@ export function useDesktopParityMonitorPlayback(
       if (ownedHandle && window.electronAPI?.parityPlayback) {
         void window.electronAPI.parityPlayback.releaseTransport(ownedHandle);
       }
+      useEditorStore.getState().clearDesktopMonitorAudioPreview(options.consumer);
       setTransportState((current) => (
         current?.handle === ownedHandle ? null : current
       ));
     };
-  }, [desktopParityAvailable, request?.transportKey]);
+  }, [desktopParityAvailable, options.consumer, options.disabled, request?.transportKey]);
 
   useEffect(() => {
     if (!desktopParityAvailable || !request || !transportState || transportState.key !== request.transportKey || !window.electronAPI?.parityPlayback) {
@@ -432,6 +476,20 @@ export function useDesktopParityMonitorPlayback(
       return true;
     };
 
+    const syncAudioMonitorPreview = async () => {
+      const preview = await window.electronAPI!.parityPlayback!.getAudioMonitorPreview(transportState.handle);
+      if (cancelled) {
+        return;
+      }
+
+      if (preview) {
+        useEditorStore.getState().setDesktopMonitorAudioPreview(options.consumer, preview);
+        return;
+      }
+
+      useEditorStore.getState().clearDesktopMonitorAudioPreview(options.consumer);
+    };
+
     const renderDesktopFrame = async () => {
       const canvas = options.canvasRef.current;
       if (!canvas) {
@@ -445,7 +503,7 @@ export function useDesktopParityMonitorPlayback(
           return;
         }
 
-        if (editorState.isPlaying) {
+        if (requestState.isPlaying) {
           const activeLoop = continuousPlaybackRef.current;
           const shouldStartLoop = !activeLoop
             || activeLoop.handle !== transportState.handle
@@ -468,6 +526,7 @@ export function useDesktopParityMonitorPlayback(
               streamKey: request.streamKey,
               transportKey: request.transportKey,
             };
+            await syncAudioMonitorPreview();
           } else if (shouldResyncLoop) {
             await window.electronAPI!.parityPlayback!.syncFrame(transportState.handle, request.frameNumber);
             continuousPlaybackRef.current = {
@@ -477,6 +536,7 @@ export function useDesktopParityMonitorPlayback(
               streamKey: request.streamKey,
               transportKey: request.transportKey,
             };
+            await syncAudioMonitorPreview();
           }
           return;
         }
@@ -496,6 +556,7 @@ export function useDesktopParityMonitorPlayback(
         if (cancelled) {
           return;
         }
+        await syncAudioMonitorPreview();
 
         const frame = readDesktopParityFrame(transportState.view);
         if (!frame) {
@@ -507,6 +568,7 @@ export function useDesktopParityMonitorPlayback(
       } catch {
         if (!cancelled) {
           setBridgeFailed(true);
+          useEditorStore.getState().clearDesktopMonitorAudioPreview(options.consumer);
         }
       }
     };
@@ -518,8 +580,9 @@ export function useDesktopParityMonitorPlayback(
     };
   }, [
     desktopParityAvailable,
-    editorState.isPlaying,
     options.canvasRef,
+    options.consumer,
+    requestState.isPlaying,
     request,
     request?.frameNumber,
     request?.prerollRange.endFrame,
@@ -551,7 +614,7 @@ export function useDesktopParityMonitorPlayback(
       const frame = readDesktopParityFrame(transportState.view);
       if (frame) {
         drawDesktopParityFrameToCanvas(canvas, frame, cachedCanvasRef);
-      } else if (!editorState.isPlaying) {
+      } else if (!requestState.isPlaying) {
         drawCachedCanvas(canvas, cachedCanvasRef);
       }
 
@@ -565,7 +628,7 @@ export function useDesktopParityMonitorPlayback(
         cancelAnimationFrame(rafHandle);
       }
     };
-  }, [desktopParityAvailable, editorState.isPlaying, options.canvasRef, transportState]);
+  }, [desktopParityAvailable, options.canvasRef, requestState.isPlaying, transportState]);
 
-  return desktopParityAvailable && !bridgeFailed && Boolean(request);
+  return desktopParityAvailable && !options.disabled && !bridgeFailed && Boolean(request);
 }

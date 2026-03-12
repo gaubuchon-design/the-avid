@@ -781,6 +781,15 @@ describe('DesktopNativeParityRuntime', () => {
       lastCompositeArtifactPath?: string;
       decodedVideoArtifacts: Array<{ assetId: string; artifactPath: string }>;
       decodedAudioArtifacts: Array<{ assetId: string; artifactPath: string }>;
+      audioMonitorPreview?: {
+        mixId: string;
+        handle: string;
+        previewPath: string;
+        executionPlanPath: string;
+        previewRenderArtifacts: string[];
+        bufferedPreviewActive: boolean;
+        offlinePrintRenderRequired: boolean;
+      };
       telemetry: {
         maxDecodeLatencyMs: number;
         maxCompositeLatencyMs: number;
@@ -835,6 +844,7 @@ describe('DesktopNativeParityRuntime', () => {
     expect(aafPackage.artifactPaths[0]).toContain('timeline.aaf.json');
     expect(aafPackage.artifactPaths.some((artifactPath) => artifactPath.endsWith('protools-turnover.aaf.json'))).toBe(true);
     expect(aafPackage.artifactPaths.some((artifactPath) => artifactPath.endsWith('protools-turnover.validation.json'))).toBe(true);
+    expect(aafPackage.artifactPaths.some((artifactPath) => artifactPath.endsWith('audio-processing.execution-plan.json'))).toBe(true);
     expect(aafPackage.artifactPaths.some((artifactPath) => artifactPath.endsWith('assistant-editor.handoff.json'))).toBe(true);
     expect(aafPackage.artifactPaths.some((artifactPath) => artifactPath.endsWith('desktop-interchange.audit.json'))).toBe(true);
     expect(importedPackage.format).toBe('AAF');
@@ -843,6 +853,7 @@ describe('DesktopNativeParityRuntime', () => {
     expect(validation.valid).toBe(true);
     expect(interchangeAudit.validation.valid).toBe(true);
     expect(interchangeAudit.primaryArtifacts.some((artifactPath) => artifactPath.endsWith('protools-turnover.aaf.json'))).toBe(true);
+    expect(interchangeAudit.primaryArtifacts.some((artifactPath) => artifactPath.endsWith('audio-processing.execution-plan.json'))).toBe(true);
     expect(interchangeAudit.primaryArtifacts.some((artifactPath) => artifactPath.endsWith('assistant-editor.handoff.json'))).toBe(true);
     expect(edlContents).toContain('TITLE: Desktop Native Runtime');
     expect(diff).toEqual([
@@ -861,6 +872,13 @@ describe('DesktopNativeParityRuntime', () => {
     expect(transportManifest.lastCompositeArtifactPath?.endsWith('.ppm')).toBe(true);
     expect(transportManifest.decodedVideoArtifacts.some((artifact) => artifact.assetId === 'asset-online' && artifact.artifactPath.endsWith('.ppm'))).toBe(true);
     expect(transportManifest.decodedAudioArtifacts.some((artifact) => artifact.assetId === 'asset-online' && artifact.artifactPath.endsWith('.wav'))).toBe(true);
+    expect(transportManifest.audioMonitorPreview?.mixId).toContain('desktop-mix-desktop-project-1');
+    expect(transportManifest.audioMonitorPreview?.handle).toContain('desktop-monitor-mix-preview');
+    expect(transportManifest.audioMonitorPreview?.previewPath).toContain('audio-monitor.preview.json');
+    expect(transportManifest.audioMonitorPreview?.executionPlanPath).toContain('audio-monitor.execution-plan.json');
+    expect(transportManifest.audioMonitorPreview?.bufferedPreviewActive).toBe(true);
+    expect(transportManifest.audioMonitorPreview?.offlinePrintRenderRequired).toBe(true);
+    expect(transportManifest.audioMonitorPreview?.previewRenderArtifacts.length).toBeGreaterThan(0);
     expect(transportManifest.telemetry.maxDecodeLatencyMs).toBe(33);
     expect(transportManifest.telemetry.maxCompositeLatencyMs).toBe(13);
     expect(transportManifest.telemetry.currentQuality).toBe('preview');
@@ -918,7 +936,9 @@ describe('DesktopNativeParityRuntime', () => {
     const aafPackage = await runtime.interchange.exportPackage(snapshot, 'AAF');
 
     const audioPreviewDir = path.join(packagePath, 'exports', 'audio-previews');
-    const [previewEntry] = (await readdir(audioPreviewDir)).filter((entry) => entry.endsWith('.json'));
+    const [previewEntry] = (await readdir(audioPreviewDir)).filter((entry) => (
+      entry.endsWith('.json') && !entry.includes('.execution-plan.')
+    ));
     const previewManifest = JSON.parse(await readFile(path.join(audioPreviewDir, previewEntry!), 'utf8')) as {
       dominantLayout: string;
       containsContainerizedAudio: boolean;
@@ -937,6 +957,13 @@ describe('DesktopNativeParityRuntime', () => {
           previewBypassedProcessingChain?: Array<{ kind: string }>;
           printBypassedProcessingChain?: Array<{ kind: string }>;
         };
+        executionPolicy?: {
+          previewMode?: 'direct-monitor' | 'buffered-preview-cache';
+          printMode?: 'live-print-safe' | 'offline-print-render';
+          previewReasonKinds?: string[];
+          printReasonKinds?: string[];
+          previewRenderArtifactPath?: string;
+        };
       }>;
       routingPlan: { printMasterBusId?: string; monitoringBusId?: string; warnings: string[] };
       processing: {
@@ -944,7 +971,13 @@ describe('DesktopNativeParityRuntime', () => {
         printContext: string;
         requiresDedicatedPreviewRender?: boolean;
         requiresDedicatedPrintRender?: boolean;
+        requiresBufferedPreviewCaches?: boolean;
+        requiresOfflinePrintRenders?: boolean;
         warnings: string[];
+      };
+      execution?: {
+        planPath?: string;
+        previewRenderArtifacts?: string[];
       };
       metering: {
         context?: string;
@@ -967,6 +1000,10 @@ describe('DesktopNativeParityRuntime', () => {
         requiresDedicatedPreviewRender?: boolean;
         requiresDedicatedPrintRender?: boolean;
       };
+      executionPolicy?: {
+        requiresBufferedPreviewCaches?: boolean;
+        requiresOfflinePrintRenders?: boolean;
+      };
       buses: Array<{
         role?: string;
         stemRole?: string;
@@ -979,6 +1016,12 @@ describe('DesktopNativeParityRuntime', () => {
           requiresDedicatedPrintRender?: boolean;
           previewBypassedProcessingChain?: Array<{ kind: string }>;
           printBypassedProcessingChain?: Array<{ kind: string }>;
+        };
+        executionPolicy?: {
+          previewMode?: 'direct-monitor' | 'buffered-preview-cache';
+          printMode?: 'live-print-safe' | 'offline-print-render';
+          previewReasonKinds?: string[];
+          printReasonKinds?: string[];
         };
       }>;
       tracks: Array<{
@@ -1019,10 +1062,16 @@ describe('DesktopNativeParityRuntime', () => {
         printContext?: string;
         requiresDedicatedPreviewRender?: boolean;
         requiresDedicatedPrintRender?: boolean;
+        requiresBufferedPreviewCaches?: boolean;
+        requiresOfflinePrintRenders?: boolean;
+        executionPlanPath?: string;
         buses?: Array<{
           busId: string;
           previewBypassedKinds?: string[];
           printBypassedKinds?: string[];
+          previewMode?: 'direct-monitor' | 'buffered-preview-cache';
+          printMode?: 'live-print-safe' | 'offline-print-render';
+          printRenderArtifactPath?: string;
         }>;
       };
       signOffSummary?: {
@@ -1039,6 +1088,18 @@ describe('DesktopNativeParityRuntime', () => {
         stemRolesAssigned?: boolean;
         assistantChecklistComplete?: boolean;
       };
+    };
+    const audioExecutionPlan = JSON.parse(
+      await readFile(path.join(exportDir, 'audio-processing.execution-plan.json'), 'utf8'),
+    ) as {
+      requiresBufferedPreviewCaches?: boolean;
+      requiresOfflinePrintRenders?: boolean;
+      buses?: Array<{
+        busId: string;
+        previewMode?: 'direct-monitor' | 'buffered-preview-cache';
+        printMode?: 'live-print-safe' | 'offline-print-render';
+        printRenderArtifactPath?: string;
+      }>;
     };
 
     expect(mix.dominantLayout).toBe('5.1');
@@ -1066,13 +1127,20 @@ describe('DesktopNativeParityRuntime', () => {
       'meter',
       'limiter',
     ]);
+    expect(previewManifest.stems.find((stem) => stem.role === 'printmaster')?.executionPolicy?.previewMode).toBe('buffered-preview-cache');
+    expect(previewManifest.stems.find((stem) => stem.role === 'printmaster')?.executionPolicy?.printMode).toBe('offline-print-render');
+    expect(previewManifest.stems.find((stem) => stem.role === 'printmaster')?.executionPolicy?.previewRenderArtifactPath).toContain('.preview-render.json');
     expect(previewManifest.routingPlan.printMasterBusId).toBe('printmaster');
     expect(previewManifest.routingPlan.monitoringBusId).toBe('fold-down');
     expect(previewManifest.processing.previewContext).toBe('preview');
     expect(previewManifest.processing.printContext).toBe('print');
     expect(previewManifest.processing.requiresDedicatedPreviewRender).toBe(true);
     expect(previewManifest.processing.requiresDedicatedPrintRender).toBe(true);
+    expect(previewManifest.processing.requiresBufferedPreviewCaches).toBe(true);
+    expect(previewManifest.processing.requiresOfflinePrintRenders).toBe(true);
     expect(previewManifest.processing.warnings[0]).toContain('Fold-down monitoring');
+    expect(previewManifest.execution?.planPath).toContain('.execution-plan.json');
+    expect(previewManifest.execution?.previewRenderArtifacts?.length).toBeGreaterThan(0);
     expect(previewManifest.metering.context).toBe('preview');
     expect(previewManifest.metering.buses.some((bus) => bus.busId === 'printmaster' && bus.meteringMode === 'ebu-r128')).toBe(true);
     expect(
@@ -1097,6 +1165,8 @@ describe('DesktopNativeParityRuntime', () => {
     expect(audioTurnover.monitoringBusId).toBe('fold-down');
     expect(audioTurnover.processingPolicy?.requiresDedicatedPreviewRender).toBe(true);
     expect(audioTurnover.processingPolicy?.requiresDedicatedPrintRender).toBe(true);
+    expect(audioTurnover.executionPolicy?.requiresBufferedPreviewCaches).toBe(true);
+    expect(audioTurnover.executionPolicy?.requiresOfflinePrintRenders).toBe(true);
     expect(audioTurnover.processingWarnings?.[0]).toContain('Fold-down monitoring');
     expect(audioTurnover.assistantEditorChecklist?.find((item) => item.id === 'stem-roles')?.status).toBe('complete');
     expect(audioTurnover.assistantEditorChecklist?.find((item) => item.id === 'preview-print-separation')?.status).toBe('complete');
@@ -1115,6 +1185,12 @@ describe('DesktopNativeParityRuntime', () => {
       'fold-down-matrix',
       'limiter',
     ]);
+    expect(audioTurnover.buses.find((bus) => bus.role === 'fold-down')?.executionPolicy?.previewMode).toBe('buffered-preview-cache');
+    expect(audioTurnover.buses.find((bus) => bus.role === 'fold-down')?.executionPolicy?.printMode).toBe('offline-print-render');
+    expect(audioExecutionPlan.requiresBufferedPreviewCaches).toBe(true);
+    expect(audioExecutionPlan.requiresOfflinePrintRenders).toBe(true);
+    expect(audioExecutionPlan.buses?.find((bus) => bus.busId === 'printmaster')?.printMode).toBe('offline-print-render');
+    expect(audioExecutionPlan.buses?.find((bus) => bus.busId === 'printmaster')?.printRenderArtifactPath).toContain('.print-render.json');
     expect(protoolsTurnover.tracks[0]?.channelAssignment).toBe('5.1');
     expect(protoolsTurnover.tracks[0]?.clips[0]?.channelAssignment).toBe('5.1');
     expect(protoolsValidation.valid).toBe(true);
@@ -1133,10 +1209,16 @@ describe('DesktopNativeParityRuntime', () => {
     expect(assistantEditorHandoff.processingIntent?.printContext).toBe('print');
     expect(assistantEditorHandoff.processingIntent?.requiresDedicatedPreviewRender).toBe(true);
     expect(assistantEditorHandoff.processingIntent?.requiresDedicatedPrintRender).toBe(true);
+    expect(assistantEditorHandoff.processingIntent?.requiresBufferedPreviewCaches).toBe(true);
+    expect(assistantEditorHandoff.processingIntent?.requiresOfflinePrintRenders).toBe(true);
+    expect(assistantEditorHandoff.processingIntent?.executionPlanPath).toContain('audio-processing.execution-plan.json');
     expect(assistantEditorHandoff.processingIntent?.buses?.find((bus) => bus.busId === 'printmaster')?.previewBypassedKinds).toEqual([
       'meter',
       'limiter',
     ]);
+    expect(assistantEditorHandoff.processingIntent?.buses?.find((bus) => bus.busId === 'printmaster')?.previewMode).toBe('buffered-preview-cache');
+    expect(assistantEditorHandoff.processingIntent?.buses?.find((bus) => bus.busId === 'printmaster')?.printMode).toBe('offline-print-render');
+    expect(assistantEditorHandoff.processingIntent?.buses?.find((bus) => bus.busId === 'printmaster')?.printRenderArtifactPath).toContain('.print-render.json');
     expect(assistantEditorHandoff.processingIntent?.buses?.find((bus) => bus.busId === 'fold-down')?.previewBypassedKinds).toEqual([
       'limiter',
     ]);

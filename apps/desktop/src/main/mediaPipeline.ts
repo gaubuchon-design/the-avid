@@ -11,6 +11,7 @@ import {
   getMediaAssetPrimaryPath,
   normalizeAudioChannelLayoutLabel,
   pickDominantAudioChannelLayout,
+  summarizeAudioBusExecutionPolicy,
   summarizeAudioBusProcessingPolicy,
   type AudioTrackRoutingDescriptor,
 } from '@mcua/core';
@@ -1614,6 +1615,10 @@ function buildAudioTurnoverManifest(project: EditorProject, assetMap: Map<string
     busId: bus.id,
     ...summarizeAudioBusProcessingPolicy(bus),
   }));
+  const executionPolicy = topology.buses.map((bus) => ({
+    busId: bus.id,
+    ...summarizeAudioBusExecutionPolicy(bus),
+  }));
   const assistantEditorChecklist = [
     {
       id: 'source-paths',
@@ -1676,9 +1681,14 @@ function buildAudioTurnoverManifest(project: EditorProject, assetMap: Map<string
       requiresDedicatedPreviewRender: processingPolicy.some((bus) => bus.requiresDedicatedPreviewRender),
       requiresDedicatedPrintRender: processingPolicy.some((bus) => bus.requiresDedicatedPrintRender),
     },
+    executionPolicy: {
+      requiresBufferedPreviewCaches: executionPolicy.some((bus) => bus.previewMode === 'buffered-preview-cache'),
+      requiresOfflinePrintRenders: executionPolicy.some((bus) => bus.printMode === 'offline-print-render'),
+    },
     assistantEditorChecklist,
     buses: topology.buses.map((bus) => {
       const policy = summarizeAudioBusProcessingPolicy(bus);
+      const execution = summarizeAudioBusExecutionPolicy(bus);
       return {
         id: bus.id,
         name: bus.name,
@@ -1697,6 +1707,12 @@ function buildAudioTurnoverManifest(project: EditorProject, assetMap: Map<string
           requiresDedicatedPrintRender: policy.requiresDedicatedPrintRender,
           previewBypassedProcessingChain: policy.preview.bypassedStages,
           printBypassedProcessingChain: policy.print.bypassedStages,
+        },
+        executionPolicy: {
+          previewMode: execution.previewMode,
+          printMode: execution.printMode,
+          previewReasonKinds: execution.previewReasonKinds,
+          printReasonKinds: execution.printReasonKinds,
         },
       };
     }),

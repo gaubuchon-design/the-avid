@@ -332,11 +332,16 @@ Current execution state:
 - Reference and desktop runtimes now share a processing-policy summary that explicitly reports per-bus preview-active stages, print-active stages, and bypassed stages instead of leaving that inference to each consumer.
 - Audio preview artifacts now include print-reference metering alongside live preview metering, which makes the monitor-vs-turnover delta observable in tests and downstream UI.
 - Desktop assistant-editor handoff output now includes sign-off status, recommended actions, processing-intent summaries, and facility-policy rollups rather than only checklist presence.
+- Reference and desktop runtimes now also share an execution-policy summary that resolves each bus into concrete preview and print execution modes instead of stopping at stage-level differences.
+- Desktop preview now materializes buffered preview-cache artifacts for buses that cannot safely use the direct monitor path, and writes an execution-plan manifest beside the preview output.
+- Desktop turnover now materializes print-render artifacts and an `audio-processing.execution-plan.json` so AAF/OMF export reflects actual print-path execution decisions rather than only declaring them.
+- Desktop playback transports now invoke the audio preview renderer during live monitor playback and persist monitor-audio preview state into transport manifests, so buffered preview caches are part of the transport loop rather than a sidecar export-only feature.
+- The shared monitor shell now consumes that transport-side audio preview state, publishes per-monitor buffered-preview status into editor state, and surfaces buffered-preview execution directly in record/program monitor diagnostics.
 
 Remaining within Phase 3:
 
-- Drive actual desktop monitor/export behavior from the preview-vs-print policy so preview and print paths do more than describe different chains; they should choose different execution paths when needed.
-- Tighten turnover sign-off from generic review output into facility-specific assistant-editor delivery packages, stem expectations, and approval gates.
+- Tighten turnover sign-off from informative handoff output into facility-specific delivery packages, stem expectations, and approval gates.
+- Push the preview-vs-print execution policy deeper into desktop monitoring/export behavior so buffered-preview and offline-print decisions drive more than metadata and diagnostics.
 
 Exit bar:
 

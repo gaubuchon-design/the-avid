@@ -199,11 +199,15 @@ describe('DesktopParityPlaybackManager', () => {
     });
     await manager.start(descriptor.transportHandle, 12);
 
+    const audioMonitorPreview = manager.getAudioMonitorPreview(descriptor.transportHandle);
+
     const telemetry = await manager.getTelemetry(descriptor.transportHandle);
     expect(telemetry.activeStreamCount).toBe(2);
     expect(telemetry.streamPressure).toBe('single');
     expect(telemetry.currentQuality).toBe('full');
     expect(telemetry.cacheStrategy).toBe('source-only');
+    expect(audioMonitorPreview?.bufferedPreviewActive).toBe(true);
+    expect(audioMonitorPreview?.previewPath).toContain('audio-monitor.preview.json');
     expect(startPlayback).toHaveBeenCalledWith({
       deviceId: 'decklink-1',
       displayModeId: '1080p24',

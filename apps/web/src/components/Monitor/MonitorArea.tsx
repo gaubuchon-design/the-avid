@@ -4,6 +4,7 @@ import { usePlayerStore } from '../../store/player.store';
 import { useTitleStore } from '../../store/title.store';
 import { Timecode } from '../../lib/timecode';
 import { TrimStatusOverlay } from '../Editor/TrimStatusOverlay';
+import { DesktopAudioPreviewDiagnostics } from '../Diagnostics/DesktopAudioPreviewDiagnostics';
 import { PlaybackFallbackDiagnostics } from '../Diagnostics/PlaybackFallbackDiagnostics';
 import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
 import {
@@ -426,8 +427,12 @@ export function MonitorArea() {
             left: 12,
             top: 12,
             zIndex: 2,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
           }}
         >
+          <DesktopAudioPreviewDiagnostics consumer="program-monitor" />
           <PlaybackFallbackDiagnostics consumer="program-monitor" />
         </div>
 

@@ -9,6 +9,7 @@ import type {
 } from '@mcua/core';
 import {
   createDesktopNativeParityRuntime,
+  type DesktopAudioMonitorPreviewState,
   type DesktopNativeParityRuntime,
   type DesktopNativeParityRuntimeOptions,
   type DesktopPlaybackTransportView,
@@ -146,6 +147,12 @@ export class DesktopParityPlaybackManager {
     return this.runtime.getPlaybackTransportView(transportHandle);
   }
 
+  getAudioMonitorPreview(
+    transportHandle: NativeResourceHandle,
+  ): DesktopAudioMonitorPreviewState | null {
+    return this.runtime.getPlaybackTransportAudioMonitorPreview(transportHandle);
+  }
+
   async attachStreams(
     transportHandle: NativeResourceHandle,
     streams: PlaybackStreamDescriptor[],
@@ -232,6 +239,11 @@ export class DesktopParityPlaybackManager {
     ipc.handle('parity-playback:get-transport-view', async (_event, transportHandle: unknown) => {
       assertString(transportHandle, 'transportHandle');
       return this.getTransportView(transportHandle);
+    });
+
+    ipc.handle('parity-playback:get-audio-monitor-preview', async (_event, transportHandle: unknown) => {
+      assertString(transportHandle, 'transportHandle');
+      return this.getAudioMonitorPreview(transportHandle);
     });
 
     ipc.handle('parity-playback:attach-streams', async (_event, transportHandle: unknown, streams: unknown) => {

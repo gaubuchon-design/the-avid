@@ -122,6 +122,20 @@ export interface DesktopParityPlaybackTransportDescriptor {
   view: DesktopParityPlaybackTransportView;
 }
 
+export interface DesktopParityAudioMonitorPreviewState {
+  mixId: string;
+  handle: string;
+  previewPath: string;
+  executionPlanPath: string;
+  previewRenderArtifacts: string[];
+  bufferedPreviewActive: boolean;
+  offlinePrintRenderRequired: boolean;
+  timeRange: {
+    startSeconds: number;
+    endSeconds: number;
+  };
+}
+
 export interface DesktopBridge {
   // ─── System ───────────────────────────────────────────────────────────────
   getVersion: () => Promise<string>;
@@ -167,6 +181,7 @@ export interface DesktopBridge {
       revisionId?: string;
     }) => Promise<DesktopParityPlaybackTransportDescriptor>;
     getTransportView: (transportHandle: string) => Promise<DesktopParityPlaybackTransportView>;
+    getAudioMonitorPreview: (transportHandle: string) => Promise<DesktopParityAudioMonitorPreviewState | null>;
     attachStreams: (transportHandle: string, streams: PlaybackStreamDescriptor[]) => Promise<boolean>;
     preroll: (transportHandle: string, range: FrameRange) => Promise<boolean>;
     start: (transportHandle: string, frame: number) => Promise<boolean>;

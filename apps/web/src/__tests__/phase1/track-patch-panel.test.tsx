@@ -231,4 +231,48 @@ describe('phase 1 track patch panel', () => {
       root.unmount();
     });
   });
+
+  it('shows a clearer routing hint and record column headings', async () => {
+    useEditorStore.setState({
+      tracks: [
+        {
+          id: 't-v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [],
+        },
+      ],
+      sourceAsset: {
+        id: 'asset-video',
+        name: 'Interview Select',
+        type: 'VIDEO',
+        status: 'READY',
+        tags: [],
+        isFavorite: false,
+      },
+    });
+
+    const container = document.createElement('div');
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<TrackPatchPanel />);
+    });
+
+    expect(container.textContent).toContain('Source Lanes');
+    expect(container.textContent).toContain('Record');
+    expect(container.textContent).toContain('Patch');
+    expect(container.textContent).toContain('Select or drag a source lane');
+    expect(container.textContent).toContain('Interview Select');
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
 });

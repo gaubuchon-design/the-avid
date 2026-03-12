@@ -334,6 +334,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     syncProject: (project: unknown) => safeInvoke('parity-playback:sync-project', project) as Promise<boolean>,
     createTransport: (request: unknown) => safeInvoke('parity-playback:create-transport', request),
     getTransportView: (transportHandle: string) => safeInvoke('parity-playback:get-transport-view', transportHandle),
+    getAudioMonitorPreview: (transportHandle: string) =>
+      safeInvoke('parity-playback:get-audio-monitor-preview', transportHandle),
     attachStreams: (transportHandle: string, streams: unknown[]) =>
       safeInvoke('parity-playback:attach-streams', transportHandle, streams) as Promise<boolean>,
     preroll: (transportHandle: string, range: unknown) =>

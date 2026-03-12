@@ -41,6 +41,7 @@ export type WorkspaceTab = 'video' | 'audio' | 'color' | 'info' | 'effects';
 export type TimelineViewMode = 'timeline' | 'list' | 'waveform';
 export type EditTool = 'select' | 'trim' | 'razor' | 'slip' | 'slide';
 export type AlphaMode = 'straight' | 'premultiplied' | 'ignore' | 'auto';
+export type TrimSelectionSide = 'A_SIDE' | 'B_SIDE' | 'BOTH';
 export type CompositeMode =
   | 'source-over' | 'multiply' | 'screen' | 'overlay'
   | 'darken' | 'lighten' | 'color-dodge' | 'color-burn'
@@ -80,6 +81,12 @@ export interface TimeRemapState {
   keyframes: TimeRemapKeyframe[];
   frameBlending: 'none' | 'frame-mix' | 'optical-flow';
   pitchCorrection: boolean; // maintain audio pitch when speed changes
+}
+
+export interface TrimEditPointSelection {
+  trackId: string;
+  editPointTime: number;
+  side: TrimSelectionSide;
 }
 
 export const DEFAULT_INTRINSIC_VIDEO: IntrinsicVideoProps = {
@@ -265,6 +272,22 @@ export interface SequenceSettings {
   displayTransform: 'sdr-rec709' | 'hdr-pq' | 'hdr-hlg';
 }
 
+export type DesktopMonitorConsumer = 'record-monitor' | 'program-monitor';
+
+export interface DesktopMonitorAudioPreviewStatus {
+  mixId: string;
+  handle: string;
+  previewPath: string;
+  executionPlanPath: string;
+  previewRenderArtifacts: string[];
+  bufferedPreviewActive: boolean;
+  offlinePrintRenderRequired: boolean;
+  timeRange: {
+    startSeconds: number;
+    endSeconds: number;
+  };
+}
+
 export interface SubtitleCue {
   id: string;
   start: number; // seconds
@@ -338,6 +361,7 @@ const MIN_CLIP_DURATION = 1 / 120;
 interface EditorialOperationSnapshot {
   tracks: Track[];
   selectedClipIds: string[];
+  selectedTrimEditPoints: TrimEditPointSelection[];
   selectedTrackId: string | null;
   inspectedClipId: string | null;
   duration: number;
@@ -380,6 +404,7 @@ interface EditorState {
 
   // Selection
   selectedClipIds: string[];
+  selectedTrimEditPoints: TrimEditPointSelection[];
   selectedTrackId: string | null;
   inspectedClipId: string | null; // Decoupled from selection — set by match frame, auto-playhead, etc.
 
@@ -401,6 +426,7 @@ interface EditorState {
   sourceAsset: MediaAsset | null;
   inPoint: number | null;
   outPoint: number | null;
+  desktopMonitorAudioPreview: Record<DesktopMonitorConsumer, DesktopMonitorAudioPreviewStatus | null>;
   showSafeZones: boolean;
   showWaveforms: boolean;
   snapToGrid: boolean;
@@ -530,6 +556,9 @@ interface EditorActions {
   splitClipWithId: (clipId: string, time: number, newClipId: string) => void;
   slipClip: (clipId: string, delta: number) => void;
   selectClip: (clipId: string, multi?: boolean) => void;
+  selectTrimEditPoint: (selection: TrimEditPointSelection, multi?: boolean) => void;
+  setTrimEditPointSide: (side: TrimSelectionSide) => void;
+  clearTrimEditPoints: () => void;
   clearSelection: () => void;
   setInspectedClip: (clipId: string | null) => void;
 
@@ -541,6 +570,11 @@ interface EditorActions {
   selectBin: (id: string | null) => void;
   toggleBin: (id: string) => void;
   setSourceAsset: (asset: MediaAsset | null) => void;
+  setDesktopMonitorAudioPreview: (
+    consumer: DesktopMonitorConsumer,
+    status: DesktopMonitorAudioPreviewStatus | null,
+  ) => void;
+  clearDesktopMonitorAudioPreview: (consumer: DesktopMonitorConsumer) => void;
 
   // Monitor
   setInPoint: (t: number | null) => void;
@@ -797,6 +831,33 @@ function createId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function areDesktopMonitorAudioPreviewStatusesEqual(
+  left: DesktopMonitorAudioPreviewStatus | null,
+  right: DesktopMonitorAudioPreviewStatus | null,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+  if (
+    left.mixId !== right.mixId
+    || left.handle !== right.handle
+    || left.previewPath !== right.previewPath
+    || left.executionPlanPath !== right.executionPlanPath
+    || left.bufferedPreviewActive !== right.bufferedPreviewActive
+    || left.offlinePrintRenderRequired !== right.offlinePrintRenderRequired
+    || left.timeRange.startSeconds !== right.timeRange.startSeconds
+    || left.timeRange.endSeconds !== right.timeRange.endSeconds
+    || left.previewRenderArtifacts.length !== right.previewRenderArtifacts.length
+  ) {
+    return false;
+  }
+
+  return left.previewRenderArtifacts.every((artifactPath, index) => artifactPath === right.previewRenderArtifacts[index]);
+}
+
 function clipDuration(clip: Clip): number {
   return clip.endTime - clip.startTime;
 }
@@ -956,6 +1017,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       return {
         tracks: state.tracks.map(cloneTrackForSnapshot),
         selectedClipIds: [...state.selectedClipIds],
+        selectedTrimEditPoints: state.selectedTrimEditPoints.map((selection) => ({ ...selection })),
         selectedTrackId: state.selectedTrackId,
         inspectedClipId: state.inspectedClipId,
         duration: state.duration,
@@ -972,6 +1034,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       set((s) => {
         s.tracks = snapshot.tracks.map(cloneTrackForSnapshot);
         s.selectedClipIds = [...snapshot.selectedClipIds];
+        s.selectedTrimEditPoints = snapshot.selectedTrimEditPoints.map((selection) => ({ ...selection }));
         s.selectedTrackId = snapshot.selectedTrackId;
         s.inspectedClipId = snapshot.inspectedClipId;
         s.duration = snapshot.duration;
@@ -1082,6 +1145,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         s.scrollLeft = 0;
         s.duration = hydrated.duration;
         s.selectedClipIds = [];
+        s.selectedTrimEditPoints = [];
         s.selectedTrackId = null;
         s.inspectedClipId = null;
         s.bins = hydrated.bins;
@@ -1093,6 +1157,10 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         s.sourceAsset = hydrated.sourceAsset;
         s.inPoint = null;
         s.outPoint = null;
+        s.desktopMonitorAudioPreview = {
+          'record-monitor': null,
+          'program-monitor': null,
+        };
         s.transcript = hydrated.transcript;
         s.reviewComments = hydrated.reviewComments;
         s.approvals = hydrated.approvals;
@@ -1163,6 +1231,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     scrollLeft: 0,
     duration: 0,
     selectedClipIds: [],
+    selectedTrimEditPoints: [],
     selectedTrackId: null,
     inspectedClipId: null,
     bins: DEMO_BINS,
@@ -1186,6 +1255,10 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     sourceAsset: null,
     inPoint: null,
     outPoint: null,
+    desktopMonitorAudioPreview: {
+      'record-monitor': null,
+      'program-monitor': null,
+    },
     showSafeZones: false,
     showWaveforms: true,
     snapToGrid: true,
@@ -1420,10 +1493,52 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       } else {
         s.selectedClipIds = [clipId];
       }
+      s.selectedTrimEditPoints = [];
       // Clear inspected clip when user explicitly selects — selection takes precedence
       s.inspectedClipId = null;
     }),
-    clearSelection: () => set((s) => { s.selectedClipIds = []; s.inspectedClipId = null; }),
+    selectTrimEditPoint: (selection, multi = false) => set((s) => {
+      const normalizedSelection = {
+        trackId: selection.trackId,
+        editPointTime: selection.editPointTime,
+        side: selection.side,
+      };
+      const sameGroup = s.selectedTrimEditPoints.length === 0
+        || Math.abs(s.selectedTrimEditPoints[0]!.editPointTime - normalizedSelection.editPointTime) <= 1e-6;
+
+      if (!multi || !sameGroup) {
+        s.selectedTrimEditPoints = [normalizedSelection];
+      } else {
+        const existingIndex = s.selectedTrimEditPoints.findIndex((candidate) => (
+          candidate.trackId === normalizedSelection.trackId
+            && Math.abs(candidate.editPointTime - normalizedSelection.editPointTime) <= 1e-6
+        ));
+
+        if (existingIndex >= 0) {
+          s.selectedTrimEditPoints[existingIndex] = normalizedSelection;
+        } else {
+          s.selectedTrimEditPoints.push(normalizedSelection);
+        }
+      }
+
+      s.selectedClipIds = [];
+      s.selectedTrackId = normalizedSelection.trackId;
+      s.inspectedClipId = null;
+    }),
+    setTrimEditPointSide: (side) => set((s) => {
+      s.selectedTrimEditPoints = s.selectedTrimEditPoints.map((selection) => ({
+        ...selection,
+        side,
+      }));
+    }),
+    clearTrimEditPoints: () => set((s) => {
+      s.selectedTrimEditPoints = [];
+    }),
+    clearSelection: () => set((s) => {
+      s.selectedClipIds = [];
+      s.selectedTrimEditPoints = [];
+      s.inspectedClipId = null;
+    }),
     setInspectedClip: (clipId) => set((s) => { s.inspectedClipId = clipId; }),
 
     selectBin: (id) => set((s) => {
@@ -1481,6 +1596,25 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         usePlayerStore.getState().setSourceClip(null);
       }
     },
+    setDesktopMonitorAudioPreview: (consumer, status) => set((s) => {
+      const nextStatus = status
+        ? {
+            ...status,
+            previewRenderArtifacts: [...status.previewRenderArtifacts],
+            timeRange: { ...status.timeRange },
+          }
+        : null;
+      if (areDesktopMonitorAudioPreviewStatusesEqual(s.desktopMonitorAudioPreview[consumer], nextStatus)) {
+        return;
+      }
+      s.desktopMonitorAudioPreview[consumer] = nextStatus;
+    }),
+    clearDesktopMonitorAudioPreview: (consumer) => set((s) => {
+      if (s.desktopMonitorAudioPreview[consumer] == null) {
+        return;
+      }
+      s.desktopMonitorAudioPreview[consumer] = null;
+    }),
     setInPoint: (t) => set((s) => { s.inPoint = t; }),
     setOutPoint: (t) => set((s) => { s.outPoint = t; }),
     toggleSafeZones: () => set((s) => { s.showSafeZones = !s.showSafeZones; }),

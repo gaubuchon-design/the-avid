@@ -244,6 +244,20 @@ interface ParityPlaybackTransportView {
   slots: number;
 }
 
+interface ParityAudioMonitorPreviewState {
+  mixId: string;
+  handle: string;
+  previewPath: string;
+  executionPlanPath: string;
+  previewRenderArtifacts: string[];
+  bufferedPreviewActive: boolean;
+  offlinePrintRenderRequired: boolean;
+  timeRange: {
+    startSeconds: number;
+    endSeconds: number;
+  };
+}
+
 interface ParityPlaybackTransportDescriptor {
   transportHandle: string;
   view: ParityPlaybackTransportView;
@@ -342,6 +356,7 @@ interface DesktopBridge {
       revisionId?: string;
     }) => Promise<ParityPlaybackTransportDescriptor>;
     getTransportView: (transportHandle: string) => Promise<ParityPlaybackTransportView>;
+    getAudioMonitorPreview: (transportHandle: string) => Promise<ParityAudioMonitorPreviewState | null>;
     attachStreams: (transportHandle: string, streams: PlaybackStreamDescriptor[]) => Promise<boolean>;
     preroll: (transportHandle: string, range: FrameRange) => Promise<boolean>;
     start: (transportHandle: string, frame: number) => Promise<boolean>;

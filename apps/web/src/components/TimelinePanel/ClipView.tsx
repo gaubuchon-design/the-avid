@@ -5,6 +5,7 @@ import { editEngine } from '../../engine/EditEngine';
 import { snapEngine } from '../../engine/SnapEngine';
 import { smartToolEngine } from '../../engine/SmartToolEngine';
 import { trimEngine, TrimSide } from '../../engine/TrimEngine';
+import { enterTrimModeFromContext } from '../../lib/trimEntry';
 import {
   MoveClipCommand,
   SegmentMoveCommand,
@@ -119,10 +120,16 @@ export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor
   const { selectedClipIds, selectClip, tracks, markers, playheadTime } =
     useEditorStore();
   const activeTool = useEditorStore((s) => s.activeTool);
+  const selectedTrimEditPoints = useEditorStore((s) => s.selectedTrimEditPoints);
+  const trimRenderRevision = useEditorStore((s) => (
+    `${s.trimActive}:${s.trimMode}:${s.trimSelectionLabel}:${s.trimCounterFrames}:${s.trimASideFrames}:${s.trimBSideFrames}`
+  ));
   const isSelected = selectedClipIds.includes(clip.id);
   const width = Math.max(2, (clip.endTime - clip.startTime) * zoom);
   const left = clip.startTime * zoom;
   const typeClass = `clip-${clip.type}`;
+  const trimActive = trimRenderRevision.startsWith('true:');
+  const liveTrimState = trimActive ? trimEngine.getState() : null;
 
   // Context menu
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
@@ -147,14 +154,30 @@ export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor
       trimEngine.setOverwriteTrim(overwriteTrimMode);
     }
 
-    trimEngine.enterTrimMode([trackId], editPointTime, side);
+    useEditorStore.getState().selectTrack(trackId);
 
-    if (!trimEngine.getState().active) {
+    const target = enterTrimModeFromContext({
+      tracks: useEditorStore.getState().tracks,
+      selectedTrackId: trackId,
+      enabledTrackIds: useEditorStore.getState().enabledTrackIds,
+      videoMonitorTrackId: useEditorStore.getState().videoMonitorTrackId,
+      sequenceSettings: useEditorStore.getState().sequenceSettings,
+      projectSettings: useEditorStore.getState().projectSettings,
+      playheadTime: editPointTime,
+    }, {
+      anchorTrackId: trackId,
+      editPointTime,
+      side,
+    });
+
+    if (!target || !trimEngine.getState().active) {
       if (overwriteTrimMode !== null) {
         trimEngine.setOverwriteTrim(previousOverwriteTrim);
       }
       return false;
     }
+
+    const trimEditPointTime = target.editPointTime;
 
     const restoreTrimMode = () => {
       if (overwriteTrimMode !== null) {
@@ -164,7 +187,7 @@ export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor
 
     const onMove = (ev: MouseEvent) => {
       const dx = ev.clientX - startX;
-      trimEngine.trimToPosition(editPointTime + dx / zoom);
+      trimEngine.trimToPosition(trimEditPointTime + dx / zoom);
     };
 
     const cleanup = (cancel: boolean) => {
@@ -198,6 +221,46 @@ export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor
     window.addEventListener('keydown', onKeyDown);
     return true;
   }, [trackId, zoom]);
+
+  const enterTrimSelection = useCallback((editPointTime: number, side: TrimSide) => {
+    const editorState = useEditorStore.getState();
+    editorState.selectTrack(trackId);
+    editorState.setActiveTool('trim');
+    editorState.selectTrimEditPoint({
+      trackId,
+      editPointTime,
+      side,
+    });
+
+    const target = enterTrimModeFromContext({
+      tracks: useEditorStore.getState().tracks,
+      selectedTrackId: trackId,
+      selectedTrimEditPoints: useEditorStore.getState().selectedTrimEditPoints,
+      enabledTrackIds: useEditorStore.getState().enabledTrackIds,
+      videoMonitorTrackId: useEditorStore.getState().videoMonitorTrackId,
+      sequenceSettings: useEditorStore.getState().sequenceSettings,
+      projectSettings: useEditorStore.getState().projectSettings,
+      playheadTime: editPointTime,
+    }, {
+      anchorTrackId: trackId,
+      editPointTime,
+      side,
+    });
+    if (target) {
+      useEditorStore.getState().clearTrimEditPoints();
+    }
+  }, [trackId]);
+
+  const selectTrimEditPoint = useCallback((editPointTime: number, side: TrimSide, multi = false) => {
+    const editorState = useEditorStore.getState();
+    editorState.selectTrack(trackId);
+    editorState.setActiveTool('trim');
+    editorState.selectTrimEditPoint({
+      trackId,
+      editPointTime,
+      side,
+    }, multi);
+  }, [trackId]);
 
   // ── Body drag (move) ──
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -318,6 +381,63 @@ export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor
     window.addEventListener('mouseup', onUp);
   };
 
+  const handleDoubleClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
+    const editPointTime = localX <= bounds.width - localX ? clip.startTime : clip.endTime;
+    const track = tracks.find((candidate) => candidate.id === trackId);
+    const hasAdjacentCut = Boolean(track?.clips.some((candidate) => (
+      candidate.id !== clip.id
+        && (Math.abs(candidate.startTime - editPointTime) < 1e-6
+          || Math.abs(candidate.endTime - editPointTime) < 1e-6)
+    )));
+
+    enterTrimSelection(
+      editPointTime,
+      hasAdjacentCut
+        ? TrimSide.BOTH
+        : (editPointTime === clip.startTime ? TrimSide.B_SIDE : TrimSide.A_SIDE),
+    );
+  }, [clip.id, clip.endTime, clip.startTime, enterTrimSelection, trackId, tracks]);
+
+  const activeLeftTrimRoller = liveTrimState?.rollers.find((roller) => (
+    roller.trackId === trackId
+      && roller.clipBId === clip.id
+      && Math.abs(roller.editPointTime - clip.startTime) < 1e-6
+  )) ?? null;
+  const activeRightTrimRoller = liveTrimState?.rollers.find((roller) => (
+    roller.trackId === trackId
+      && roller.clipAId === clip.id
+      && Math.abs(roller.editPointTime - clip.endTime) < 1e-6
+  )) ?? null;
+  const leftTrimActive = Boolean(
+    activeLeftTrimRoller
+      && (activeLeftTrimRoller.side === TrimSide.B_SIDE || activeLeftTrimRoller.side === TrimSide.BOTH),
+  );
+  const rightTrimActive = Boolean(
+    activeRightTrimRoller
+      && (activeRightTrimRoller.side === TrimSide.A_SIDE || activeRightTrimRoller.side === TrimSide.BOTH),
+  );
+  const selectedLeftTrimEditPoint = selectedTrimEditPoints.find((selection) => (
+    selection.trackId === trackId
+      && Math.abs(selection.editPointTime - clip.startTime) < 1e-6
+  )) ?? null;
+  const selectedRightTrimEditPoint = selectedTrimEditPoints.find((selection) => (
+    selection.trackId === trackId
+      && Math.abs(selection.editPointTime - clip.endTime) < 1e-6
+  )) ?? null;
+
+  const getTrimSelectionBadge = useCallback((side: 'A_SIDE' | 'B_SIDE' | 'BOTH'): string => {
+    switch (side) {
+      case 'A_SIDE':
+        return 'A';
+      case 'B_SIDE':
+        return 'B';
+      default:
+        return 'AB';
+    }
+  }, []);
+
   // ── Left trim ──
   const handleTrimLeft = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -408,6 +528,7 @@ export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor
         aria-selected={isSelected}
         tabIndex={0}
         onMouseDown={handleMouseDown}
+        onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -417,7 +538,30 @@ export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor
         }}
       >
         {width > 18 && (
-          <div className="clip-trim-handle left" onMouseDown={handleTrimLeft} role="separator" aria-label="Trim left edge" />
+          <div
+            className={`clip-trim-handle left${leftTrimActive ? ' is-trim-target active' : activeLeftTrimRoller ? ' is-trim-target' : ''}${selectedLeftTrimEditPoint ? ' is-cut-selected' : ''}`}
+            onMouseDown={handleTrimLeft}
+            onClick={(event) => {
+              event.stopPropagation();
+              selectTrimEditPoint(
+                clip.startTime,
+                activeLeftTrimRoller ? activeLeftTrimRoller.side : TrimSide.B_SIDE,
+                event.shiftKey || event.metaKey || event.ctrlKey,
+              );
+            }}
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              enterTrimSelection(clip.startTime, activeLeftTrimRoller ? activeLeftTrimRoller.side : TrimSide.B_SIDE);
+            }}
+            role="separator"
+            aria-label="Trim left edge"
+          >
+            {selectedLeftTrimEditPoint && (
+              <span className="clip-trim-selection-badge" aria-hidden="true">
+                {getTrimSelectionBadge(selectedLeftTrimEditPoint.side)}
+              </span>
+            )}
+          </div>
         )}
 
         {clip.waveformData && clip.type === 'audio' && (
@@ -432,7 +576,30 @@ export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor
         {width > 30 && <div className="clip-label">{clip.name}</div>}
 
         {width > 18 && (
-          <div className="clip-trim-handle right" onMouseDown={handleTrimRight} role="separator" aria-label="Trim right edge" />
+          <div
+            className={`clip-trim-handle right${rightTrimActive ? ' is-trim-target active' : activeRightTrimRoller ? ' is-trim-target' : ''}${selectedRightTrimEditPoint ? ' is-cut-selected' : ''}`}
+            onMouseDown={handleTrimRight}
+            onClick={(event) => {
+              event.stopPropagation();
+              selectTrimEditPoint(
+                clip.endTime,
+                activeRightTrimRoller ? activeRightTrimRoller.side : TrimSide.A_SIDE,
+                event.shiftKey || event.metaKey || event.ctrlKey,
+              );
+            }}
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              enterTrimSelection(clip.endTime, activeRightTrimRoller ? activeRightTrimRoller.side : TrimSide.A_SIDE);
+            }}
+            role="separator"
+            aria-label="Trim right edge"
+          >
+            {selectedRightTrimEditPoint && (
+              <span className="clip-trim-selection-badge" aria-hidden="true">
+                {getTrimSelectionBadge(selectedRightTrimEditPoint.side)}
+              </span>
+            )}
+          </div>
         )}
       </div>
 

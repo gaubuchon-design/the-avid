@@ -1006,6 +1006,10 @@ export class TrimEngine {
     };
   }
 
+  getSlipState(): SlipState | null {
+    return this.slipState ? { ...this.slipState } : null;
+  }
+
   // ── Slide Operations ────────────────────────────────────────────────────────
 
   /**
@@ -1194,6 +1198,15 @@ export class TrimEngine {
       left: this.slideState.maxSlideLeft,
       right: this.slideState.maxSlideRight,
     };
+  }
+
+  getSlideState(): SlideState | null {
+    return this.slideState
+      ? {
+        ...this.slideState,
+        originalPositions: new Map(this.slideState.originalPositions),
+      }
+      : null;
   }
 
   // ── Asymmetric Trim ─────────────────────────────────────────────────────────
@@ -1408,10 +1421,32 @@ export class TrimEngine {
     const frameRate = projectSettings.frameRate || 24;
 
     const totalFrames = Math.round(this.state.totalDelta * frameRate);
+    const hasASideSelection = this.state.rollers.some((roller) => (
+      roller.side === TrimSide.A_SIDE || roller.side === TrimSide.BOTH
+    ));
+    const hasBSideSelection = this.state.rollers.some((roller) => (
+      roller.side === TrimSide.B_SIDE || roller.side === TrimSide.BOTH
+    ));
+
+    if (this.state.mode === TrimMode.SLIP) {
+      return {
+        aSideFrame: -totalFrames,
+        bSideFrame: totalFrames,
+        trimCounter: totalFrames,
+      };
+    }
+
+    if (hasASideSelection && hasBSideSelection) {
+      return {
+        aSideFrame: -totalFrames,
+        bSideFrame: totalFrames,
+        trimCounter: totalFrames,
+      };
+    }
 
     return {
-      aSideFrame: -totalFrames, // A-side loses frames when trimming right
-      bSideFrame: totalFrames,  // B-side gains frames when trimming right
+      aSideFrame: hasASideSelection ? totalFrames : 0,
+      bSideFrame: hasBSideSelection ? totalFrames : 0,
       trimCounter: totalFrames,
     };
   }

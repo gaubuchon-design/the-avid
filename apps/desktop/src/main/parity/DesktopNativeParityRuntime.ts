@@ -68,6 +68,7 @@ import {
   normalizeAudioChannelLayoutLabel,
   pickDominantAudioChannelLayout,
   resolveAudioBusProcessingChain,
+  summarizeAudioBusExecutionPolicy,
   summarizeAudioBusProcessingPolicy,
   type AudioTrackRoutingDescriptor,
   MultiCamEngine,
@@ -139,6 +140,17 @@ export interface DesktopPlaybackTransportView {
   height: number;
   bytesPerPixel: number;
   slots: number;
+}
+
+export interface DesktopAudioMonitorPreviewState {
+  mixId: string;
+  handle: NativeResourceHandle;
+  previewPath: string;
+  executionPlanPath: string;
+  previewRenderArtifacts: string[];
+  bufferedPreviewActive: boolean;
+  offlinePrintRenderRequired: boolean;
+  timeRange: TimeRange;
 }
 
 interface BoundDesktopProject {
@@ -775,6 +787,7 @@ interface DesktopPlaybackTransportState {
   decodedAudioArtifacts: DesktopDecodedAudioArtifact[];
   frameTransport: FrameTransport;
   frameTransportView: DesktopPlaybackTransportView;
+  audioMonitorPreview?: DesktopAudioMonitorPreviewState;
   attachedOutputConfigs: PlaybackConfig[];
   activeOutputDeviceIds: string[];
   inFlightTasks: Set<Promise<void>>;
@@ -842,6 +855,10 @@ interface DesktopAudioMixState {
   trackLayouts: ResolvedAudioTrackLayout[];
   automationWrites: AudioAutomationWrite[];
   previewHandles: NativeResourceHandle[];
+  previewRenderArtifacts: string[];
+  printRenderArtifacts: string[];
+  lastPreviewExecutionPlanPath?: string;
+  lastPrintExecutionPlanPath?: string;
   lastLoudness?: LoudnessMeasurement;
 }
 
@@ -1655,6 +1672,7 @@ export class DesktopNativeInterchangeAdapter implements InterchangePort {
         assistantChecklistComplete: boolean;
       };
     },
+    executionPlanPath?: string,
   ): Promise<{
     generatedAt: string;
     signOffStatus: 'ready' | 'needs-review' | 'blocked';
@@ -1672,6 +1690,9 @@ export class DesktopNativeInterchangeAdapter implements InterchangePort {
       printContext: 'print';
       requiresDedicatedPreviewRender: boolean;
       requiresDedicatedPrintRender: boolean;
+      requiresBufferedPreviewCaches: boolean;
+      requiresOfflinePrintRenders: boolean;
+      executionPlanPath?: string;
       buses: Array<{
         busId: string;
         role?: string;
@@ -1680,6 +1701,9 @@ export class DesktopNativeInterchangeAdapter implements InterchangePort {
         printProcessingKinds: string[];
         previewBypassedKinds: string[];
         printBypassedKinds: string[];
+        previewMode?: 'direct-monitor' | 'buffered-preview-cache';
+        printMode?: 'live-print-safe' | 'offline-print-render';
+        printRenderArtifactPath?: string;
       }>;
     };
     signOffSummary: {
@@ -1717,6 +1741,18 @@ export class DesktopNativeInterchangeAdapter implements InterchangePort {
         };
       }>;
     };
+    const executionPlan = executionPlanPath && await fileExists(this.fsBindings, executionPlanPath)
+      ? JSON.parse(await this.fsBindings.readFile(executionPlanPath, 'utf8')) as {
+          requiresBufferedPreviewCaches?: boolean;
+          requiresOfflinePrintRenders?: boolean;
+          buses?: Array<{
+            busId: string;
+            previewMode?: 'direct-monitor' | 'buffered-preview-cache';
+            printMode?: 'live-print-safe' | 'offline-print-render';
+            printRenderArtifactPath?: string;
+          }>;
+        }
+      : null;
 
     const recommendedActions = [
       ...validation.issues.map((message) => ({
@@ -1748,6 +1784,16 @@ export class DesktopNativeInterchangeAdapter implements InterchangePort {
           message: `${bus.id} previews without ${previewBypassedKinds.join(', ')}; verify the print render before turnover.`,
         }];
       })),
+      ...((executionPlan?.buses ?? []).flatMap((bus) => {
+        if (bus.printMode !== 'offline-print-render') {
+          return [];
+        }
+        return [{
+          severity: 'info' as const,
+          category: 'processing' as const,
+          message: `${bus.busId} uses an offline print render${bus.printRenderArtifactPath ? ` at ${bus.printRenderArtifactPath}` : ''}.`,
+        }];
+      })),
     ];
 
     const signOffStatus = validation.issues.length > 0
@@ -1769,17 +1815,26 @@ export class DesktopNativeInterchangeAdapter implements InterchangePort {
         printContext: 'print',
         requiresDedicatedPreviewRender: (parsed.buses ?? []).some((bus) => bus.processingPolicy?.requiresDedicatedPreviewRender),
         requiresDedicatedPrintRender: (parsed.buses ?? []).some((bus) => bus.processingPolicy?.requiresDedicatedPrintRender),
-        buses: (parsed.buses ?? []).map((bus) => ({
-          busId: bus.id,
-          role: bus.role,
-          stemRole: bus.stemRole,
-          previewProcessingKinds: (bus.previewProcessingChain ?? []).flatMap((stage) => stage.kind ? [stage.kind] : []),
-          printProcessingKinds: (bus.printProcessingChain ?? []).flatMap((stage) => stage.kind ? [stage.kind] : []),
-          previewBypassedKinds: (bus.processingPolicy?.previewBypassedProcessingChain ?? [])
-            .flatMap((stage) => stage.kind ? [stage.kind] : []),
-          printBypassedKinds: (bus.processingPolicy?.printBypassedProcessingChain ?? [])
-            .flatMap((stage) => stage.kind ? [stage.kind] : []),
-        })),
+        requiresBufferedPreviewCaches: executionPlan?.requiresBufferedPreviewCaches ?? false,
+        requiresOfflinePrintRenders: executionPlan?.requiresOfflinePrintRenders ?? false,
+        executionPlanPath,
+        buses: (parsed.buses ?? []).map((bus) => {
+          const executionBus = executionPlan?.buses?.find((candidate) => candidate.busId === bus.id);
+          return {
+            busId: bus.id,
+            role: bus.role,
+            stemRole: bus.stemRole,
+            previewProcessingKinds: (bus.previewProcessingChain ?? []).flatMap((stage) => stage.kind ? [stage.kind] : []),
+            printProcessingKinds: (bus.printProcessingChain ?? []).flatMap((stage) => stage.kind ? [stage.kind] : []),
+            previewBypassedKinds: (bus.processingPolicy?.previewBypassedProcessingChain ?? [])
+              .flatMap((stage) => stage.kind ? [stage.kind] : []),
+            printBypassedKinds: (bus.processingPolicy?.printBypassedProcessingChain ?? [])
+              .flatMap((stage) => stage.kind ? [stage.kind] : []),
+            previewMode: executionBus?.previewMode,
+            printMode: executionBus?.printMode,
+            printRenderArtifactPath: executionBus?.printRenderArtifactPath,
+          };
+        }),
       },
       signOffSummary: {
         blockerCount: recommendedActions.filter((action) => action.severity === 'blocker').length,
@@ -1787,6 +1842,121 @@ export class DesktopNativeInterchangeAdapter implements InterchangePort {
         infoCount: recommendedActions.filter((action) => action.severity === 'info').length,
       },
       assistantEditorChecklist: parsed.assistantEditorChecklist ?? [],
+    };
+  }
+
+  private async writeAudioExecutionArtifacts(
+    audioTurnoverPath: string,
+    exportDir: string,
+  ): Promise<{
+    artifactPaths: string[];
+    executionPlanPath?: string;
+  }> {
+    if (!await fileExists(this.fsBindings, audioTurnoverPath)) {
+      return { artifactPaths: [] };
+    }
+
+    const parsed = JSON.parse(await this.fsBindings.readFile(audioTurnoverPath, 'utf8')) as {
+      previewProcessingContext?: string;
+      printProcessingContext?: string;
+      buses?: Array<{
+        id: string;
+        role?: string;
+        stemRole?: string;
+        previewProcessingChain?: Array<{ kind?: string }>;
+        printProcessingChain?: Array<{ kind?: string }>;
+        processingPolicy?: {
+          previewBypassedProcessingChain?: Array<{ kind?: string }>;
+          printBypassedProcessingChain?: Array<{ kind?: string }>;
+        };
+        executionPolicy?: {
+          previewMode?: 'direct-monitor' | 'buffered-preview-cache';
+          printMode?: 'live-print-safe' | 'offline-print-render';
+          previewReasonKinds?: string[];
+          printReasonKinds?: string[];
+        };
+      }>;
+    };
+
+    const printRenderDir = path.join(exportDir, 'audio-print-renders');
+    await this.fsBindings.mkdir(printRenderDir, { recursive: true });
+
+    const planBuses: Array<{
+      busId: string;
+      role?: string;
+      stemRole?: string;
+      previewMode: 'direct-monitor' | 'buffered-preview-cache';
+      printMode: 'live-print-safe' | 'offline-print-render';
+      previewReasonKinds: string[];
+      printReasonKinds: string[];
+      printRenderArtifactPath?: string;
+    }> = [];
+    const artifactPaths: string[] = [];
+
+    for (const bus of parsed.buses ?? []) {
+      const previewReasonKinds = uniqueStrings([
+        ...(bus.executionPolicy?.previewReasonKinds ?? []),
+        ...(bus.processingPolicy?.previewBypassedProcessingChain ?? [])
+          .flatMap((stage) => stage.kind ? [stage.kind] : []),
+      ]);
+      const printReasonKinds = uniqueStrings([
+        ...(bus.executionPolicy?.printReasonKinds ?? []),
+        ...(bus.printProcessingChain ?? []).flatMap((stage) => stage.kind ? [stage.kind] : []),
+        ...(bus.processingPolicy?.printBypassedProcessingChain ?? [])
+          .flatMap((stage) => stage.kind ? [stage.kind] : []),
+      ]);
+      const previewMode = bus.executionPolicy?.previewMode
+        ?? (previewReasonKinds.length > 0 ? 'buffered-preview-cache' : 'direct-monitor');
+      const printMode = bus.executionPolicy?.printMode
+        ?? ((bus.printProcessingChain?.length ?? 0) > (bus.previewProcessingChain?.length ?? 0)
+          || printReasonKinds.length > 0
+          ? 'offline-print-render'
+          : 'live-print-safe');
+      let printRenderArtifactPath: string | undefined;
+      if (printMode === 'offline-print-render') {
+        printRenderArtifactPath = path.join(
+          printRenderDir,
+          `${sanitizeArtifactBase(bus.id)}.print-render.json`,
+        );
+        await this.fsBindings.writeFile(printRenderArtifactPath, JSON.stringify({
+          busId: bus.id,
+          role: bus.role,
+          stemRole: bus.stemRole,
+          context: parsed.printProcessingContext ?? 'print',
+          executionMode: printMode,
+          activeProcessingKinds: (bus.printProcessingChain ?? [])
+            .flatMap((stage) => stage.kind ? [stage.kind] : []),
+          reasonKinds: printReasonKinds,
+          generatedAt: new Date().toISOString(),
+        }, null, 2), 'utf8');
+        artifactPaths.push(printRenderArtifactPath);
+      }
+
+      planBuses.push({
+        busId: bus.id,
+        role: bus.role,
+        stemRole: bus.stemRole,
+        previewMode,
+        printMode,
+        previewReasonKinds,
+        printReasonKinds,
+        printRenderArtifactPath,
+      });
+    }
+
+    const executionPlanPath = path.join(exportDir, 'audio-processing.execution-plan.json');
+    await this.fsBindings.writeFile(executionPlanPath, JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      previewContext: parsed.previewProcessingContext ?? 'preview',
+      printContext: parsed.printProcessingContext ?? 'print',
+      requiresBufferedPreviewCaches: planBuses.some((bus) => bus.previewMode === 'buffered-preview-cache'),
+      requiresOfflinePrintRenders: planBuses.some((bus) => bus.printMode === 'offline-print-render'),
+      buses: planBuses,
+    }, null, 2), 'utf8');
+
+    return {
+      artifactPaths: [executionPlanPath, ...artifactPaths],
+      executionPlanPath,
     };
   }
 
@@ -1800,6 +1970,8 @@ export class DesktopNativeInterchangeAdapter implements InterchangePort {
     if (await fileExists(this.fsBindings, audioTurnoverPath)) {
       companionPaths.push(audioTurnoverPath);
     }
+    const executionArtifacts = await this.writeAudioExecutionArtifacts(audioTurnoverPath, exportDir);
+    companionPaths.push(...executionArtifacts.artifactPaths);
 
     const dominantLayout = pickDominantAudioChannelLayout(
       resolveAudioTrackLayouts(project).map((track) => track.layout),
@@ -1828,7 +2000,11 @@ export class DesktopNativeInterchangeAdapter implements InterchangePort {
     const validationPath = path.join(exportDir, 'protools-turnover.validation.json');
     await this.fsBindings.writeFile(validationPath, JSON.stringify(mergedValidation, null, 2), 'utf8');
     companionPaths.push(validationPath);
-    const handoffSummary = await this.buildAssistantEditorHandoff(audioTurnoverPath, mergedValidation);
+    const handoffSummary = await this.buildAssistantEditorHandoff(
+      audioTurnoverPath,
+      mergedValidation,
+      executionArtifacts.executionPlanPath,
+    );
     if (handoffSummary) {
       const handoffPath = path.join(exportDir, 'assistant-editor.handoff.json');
       await this.fsBindings.writeFile(handoffPath, JSON.stringify(handoffSummary, null, 2), 'utf8');
@@ -2588,6 +2764,7 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
   private readonly fsBindings: DesktopFsBindings;
   private readonly decodeAdapter: DesktopNativeDecodeAdapter;
   private readonly compositorAdapter: DesktopNativeVideoCompositingAdapter;
+  private readonly audioMixAdapter: DesktopNativeAudioMixAdapter;
   private readonly bindings = new Map<string, BoundDesktopProject>();
   private readonly transports = new Map<string, DesktopPlaybackTransportState>();
   private sequence = 0;
@@ -2595,6 +2772,7 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
   constructor(
     decodeAdapter: DesktopNativeDecodeAdapter,
     compositorAdapter: DesktopNativeVideoCompositingAdapter,
+    audioMixAdapter: DesktopNativeAudioMixAdapter,
     options: DesktopNativeMediaManagementAdapterOptions = {},
   ) {
     this.pipeline = {
@@ -2610,6 +2788,7 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
     };
     this.decodeAdapter = decodeAdapter;
     this.compositorAdapter = compositorAdapter;
+    this.audioMixAdapter = audioMixAdapter;
   }
 
   async bindProject(binding: DesktopProjectBinding): Promise<void> {
@@ -2631,6 +2810,13 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
       bytesPerPixel: state.frameTransportView.bytesPerPixel,
       slots: state.frameTransportView.slots,
     };
+  }
+
+  getAudioMonitorPreview(
+    transportHandle: NativeResourceHandle,
+  ): DesktopAudioMonitorPreviewState | null {
+    const state = this.requireTransport(transportHandle);
+    return state.audioMonitorPreview ? cloneValue(state.audioMonitorPreview) : null;
   }
 
   async attachOutputDevice(
@@ -2684,6 +2870,7 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
       state.lastCompositeArtifactPath = undefined;
       state.decodedVideoArtifacts = [];
       state.decodedAudioArtifacts = [];
+      state.audioMonitorPreview = undefined;
       state.policy.promotedFrameCount = 0;
       state.policy.lastFrameCacheHitRate = 0;
       state.policy.lastFrameRenderLatencyMs = 0;
@@ -2748,6 +2935,7 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
         bytesPerPixel: 4,
         slots: frameTransportSlots,
       },
+      audioMonitorPreview: undefined,
       attachedOutputConfigs: [],
       activeOutputDeviceIds: [],
       inFlightTasks: new Set<Promise<void>>(),
@@ -2881,6 +3069,13 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
         })
       )),
     );
+    const audioPreviewTimeRange = {
+      startSeconds: frame / fps,
+      endSeconds: (frame + Math.max(1, prerollFrames || fps)) / fps,
+    };
+    state.audioMonitorPreview = audioStreams.length > 0
+      ? await this.audioMixAdapter.renderMonitorPreview(state.snapshot, audioPreviewTimeRange, state.handle)
+      : undefined;
     const composite = await this.compositorAdapter.materializeCompositeArtifact({
       graphId: state.graphId,
       frame,
@@ -2955,6 +3150,7 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
       lastStartFrame: frame,
       lastCompositeHandle: composite.handle,
       lastCompositeArtifactPath: composite.artifactPath,
+      audioMonitorPreview: state.audioMonitorPreview,
     });
 
     this.queueLookaheadPromotion(state, frame, target, policy);
@@ -3234,6 +3430,7 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
       lastCompositeArtifactPath: state.lastCompositeArtifactPath,
       decodedVideoArtifacts: state.decodedVideoArtifacts,
       decodedAudioArtifacts: state.decodedAudioArtifacts,
+      audioMonitorPreview: state.audioMonitorPreview,
       frameTransport: {
         width: state.frameTransportView.width,
         height: state.frameTransportView.height,
@@ -3373,6 +3570,8 @@ export class DesktopNativeAudioMixAdapter implements ProfessionalAudioMixPort {
       trackLayouts,
       automationWrites: [],
       previewHandles: [],
+      previewRenderArtifacts: [],
+      printRenderArtifacts: [],
     };
 
     this.mixes.set(compilation.mixId, state);
@@ -3407,16 +3606,131 @@ export class DesktopNativeAudioMixAdapter implements ProfessionalAudioMixPort {
     state.previewHandles.push(handle);
     const previewBusMeasurements = this.buildBusMeasurements(state, timeRange, 'preview');
     const printReferenceBusMeasurements = this.buildBusMeasurements(state, timeRange, 'print');
+    const previewCacheDir = path.join(previewDir, 'cache', sanitizeArtifactBase(mixId));
+    await this.fsBindings.mkdir(previewCacheDir, { recursive: true });
     const stemPolicies = state.compilation.buses.map((bus) => {
       const policy = summarizeAudioBusProcessingPolicy(bus);
+      const execution = summarizeAudioBusExecutionPolicy(bus);
       return {
         busId: bus.id,
+        policy,
+        execution,
         requiresDedicatedPreviewRender: policy.requiresDedicatedPreviewRender,
         requiresDedicatedPrintRender: policy.requiresDedicatedPrintRender,
         previewBypassedProcessingChain: policy.preview.bypassedStages,
         printBypassedProcessingChain: policy.print.bypassedStages,
       };
     });
+    const stemEntries: Array<{
+      busId: string;
+      name: string;
+      role?: string;
+      stemRole?: string;
+      layout: AudioChannelLayout;
+      meteringMode?: string;
+      channelCount: number;
+      sourceTrackIds: string[];
+      sendTargets: NonNullable<AudioMixCompilation['buses']>[number]['sendTargets'];
+      processingChain: NonNullable<AudioMixCompilation['buses']>[number]['processingChain'];
+      previewProcessingChain: NonNullable<AudioMixCompilation['buses']>[number]['processingChain'];
+      printProcessingChain: NonNullable<AudioMixCompilation['buses']>[number]['processingChain'];
+      processingPolicy: {
+        requiresDedicatedPreviewRender: boolean;
+        requiresDedicatedPrintRender: boolean;
+        previewBypassedProcessingChain: NonNullable<AudioMixCompilation['buses']>[number]['processingChain'];
+        printBypassedProcessingChain: NonNullable<AudioMixCompilation['buses']>[number]['processingChain'];
+      };
+      executionPolicy: {
+        previewMode: 'direct-monitor' | 'buffered-preview-cache';
+        printMode: 'live-print-safe' | 'offline-print-render';
+        previewReasonKinds: string[];
+        printReasonKinds: string[];
+        previewRenderArtifactPath?: string;
+      };
+    }> = [];
+    const previewRenderArtifacts: string[] = [];
+    for (const bus of state.compilation.buses) {
+      const entry = stemPolicies.find((item) => item.busId === bus.id);
+      if (!entry) {
+        continue;
+      }
+      let previewRenderArtifactPath: string | undefined;
+      if (entry.execution.previewMode === 'buffered-preview-cache') {
+        previewRenderArtifactPath = path.join(
+          previewCacheDir,
+          `${sanitizeArtifactBase(bus.id)}-${this.sequence.toString(36)}.preview-render.json`,
+        );
+        await this.fsBindings.writeFile(previewRenderArtifactPath, JSON.stringify({
+          mixId,
+          busId: bus.id,
+          role: bus.role,
+          stemRole: bus.stemRole,
+          context: 'preview',
+          executionMode: entry.execution.previewMode,
+          timeRange,
+          activeProcessingKinds: entry.policy.preview.activeStages.map((stage) => stage.kind),
+          bypassedProcessingKinds: entry.execution.previewReasonKinds,
+          automationModes: state.compilation.automationModes ?? [],
+          automationWrites: state.automationWrites,
+        }, null, 2), 'utf8');
+        previewRenderArtifacts.push(previewRenderArtifactPath);
+      }
+      stemEntries.push({
+        busId: bus.id,
+        name: bus.name,
+        role: bus.role,
+        stemRole: bus.stemRole,
+        layout: bus.layout,
+        meteringMode: bus.meteringMode,
+        channelCount: bus.channelCount ?? getAudioChannelCountForLayout(bus.layout),
+        sourceTrackIds: bus.sourceTrackIds ?? [],
+        sendTargets: bus.sendTargets ?? [],
+        processingChain: bus.processingChain ?? [],
+        previewProcessingChain: entry.policy.preview.activeStages,
+        printProcessingChain: entry.policy.print.activeStages,
+        processingPolicy: {
+          requiresDedicatedPreviewRender: entry.policy.requiresDedicatedPreviewRender,
+          requiresDedicatedPrintRender: entry.policy.requiresDedicatedPrintRender,
+          previewBypassedProcessingChain: entry.policy.preview.bypassedStages,
+          printBypassedProcessingChain: entry.policy.print.bypassedStages,
+        },
+        executionPolicy: {
+          previewMode: entry.execution.previewMode,
+          printMode: entry.execution.printMode,
+          previewReasonKinds: entry.execution.previewReasonKinds,
+          printReasonKinds: entry.execution.printReasonKinds,
+          previewRenderArtifactPath,
+        },
+      });
+    }
+    const executionPlanPath = path.join(
+      previewDir,
+      `${sanitizeArtifactBase(mixId)}-${this.sequence.toString(36)}.execution-plan.json`,
+    );
+    await this.fsBindings.writeFile(executionPlanPath, JSON.stringify({
+      mixId,
+      handle,
+      previewContext: 'preview',
+      printContext: 'print',
+      generatedAt: new Date().toISOString(),
+      requiresBufferedPreviewCaches: stemEntries.some((stem) => stem.executionPolicy.previewMode === 'buffered-preview-cache'),
+      requiresOfflinePrintRenders: stemEntries.some((stem) => stem.executionPolicy.printMode === 'offline-print-render'),
+      buses: stemEntries.map((stem) => ({
+        busId: stem.busId,
+        role: stem.role,
+        stemRole: stem.stemRole,
+        previewMode: stem.executionPolicy.previewMode,
+        printMode: stem.executionPolicy.printMode,
+        previewReasonKinds: stem.executionPolicy.previewReasonKinds,
+        printReasonKinds: stem.executionPolicy.printReasonKinds,
+        previewRenderArtifactPath: stem.executionPolicy.previewRenderArtifactPath,
+      })),
+    }, null, 2), 'utf8');
+    state.previewRenderArtifacts = uniqueStrings([
+      ...state.previewRenderArtifacts,
+      ...previewRenderArtifacts,
+    ]);
+    state.lastPreviewExecutionPlanPath = executionPlanPath;
 
     const previewPath = path.join(previewDir, `${sanitizeArtifactBase(mixId)}-${this.sequence.toString(36)}.json`);
     await this.fsBindings.writeFile(previewPath, JSON.stringify({
@@ -3425,24 +3739,7 @@ export class DesktopNativeAudioMixAdapter implements ProfessionalAudioMixPort {
       handle,
       dominantLayout: state.compilation.dominantLayout,
       containsContainerizedAudio: state.compilation.containsContainerizedAudio ?? false,
-      stems: state.compilation.buses.map((bus) => {
-        const policy = stemPolicies.find((entry) => entry.busId === bus.id);
-        return {
-          busId: bus.id,
-          name: bus.name,
-          role: bus.role,
-          stemRole: bus.stemRole,
-          layout: bus.layout,
-          meteringMode: bus.meteringMode,
-          channelCount: bus.channelCount ?? getAudioChannelCountForLayout(bus.layout),
-          sourceTrackIds: bus.sourceTrackIds ?? [],
-          sendTargets: bus.sendTargets ?? [],
-          processingChain: bus.processingChain ?? [],
-          previewProcessingChain: resolveAudioBusProcessingChain(bus, 'preview'),
-          printProcessingChain: resolveAudioBusProcessingChain(bus, 'print'),
-          processingPolicy: policy,
-        };
-      }),
+      stems: stemEntries,
       routingPlan: {
         printMasterBusId: state.compilation.printMasterBusId,
         monitoringBusId: state.compilation.monitoringBusId,
@@ -3453,7 +3750,13 @@ export class DesktopNativeAudioMixAdapter implements ProfessionalAudioMixPort {
         printContext: 'print',
         requiresDedicatedPreviewRender: stemPolicies.some((stem) => stem.requiresDedicatedPreviewRender),
         requiresDedicatedPrintRender: stemPolicies.some((stem) => stem.requiresDedicatedPrintRender),
+        requiresBufferedPreviewCaches: stemEntries.some((stem) => stem.executionPolicy.previewMode === 'buffered-preview-cache'),
+        requiresOfflinePrintRenders: stemEntries.some((stem) => stem.executionPolicy.printMode === 'offline-print-render'),
         warnings: state.compilation.processingWarnings ?? [],
+      },
+      execution: {
+        planPath: executionPlanPath,
+        previewRenderArtifacts,
       },
       metering: {
         context: 'preview',
@@ -3467,8 +3770,173 @@ export class DesktopNativeAudioMixAdapter implements ProfessionalAudioMixPort {
     await this.writeMixManifest(state, {
       lastPreviewHandle: handle,
       lastPreviewPath: previewPath,
+      lastPreviewExecutionPlanPath: executionPlanPath,
+      previewRenderArtifacts: state.previewRenderArtifacts,
     });
     return handle;
+  }
+
+  async renderMonitorPreview(
+    snapshot: TimelineRenderSnapshot,
+    timeRange: TimeRange,
+    transportHandle: NativeResourceHandle,
+  ): Promise<DesktopAudioMonitorPreviewState> {
+    const state = await this.ensureMixForSnapshot(snapshot);
+    const binding = this.requireBinding(state.projectId);
+    const monitorPreviewDir = path.join(
+      binding.mediaPaths.indexPath,
+      'playback-audio-previews',
+      sanitizeArtifactBase(transportHandle),
+    );
+    const previewCacheDir = path.join(monitorPreviewDir, 'cache');
+    await this.fsBindings.mkdir(previewCacheDir, { recursive: true });
+
+    const handle = `desktop-monitor-mix-preview-${sanitizeArtifactBase(transportHandle)}`;
+    const previewBusMeasurements = this.buildBusMeasurements(state, timeRange, 'preview');
+    const printReferenceBusMeasurements = this.buildBusMeasurements(state, timeRange, 'print');
+    const stemPolicies = state.compilation.buses.map((bus) => {
+      const policy = summarizeAudioBusProcessingPolicy(bus);
+      const execution = summarizeAudioBusExecutionPolicy(bus);
+      return {
+        busId: bus.id,
+        policy,
+        execution,
+      };
+    });
+
+    const previewRenderArtifacts: string[] = [];
+    const stems = [];
+    for (const bus of state.compilation.buses) {
+      const entry = stemPolicies.find((item) => item.busId === bus.id);
+      if (!entry) {
+        continue;
+      }
+      let previewRenderArtifactPath: string | undefined;
+      if (entry.execution.previewMode === 'buffered-preview-cache') {
+        previewRenderArtifactPath = path.join(
+          previewCacheDir,
+          `${sanitizeArtifactBase(bus.id)}.preview-render.json`,
+        );
+        await this.fsBindings.writeFile(previewRenderArtifactPath, JSON.stringify({
+          mixId: state.mixId,
+          transportHandle,
+          busId: bus.id,
+          role: bus.role,
+          stemRole: bus.stemRole,
+          context: 'preview',
+          executionMode: entry.execution.previewMode,
+          timeRange,
+          activeProcessingKinds: entry.policy.preview.activeStages.map((stage) => stage.kind),
+          bypassedProcessingKinds: entry.execution.previewReasonKinds,
+          automationModes: state.compilation.automationModes ?? [],
+          automationWrites: state.automationWrites,
+        }, null, 2), 'utf8');
+        previewRenderArtifacts.push(previewRenderArtifactPath);
+      }
+
+      stems.push({
+        busId: bus.id,
+        name: bus.name,
+        role: bus.role,
+        stemRole: bus.stemRole,
+        layout: bus.layout,
+        meteringMode: bus.meteringMode,
+        channelCount: bus.channelCount ?? getAudioChannelCountForLayout(bus.layout),
+        sourceTrackIds: bus.sourceTrackIds ?? [],
+        sendTargets: bus.sendTargets ?? [],
+        processingChain: bus.processingChain ?? [],
+        previewProcessingChain: entry.policy.preview.activeStages,
+        printProcessingChain: entry.policy.print.activeStages,
+        processingPolicy: {
+          requiresDedicatedPreviewRender: entry.policy.requiresDedicatedPreviewRender,
+          requiresDedicatedPrintRender: entry.policy.requiresDedicatedPrintRender,
+          previewBypassedProcessingChain: entry.policy.preview.bypassedStages,
+          printBypassedProcessingChain: entry.policy.print.bypassedStages,
+        },
+        executionPolicy: {
+          previewMode: entry.execution.previewMode,
+          printMode: entry.execution.printMode,
+          previewReasonKinds: entry.execution.previewReasonKinds,
+          printReasonKinds: entry.execution.printReasonKinds,
+          previewRenderArtifactPath,
+        },
+      });
+    }
+
+    const executionPlanPath = path.join(monitorPreviewDir, 'audio-monitor.execution-plan.json');
+    await this.fsBindings.writeFile(executionPlanPath, JSON.stringify({
+      mixId: state.mixId,
+      transportHandle,
+      previewContext: 'preview',
+      printContext: 'print',
+      generatedAt: new Date().toISOString(),
+      requiresBufferedPreviewCaches: stems.some((stem) => stem.executionPolicy.previewMode === 'buffered-preview-cache'),
+      requiresOfflinePrintRenders: stems.some((stem) => stem.executionPolicy.printMode === 'offline-print-render'),
+      buses: stems.map((stem) => ({
+        busId: stem.busId,
+        role: stem.role,
+        stemRole: stem.stemRole,
+        previewMode: stem.executionPolicy.previewMode,
+        printMode: stem.executionPolicy.printMode,
+        previewReasonKinds: stem.executionPolicy.previewReasonKinds,
+        printReasonKinds: stem.executionPolicy.printReasonKinds,
+        previewRenderArtifactPath: stem.executionPolicy.previewRenderArtifactPath,
+      })),
+    }, null, 2), 'utf8');
+
+    const previewPath = path.join(monitorPreviewDir, 'audio-monitor.preview.json');
+    await this.fsBindings.writeFile(previewPath, JSON.stringify({
+      mixId: state.mixId,
+      transportHandle,
+      timeRange,
+      handle,
+      dominantLayout: state.compilation.dominantLayout,
+      containsContainerizedAudio: state.compilation.containsContainerizedAudio ?? false,
+      stems,
+      processing: {
+        previewContext: 'preview',
+        printContext: 'print',
+        requiresDedicatedPreviewRender: stems.some((stem) => stem.processingPolicy.requiresDedicatedPreviewRender),
+        requiresDedicatedPrintRender: stems.some((stem) => stem.processingPolicy.requiresDedicatedPrintRender),
+        requiresBufferedPreviewCaches: stems.some((stem) => stem.executionPolicy.previewMode === 'buffered-preview-cache'),
+        requiresOfflinePrintRenders: stems.some((stem) => stem.executionPolicy.printMode === 'offline-print-render'),
+        warnings: state.compilation.processingWarnings ?? [],
+      },
+      execution: {
+        planPath: executionPlanPath,
+        previewRenderArtifacts,
+      },
+      metering: {
+        context: 'preview',
+        standard: 'EBU R128',
+        buses: previewBusMeasurements,
+        printReferenceBuses: printReferenceBusMeasurements,
+      },
+      automationModes: state.compilation.automationModes ?? [],
+      automationWrites: state.automationWrites,
+    }, null, 2), 'utf8');
+
+    const result: DesktopAudioMonitorPreviewState = {
+      mixId: state.mixId,
+      handle,
+      previewPath,
+      executionPlanPath,
+      previewRenderArtifacts,
+      bufferedPreviewActive: previewRenderArtifacts.length > 0,
+      offlinePrintRenderRequired: stems.some((stem) => stem.executionPolicy.printMode === 'offline-print-render'),
+      timeRange,
+    };
+    state.previewRenderArtifacts = uniqueStrings([
+      ...state.previewRenderArtifacts,
+      ...previewRenderArtifacts,
+    ]);
+    state.lastPreviewExecutionPlanPath = executionPlanPath;
+    await this.writeMixManifest(state, {
+      lastMonitorPreview: result,
+      previewRenderArtifacts: state.previewRenderArtifacts,
+      lastPreviewExecutionPlanPath: executionPlanPath,
+    });
+    return result;
   }
 
   async analyzeLoudness(mixId: string, timeRange: TimeRange): Promise<LoudnessMeasurement> {
@@ -3523,6 +3991,24 @@ export class DesktopNativeAudioMixAdapter implements ProfessionalAudioMixPort {
       throw new Error(`Unknown desktop audio mix: ${mixId}`);
     }
     return state;
+  }
+
+  private findMixForSnapshot(snapshot: TimelineRenderSnapshot): DesktopAudioMixState | undefined {
+    return Array.from(this.mixes.values()).find((state) => (
+      state.projectId === snapshot.projectId
+      && state.snapshot.sequenceId === snapshot.sequenceId
+      && state.snapshot.revisionId === snapshot.revisionId
+    ));
+  }
+
+  private async ensureMixForSnapshot(snapshot: TimelineRenderSnapshot): Promise<DesktopAudioMixState> {
+    const existing = this.findMixForSnapshot(snapshot);
+    if (existing) {
+      return existing;
+    }
+
+    const compilation = await this.compileMix(snapshot);
+    return this.requireMix(compilation.mixId);
   }
 
   private buildBusMeasurements(
@@ -3605,6 +4091,10 @@ export class DesktopNativeAudioMixAdapter implements ProfessionalAudioMixPort {
       trackLayouts: state.trackLayouts,
       automationWrites: state.automationWrites,
       previewHandles: state.previewHandles,
+      previewRenderArtifacts: state.previewRenderArtifacts,
+      printRenderArtifacts: state.printRenderArtifacts,
+      lastPreviewExecutionPlanPath: state.lastPreviewExecutionPlanPath,
+      lastPrintExecutionPlanPath: state.lastPrintExecutionPlanPath,
       lastLoudness: state.lastLoudness,
       ...extra,
     }, null, 2), 'utf8');
@@ -4045,12 +4535,13 @@ export class DesktopNativeParityRuntime {
     });
     this.decodeAdapter = new DesktopNativeDecodeAdapter(options.mediaAdapterOptions);
     this.compositorAdapter = new DesktopNativeVideoCompositingAdapter(options.mediaAdapterOptions);
+    this.audioMixAdapter = new DesktopNativeAudioMixAdapter(options.mediaAdapterOptions);
     this.playbackAdapter = new DesktopNativeRealtimePlaybackAdapter(
       this.decodeAdapter,
       this.compositorAdapter,
+      this.audioMixAdapter,
       options.mediaAdapterOptions,
     );
-    this.audioMixAdapter = new DesktopNativeAudioMixAdapter(options.mediaAdapterOptions);
     this.motionEffectsAdapter = new DesktopNativeMotionEffectsAdapter(
       options.motionTemplates ?? DEFAULT_MOTION_TEMPLATES,
       options.mediaAdapterOptions,
@@ -4171,6 +4662,12 @@ export class DesktopNativeParityRuntime {
 
   getPlaybackTransportView(transportHandle: NativeResourceHandle): DesktopPlaybackTransportView {
     return this.playbackAdapter.getTransportView(transportHandle);
+  }
+
+  getPlaybackTransportAudioMonitorPreview(
+    transportHandle: NativeResourceHandle,
+  ): DesktopAudioMonitorPreviewState | null {
+    return this.playbackAdapter.getAudioMonitorPreview(transportHandle);
   }
 
   async attachPlaybackOutputDevice(

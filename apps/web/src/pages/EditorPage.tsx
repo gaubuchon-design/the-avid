@@ -41,10 +41,10 @@ import {
 import { buildProjectPersistenceSnapshot, getProjectPersistenceHash } from '../lib/editorProjectState';
 import { isLegacyExportPageParam, resolveEditorPageParam } from '../lib/editorUrlState';
 import { subscribeSmartToolStateToStore } from '../lib/smartToolStateBridge';
+import { enterTrimModeFromContext } from '../lib/trimEntry';
 import { subscribeTrimHistoryToEditEngine } from '../lib/trimHistoryBridge';
 import { subscribeTrimStateToStore } from '../lib/trimStateBridge';
 import { subscribeTrackPatchingStateToStore } from '../lib/trackPatchingStateBridge';
-import { resolveEditorialFocusTrackIds } from '../lib/editorialTrackFocus';
 import { MediaPage } from './MediaPage';
 
 // Playback is driven by PlaybackEngine (RAF-based) via editor.store.ts togglePlay().
@@ -102,10 +102,12 @@ export function EditorPage() {
   }, []);
   const enterTrimMode = useCallback(() => {
     const state = useEditorStore.getState();
-    const activeTrackIds = resolveEditorialFocusTrackIds(state);
-
     setActiveTool('trim');
-    trimEngine.enterTrimMode(activeTrackIds, state.playheadTime, TrimSide.BOTH);
+    const target = enterTrimModeFromContext(state, { side: TrimSide.BOTH });
+    if (target) {
+      useEditorStore.getState().selectTrack(target.anchorTrackId);
+      useEditorStore.getState().clearTrimEditPoints();
+    }
   }, [setActiveTool]);
   const selectTrimASide = useCallback(() => {
     trimEngine.selectASide();

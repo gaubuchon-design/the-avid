@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState, memo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePlayerStore, ScopeType } from '../../store/player.store';
 import { useEditorStore } from '../../store/editor.store';
 import {
@@ -7,6 +7,9 @@ import {
   releaseMonitorAudioOutput,
 } from '../../lib/monitorPlayback';
 import { usePointerScrub } from '../../hooks/usePointerScrub';
+import { TrimStatusOverlay } from '../Editor/TrimStatusOverlay';
+import { useTrimMonitorPreview } from '../../lib/trimMonitorPreview';
+import { trimEngine } from '../../engine/TrimEngine';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -85,18 +88,60 @@ export function SourceMonitor() {
   const sourceOutPoint = useEditorStore((s) => s.sourceOutPoint);
   const setSourceInPoint = useEditorStore((s) => s.setSourceInPoint);
   const setSourceOutPoint = useEditorStore((s) => s.setSourceOutPoint);
+  const trimSelectionLabel = useEditorStore((s) => s.trimSelectionLabel);
+  const tracks = useEditorStore((s) => s.tracks);
+  const bins = useEditorStore((s) => s.bins);
+  const selectedTrackId = useEditorStore((s) => s.selectedTrackId);
+  const enabledTrackIds = useEditorStore((s) => s.enabledTrackIds);
+  const videoMonitorTrackId = useEditorStore((s) => s.videoMonitorTrackId);
   const fps = useEditorStore((s) => s.sequenceSettings.fps);
+  const projectFrameRate = useEditorStore((s) => s.projectSettings.frameRate);
   const audioScrubEnabled = useEditorStore((s) => s.audioScrubEnabled);
+  const trimPreview = useTrimMonitorPreview({
+    tracks,
+    bins,
+    selectedTrackId,
+    enabledTrackIds,
+    videoMonitorTrackId,
+    sequenceSettings: { fps },
+    projectSettings: { frameRate: projectFrameRate },
+  });
+  const trimPreviewSide = useMemo(() => {
+    return trimPreview.sourceMonitor ?? trimPreview.aSide ?? trimPreview.bSide;
+  }, [trimPreview.aSide, trimPreview.bSide, trimPreview.sourceMonitor]);
+  const trimPreviewActive = Boolean(trimPreview.active && trimPreviewSide);
+  const displayedAsset = trimPreviewActive
+    ? trimPreviewSide!.asset ?? null
+    : sourceAsset;
+  const displayedPlayhead = trimPreviewActive
+    ? trimPreviewSide!.sourceTime
+    : sourcePlayhead;
+  const displayedInPoint = trimPreviewActive ? null : sourceInPoint;
+  const displayedOutPoint = trimPreviewActive ? null : sourceOutPoint;
+  const displayedDuration = trimPreviewActive
+    ? (displayedAsset?.duration ?? 0)
+    : (sourceAsset?.duration ?? 0);
+  const effectiveIsPlaying = trimPreviewActive ? false : isPlaying;
 
   useEffect(() => {
     renderStateRef.current = {
-      assetName: sourceAsset?.name ?? '',
+      assetName: trimPreviewActive && trimPreviewSide
+        ? `${trimPreviewSide.trackName} · ${trimPreviewSide.clipName}`
+        : displayedAsset?.name ?? '',
       fps,
-      sourceInPoint,
-      sourceOutPoint,
-      sourcePlayhead,
+      sourceInPoint: displayedInPoint,
+      sourceOutPoint: displayedOutPoint,
+      sourcePlayhead: displayedPlayhead,
     };
-  }, [fps, sourceAsset?.name, sourceInPoint, sourceOutPoint, sourcePlayhead]);
+  }, [
+    displayedAsset?.name,
+    displayedInPoint,
+    displayedOutPoint,
+    displayedPlayhead,
+    fps,
+    trimPreviewActive,
+    trimPreviewSide,
+  ]);
 
   // Responsive canvas sizing
   useEffect(() => {
@@ -127,7 +172,7 @@ export function SourceMonitor() {
     setVideoReady(false);
     cachedFrameRef.current = null;
 
-    if (!sourceAsset || !(sourceAsset.fileHandle || sourceAsset.playbackUrl)) {
+    if (!displayedAsset || !(displayedAsset.fileHandle || displayedAsset.playbackUrl)) {
       releaseMonitorAudioOutput('source-monitor');
       if (videoRef.current) {
         videoRef.current.pause();
@@ -143,17 +188,16 @@ export function SourceMonitor() {
     video.playsInline = true;
     video.muted = true;
 
-    const ownedUrl = sourceAsset.fileHandle
-      ? URL.createObjectURL(sourceAsset.fileHandle)
+    const ownedUrl = displayedAsset.fileHandle
+      ? URL.createObjectURL(displayedAsset.fileHandle)
       : undefined;
-    video.src = ownedUrl ?? sourceAsset.playbackUrl!;
+    video.src = ownedUrl ?? displayedAsset.playbackUrl!;
 
     const handleLoadedMetadata = () => {
       videoRef.current = video;
       attachMonitorAudioOutput('source-monitor', video);
-      const currentSourcePlayhead = useEditorStore.getState().sourcePlayhead;
-      if (Number.isFinite(currentSourcePlayhead) && currentSourcePlayhead > 0) {
-        video.currentTime = currentSourcePlayhead;
+      if (Number.isFinite(displayedPlayhead) && displayedPlayhead > 0) {
+        video.currentTime = displayedPlayhead;
       }
       setVideoReady(true);
     };
@@ -179,7 +223,7 @@ export function SourceMonitor() {
         videoRef.current = null;
       }
     };
-  }, [sourceAsset?.id, sourceAsset?.fileHandle, sourceAsset?.playbackUrl]);
+  }, [displayedAsset?.fileHandle, displayedAsset?.id, displayedAsset?.playbackUrl, displayedPlayhead]);
 
   // Render loop — draw video frame or placeholder
   useEffect(() => {
@@ -265,10 +309,10 @@ export function SourceMonitor() {
     const video = videoRef.current;
     if (!video || !videoReady) return;
     const frameTolerance = fps > 0 ? 0.5 / fps : 0.02;
-    if (!isPlaying && isFinite(sourcePlayhead) && Math.abs(video.currentTime - sourcePlayhead) > frameTolerance) {
-      video.currentTime = Math.max(0, sourcePlayhead);
+    if (!effectiveIsPlaying && isFinite(displayedPlayhead) && Math.abs(video.currentTime - displayedPlayhead) > frameTolerance) {
+      video.currentTime = Math.max(0, displayedPlayhead);
     }
-  }, [fps, isPlaying, sourcePlayhead, videoReady]);
+  }, [displayedPlayhead, effectiveIsPlaying, fps, videoReady]);
 
   // Play/pause — properly cancel previous RAF sync loop before creating new one.
   // Also applies playback rate from playerStore.speed for JKL shuttle support.
@@ -282,7 +326,7 @@ export function SourceMonitor() {
       syncRafRef.current = undefined;
     }
 
-    if (isPlaying) {
+    if (effectiveIsPlaying) {
       // Apply playback rate — clamp to browser-supported range.
       // Negative speeds aren't natively supported by HTMLVideoElement,
       // so we handle reverse by manual frame stepping.
@@ -330,7 +374,7 @@ export function SourceMonitor() {
         syncRafRef.current = undefined;
       }
     };
-  }, [isPlaying, speed, videoReady, fps, setSourcePlayhead]);
+  }, [effectiveIsPlaying, speed, videoReady, fps, setSourcePlayhead]);
 
   useEffect(() => {
     return () => {
@@ -391,6 +435,15 @@ export function SourceMonitor() {
   }
 
   // Transport handlers
+  const nudgeTrim = useCallback((frames: number): boolean => {
+    if (!trimPreviewActive) {
+      return false;
+    }
+
+    trimEngine.trimByFrames(frames, fps);
+    return true;
+  }, [fps, trimPreviewActive]);
+
   const handlePlayPause = useCallback(() => {
     if (isPlaying) pause();
     else play();
@@ -405,22 +458,34 @@ export function SourceMonitor() {
   }, [sourceOutPoint, setSourcePlayhead]);
 
   const handlePrevFrame = useCallback(() => {
+    if (nudgeTrim(-1)) {
+      return;
+    }
     setSourcePlayhead(Math.max(0, sourcePlayhead - 1 / fps));
-  }, [sourcePlayhead, fps, setSourcePlayhead]);
+  }, [nudgeTrim, sourcePlayhead, fps, setSourcePlayhead]);
 
   const handleNextFrame = useCallback(() => {
+    if (nudgeTrim(1)) {
+      return;
+    }
     const maxDur = sourceAsset?.duration ?? 999;
     setSourcePlayhead(Math.min(maxDur, sourcePlayhead + 1 / fps));
-  }, [sourcePlayhead, fps, sourceAsset?.duration, setSourcePlayhead]);
+  }, [nudgeTrim, sourcePlayhead, fps, sourceAsset?.duration, setSourcePlayhead]);
 
   const handleRewind = useCallback(() => {
+    if (nudgeTrim(-10)) {
+      return;
+    }
     setSourcePlayhead(Math.max(0, sourcePlayhead - 1));
-  }, [sourcePlayhead, setSourcePlayhead]);
+  }, [nudgeTrim, sourcePlayhead, setSourcePlayhead]);
 
   const handleFastForward = useCallback(() => {
+    if (nudgeTrim(10)) {
+      return;
+    }
     const maxDur = sourceAsset?.duration ?? 999;
     setSourcePlayhead(Math.min(maxDur, sourcePlayhead + 1));
-  }, [sourcePlayhead, sourceAsset?.duration, setSourcePlayhead]);
+  }, [nudgeTrim, sourcePlayhead, sourceAsset?.duration, setSourcePlayhead]);
 
   const handleMarkIn = useCallback(() => {
     setSourceInPoint(sourcePlayhead);
@@ -442,6 +507,38 @@ export function SourceMonitor() {
     setActiveMonitor('source');
   }, [setActiveMonitor]);
 
+  const handleSelectTrimASide = useCallback(() => {
+    setActiveMonitor('source');
+    if (trimPreviewActive) {
+      trimEngine.selectASide();
+    }
+  }, [setActiveMonitor, trimPreviewActive]);
+
+  const handleSelectTrimBSide = useCallback(() => {
+    if (trimPreviewActive) {
+      trimEngine.selectBSide();
+    }
+  }, [trimPreviewActive]);
+
+  const handleSelectTrimBothSides = useCallback(() => {
+    if (trimPreviewActive) {
+      trimEngine.selectBothSides();
+    }
+  }, [trimPreviewActive]);
+
+  const handleCanvasClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    setActiveMonitor('source');
+    if (!trimPreviewActive) {
+      return;
+    }
+
+    if ((event.target as HTMLElement).closest('.trim-status-overlay')) {
+      return;
+    }
+
+    trimEngine.selectASide();
+  }, [setActiveMonitor, trimPreviewActive]);
+
   // Keyboard shortcuts are now handled centrally by useGlobalKeyboard() in EditorPage.
   // I/O marks are routed there based on activeMonitor, along with JKL shuttle.
 
@@ -449,10 +546,10 @@ export function SourceMonitor() {
   const scrubRef = useRef<HTMLDivElement>(null);
   const scrubToTime = useCallback((clientX: number, previewAudio: boolean) => {
     const bar = scrubRef.current;
-    if (!bar || !sourceAsset?.duration) return;
+    if (!bar || !displayedDuration || trimPreviewActive) return;
     const rect = bar.getBoundingClientRect();
     const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    const nextTime = pct * sourceAsset.duration;
+    const nextTime = pct * displayedDuration;
     setActiveMonitor('source');
     setSourcePlayhead(nextTime);
 
@@ -467,38 +564,51 @@ export function SourceMonitor() {
     }
 
     previewMonitorAudioOutput('source-monitor', video, nextTime);
-  }, [fps, isPlaying, setActiveMonitor, setSourcePlayhead, sourceAsset?.duration]);
+  }, [displayedDuration, fps, isPlaying, setActiveMonitor, setSourcePlayhead, trimPreviewActive]);
 
   const scrubBindings = usePointerScrub({
-    disabled: !sourceAsset?.duration,
+    disabled: trimPreviewActive || !displayedDuration,
     onScrub: ({ clientX, phase }) => {
       scrubToTime(clientX, audioScrubEnabled && phase === 'end');
     },
   });
 
-  const tc = formatTimecode(sourcePlayhead, fps);
-  const dur = sourceAsset?.duration ?? 0;
-  const progress = dur > 0 ? (sourcePlayhead / dur) * 100 : 0;
-  const inPct = sourceInPoint !== null && dur > 0 ? (sourceInPoint / dur) * 100 : null;
-  const outPct = sourceOutPoint !== null && dur > 0 ? (sourceOutPoint / dur) * 100 : null;
+  const tc = formatTimecode(displayedPlayhead, fps);
+  const dur = displayedDuration;
+  const progress = dur > 0 ? (displayedPlayhead / dur) * 100 : 0;
+  const inPct = displayedInPoint !== null && dur > 0 ? (displayedInPoint / dur) * 100 : null;
+  const outPct = displayedOutPoint !== null && dur > 0 ? (displayedOutPoint / dur) * 100 : null;
 
   const isActive = usePlayerStore((s) => s.activeMonitor === 'source');
+  const sourceLabel = trimPreviewActive ? trimPreviewSide!.monitorLabel : 'SOURCE';
+  const sourceMeta = trimPreviewActive && trimPreviewSide
+    ? `${trimPreviewSide.trackName} · ${trimPreviewSide.clipName}`
+    : displayedAsset?.name ?? null;
 
   return (
     <div className={`monitor${isActive ? ' monitor-active' : ''}`} onClick={handleFocus} role="region" aria-label="Source Monitor">
       {/* Header */}
       <div className="monitor-header">
-        <span className="monitor-label source" aria-hidden="true">SOURCE</span>
-        {sourceAsset && (
-          <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 4, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {sourceAsset.name}
+        <button
+          type="button"
+          className={`monitor-label monitor-label-button source${trimPreviewActive ? ' trim-side trim-side-a' : ''}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            handleSelectTrimASide();
+          }}
+          aria-label={trimPreviewActive ? 'Select A-side trim monitor' : 'Source monitor'}
+        >
+          {sourceLabel}
+        </button>
+        {sourceMeta && (
+          <span className="monitor-meta" title={sourceMeta}>
+            {sourceMeta}
           </span>
         )}
-        <span className="monitor-tc">{tc}</span>
       </div>
 
       {/* Canvas area */}
-      <div className="monitor-canvas" ref={containerRef} style={{ flex: 1, minHeight: 0 }}>
+      <div className="monitor-canvas" ref={containerRef} style={{ flex: 1, minHeight: 0 }} onClick={handleCanvasClick}>
         <canvas
           ref={canvasRef}
           width={canvasSize.w}
@@ -518,10 +628,11 @@ export function SourceMonitor() {
             <div className="safe-zone-title" />
           </div>
         )}
+        {trimPreviewActive && <TrimStatusOverlay />}
       </div>
 
       {/* Scrub bar */}
-      {sourceAsset && dur > 0 && (
+      {!trimPreviewActive && displayedAsset && dur > 0 && (
         <div
           className="composer-scrubbar"
           ref={scrubRef}
@@ -541,83 +652,119 @@ export function SourceMonitor() {
 
       {/* Footer / Transport */}
       <div className="monitor-footer">
-        {/* Mark In */}
-        <button
-          className="transport-btn"
-          onClick={handleMarkIn}
-          title="Mark In (I)"
-          style={{ fontSize: 10, fontWeight: 600, color: sourceInPoint !== null ? 'var(--info)' : undefined }}
-        >
-          I
-        </button>
+        <div className="monitor-footer-group" role="group" aria-label="Source mark controls">
+          <button
+            className={`transport-btn monitor-toolbar-btn is-mark${sourceInPoint !== null ? ' active' : ''}`}
+            onClick={handleMarkIn}
+            title="Mark In (I)"
+            disabled={trimPreviewActive}
+          >
+            IN
+          </button>
+          <button
+            className={`transport-btn monitor-toolbar-btn is-mark${sourceOutPoint !== null ? ' active' : ''}`}
+            onClick={handleMarkOut}
+            title="Mark Out (O)"
+            disabled={trimPreviewActive}
+          >
+            OUT
+          </button>
+        </div>
 
-        {/* Transport controls */}
-        <div className="transport-controls" role="group" aria-label="Source transport controls">
-          <button className="transport-btn" onClick={handleGoToIn} title="Go to In (Shift+I)" aria-label="Go to In point">
+        <div className="monitor-footer-group transport-controls" role="group" aria-label="Source transport controls">
+          <button className="transport-btn monitor-toolbar-btn" onClick={handleGoToIn} title="Go to In (Shift+I)" aria-label="Go to In point" disabled={trimPreviewActive}>
             |&laquo;
           </button>
-          <button className="transport-btn" onClick={handleRewind} title="Rewind (J)">
+          <button className="transport-btn monitor-toolbar-btn" onClick={handleRewind} title={trimPreviewActive ? 'Trim Left 10 Frames' : 'Rewind (J)'}>
             &laquo;
           </button>
-          <button className="transport-btn" onClick={handlePrevFrame} title="Prev Frame (Left)">
+          <button className="transport-btn monitor-toolbar-btn" onClick={handlePrevFrame} title={trimPreviewActive ? 'Trim Left 1 Frame' : 'Prev Frame (Left)'}>
             &lsaquo;
           </button>
           <button
-            className="transport-btn play-btn"
+            className="transport-btn play-btn monitor-toolbar-btn"
             onClick={handlePlayPause}
             title="Play/Pause (Space)"
+            disabled={trimPreviewActive}
           >
             {isPlaying ? '\u23F8' : '\u25B6'}
           </button>
-          <button className="transport-btn" onClick={handleNextFrame} title="Next Frame">&rsaquo;</button>
-          <button className="transport-btn" onClick={handleFastForward} title="Fast Forward (L)">&raquo;</button>
-          <button className="transport-btn" onClick={handleGoToOut} title="Go to Out">&raquo;|</button>
+          <button className="transport-btn monitor-toolbar-btn" onClick={handleNextFrame} title={trimPreviewActive ? 'Trim Right 1 Frame' : 'Next Frame'}>&rsaquo;</button>
+          <button className="transport-btn monitor-toolbar-btn" onClick={handleFastForward} title={trimPreviewActive ? 'Trim Right 10 Frames' : 'Fast Forward (L)'}>&raquo;</button>
+          <button className="transport-btn monitor-toolbar-btn" onClick={handleGoToOut} title="Go to Out" aria-label="Go to Out point" disabled={trimPreviewActive}>&raquo;|</button>
         </div>
 
-        {/* Mark Out */}
-        <button
-          className="transport-btn"
-          onClick={handleMarkOut}
-          title="Mark Out (O)"
-          style={{ fontSize: 10, fontWeight: 600, color: sourceOutPoint !== null ? 'var(--info)' : undefined }}
-        >
-          O
-        </button>
+        <div className="monitor-footer-spacer" />
 
-        <div style={{ flex: 1 }} />
+        {trimPreviewActive ? (
+          <div className="monitor-footer-group monitor-footer-group-trim" role="group" aria-label="Source trim selection">
+            <button
+              type="button"
+              className={`transport-btn monitor-toolbar-btn trim-side-btn${trimSelectionLabel === 'A' ? ' active' : ''}`}
+              onClick={handleSelectTrimASide}
+              aria-label="Select A-side trim"
+            >
+              A
+            </button>
+            <button
+              type="button"
+              className={`transport-btn monitor-toolbar-btn trim-side-btn${trimSelectionLabel === 'AB' ? ' active' : ''}`}
+              onClick={handleSelectTrimBothSides}
+              aria-label="Select both trim sides"
+            >
+              AB
+            </button>
+            <button
+              type="button"
+              className={`transport-btn monitor-toolbar-btn trim-side-btn${trimSelectionLabel === 'B' ? ' active' : ''}`}
+              onClick={handleSelectTrimBSide}
+              aria-label="Select B-side trim"
+            >
+              B
+            </button>
+            {trimPreviewSide && (
+              <span className="monitor-toolbar-pill" aria-live="polite">
+                {trimPreviewSide.monitorContext}
+              </span>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="monitor-footer-group">
+              <button
+                className={`transport-btn monitor-toolbar-btn${showSafeZones ? ' active' : ''}`}
+                onClick={toggleSafeZones}
+                title="Toggle Safe Zones"
+                style={{ fontSize: 9 }}
+              >
+                SAFE
+              </button>
+            </div>
 
-        {/* Safe zones toggle */}
-        <button
-          className={`transport-btn${showSafeZones ? ' active' : ''}`}
-          onClick={toggleSafeZones}
-          title="Toggle Safe Zones"
-          style={{ fontSize: 9 }}
-        >
-          [&nbsp;]
-        </button>
+            <div className="monitor-footer-group">
+              <select
+                value={activeScope ?? ''}
+                onChange={handleScopeChange}
+                title="Video Scope"
+                disabled={trimPreviewActive}
+                className="monitor-scope-select"
+              >
+                <option value="">No Scope</option>
+                {SCOPE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
 
-        {/* Scope selector */}
-        <select
-          value={activeScope ?? ''}
-          onChange={handleScopeChange}
-          title="Video Scope"
-          style={{
-            background: 'var(--bg-void)',
-            color: 'var(--text-secondary)',
-            border: '1px solid var(--border-default)',
-            borderRadius: 'var(--radius-sm)',
-            fontSize: 10,
-            padding: '2px 4px',
-            outline: 'none',
-          }}
-        >
-          <option value="">No Scope</option>
-          {SCOPE_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+        <div className="monitor-footer-group">
+          <div className="timecode-display monitor-footer-timecode" role="status" aria-live="polite" aria-label="Current timecode">
+            {tc}
+          </div>
+        </div>
       </div>
     </div>
   );

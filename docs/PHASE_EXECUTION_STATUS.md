@@ -192,10 +192,15 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Added a shared audio-processing-policy summary helper so reference and desktop runtimes now agree on which stages are active, bypassed, preview-only, or print-only on every bus.
 - Upgraded audio preview artifacts to include print-reference measurements and per-bus processing-policy deltas, so monitor-path loudness can now be compared directly against the print path.
 - Added richer assistant-editor handoff artifacts with sign-off status, recommended actions, processing-intent summaries, and facility-policy rollups for turnover review.
+- Added a shared execution-policy summary so each bus now resolves to a concrete preview mode (`direct-monitor` or `buffered-preview-cache`) and print mode (`live-print-safe` or `offline-print-render`).
+- Desktop audio preview now writes buffered preview-cache artifacts and an execution-plan manifest whenever the live monitor path cannot safely represent the print chain.
+- Desktop AAF/OMF turnover now writes an `audio-processing.execution-plan.json` plus per-bus print-render artifacts for buses that require offline print rendering, and includes those paths in assistant-editor handoff output.
+- Desktop playback transports now invoke the audio preview path directly during monitor playback, persisting monitor-audio preview state and buffered preview-cache artifacts into the transport manifest instead of leaving that path export-only.
+- The shared desktop monitor hook now consumes transport-side audio preview state, publishes per-monitor buffered-preview status into editor state, and surfaces a restrained monitor diagnostics badge when desktop playback is running on buffered audio preview caches.
 
 ## Next Execution Slices
 
-1. Deepen Phase 3 from artifact-level processing intent into fuller audio workflow behavior: actual preview-vs-print render decisions in the desktop monitor/export path, stricter stem-delivery policy, and facility-ready assistant-editor sign-off outputs.
+1. Deepen Phase 3 from monitor-preview diagnostics into fuller audio workflow behavior: tighten stem-delivery/facility policy, drive explicit preview-vs-print execution choices deeper into desktop monitoring/export behavior, and promote assistant-editor handoff into explicit approval gates.
 
 ## Exit Signals For These Early Phases
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildAudioMixTopology,
+  summarizeAudioBusExecutionPolicy,
   summarizeAudioBusProcessingPolicy,
   type AudioTrackRoutingDescriptor,
 } from '../parity/audioMixTopology';
@@ -92,5 +93,19 @@ describe('buildAudioMixTopology', () => {
     expect(foldDownPolicy.preview.activeStages.map((stage) => stage.kind)).toEqual(['fold-down-matrix']);
     expect(foldDownPolicy.print.activeStages.map((stage) => stage.kind)).toEqual(['fold-down-matrix', 'limiter']);
     expect(foldDownPolicy.preview.bypassedStages.map((stage) => stage.kind)).toEqual(['limiter']);
+
+    const printmasterExecution = summarizeAudioBusExecutionPolicy(
+      topology.buses.find((bus) => bus.role === 'printmaster')!,
+    );
+    const foldDownExecution = summarizeAudioBusExecutionPolicy(
+      topology.buses.find((bus) => bus.role === 'fold-down')!,
+    );
+
+    expect(printmasterExecution.previewMode).toBe('buffered-preview-cache');
+    expect(printmasterExecution.printMode).toBe('offline-print-render');
+    expect(printmasterExecution.previewReasonKinds).toEqual(['meter', 'limiter']);
+    expect(foldDownExecution.previewMode).toBe('buffered-preview-cache');
+    expect(foldDownExecution.printMode).toBe('offline-print-render');
+    expect(foldDownExecution.previewReasonKinds).toEqual(['limiter']);
   });
 });

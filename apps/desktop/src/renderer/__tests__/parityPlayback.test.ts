@@ -77,4 +77,33 @@ describe('desktop parity playback bridge', () => {
     expect(frame?.metadata.timecode).toBe('00:00:01:18');
     expect(frame?.pixelData[0]).toBe(19);
   });
+
+  it('reads audio monitor preview state from the desktop preload bridge', async () => {
+    const getAudioMonitorPreview = vi.fn(async () => ({
+      mixId: 'desktop-mix-project-1',
+      handle: 'desktop-monitor-mix-preview-1',
+      previewPath: '/tmp/audio-monitor.preview.json',
+      executionPlanPath: '/tmp/audio-monitor.execution-plan.json',
+      previewRenderArtifacts: ['/tmp/cache/bus-1.preview-render.json'],
+      bufferedPreviewActive: true,
+      offlinePrintRenderRequired: true,
+      timeRange: {
+        startSeconds: 0,
+        endSeconds: 1,
+      },
+    }));
+
+    root.window!.electronAPI = {
+      parityPlayback: {
+        getAudioMonitorPreview,
+      },
+    } as unknown as typeof window.electronAPI;
+
+    const bridge = new DesktopParityPlaybackBridge();
+    const preview = await bridge.getAudioMonitorPreview('transport-42');
+
+    expect(getAudioMonitorPreview).toHaveBeenCalledWith('transport-42');
+    expect(preview?.bufferedPreviewActive).toBe(true);
+    expect(preview?.executionPlanPath).toContain('audio-monitor.execution-plan.json');
+  });
 });

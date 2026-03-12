@@ -66,6 +66,7 @@ import type {
 import {
   buildAudioMixTopology,
   resolveAudioBusProcessingChain,
+  summarizeAudioBusExecutionPolicy,
   summarizeAudioBusProcessingPolicy,
   type AudioTrackRoutingDescriptor,
 } from './audioMixTopology';
@@ -910,12 +911,17 @@ export class ReferenceNLEParityRuntime {
     );
     const busPolicies = mix.compilation.buses.map((bus) => {
       const policy = summarizeAudioBusProcessingPolicy(bus);
+      const execution = summarizeAudioBusExecutionPolicy(bus);
       return {
         busId: bus.id,
         requiresDedicatedPreviewRender: policy.requiresDedicatedPreviewRender,
         requiresDedicatedPrintRender: policy.requiresDedicatedPrintRender,
         previewBypassedProcessingChain: policy.preview.bypassedStages,
         printBypassedProcessingChain: policy.print.bypassedStages,
+        previewMode: execution.previewMode,
+        printMode: execution.printMode,
+        previewReasonKinds: execution.previewReasonKinds,
+        printReasonKinds: execution.printReasonKinds,
       };
     });
     this.storeArtifact(
@@ -928,6 +934,8 @@ export class ReferenceNLEParityRuntime {
         processingPolicy: {
           requiresDedicatedPreviewRender: busPolicies.some((bus) => bus.requiresDedicatedPreviewRender),
           requiresDedicatedPrintRender: busPolicies.some((bus) => bus.requiresDedicatedPrintRender),
+          requiresBufferedPreviewCaches: busPolicies.some((bus) => bus.previewMode === 'buffered-preview-cache'),
+          requiresOfflinePrintRenders: busPolicies.some((bus) => bus.printMode === 'offline-print-render'),
         },
         buses: mix.compilation.buses.map((bus) => ({
           ...bus,

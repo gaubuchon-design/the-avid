@@ -196,6 +196,19 @@ describe('useDesktopParityMonitorPlayback', () => {
     });
     const play = vi.fn(async () => true);
     const syncFrame = vi.fn(async () => true);
+    const getAudioMonitorPreview = vi.fn(async () => ({
+      mixId: 'desktop-mix-project-1',
+      handle: 'desktop-monitor-mix-preview-1',
+      previewPath: '/tmp/audio-monitor.preview.json',
+      executionPlanPath: '/tmp/audio-monitor.execution-plan.json',
+      previewRenderArtifacts: ['/tmp/cache/bus-1.preview-render.json'],
+      bufferedPreviewActive: true,
+      offlinePrintRenderRequired: true,
+      timeRange: {
+        startSeconds: 1,
+        endSeconds: 2,
+      },
+    }));
     const releaseTransport = vi.fn(async () => true);
     const putImageData = vi.fn();
     const clearRect = vi.fn();
@@ -212,6 +225,7 @@ describe('useDesktopParityMonitorPlayback', () => {
         syncProject,
         createTransport,
         getTransportView: vi.fn(),
+        getAudioMonitorPreview,
         attachStreams,
         preroll,
         start,
@@ -236,8 +250,12 @@ describe('useDesktopParityMonitorPlayback', () => {
     await waitFor(() => {
       expect(start).toHaveBeenCalledTimes(1);
     });
+    await waitFor(() => {
+      expect(useEditorStore.getState().desktopMonitorAudioPreview['record-monitor']?.bufferedPreviewActive).toBe(true);
+    });
 
     expect(syncProject).toHaveBeenCalledTimes(1);
+    expect(getAudioMonitorPreview).toHaveBeenCalledWith('transport-1');
     expect(attachStreams).toHaveBeenCalledWith('transport-1', [
       { streamId: 'program-video-0', assetId: 'asset-video-1', mediaType: 'video', role: 'program' },
       { streamId: 'program-audio-0', assetId: 'asset-audio-1', mediaType: 'audio', role: 'program' },
@@ -255,6 +273,9 @@ describe('useDesktopParityMonitorPlayback', () => {
 
     await waitFor(() => {
       expect(releaseTransport).toHaveBeenCalledWith('transport-1');
+    });
+    await waitFor(() => {
+      expect(useEditorStore.getState().desktopMonitorAudioPreview['record-monitor']).toBeNull();
     });
   });
 
@@ -323,6 +344,19 @@ describe('useDesktopParityMonitorPlayback', () => {
       });
       return true;
     });
+    const getAudioMonitorPreview = vi.fn(async () => ({
+      mixId: 'desktop-mix-project-1',
+      handle: 'desktop-monitor-mix-preview-1',
+      previewPath: '/tmp/audio-monitor.preview.json',
+      executionPlanPath: '/tmp/audio-monitor.execution-plan.json',
+      previewRenderArtifacts: ['/tmp/cache/bus-1.preview-render.json'],
+      bufferedPreviewActive: true,
+      offlinePrintRenderRequired: false,
+      timeRange: {
+        startSeconds: 0,
+        endSeconds: 1,
+      },
+    }));
     const releaseTransport = vi.fn(async () => true);
     const putImageData = vi.fn();
     const clearRect = vi.fn();
@@ -339,6 +373,7 @@ describe('useDesktopParityMonitorPlayback', () => {
         syncProject,
         createTransport,
         getTransportView: vi.fn(),
+        getAudioMonitorPreview,
         attachStreams,
         preroll,
         start,
@@ -367,6 +402,7 @@ describe('useDesktopParityMonitorPlayback', () => {
     expect(preroll).toHaveBeenCalledTimes(1);
     expect(start).not.toHaveBeenCalled();
     expect(syncFrame).not.toHaveBeenCalled();
+    expect(getAudioMonitorPreview).toHaveBeenCalledTimes(1);
 
     act(() => {
       flushAnimationFrame(16);
@@ -432,6 +468,9 @@ describe('useDesktopParityMonitorPlayback', () => {
 
     await waitFor(() => {
       expect(syncFrame).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(getAudioMonitorPreview).toHaveBeenCalledTimes(2);
     });
 
     expect(syncProject).toHaveBeenCalledTimes(1);

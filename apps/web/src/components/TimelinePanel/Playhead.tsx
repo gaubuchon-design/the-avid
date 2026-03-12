@@ -19,8 +19,6 @@ export const Playhead = memo(function Playhead({
   onScrub,
 }: PlayheadProps) {
   const left = time * zoom - scrollLeft;
-  if (left < -1 || left > 10000) return null;
-
   const scrubBindings = usePointerScrub({
     disabled: duration <= 0,
     onScrub: ({ clientX }) => {
@@ -34,6 +32,8 @@ export const Playhead = memo(function Playhead({
       onScrub(nextTime);
     },
   });
+
+  if (left < -1 || left > 10000) return null;
 
   return (
     <div

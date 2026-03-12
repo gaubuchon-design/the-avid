@@ -19,6 +19,20 @@ export interface DesktopParityPlaybackTransportDescriptor {
   view: DesktopParityPlaybackTransportView;
 }
 
+export interface DesktopParityAudioMonitorPreviewState {
+  mixId: string;
+  handle: string;
+  previewPath: string;
+  executionPlanPath: string;
+  previewRenderArtifacts: string[];
+  bufferedPreviewActive: boolean;
+  offlinePrintRenderRequired: boolean;
+  timeRange: {
+    startSeconds: number;
+    endSeconds: number;
+  };
+}
+
 export interface DesktopParityPlaybackFrame {
   metadata: {
     width: number;
@@ -203,6 +217,15 @@ export class DesktopParityPlaybackBridge {
       return null;
     }
     return window.electronAPI.parityPlayback.getTransportView(transportHandle);
+  }
+
+  async getAudioMonitorPreview(
+    transportHandle: string,
+  ): Promise<DesktopParityAudioMonitorPreviewState | null> {
+    if (!window.electronAPI?.parityPlayback) {
+      return null;
+    }
+    return window.electronAPI.parityPlayback.getAudioMonitorPreview(transportHandle);
   }
 
   async readLatestFrame(transportHandle: string): Promise<DesktopParityPlaybackFrame | null> {

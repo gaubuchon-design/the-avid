@@ -45,7 +45,21 @@ export interface AudioBusProcessingPolicySummary {
   requiresDedicatedPrintRender: boolean;
 }
 
+export type AudioPreviewExecutionMode = 'direct-monitor' | 'buffered-preview-cache';
+export type AudioPrintExecutionMode = 'live-print-safe' | 'offline-print-render';
+
+export interface AudioBusExecutionPolicySummary {
+  previewMode: AudioPreviewExecutionMode;
+  printMode: AudioPrintExecutionMode;
+  previewReasonKinds: AudioInsertDefinition['kind'][];
+  printReasonKinds: AudioInsertDefinition['kind'][];
+}
+
 function uniqueLayouts(values: AudioChannelLayout[]): AudioChannelLayout[] {
+  return Array.from(new Set(values));
+}
+
+function uniqueStrings<T extends string>(values: T[]): T[] {
   return Array.from(new Set(values));
 }
 
@@ -156,6 +170,24 @@ export function summarizeAudioBusProcessingPolicy(
       || preview.bypassedStages.length > 0,
     requiresDedicatedPrintRender: print.activeStages.length !== preview.activeStages.length
       || print.bypassedStages.length > 0,
+  };
+}
+
+export function summarizeAudioBusExecutionPolicy(
+  bus: Pick<AudioBusDefinition, 'processingChain'>,
+): AudioBusExecutionPolicySummary {
+  const policy = summarizeAudioBusProcessingPolicy(bus);
+  const previewReasonKinds: AudioInsertDefinition['kind'][] = uniqueStrings(policy.preview.bypassedStages.map((stage) => stage.kind));
+  const printReasonKinds: AudioInsertDefinition['kind'][] = uniqueStrings([
+    ...policy.print.activeStages.map((stage) => stage.kind),
+    ...policy.print.bypassedStages.map((stage) => stage.kind),
+  ]);
+
+  return {
+    previewMode: policy.requiresDedicatedPreviewRender ? 'buffered-preview-cache' : 'direct-monitor',
+    printMode: policy.requiresDedicatedPrintRender ? 'offline-print-render' : 'live-print-safe',
+    previewReasonKinds,
+    printReasonKinds,
   };
 }
 
