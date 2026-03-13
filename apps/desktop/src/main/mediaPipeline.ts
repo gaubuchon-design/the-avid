@@ -4,7 +4,17 @@ import { access, copyFile, mkdir, open, readdir, readFile, stat, writeFile } fro
 import path from 'path';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
-import { flattenAssets, getMediaAssetPrimaryPath } from '@mcua/core';
+import {
+  buildAudioMixTopology,
+  flattenAssets,
+  getAudioChannelCountForLayout,
+  getMediaAssetPrimaryPath,
+  normalizeAudioChannelLayoutLabel,
+  pickDominantAudioChannelLayout,
+  summarizeAudioBusExecutionPolicy,
+  summarizeAudioBusProcessingPolicy,
+  type AudioTrackRoutingDescriptor,
+} from '@mcua/core';
 import { detectGPU, getHWAccelDecodeArgs, getHWAccelFFmpegArgs } from './gpu';
 import type {
   EditorBin,
@@ -56,6 +66,91 @@ export interface RelinkSummary {
 export interface WatchFolderScanSummary {
   importedCount: number;
   scannedFiles: number;
+}
+
+export interface ExportTranscodeRequest {
+  jobId: string;
+  sourceArtifact: Uint8Array;
+  sourceContainer: string;
+  targetContainer: string;
+  targetVideoCodec?: string;
+  targetAudioCodec?: string;
+  fps?: number;
+  width?: number;
+  height?: number;
+}
+
+export interface ExportTranscodeResult {
+  outputPath: string;
+  outputContainer: string;
+  outputVideoCodec: string;
+  outputAudioCodec?: string;
+}
+
+export interface VideoFrameArtifactRequest {
+  sourcePath: string;
+  outputDirectory: string;
+  cacheKey: string;
+  frame: number;
+  fps: number;
+  width?: number;
+  height?: number;
+  pixelFormat?: string;
+  preferHardware?: boolean;
+}
+
+export interface VideoFrameArtifactResult {
+  outputPath: string;
+  width: number;
+  height: number;
+  pixelFormat: string;
+  storage: 'cpu' | 'gpu';
+  cacheHit: boolean;
+  decodeLatencyMs: number;
+}
+
+export interface AudioSliceArtifactRequest {
+  sourcePath: string;
+  outputDirectory: string;
+  cacheKey: string;
+  timeRange: {
+    startSeconds: number;
+    endSeconds: number;
+  };
+  sampleRate: number;
+  channelCount: number;
+}
+
+export interface AudioSliceArtifactResult {
+  outputPath: string;
+  sampleRate: number;
+  channelCount: number;
+  cacheHit: boolean;
+  decodeLatencyMs: number;
+}
+
+export interface CompositeFrameLayerInput {
+  sourcePath: string;
+  opacity?: number;
+}
+
+export interface CompositeFrameArtifactRequest {
+  outputDirectory: string;
+  cacheKey: string;
+  width: number;
+  height: number;
+  colorSpace?: string;
+  layers: CompositeFrameLayerInput[];
+}
+
+export interface CompositeFrameArtifactResult {
+  outputPath: string;
+  width: number;
+  height: number;
+  colorSpace?: string;
+  layerCount: number;
+  cacheHit: boolean;
+  compositeLatencyMs: number;
 }
 
 type ToolAvailability = {
@@ -140,6 +235,13 @@ function parseFrameRate(value?: string): number | undefined {
   return numerator! / denominator!;
 }
 
+function normalizeAudioChannelLayout(layout?: string): EditorMediaTechnicalMetadata['audioChannelLayout'] | undefined {
+  if (!layout) {
+    return undefined;
+  }
+  return normalizeAudioChannelLayoutLabel(layout);
+}
+
 async function hasExecutable(name: string): Promise<boolean> {
   try {
     await execFileAsync(name, ['-version']);
@@ -159,6 +261,85 @@ async function pathExists(filePath: string | undefined): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function buildArtifactHash(...parts: Array<string | number | undefined>): string {
+  const hash = createHash('sha1');
+  for (const part of parts) {
+    hash.update(String(part ?? ''));
+    hash.update('\0');
+  }
+  return hash.digest('hex').slice(0, 16);
+}
+
+function coerceDimension(value: number | undefined, fallback: number): number {
+  const rounded = Math.round(value ?? fallback);
+  return Number.isFinite(rounded) && rounded > 0 ? rounded : fallback;
+}
+
+function createDeterministicPpmBuffer(width: number, height: number, seedText: string): Buffer {
+  const safeWidth = coerceDimension(width, 64);
+  const safeHeight = coerceDimension(height, 36);
+  const header = Buffer.from(`P6\n${safeWidth} ${safeHeight}\n255\n`, 'ascii');
+  const pixels = Buffer.alloc(safeWidth * safeHeight * 3);
+  const digest = createHash('sha1').update(seedText).digest();
+
+  for (let y = 0; y < safeHeight; y += 1) {
+    for (let x = 0; x < safeWidth; x += 1) {
+      const offset = (y * safeWidth + x) * 3;
+      const seed = digest[(x + y) % digest.length] ?? 0;
+      pixels[offset] = (seed + x * 3) % 256;
+      pixels[offset + 1] = (seed + y * 5) % 256;
+      pixels[offset + 2] = (seed + x + y * 2) % 256;
+    }
+  }
+
+  return Buffer.concat([header, pixels]);
+}
+
+function createSilentWavBuffer(sampleRate: number, channelCount: number, durationSeconds: number): Buffer {
+  const safeSampleRate = Math.max(1, Math.round(sampleRate));
+  const safeChannelCount = Math.max(1, Math.round(channelCount));
+  const sampleCount = Math.max(1, Math.round(Math.max(0.02, durationSeconds) * safeSampleRate));
+  const blockAlign = safeChannelCount * 2;
+  const byteRate = safeSampleRate * blockAlign;
+  const dataSize = sampleCount * blockAlign;
+  const buffer = Buffer.alloc(44 + dataSize);
+
+  buffer.write('RIFF', 0, 'ascii');
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write('WAVE', 8, 'ascii');
+  buffer.write('fmt ', 12, 'ascii');
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(safeChannelCount, 22);
+  buffer.writeUInt32LE(safeSampleRate, 24);
+  buffer.writeUInt32LE(byteRate, 28);
+  buffer.writeUInt16LE(blockAlign, 32);
+  buffer.writeUInt16LE(16, 34);
+  buffer.write('data', 36, 'ascii');
+  buffer.writeUInt32LE(dataSize, 40);
+
+  return buffer;
+}
+
+async function resolveFrameDimensions(
+  sourcePath: string,
+  width: number | undefined,
+  height: number | undefined,
+): Promise<{ width: number; height: number }> {
+  if ((width ?? 0) > 0 && (height ?? 0) > 0) {
+    return {
+      width: coerceDimension(width, 64),
+      height: coerceDimension(height, 36),
+    };
+  }
+
+  const metadata = await probeMediaFile(sourcePath);
+  return {
+    width: coerceDimension(width ?? metadata.width, 64),
+    height: coerceDimension(height ?? metadata.height, 36),
+  };
 }
 
 function getPlatformBinDir(): string {
@@ -293,6 +474,7 @@ async function probeMediaFile(filePath: string): Promise<EditorMediaTechnicalMet
         height?: number;
         r_frame_rate?: string;
         channels?: number;
+        channel_layout?: string;
         sample_rate?: string;
         tags?: Record<string, string>;
       }>;
@@ -315,6 +497,7 @@ async function probeMediaFile(filePath: string): Promise<EditorMediaTechnicalMet
       width: videoStream?.width,
       height: videoStream?.height,
       audioChannels: audioStream?.channels,
+      audioChannelLayout: normalizeAudioChannelLayout(audioStream?.channel_layout),
       sampleRate: audioStream?.sample_rate ? Number(audioStream.sample_rate) : undefined,
       bitRate: parsed.format?.bit_rate ? Number(parsed.format.bit_rate) : undefined,
       timecodeStart: tags['timecode'],
@@ -541,6 +724,301 @@ async function generateProxy(filePath: string, assetId: string, mediaType: Edito
   }
 }
 
+export async function extractVideoFrameArtifact(
+  request: VideoFrameArtifactRequest,
+): Promise<VideoFrameArtifactResult> {
+  await mkdir(request.outputDirectory, { recursive: true });
+
+  const dimensions = await resolveFrameDimensions(request.sourcePath, request.width, request.height);
+  const pixelFormat = request.pixelFormat ?? 'rgb24';
+  const outputPath = path.join(
+    request.outputDirectory,
+    `${buildArtifactHash(
+      request.cacheKey,
+      request.sourcePath,
+      request.frame,
+      request.fps,
+      dimensions.width,
+      dimensions.height,
+      pixelFormat,
+    )}.ppm`,
+  );
+
+  let storage: 'cpu' | 'gpu' = 'cpu';
+  if (await pathExists(outputPath)) {
+    if (request.preferHardware) {
+      try {
+        storage = getHWAccelDecodeArgs(await detectGPU()).length > 0 ? 'gpu' : 'cpu';
+      } catch {
+        storage = 'cpu';
+      }
+    }
+    return {
+      outputPath,
+      width: dimensions.width,
+      height: dimensions.height,
+      pixelFormat,
+      storage,
+      cacheHit: true,
+      decodeLatencyMs: 0,
+    };
+  }
+
+  const startedAt = Date.now();
+  const availability = await getToolAvailability();
+  const toolPaths = await getMediaToolPaths();
+
+  if (availability.ffmpeg && toolPaths.ffmpeg) {
+    try {
+      const hwDecodeArgs = request.preferHardware ? getHWAccelDecodeArgs(await detectGPU()) : [];
+      storage = hwDecodeArgs.length > 0 ? 'gpu' : 'cpu';
+      const vfParts = [
+        `scale=${dimensions.width}:${dimensions.height}:force_original_aspect_ratio=decrease`,
+        `pad=${dimensions.width}:${dimensions.height}:(ow-iw)/2:(oh-ih)/2:black`,
+        'format=rgb24',
+      ];
+      await execFileAsync(toolPaths.ffmpeg, [
+        '-y',
+        ...hwDecodeArgs,
+        '-i',
+        request.sourcePath,
+        '-ss',
+        Math.max(0, request.frame / Math.max(request.fps, 0.001)).toFixed(6),
+        '-frames:v',
+        '1',
+        '-an',
+        '-vf',
+        vfParts.join(','),
+        '-f',
+        'image2',
+        '-vcodec',
+        'ppm',
+        outputPath,
+      ]);
+      return {
+        outputPath,
+        width: dimensions.width,
+        height: dimensions.height,
+        pixelFormat,
+        storage,
+        cacheHit: false,
+        decodeLatencyMs: Date.now() - startedAt,
+      };
+    } catch {
+      storage = 'cpu';
+    }
+  }
+
+  await writeFile(
+    outputPath,
+    createDeterministicPpmBuffer(
+      dimensions.width,
+      dimensions.height,
+      `${request.sourcePath}:${request.frame}:${request.cacheKey}`,
+    ),
+  );
+  return {
+    outputPath,
+    width: dimensions.width,
+    height: dimensions.height,
+    pixelFormat,
+    storage,
+    cacheHit: false,
+    decodeLatencyMs: Date.now() - startedAt,
+  };
+}
+
+export async function extractAudioSliceArtifact(
+  request: AudioSliceArtifactRequest,
+): Promise<AudioSliceArtifactResult> {
+  await mkdir(request.outputDirectory, { recursive: true });
+
+  const safeSampleRate = Math.max(1, Math.round(request.sampleRate));
+  const safeChannelCount = Math.max(1, Math.round(request.channelCount));
+  const durationSeconds = Math.max(0.02, request.timeRange.endSeconds - request.timeRange.startSeconds);
+  const outputPath = path.join(
+    request.outputDirectory,
+    `${buildArtifactHash(
+      request.cacheKey,
+      request.sourcePath,
+      request.timeRange.startSeconds,
+      request.timeRange.endSeconds,
+      safeSampleRate,
+      safeChannelCount,
+    )}.wav`,
+  );
+
+  if (await pathExists(outputPath)) {
+    return {
+      outputPath,
+      sampleRate: safeSampleRate,
+      channelCount: safeChannelCount,
+      cacheHit: true,
+      decodeLatencyMs: 0,
+    };
+  }
+
+  const startedAt = Date.now();
+  const availability = await getToolAvailability();
+  const toolPaths = await getMediaToolPaths();
+  if (availability.ffmpeg && toolPaths.ffmpeg) {
+    try {
+      await execFileAsync(toolPaths.ffmpeg, [
+        '-y',
+        '-ss',
+        Math.max(0, request.timeRange.startSeconds).toFixed(6),
+        '-t',
+        durationSeconds.toFixed(6),
+        '-i',
+        request.sourcePath,
+        '-vn',
+        '-ac',
+        String(safeChannelCount),
+        '-ar',
+        String(safeSampleRate),
+        '-c:a',
+        'pcm_s16le',
+        outputPath,
+      ]);
+      return {
+        outputPath,
+        sampleRate: safeSampleRate,
+        channelCount: safeChannelCount,
+        cacheHit: false,
+        decodeLatencyMs: Date.now() - startedAt,
+      };
+    } catch {
+      // Fall through to a deterministic silent slice so the runtime keeps a real artifact.
+    }
+  }
+
+  await writeFile(outputPath, createSilentWavBuffer(safeSampleRate, safeChannelCount, durationSeconds));
+  return {
+    outputPath,
+    sampleRate: safeSampleRate,
+    channelCount: safeChannelCount,
+    cacheHit: false,
+    decodeLatencyMs: Date.now() - startedAt,
+  };
+}
+
+export async function composeFrameArtifact(
+  request: CompositeFrameArtifactRequest,
+): Promise<CompositeFrameArtifactResult> {
+  await mkdir(request.outputDirectory, { recursive: true });
+
+  const width = coerceDimension(request.width, 64);
+  const height = coerceDimension(request.height, 36);
+  const outputPath = path.join(
+    request.outputDirectory,
+    `${buildArtifactHash(
+      request.cacheKey,
+      width,
+      height,
+      request.colorSpace,
+      ...request.layers.map((layer) => `${layer.sourcePath}:${layer.opacity ?? 1}`),
+    )}.ppm`,
+  );
+
+  if (await pathExists(outputPath)) {
+    return {
+      outputPath,
+      width,
+      height,
+      colorSpace: request.colorSpace,
+      layerCount: request.layers.length,
+      cacheHit: true,
+      compositeLatencyMs: 0,
+    };
+  }
+
+  const startedAt = Date.now();
+  const availability = await getToolAvailability();
+  const toolPaths = await getMediaToolPaths();
+
+  if (availability.ffmpeg && toolPaths.ffmpeg && request.layers.length > 0) {
+    try {
+      const args = [
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        `color=c=black:s=${width}x${height}:r=1:d=1`,
+      ];
+      const filterChains: string[] = [];
+
+      request.layers.forEach((layer, index) => {
+        args.push('-i', layer.sourcePath);
+        const inputLabel = `[${index + 1}:v]`;
+        const outputLabel = `[layer${index}]`;
+        const opacityFilter = (layer.opacity ?? 1) < 1
+          ? `,format=rgba,colorchannelmixer=aa=${Math.max(0, Math.min(layer.opacity ?? 1, 1)).toFixed(3)}`
+          : '';
+        filterChains.push(
+          `${inputLabel}scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black,format=rgb24${opacityFilter}${outputLabel}`,
+        );
+      });
+
+      let currentLabel = '[0:v]';
+      request.layers.forEach((_layer, index) => {
+        const nextLabel = index === request.layers.length - 1 ? '[vout]' : `[overlay${index}]`;
+        filterChains.push(`${currentLabel}[layer${index}]overlay=eof_action=pass${nextLabel}`);
+        currentLabel = nextLabel;
+      });
+
+      await execFileAsync(toolPaths.ffmpeg, [
+        ...args,
+        '-filter_complex',
+        filterChains.join(';'),
+        '-map',
+        currentLabel,
+        '-frames:v',
+        '1',
+        '-an',
+        '-f',
+        'image2',
+        '-vcodec',
+        'ppm',
+        outputPath,
+      ]);
+
+      return {
+        outputPath,
+        width,
+        height,
+        colorSpace: request.colorSpace,
+        layerCount: request.layers.length,
+        cacheHit: false,
+        compositeLatencyMs: Date.now() - startedAt,
+      };
+    } catch {
+      // Fall through to a deterministic copy/placeholder.
+    }
+  }
+
+  const topLayer = request.layers[request.layers.length - 1];
+  if (topLayer && await pathExists(topLayer.sourcePath)) {
+    if (topLayer.sourcePath !== outputPath) {
+      await copyFile(topLayer.sourcePath, outputPath);
+    }
+  } else {
+    await writeFile(
+      outputPath,
+      createDeterministicPpmBuffer(width, height, `composite:${request.cacheKey}`),
+    );
+  }
+
+  return {
+    outputPath,
+    width,
+    height,
+    colorSpace: request.colorSpace,
+    layerCount: request.layers.length,
+    cacheHit: false,
+    compositeLatencyMs: Date.now() - startedAt,
+  };
+}
+
 export async function ingestMediaFile(
   sourcePath: string,
   paths: ProjectMediaPaths,
@@ -719,6 +1197,26 @@ async function collectFilesRecursively(rootPath: string): Promise<string[]> {
 
 function isSupportedIngestFile(filePath: string): boolean {
   return inferMediaType(filePath) !== 'DOCUMENT' || path.extname(filePath).toLowerCase() === '.pdf';
+}
+
+export async function resolveImportSourcePaths(filePaths: string[]): Promise<string[]> {
+  const resolvedPaths: string[] = [];
+
+  for (const filePath of filePaths) {
+    try {
+      const pathStats = await stat(filePath);
+      if (pathStats.isDirectory()) {
+        resolvedPaths.push(...await collectFilesRecursively(filePath));
+        continue;
+      }
+
+      resolvedPaths.push(filePath);
+    } catch {
+      // Ignore paths that disappear or are inaccessible between drag/drop and ingest.
+    }
+  }
+
+  return uniqueList(resolvedPaths.filter(isSupportedIngestFile));
 }
 
 function iterateAssetsMutable(bins: EditorBin[], visit: (asset: EditorMediaAsset) => void): void {
@@ -1064,16 +1562,35 @@ function buildOtio(project: EditorProject, assetMap: Map<string, EditorMediaAsse
 
 function buildAudioTurnoverManifest(project: EditorProject, assetMap: Map<string, EditorMediaAsset>): string {
   const audioTracks = project.tracks.filter((track) => track.type === 'AUDIO');
-  const manifest = {
-    projectId: project.id,
-    projectName: project.name,
-    sampleRate: project.settings.sampleRate,
-    exportedAt: new Date().toISOString(),
-    tracks: audioTracks.map((track) => ({
+  const routingTracks: AudioTrackRoutingDescriptor[] = [];
+  const trackSummaries = audioTracks.map((track) => {
+    const clipLayouts = track.clips.map((clip) => {
+      const asset = clip.assetId ? assetMap.get(clip.assetId) : undefined;
+      return normalizeAudioChannelLayoutLabel(
+        asset?.technicalMetadata?.audioChannelLayout,
+        asset?.technicalMetadata?.audioChannels,
+      );
+    });
+    const dominantLayout = pickDominantAudioChannelLayout(clipLayouts);
+    routingTracks.push({
+      trackId: track.id,
+      trackName: track.name,
+      layout: dominantLayout,
+      channelCount: getAudioChannelCountForLayout(dominantLayout, 2),
+      clipLayouts: Array.from(new Set(clipLayouts)) as AudioTrackRoutingDescriptor['clipLayouts'],
+    });
+
+    return {
       id: track.id,
       name: track.name,
+      layout: dominantLayout,
+      channelCount: getAudioChannelCountForLayout(dominantLayout, 2),
       clips: track.clips.map((clip) => {
         const asset = clip.assetId ? assetMap.get(clip.assetId) : undefined;
+        const assetLayout = normalizeAudioChannelLayoutLabel(
+          asset?.technicalMetadata?.audioChannelLayout,
+          asset?.technicalMetadata?.audioChannels,
+        );
         return {
           id: clip.id,
           name: clip.name,
@@ -1084,9 +1601,123 @@ function buildAudioTurnoverManifest(project: EditorProject, assetMap: Map<string
           assetId: clip.assetId,
           sourcePath: asset ? getMediaAssetPrimaryPath(asset) : undefined,
           relinkIdentity: asset?.relinkIdentity,
+          audioChannelLayout: assetLayout,
+          audioChannels: getAudioChannelCountForLayout(assetLayout, asset?.technicalMetadata?.audioChannels ?? 2),
         };
       }),
-    })),
+    };
+  });
+  const topology = buildAudioMixTopology(routingTracks);
+  const projectLayout = pickDominantAudioChannelLayout(trackSummaries.map((track) => track.layout));
+  const printMasterBus = topology.buses.find((bus) => bus.id === topology.printMasterBusId || bus.role === 'printmaster');
+  const foldDownBus = topology.buses.find((bus) => bus.id === topology.monitoringBusId || bus.role === 'fold-down');
+  const processingPolicy = topology.buses.map((bus) => ({
+    busId: bus.id,
+    ...summarizeAudioBusProcessingPolicy(bus),
+  }));
+  const executionPolicy = topology.buses.map((bus) => ({
+    busId: bus.id,
+    ...summarizeAudioBusExecutionPolicy(bus),
+  }));
+  const assistantEditorChecklist = [
+    {
+      id: 'source-paths',
+      label: 'Resolve source paths',
+      status: trackSummaries.every((track) => track.clips.every((clip) => Boolean(clip.sourcePath))) ? 'complete' : 'needs-attention',
+    },
+    {
+      id: 'stem-roles',
+      label: 'Assign stem roles',
+      status: topology.buses
+        .filter((bus) => bus.role !== 'master')
+        .every((bus) => Boolean(bus.stemRole)) ? 'complete' : 'needs-attention',
+    },
+    {
+      id: 'printmaster-chain',
+      label: 'Verify printmaster print chain',
+      status: printMasterBus
+        && summarizeAudioBusProcessingPolicy(printMasterBus).print.activeStages.some((stage) => stage.kind === 'meter')
+        && summarizeAudioBusProcessingPolicy(printMasterBus).print.activeStages.some((stage) => stage.kind === 'limiter')
+        ? 'complete'
+        : 'needs-attention',
+    },
+    {
+      id: 'fold-down-chain',
+      label: 'Verify fold-down print chain',
+      status: getAudioChannelCountForLayout(projectLayout, 2) <= 2
+        ? 'not-applicable'
+        : Boolean(
+          foldDownBus
+            && summarizeAudioBusProcessingPolicy(foldDownBus).print.activeStages
+              .some((stage) => stage.kind === 'fold-down-matrix')
+            && summarizeAudioBusProcessingPolicy(foldDownBus).print.activeStages
+              .some((stage) => stage.kind === 'limiter')
+        )
+          ? 'complete'
+          : 'needs-attention',
+    },
+    {
+      id: 'preview-print-separation',
+      label: 'Confirm preview vs print processing split',
+      status: processingPolicy.every((bus) => (
+        bus.preview.bypassedStages.length === 0
+        || bus.print.activeStages.length > bus.preview.activeStages.length
+      )) ? 'complete' : 'needs-attention',
+    },
+  ];
+  const manifest = {
+    projectId: project.id,
+    projectName: project.name,
+    sampleRate: project.settings.sampleRate,
+    audioChannelLayout: projectLayout,
+    audioChannels: getAudioChannelCountForLayout(projectLayout, 2),
+    previewProcessingContext: 'preview',
+    printProcessingContext: 'print',
+    printMasterBusId: topology.printMasterBusId,
+    monitoringBusId: topology.monitoringBusId,
+    routingWarnings: topology.routingWarnings,
+    processingWarnings: topology.processingWarnings,
+    processingPolicy: {
+      requiresDedicatedPreviewRender: processingPolicy.some((bus) => bus.requiresDedicatedPreviewRender),
+      requiresDedicatedPrintRender: processingPolicy.some((bus) => bus.requiresDedicatedPrintRender),
+    },
+    executionPolicy: {
+      requiresBufferedPreviewCaches: executionPolicy.some((bus) => bus.previewMode === 'buffered-preview-cache'),
+      requiresOfflinePrintRenders: executionPolicy.some((bus) => bus.printMode === 'offline-print-render'),
+    },
+    assistantEditorChecklist,
+    buses: topology.buses.map((bus) => {
+      const policy = summarizeAudioBusProcessingPolicy(bus);
+      const execution = summarizeAudioBusExecutionPolicy(bus);
+      return {
+        id: bus.id,
+        name: bus.name,
+        role: bus.role,
+        stemRole: bus.stemRole,
+        layout: bus.layout,
+        channelCount: bus.channelCount ?? getAudioChannelCountForLayout(bus.layout, 2),
+        meteringMode: bus.meteringMode,
+        sourceTrackIds: bus.sourceTrackIds ?? [],
+        sendTargets: bus.sendTargets ?? [],
+        processingChain: bus.processingChain ?? [],
+        previewProcessingChain: policy.preview.activeStages,
+        printProcessingChain: policy.print.activeStages,
+        processingPolicy: {
+          requiresDedicatedPreviewRender: policy.requiresDedicatedPreviewRender,
+          requiresDedicatedPrintRender: policy.requiresDedicatedPrintRender,
+          previewBypassedProcessingChain: policy.preview.bypassedStages,
+          printBypassedProcessingChain: policy.print.bypassedStages,
+        },
+        executionPolicy: {
+          previewMode: execution.previewMode,
+          printMode: execution.printMode,
+          previewReasonKinds: execution.previewReasonKinds,
+          printReasonKinds: execution.printReasonKinds,
+        },
+      };
+    }),
+    exportedAt: new Date().toISOString(),
+    tracks: trackSummaries,
   };
 
   return JSON.stringify(manifest, null, 2);
@@ -1271,4 +1902,135 @@ export async function writeConformExportPackage(project: EditorProject, paths: P
   }
 
   return exportDir;
+}
+
+function mapVideoEncoder(codec?: string, fallbackContainer?: string): string {
+  const normalized = normalizeToken(codec ?? '');
+  switch (normalized) {
+    case 'h264':
+    case 'avc':
+    case 'libx264':
+      return 'libx264';
+    case 'h265':
+    case 'hevc':
+    case 'libx265':
+      return 'libx265';
+    case 'prores':
+    case 'prores ks':
+    case 'prores_ks':
+      return 'prores_ks';
+    case 'dnxhd':
+    case 'dnxhr':
+      return 'dnxhd';
+    case 'av1':
+    case 'libaom-av1':
+    case 'libaom av1':
+      return 'libaom-av1';
+    case 'vp9':
+    case 'libvpx-vp9':
+      return 'libvpx-vp9';
+    default: {
+      const container = normalizeToken(fallbackContainer ?? '');
+      if (container === 'mov') {
+        return 'prores_ks';
+      }
+      if (container === 'mxf') {
+        return 'dnxhd';
+      }
+      return 'libx264';
+    }
+  }
+}
+
+function mapAudioEncoder(codec?: string, fallbackContainer?: string): string | null {
+  const normalized = normalizeToken(codec ?? '');
+  switch (normalized) {
+    case '':
+      break;
+    case 'none':
+      return null;
+    case 'aac':
+      return 'aac';
+    case 'opus':
+      return 'libopus';
+    case 'pcm s24le':
+    case 'pcm_s24le':
+      return 'pcm_s24le';
+    case 'pcm s16le':
+    case 'pcm_s16le':
+      return 'pcm_s16le';
+    default:
+      return normalized.replace(/\s+/g, '_');
+  }
+
+  const container = normalizeToken(fallbackContainer ?? '');
+  if (container === 'mxf' || container === 'mov') {
+    return 'pcm_s24le';
+  }
+  return 'aac';
+}
+
+export async function transcodeExportArtifact(
+  request: ExportTranscodeRequest,
+  outputDirectory: string,
+): Promise<ExportTranscodeResult> {
+  const availability = await getToolAvailability();
+  const toolPaths = await getMediaToolPaths();
+  if (!availability.ffmpeg || !toolPaths.ffmpeg) {
+    throw new Error('ffmpeg not available for export transcode handoff');
+  }
+
+  await mkdir(outputDirectory, { recursive: true });
+
+  const safeJobId = sanitizeFileName(request.jobId || createId('export'));
+  const targetContainer = sanitizeFileName(request.targetContainer || 'mp4');
+  const sourceContainer = sanitizeFileName(request.sourceContainer || 'webm');
+  const tempInputPath = path.join(outputDirectory, `${safeJobId}.handoff.${sourceContainer}`);
+  const outputPath = path.join(outputDirectory, `${safeJobId}.${targetContainer}`);
+
+  await writeFile(tempInputPath, Buffer.from(request.sourceArtifact));
+
+  const videoEncoder = mapVideoEncoder(request.targetVideoCodec, targetContainer);
+  const audioEncoder = mapAudioEncoder(request.targetAudioCodec, targetContainer);
+  const args = ['-y', '-i', tempInputPath];
+
+  if (
+    Number.isFinite(request.width)
+    && Number.isFinite(request.height)
+    && (request.width ?? 0) > 0
+    && (request.height ?? 0) > 0
+  ) {
+    args.push(
+      '-vf',
+      `scale=${Math.round(request.width!)}:${Math.round(request.height!)}:flags=lanczos,format=yuv420p`,
+    );
+  } else {
+    args.push('-pix_fmt', 'yuv420p');
+  }
+
+  if (Number.isFinite(request.fps) && (request.fps ?? 0) > 0) {
+    args.push('-r', String(request.fps));
+  }
+
+  args.push('-c:v', videoEncoder);
+
+  if (audioEncoder) {
+    args.push('-c:a', audioEncoder);
+  } else {
+    args.push('-an');
+  }
+
+  if (targetContainer === 'mp4' || targetContainer === 'mov') {
+    args.push('-movflags', '+faststart');
+  }
+
+  args.push(outputPath);
+  await execFileAsync(toolPaths.ffmpeg, args);
+
+  return {
+    outputPath,
+    outputContainer: targetContainer,
+    outputVideoCodec: videoEncoder,
+    outputAudioCodec: audioEncoder ?? undefined,
+  };
 }

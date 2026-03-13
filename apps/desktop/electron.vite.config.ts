@@ -12,6 +12,7 @@ export default defineConfig({
       minify: 'esbuild',
       sourcemap: isProduction ? 'hidden' : true,
       rollupOptions: {
+        external: ['aja-ntv2'],
         output: {
           // Preserve dynamic imports for optional native modules
           manualChunks: undefined,

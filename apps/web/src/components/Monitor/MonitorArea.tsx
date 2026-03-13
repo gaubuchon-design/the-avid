@@ -1,14 +1,35 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react';
 import { useEditorStore } from '../../store/editor.store';
+import { usePlayerStore } from '../../store/player.store';
 import { useTitleStore } from '../../store/title.store';
 import { Timecode } from '../../lib/timecode';
+import { TrimStatusOverlay } from '../Editor/TrimStatusOverlay';
+import { DesktopAudioPreviewDiagnostics } from '../Diagnostics/DesktopAudioPreviewDiagnostics';
+import { PlaybackFallbackDiagnostics } from '../Diagnostics/PlaybackFallbackDiagnostics';
+import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
 import {
-  compositeRecordFrame,
+  buildPlaybackSnapshotRenderRevision,
+  getCachedPlaybackSnapshotCanvas,
+  renderPlaybackSnapshotFrame,
+  renderPlaybackSnapshotFrameAsync,
+} from '../../engine/playbackSnapshotFrame';
+import {
   findActiveClip,
+  inspectPlaybackVideoLayerAvailability,
   syncVideoPlayback,
   pauseVideoSource,
   tryLoadClipSource,
 } from '../../engine/compositeRecordFrame';
+import { videoSourceManager } from '../../engine/VideoSourceManager';
+import {
+  findTimelineMonitorMediaSource,
+  previewMonitorAudioOutput,
+  releaseMonitorAudioOutput,
+  syncMonitorAudioOutput,
+} from '../../lib/monitorPlayback';
+import { usePointerScrub } from '../../hooks/usePointerScrub';
+import { useDesktopParityMonitorPlayback } from '../../hooks/useDesktopParityMonitorPlayback';
+import { useMonitorTransportState } from '../../hooks/useMonitorTransportState';
 
 /**
  * MonitorArea — Full-record mode composited monitor.
@@ -17,23 +38,79 @@ import {
  * intrinsic transforms + effects + titles + subtitles + safe zones.
  * Identical output to RecordMonitor (dual mode).
  */
+
+function updateCachedCanvasFrame(
+  sourceCanvas: HTMLCanvasElement,
+  cacheRef: React.MutableRefObject<HTMLCanvasElement | null>,
+): void {
+  if (typeof document === 'undefined') {
+    return;
+  }
+
+  const cachedFrame = cacheRef.current ?? document.createElement('canvas');
+  cachedFrame.width = sourceCanvas.width;
+  cachedFrame.height = sourceCanvas.height;
+  const cachedCtx = cachedFrame.getContext('2d');
+  if (!cachedCtx) {
+    return;
+  }
+
+  cachedCtx.clearRect(0, 0, cachedFrame.width, cachedFrame.height);
+  cachedCtx.drawImage(sourceCanvas, 0, 0, cachedFrame.width, cachedFrame.height);
+  cacheRef.current = cachedFrame;
+}
+
+function drawCanvasFrame(
+  targetCanvas: HTMLCanvasElement,
+  sourceCanvas: HTMLCanvasElement,
+): boolean {
+  const ctx = targetCanvas.getContext('2d');
+  if (!ctx) {
+    return false;
+  }
+
+  ctx.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
+  ctx.drawImage(sourceCanvas, 0, 0, targetCanvas.width, targetCanvas.height);
+  return true;
+}
+
 export function MonitorArea() {
   const {
-    isPlaying, togglePlay, playheadTime, setPlayhead, showSafeZones, duration,
-    tracks, selectedClipIds, inPoint, outPoint, isFullscreen,
+    isPlaying, togglePlay, playheadTime, setPlayhead, duration,
+    tracks, selectedClipIds, inPoint, outPoint,
     projectSettings,
   } = useEditorStore();
+  const bins = useEditorStore((s) => s.bins);
+  const sequenceFps = useEditorStore((s) => s.sequenceSettings.fps);
+  const audioScrubEnabled = useEditorStore((s) => s.audioScrubEnabled);
+  const setActiveMonitor = usePlayerStore((s) => s.setActiveMonitor);
+  const monitorTransport = useMonitorTransportState(playheadTime, isPlaying);
 
   const tc = new Timecode({ fps: projectSettings?.frameRate || 24 });
   const aspectRatio = projectSettings ? projectSettings.width / projectSettings.height : 16 / 9;
-  const totalClips = tracks.reduce((n, t) => n + t.clips.length, 0);
+  const viewingLabel = projectSettings
+    ? `${projectSettings.width}×${projectSettings.height} · ${sequenceFps || projectSettings.frameRate || 24}fps`
+    : '--';
+  const trimActive = useEditorStore((s) => s.trimActive);
+  const trimMode = useEditorStore((s) => s.trimMode);
+  const trimSelectionLabel = useEditorStore((s) => s.trimSelectionLabel);
+  const trimCounterFrames = useEditorStore((s) => s.trimCounterFrames);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const scrubRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>();
-  const lastClipIdRef = useRef<string | null>(null);
+  const activeAssetIdsRef = useRef<Set<string>>(new Set());
+  const cachedFrameRef = useRef<HTMLCanvasElement | null>(null);
+  const inFlightFrameRevisionRef = useRef<string | null>(null);
+  const requestedFrameRevisionRef = useRef<string | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 640, h: 360 });
+  const [sourceRevision, setSourceRevision] = useState(0);
+  const desktopParityPlaybackActive = useDesktopParityMonitorPlayback({
+    consumer: 'program-monitor',
+    canvasRef,
+    canvasSize,
+  });
 
   // Calculate progress
   const progress = duration > 0 ? (playheadTime / duration) * 100 : 0;
@@ -67,62 +144,157 @@ export function MonitorArea() {
     return () => observer.disconnect();
   }, [aspectRatio]);
 
+  useEffect(() => {
+    return videoSourceManager.subscribe(() => {
+      setSourceRevision((revision) => revision + 1);
+    });
+  }, []);
+
   // ── Continuous RAF render loop ─────────────────────────────────────────
   // Uses the shared compositing pipeline for full compositing:
   // intrinsic transforms + effects + titles + subtitles + safe zones.
   useEffect(() => {
+    if (desktopParityPlaybackActive) {
+      return;
+    }
+
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const render = () => {
-      const ctx = canvas.getContext('2d');
-      if (!ctx) { rafRef.current = requestAnimationFrame(render); return; }
-
       const { w, h } = canvasSize;
-      canvas.width = w;
-      canvas.height = h;
+      const renderWidth = Math.max(1, Math.round(w * monitorTransport.renderScale));
+      const renderHeight = Math.max(1, Math.round(h * monitorTransport.renderScale));
+      if (canvas.width !== renderWidth) {
+        canvas.width = renderWidth;
+      }
+      if (canvas.height !== renderHeight) {
+        canvas.height = renderHeight;
+      }
 
       // Read latest state (non-reactive inside RAF)
       const state = useEditorStore.getState();
+      const playerState = usePlayerStore.getState();
       const titleState = useTitleStore.getState();
-
-      // Sync video playback for the active clip
-      const activeClip = findActiveClip(state.tracks, state.playheadTime);
-
-      // Handle clip transitions: pause old clip, start new
-      if (activeClip?.assetId !== lastClipIdRef.current) {
-        if (lastClipIdRef.current) {
-          pauseVideoSource(lastClipIdRef.current);
-        }
-        lastClipIdRef.current = activeClip?.assetId ?? null;
-      }
-
-      // Sync playback for the active clip
-      if (activeClip) {
-        syncVideoPlayback(activeClip, state.isPlaying, state.playheadTime, state.sequenceSettings.fps);
-      }
-
-      // Try loading unloaded clip sources
-      if (activeClip?.assetId) {
-        tryLoadClipSource(activeClip.assetId, state.bins as any);
-      }
-
-      // Composite the full frame
-      compositeRecordFrame({
-        ctx,
-        canvasW: w,
-        canvasH: h,
-        playheadTime: state.playheadTime,
+      const snapshot = buildPlaybackSnapshot({
         tracks: state.tracks,
-        fps: state.sequenceSettings.fps,
-        aspectRatio: 16 / 9,
-        showSafeZones: state.showSafeZones,
-        isPlaying: state.isPlaying,
-        titleClips: state.titleClips,
         subtitleTracks: state.subtitleTracks,
+        titleClips: state.titleClips,
+        playheadTime: state.playheadTime,
+        duration: state.duration,
+        isPlaying: state.isPlaying,
+        showSafeZones: state.showSafeZones,
+        activeMonitor: 'record',
+        activeScope: playerState.activeScope,
+        sequenceSettings: state.sequenceSettings,
+        projectSettings: state.projectSettings,
+      }, 'program-monitor');
+
+      const nextAssetIds = new Set<string>();
+      for (const layer of snapshot.videoLayers) {
+        if (!layer.assetId) {
+          continue;
+        }
+        nextAssetIds.add(layer.assetId);
+        if (!activeAssetIdsRef.current.has(layer.assetId)) {
+          tryLoadClipSource(layer.assetId, state.bins as any);
+        }
+        syncVideoPlayback(layer.clip, state.isPlaying, state.playheadTime, state.sequenceSettings.fps);
+      }
+
+      for (const previousAssetId of activeAssetIdsRef.current) {
+        if (!nextAssetIds.has(previousAssetId)) {
+          pauseVideoSource(previousAssetId);
+        }
+      }
+      activeAssetIdsRef.current = nextAssetIds;
+
+      const layerAvailability = inspectPlaybackVideoLayerAvailability(snapshot);
+      const canHoldPreviousFrame = layerAvailability.totalVideoLayers > 0
+        && layerAvailability.pendingVideoLayers > 0
+        && cachedFrameRef.current;
+
+      const fullQualityFrameRevision = buildPlaybackSnapshotRenderRevision({
+        snapshot,
+        width: renderWidth,
+        height: renderHeight,
         currentTitle: titleState.currentTitle,
         isTitleEditing: titleState.isEditing,
+        colorProcessing: 'post',
+        useCache: true,
       });
+      requestedFrameRevisionRef.current = fullQualityFrameRevision;
+
+      const cachedFullQualityFrame = getCachedPlaybackSnapshotCanvas(fullQualityFrameRevision);
+      if (cachedFullQualityFrame && (!canHoldPreviousFrame || layerAvailability.pendingVideoLayers === 0)) {
+        drawCanvasFrame(canvas, cachedFullQualityFrame);
+        updateCachedCanvasFrame(canvas, cachedFrameRef);
+        rafRef.current = requestAnimationFrame(render);
+        return;
+      }
+
+      if (canHoldPreviousFrame) {
+        const ctx = canvas.getContext('2d');
+        if (ctx && cachedFrameRef.current) {
+          ctx.clearRect(0, 0, renderWidth, renderHeight);
+          ctx.drawImage(cachedFrameRef.current, 0, 0, renderWidth, renderHeight);
+        }
+        rafRef.current = requestAnimationFrame(render);
+        return;
+      }
+
+      renderPlaybackSnapshotFrame({
+        snapshot,
+        width: renderWidth,
+        height: renderHeight,
+        canvas,
+        currentTitle: titleState.currentTitle,
+        isTitleEditing: titleState.isEditing,
+        colorProcessing: monitorTransport.colorProcessing,
+        useCache: monitorTransport.useCache,
+      });
+
+      if (layerAvailability.totalVideoLayers > 0 && layerAvailability.pendingVideoLayers === 0) {
+        updateCachedCanvasFrame(canvas, cachedFrameRef);
+      }
+
+      if (!inFlightFrameRevisionRef.current) {
+        inFlightFrameRevisionRef.current = fullQualityFrameRevision;
+        void renderPlaybackSnapshotFrameAsync({
+          snapshot,
+          width: renderWidth,
+          height: renderHeight,
+          currentTitle: titleState.currentTitle,
+          isTitleEditing: titleState.isEditing,
+          colorProcessing: 'post',
+          useCache: true,
+        }).then((result) => {
+          if (inFlightFrameRevisionRef.current === result.frameRevision) {
+            inFlightFrameRevisionRef.current = null;
+          }
+
+          if (
+            !result.canvas
+            || requestedFrameRevisionRef.current !== result.frameRevision
+            || layerAvailability.pendingVideoLayers > 0
+          ) {
+            return;
+          }
+
+          const visibleCanvas = canvasRef.current;
+          if (!visibleCanvas) {
+            return;
+          }
+
+          if (drawCanvasFrame(visibleCanvas, result.canvas)) {
+            updateCachedCanvasFrame(visibleCanvas, cachedFrameRef);
+          }
+        }).catch(() => {
+          if (inFlightFrameRevisionRef.current === fullQualityFrameRevision) {
+            inFlightFrameRevisionRef.current = null;
+          }
+        });
+      }
 
       rafRef.current = requestAnimationFrame(render);
     };
@@ -130,8 +302,12 @@ export function MonitorArea() {
     rafRef.current = requestAnimationFrame(render);
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      for (const assetId of activeAssetIdsRef.current) {
+        pauseVideoSource(assetId);
+      }
+      activeAssetIdsRef.current.clear();
     };
-  }, [canvasSize]);
+  }, [canvasSize, desktopParityPlaybackActive, monitorTransport.colorProcessing, monitorTransport.renderScale, monitorTransport.useCache]);
 
   // Auto-inspect clip at playhead (Premiere Pro behavior — Inspector shows
   // properties for the clip currently visible in the record monitor)
@@ -145,43 +321,68 @@ export function MonitorArea() {
     }
   }, [playheadTime]);
 
+  useEffect(() => {
+    const candidate = findTimelineMonitorMediaSource(tracks, playheadTime);
+    if (!candidate) {
+      releaseMonitorAudioOutput('program-monitor');
+      return;
+    }
+
+    tryLoadClipSource(candidate.assetId, bins as any);
+    const source = videoSourceManager.getSource(candidate.assetId);
+    if (!source?.ready) {
+      return;
+    }
+
+    syncMonitorAudioOutput(
+      'program-monitor',
+      source.element,
+      candidate.sourceTime,
+      isPlaying,
+      sequenceFps,
+    );
+  }, [bins, isPlaying, playheadTime, sequenceFps, sourceRevision, tracks]);
+
   // ── Scrub bar ──────────────────────────────────────────────────────────
-  const handleScrub = useCallback((e: React.MouseEvent) => {
+  const scrubToTime = useCallback((clientX: number, previewAudio: boolean) => {
     const bar = scrubRef.current;
     if (!bar) return;
     const rect = bar.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    setPlayhead(pct * duration);
-  }, [duration, setPlayhead]);
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const nextTime = pct * duration;
+    setActiveMonitor('record');
+    setPlayhead(nextTime);
 
-  const dragListenersRef = useRef<{ onMove: (ev: MouseEvent) => void; onUp: () => void } | null>(null);
+    if (!previewAudio || isPlaying) {
+      return;
+    }
 
-  const handleScrubDrag = useCallback((e: React.MouseEvent) => {
-    handleScrub(e);
-    const bar = scrubRef.current;
-    if (!bar) return;
-    const onMove = (ev: MouseEvent) => {
-      const rect = bar.getBoundingClientRect();
-      const pct = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
-      setPlayhead(pct * duration);
-    };
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      dragListenersRef.current = null;
-    };
-    dragListenersRef.current = { onMove, onUp };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  }, [duration, setPlayhead, handleScrub]);
+    const state = useEditorStore.getState();
+    const candidate = findTimelineMonitorMediaSource(state.tracks, nextTime);
+    if (!candidate) {
+      releaseMonitorAudioOutput('program-monitor');
+      return;
+    }
+
+    tryLoadClipSource(candidate.assetId, state.bins as any);
+    const source = videoSourceManager.getSource(candidate.assetId);
+    if (!source?.ready) {
+      return;
+    }
+
+    previewMonitorAudioOutput('program-monitor', source.element, candidate.sourceTime);
+  }, [duration, isPlaying, setActiveMonitor, setPlayhead]);
+
+  const scrubBindings = usePointerScrub({
+    disabled: duration <= 0,
+    onScrub: ({ clientX, phase }) => {
+      scrubToTime(clientX, audioScrubEnabled && phase === 'end');
+    },
+  });
 
   useEffect(() => {
     return () => {
-      if (dragListenersRef.current) {
-        window.removeEventListener('mousemove', dragListenersRef.current.onMove);
-        window.removeEventListener('mouseup', dragListenersRef.current.onUp);
-        dragListenersRef.current = null;
-      }
+      releaseMonitorAudioOutput('program-monitor');
     };
   }, []);
 
@@ -220,6 +421,23 @@ export function MonitorArea() {
           {tc.secondsToTC(playheadTime)}
         </div>
 
+        <div
+          style={{
+            position: 'absolute',
+            left: 12,
+            top: 12,
+            zIndex: 2,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
+          <DesktopAudioPreviewDiagnostics consumer="program-monitor" />
+          <PlaybackFallbackDiagnostics consumer="program-monitor" />
+        </div>
+
+        <TrimStatusOverlay />
+
         {/* Controls overlay — top right */}
         <div className="composer-controls-overlay">
           <button className="composer-ctrl-btn" title="Toggle Fullscreen" aria-label="Toggle Fullscreen" onClick={handleFullscreen}>
@@ -235,7 +453,7 @@ export function MonitorArea() {
       <div
         className="composer-scrubbar"
         ref={scrubRef}
-        onMouseDown={handleScrubDrag}
+        {...scrubBindings}
         role="slider"
         aria-valuemin={0}
         aria-valuemax={100}
@@ -279,9 +497,11 @@ export function MonitorArea() {
 
       {/* Status bar */}
       <div className="composer-status-bar">
-        <span>Selected: {selectedClipIds.length}</span>
-        <span>Duration: {tc.secondsToTC(duration)}</span>
-        <span>Viewing: {totalClips > 0 ? `${projectSettings?.width}×${projectSettings?.height}` : '--'}</span>
+        <span>{viewingLabel}</span>
+        <span>{selectedClipIds.length} selected</span>
+        {trimActive && (
+          <span>Trim: {trimMode.toUpperCase()} {trimSelectionLabel} {trimCounterFrames > 0 ? '+' : ''}{trimCounterFrames}f</span>
+        )}
       </div>
     </div>
   );

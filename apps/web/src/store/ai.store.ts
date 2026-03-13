@@ -6,7 +6,7 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import type { AgentPlan } from '../ai/AgentEngine';
-import type { PhraseSearchResult } from '../ai/TranscriptEngine';
+import type { PhraseFindResult } from '../lib/transcriptWorkbench';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -26,7 +26,7 @@ export interface AIState {
   tokenUsedSession: number;
   activeTab: 'chat' | 'transcript' | 'tools';
   transcriptSearchQuery: string;
-  transcriptResults: PhraseSearchResult[];
+  transcriptResults: PhraseFindResult[];
   geminiApiKey: string;
   mcpServerUrl: string;
   streamingText: string;
@@ -40,7 +40,7 @@ interface AIActions {
   deductTokens: (amount: number) => void;
   setActiveTab: (tab: 'chat' | 'transcript' | 'tools') => void;
   setTranscriptSearch: (query: string) => void;
-  setTranscriptResults: (results: PhraseSearchResult[]) => void;
+  setTranscriptResults: (results: PhraseFindResult[]) => void;
   clearChat: () => void;
   setGeminiApiKey: (key: string) => void;
   setMCPServerUrl: (url: string) => void;

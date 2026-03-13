@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
+import React, { useState, useEffect, useCallback, memo } from 'react';
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import {
@@ -9,6 +9,9 @@ import {
   ExportDestination,
   CaptionFormat,
 } from '../../engine/ExportEngine';
+import { useEditorStore } from '../../store/editor.store';
+import { buildExportPlaybackSnapshot, buildExportSelectionSummary } from '../../lib/exportSelection';
+import { renderPlaybackSnapshotFrame } from '../../engine/playbackSnapshotFrame';
 
 // =============================================================================
 //  Inline Zustand store for export wizard state
@@ -133,6 +136,20 @@ const DESTINATIONS: { key: ExportDestination; icon: string; label: string }[] = 
 
 const CAPTION_FORMATS: CaptionFormat[] = ['srt', 'vtt', 'scc', 'ttml'];
 
+function formatTimecode(seconds: number, fps = 24): string {
+  const totalFrames = Math.max(0, Math.round(seconds * fps));
+  const h = Math.floor(totalFrames / (fps * 3600));
+  const m = Math.floor((totalFrames % (fps * 3600)) / (fps * 60));
+  const s = Math.floor((totalFrames % (fps * 60)) / fps);
+  const f = totalFrames % Math.ceil(fps);
+  return [
+    String(h).padStart(2, '0'),
+    String(m).padStart(2, '0'),
+    String(s).padStart(2, '0'),
+    String(f).padStart(2, '0'),
+  ].join(':');
+}
+
 // =============================================================================
 //  Sub-components
 // =============================================================================
@@ -190,6 +207,27 @@ const StepIndicator = memo(function StepIndicator({ current }: { current: number
 
 function StepSelect() {
   const { selectionMode, setSelectionMode } = useExportStore();
+  const tracks = useEditorStore((s) => s.tracks);
+  const selectedClipIds = useEditorStore((s) => s.selectedClipIds);
+  const inPoint = useEditorStore((s) => s.inPoint);
+  const outPoint = useEditorStore((s) => s.outPoint);
+  const playheadTime = useEditorStore((s) => s.playheadTime);
+  const duration = useEditorStore((s) => s.duration);
+  const sequenceSettings = useEditorStore((s) => s.sequenceSettings);
+  const projectSettings = useEditorStore((s) => s.projectSettings);
+  const selectionSummary = buildExportSelectionSummary({
+    tracks,
+    subtitleTracks: [],
+    titleClips: [],
+    selectedClipIds,
+    inPoint,
+    outPoint,
+    playheadTime,
+    duration,
+    showSafeZones: false,
+    sequenceSettings,
+    projectSettings,
+  }, selectionMode);
   const modes: { key: typeof selectionMode; label: string; desc: string }[] = [
     { key: 'full', label: 'Full Sequence', desc: 'Export the entire timeline' },
     { key: 'inout', label: 'In/Out Range', desc: 'Export between In and Out points' },
@@ -240,12 +278,37 @@ function StepSelect() {
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
           <span style={{ color: 'var(--text-muted)' }}>Duration</span>
-          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>00:00:34:00</span>
+          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
+            {selectionSummary.valid ? formatTimecode(selectionSummary.duration, sequenceSettings.fps) : '--:--:--:--'}
+          </span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 4 }}>
           <span style={{ color: 'var(--text-muted)' }}>Frames</span>
-          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>816</span>
+          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
+            {selectionSummary.frameCount || 0}
+          </span>
         </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 4 }}>
+          <span style={{ color: 'var(--text-muted)' }}>Range</span>
+          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
+            {selectionSummary.valid
+              ? `${formatTimecode(selectionSummary.inPoint, sequenceSettings.fps)} → ${formatTimecode(selectionSummary.outPoint, sequenceSettings.fps)}`
+              : 'Unavailable'}
+          </span>
+        </div>
+        {selectionMode === 'selected' && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 4 }}>
+            <span style={{ color: 'var(--text-muted)' }}>Selected Clips</span>
+            <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
+              {selectionSummary.selectedClipCount}
+            </span>
+          </div>
+        )}
+        {!selectionSummary.valid && (
+          <div style={{ marginTop: 8, fontSize: 10, color: 'var(--warning, #f59e0b)' }}>
+            {selectionSummary.issue}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -446,8 +509,45 @@ function StepDestination() {
 function StepExport() {
   const { selectedPresetId, destination, selectionMode, includeCaptions, captionFormat, jobs, syncJobs } =
     useExportStore();
+  const tracks = useEditorStore((s) => s.tracks);
+  const subtitleTracks = useEditorStore((s) => s.subtitleTracks);
+  const titleClips = useEditorStore((s) => s.titleClips);
+  const selectedClipIds = useEditorStore((s) => s.selectedClipIds);
+  const inPoint = useEditorStore((s) => s.inPoint);
+  const outPoint = useEditorStore((s) => s.outPoint);
+  const playheadTime = useEditorStore((s) => s.playheadTime);
+  const duration = useEditorStore((s) => s.duration);
+  const showSafeZones = useEditorStore((s) => s.showSafeZones);
+  const sequenceSettings = useEditorStore((s) => s.sequenceSettings);
+  const projectSettings = useEditorStore((s) => s.projectSettings);
   const preset = selectedPresetId ? exportEngine.getPreset(selectedPresetId) : undefined;
   const [exporting, setExporting] = useState(false);
+  const selectionSummary = buildExportSelectionSummary({
+    tracks,
+    subtitleTracks,
+    titleClips,
+    selectedClipIds,
+    inPoint,
+    outPoint,
+    playheadTime,
+    duration,
+    showSafeZones,
+    sequenceSettings,
+    projectSettings,
+  }, selectionMode);
+  const exportSnapshot = buildExportPlaybackSnapshot({
+    tracks,
+    subtitleTracks,
+    titleClips,
+    selectedClipIds,
+    inPoint,
+    outPoint,
+    playheadTime,
+    duration,
+    showSafeZones,
+    sequenceSettings,
+    projectSettings,
+  }, selectionMode);
 
   // Poll jobs from engine
   useEffect(() => {
@@ -458,12 +558,75 @@ function StepExport() {
   }, [syncJobs]);
 
   const handleExport = useCallback(() => {
-    if (!selectedPresetId) return;
+    if (!selectedPresetId || !selectionSummary.valid) return;
     setExporting(true);
+
+    let renderFrameRevision: string | undefined;
+    let previewImageDataUrl: string | undefined;
+    if (typeof document !== 'undefined') {
+      const previewCanvas = document.createElement('canvas');
+      const renderResult = renderPlaybackSnapshotFrame({
+        snapshot: exportSnapshot,
+        width: preset?.resolution.width ?? sequenceSettings.width,
+        height: preset?.resolution.height ?? sequenceSettings.height,
+        canvas: previewCanvas,
+        colorProcessing: 'post',
+        overlayProcessing: 'post',
+        useCache: true,
+      });
+
+      renderFrameRevision = renderResult.frameRevision;
+      try {
+        previewImageDataUrl = renderResult.canvas?.toDataURL('image/jpeg', 0.72);
+      } catch {
+        previewImageDataUrl = undefined;
+      }
+    }
+
     exportEngine.startExport(selectedPresetId, destination, {
+      inFrame: Math.round(selectionSummary.inPoint * sequenceSettings.fps),
+      outFrame: Math.round(selectionSummary.outPoint * sequenceSettings.fps),
+      selectionLabel: selectionSummary.label,
+      snapshot: exportSnapshot,
+      renderFrameRevision,
+      renderProcessing: 'post',
+      renderOverlayProcessing: 'post',
+      previewImageDataUrl,
       captionFormat: includeCaptions ? captionFormat : undefined,
+      duration: selectionSummary.duration,
+      renderSource: {
+        tracks,
+        subtitleTracks,
+        titleClips,
+        showSafeZones,
+        sequenceSettings,
+        projectSettings,
+        sequenceDuration: Math.max(duration, selectionSummary.outPoint),
+        inPoint: selectionSummary.inPoint,
+        outPoint: selectionSummary.outPoint,
+      },
     });
-  }, [selectedPresetId, destination, includeCaptions, captionFormat]);
+  }, [
+    captionFormat,
+    destination,
+    duration,
+    exportSnapshot,
+    includeCaptions,
+    projectSettings,
+    preset?.resolution.height,
+    preset?.resolution.width,
+    selectedPresetId,
+    sequenceSettings,
+    selectionSummary.duration,
+    selectionSummary.inPoint,
+    selectionSummary.outPoint,
+    selectionSummary.label,
+    selectionSummary.valid,
+    showSafeZones,
+    subtitleTracks,
+    titleClips,
+    tracks,
+  ]);
 
   const handleCancel = useCallback(
     (jobId: string) => {
@@ -491,25 +654,51 @@ function StepExport() {
           fontSize: 11,
         }}
       >
-        <Row label="Selection" value={selectionMode === 'full' ? 'Full Sequence' : selectionMode === 'inout' ? 'In/Out Range' : 'Selected Clips'} />
+        <Row label="Selection" value={selectionSummary.label} />
         <Row label="Format" value={preset ? `${preset.name} (${preset.format.toUpperCase()})` : 'None'} />
         <Row label="Resolution" value={preset ? `${preset.resolution.width}x${preset.resolution.height}` : '--'} />
         <Row label="Bitrate" value={preset?.bitrate ?? '--'} />
         <Row label="Destination" value={destLabel} />
+        <Row
+          label="Range"
+          value={selectionSummary.valid
+            ? `${formatTimecode(selectionSummary.inPoint, sequenceSettings.fps)} → ${formatTimecode(selectionSummary.outPoint, sequenceSettings.fps)}`
+            : 'Unavailable'}
+        />
+        <Row
+          label="Preview"
+          value={`${formatTimecode(selectionSummary.previewTime, sequenceSettings.fps)} · ${exportSnapshot.primaryVideoLayer?.clip.name ?? 'No active clip'}`}
+        />
+        {selectionMode === 'selected' && <Row label="Selected Clips" value={String(selectionSummary.selectedClipCount)} />}
         {includeCaptions && <Row label="Captions" value={captionFormat.toUpperCase()} />}
       </div>
+      {!selectionSummary.valid && (
+        <div
+          style={{
+            marginBottom: 12,
+            padding: '10px 12px',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--border-subtle)',
+            background: 'var(--bg-raised)',
+            color: 'var(--warning, #f59e0b)',
+            fontSize: 10,
+          }}
+        >
+          {selectionSummary.issue}
+        </div>
+      )}
 
       {/* Start button */}
       {!exporting && (
         <button
           onClick={handleExport}
-          disabled={!selectedPresetId}
+          disabled={!selectedPresetId || !selectionSummary.valid}
           style={{
             ...btn('primary'),
             width: '100%',
             padding: '10px 0',
             fontSize: 12,
-            opacity: selectedPresetId ? 1 : 0.4,
+            opacity: selectedPresetId && selectionSummary.valid ? 1 : 0.4,
           }}
         >
           Start Export
@@ -577,6 +766,37 @@ const JobCard = memo(function JobCard({ job, onCancel }: { job: ExportJob; onCan
       {/* Progress bar */}
       {(job.status === 'encoding' || job.status === 'uploading') && (
         <>
+          {job.previewImageDataUrl && (
+            <img
+              src={job.previewImageDataUrl}
+              alt="Export preview"
+              style={{
+                width: '100%',
+                aspectRatio: '16 / 9',
+                objectFit: 'cover',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-subtle)',
+                marginBottom: 8,
+                background: '#000',
+              }}
+            />
+          )}
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>
+            <span>{job.selectionLabel ?? 'Export'}</span>
+            {job.inFrame !== undefined && job.outFrame !== undefined && (
+              <span>{job.inFrame}f → {job.outFrame}f</span>
+            )}
+          </div>
+          {job.previewClipName && (
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>
+              Preview {job.previewClipName}
+            </div>
+          )}
+          {job.renderFrameRevision && (
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>
+              Rendered {job.renderProcessing ?? 'pre'} frame ({job.renderOverlayProcessing ?? 'post'} overlay) locked to shared revision
+            </div>
+          )}
           <div style={{ height: 4, borderRadius: 2, background: 'var(--bg-elevated)', overflow: 'hidden', marginBottom: 4 }} role="progressbar" aria-valuenow={job.progress} aria-valuemin={0} aria-valuemax={100} aria-label="Export progress">
             <div
               style={{

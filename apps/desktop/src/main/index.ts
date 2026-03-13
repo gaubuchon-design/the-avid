@@ -23,10 +23,11 @@ import os from 'os';
 import path from 'path';
 import { randomBytes } from 'node:crypto';
 import { flattenAssets, PROJECT_SCHEMA_VERSION } from '@mcua/core';
-import type { EditorMediaAsset, EditorProject } from '@mcua/core';
+import type { EditorBin, EditorMediaAsset, EditorProject } from '@mcua/core';
 import { detectGPU } from './gpu';
 import { FileLogger } from './logging/FileLogger';
 import { VideoIOManager } from './videoIO/VideoIOManager';
+import { DesktopParityPlaybackManager } from './parity/DesktopParityPlaybackManager';
 import { StreamManager } from './streaming/StreamManager';
 import { DeckControlManager } from './deckControl/DeckControlManager';
 import {
@@ -36,9 +37,11 @@ import {
   ingestMediaFile,
   mergeIntoMediaIndex,
   relinkProjectMedia,
+  resolveImportSourcePaths,
   scanProjectMedia,
   scanWatchFolderIntoProject,
   sanitizeFileName,
+  transcodeExportArtifact,
   writeConformExportPackage,
   writeMediaIndexManifest,
 } from './mediaPipeline';
@@ -387,6 +390,30 @@ const secondaryWindows = new Set<BrowserWindow>();
 const videoIOManager = new VideoIOManager();
 const streamManager = new StreamManager();
 const deckControlManager = new DeckControlManager();
+const parityPlaybackManager = new DesktopParityPlaybackManager({
+  getProjectPackagePath,
+  ensureProjectPackageDir,
+  outputBindings: {
+    startPlayback: async (config) => {
+      const result = await videoIOManager.startPlayback(config);
+      if (!result.ok) {
+        throw new Error(result.error ?? `Failed to start playback on ${config.deviceId}`);
+      }
+    },
+    stopPlayback: async (deviceId) => {
+      const result = await videoIOManager.stopPlayback(deviceId);
+      if (!result.ok) {
+        throw new Error(result.error ?? `Failed to stop playback on ${deviceId}`);
+      }
+    },
+    sendFrame: async (deviceId, frameData) => {
+      const result = await videoIOManager.sendFrame(deviceId, frameData);
+      if (!result.ok) {
+        throw new Error(result.error ?? `Failed to send frame to ${deviceId}`);
+      }
+    },
+  },
+});
 const PROJECT_STORE_DIR = 'projects';
 const PROJECT_FILE_EXTENSION = '.avidproj.json';
 const PROJECT_MANIFEST_FILE = 'project.avid.json';
@@ -668,6 +695,57 @@ function createId(prefix: string): string {
   return `${prefix}-${randomBytes(4).toString('hex')}`;
 }
 
+function findBinByIdMutable(bins: EditorBin[], binId: string): EditorBin | null {
+  for (const bin of bins) {
+    if (bin.id === binId) {
+      return bin;
+    }
+
+    const nested = findBinByIdMutable(bin.children, binId);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return null;
+}
+
+function ensureDesktopImportBin(project: EditorProject, binId?: string): EditorBin {
+  if (binId) {
+    const existing = findBinByIdMutable(project.bins, binId);
+    if (existing) {
+      return existing;
+    }
+  }
+
+  const firstBin = project.bins[0];
+  if (firstBin) {
+    return firstBin;
+  }
+
+  const bin: EditorBin = {
+    id: createId('bin'),
+    name: 'Imported Media',
+    color: '#4f63f5',
+    parentId: undefined,
+    children: [],
+    assets: [],
+    isOpen: true,
+  };
+  project.bins.unshift(bin);
+  return bin;
+}
+
+function appendImportedAssetsToBin(bin: EditorBin, assets: EditorMediaAsset[]): void {
+  const existingIds = new Set(bin.assets.map((asset) => asset.id));
+  for (const asset of assets) {
+    if (!existingIds.has(asset.id)) {
+      bin.assets.unshift(asset);
+      existingIds.add(asset.id);
+    }
+  }
+}
+
 function getProjectStorePath(): string {
   return path.join(app.getPath('userData'), PROJECT_STORE_DIR);
 }
@@ -752,6 +830,7 @@ async function savePersistedProject(project: EditorProject): Promise<EditorProje
   } catch {
     // Ignore missing legacy files after migrating to package storage.
   }
+  await parityPlaybackManager.syncProject(nextProject);
   await syncProjectWatchers(nextProject);
   void addRecentProject(nextProject);
   return nextProject;
@@ -877,16 +956,30 @@ async function syncAllProjectWatchers(): Promise<void> {
   await Promise.all(projects.map((project) => syncProjectWatchers(project, true)));
 }
 
-async function importMediaIntoProject(projectId: string, filePaths: string[]): Promise<EditorMediaAsset[]> {
+async function importMediaIntoProject(
+  projectId: string,
+  filePaths: string[],
+  binId?: string,
+): Promise<EditorMediaAsset[]> {
+  const project = await getPersistedProject(projectId);
+  if (!project) {
+    throw new Error(`Project not found: ${projectId}`);
+  }
+
   await ensureProjectPackageDir(projectId);
   const mediaPaths = createProjectMediaPaths(getProjectPackagePath(projectId));
+  const resolvedPaths = await resolveImportSourcePaths(filePaths);
+  if (resolvedPaths.length === 0) {
+    throw new Error('No supported media files were found in the dropped selection');
+  }
+  const targetBin = ensureDesktopImportBin(project, binId);
 
   const jobId = createId('job');
   upsertDesktopJob({
     id: jobId,
     kind: 'INGEST',
     projectId,
-    label: `Ingesting, indexing, and organizing ${filePaths.length} file${filePaths.length === 1 ? '' : 's'}`,
+    label: `Ingesting, indexing, and organizing ${resolvedPaths.length} file${resolvedPaths.length === 1 ? '' : 's'}`,
     status: 'QUEUED',
     progress: 0,
     startedAt: new Date().toISOString(),
@@ -896,13 +989,13 @@ async function importMediaIntoProject(projectId: string, filePaths: string[]): P
   const assets: EditorMediaAsset[] = [];
 
   const errors: string[] = [];
-  for (let index = 0; index < filePaths.length; index += 1) {
-    const sourcePath = filePaths[index]!;
+  for (let index = 0; index < resolvedPaths.length; index += 1) {
+    const sourcePath = resolvedPaths[index]!;
 
     upsertDesktopJob({
       ...desktopJobs.get(jobId)!,
       status: 'RUNNING',
-      progress: Math.round((index / Math.max(filePaths.length, 1)) * 100),
+      progress: Math.round((index / Math.max(resolvedPaths.length, 1)) * 100),
     });
 
     try {
@@ -920,7 +1013,8 @@ async function importMediaIntoProject(projectId: string, filePaths: string[]): P
   }
 
   if (assets.length > 0) {
-    await mergeIntoMediaIndex(projectId, assets, mediaPaths);
+    appendImportedAssetsToBin(targetBin, assets);
+    await savePersistedProject(project);
   }
 
   upsertDesktopJob({
@@ -1396,6 +1490,7 @@ if (!gotTheLock) {
 
     // Initialize professional I/O subsystems (non-blocking — missing modules are OK)
     videoIOManager.registerIPCHandlers();
+    parityPlaybackManager.registerIPCHandlers();
     streamManager.registerIPCHandlers();
     deckControlManager.registerIPCHandlers();
 
@@ -1722,13 +1817,16 @@ ipcMain.handle('projects:delete', async (_event, projectId: unknown) => {
   return true;
 });
 
-ipcMain.handle('projects:import-media', async (_event, projectId: unknown, filePaths: unknown) => {
+ipcMain.handle('projects:import-media', async (_event, projectId: unknown, filePaths: unknown, binId: unknown) => {
   assertString(projectId, 'projectId');
   assertStringArray(filePaths, 'filePaths');
+  if (binId !== undefined) {
+    assertString(binId, 'binId');
+  }
   if (filePaths.length === 0) {
     throw new Error('filePaths must contain at least one path');
   }
-  return importMediaIntoProject(projectId, filePaths);
+  return importMediaIntoProject(projectId, filePaths, binId as string | undefined);
 });
 
 ipcMain.handle('projects:scan-media', async (_event, projectId: unknown) => {
@@ -1773,6 +1871,57 @@ ipcMain.handle('jobs:start-export', async (_event, project: unknown) => {
     throw new Error('Project must have a valid string "id" field');
   }
   return startExportJob(project as unknown as EditorProject);
+});
+
+ipcMain.handle('jobs:transcode-export-artifact', async (_event, payload: unknown) => {
+  assertObject(payload, 'payload');
+
+  const {
+    jobId,
+    sourceArtifact,
+    sourceContainer,
+    targetContainer,
+    targetVideoCodec,
+    targetAudioCodec,
+    fps,
+    width,
+    height,
+  } = payload as Record<string, unknown>;
+
+  assertString(jobId, 'jobId');
+  if (!(sourceArtifact instanceof Uint8Array)) {
+    throw new Error('Invalid parameter "sourceArtifact": expected Uint8Array');
+  }
+  assertString(sourceContainer, 'sourceContainer');
+  assertString(targetContainer, 'targetContainer');
+  if (targetVideoCodec !== undefined && typeof targetVideoCodec !== 'string') {
+    throw new Error('Invalid parameter "targetVideoCodec": expected string');
+  }
+  if (targetAudioCodec !== undefined && typeof targetAudioCodec !== 'string') {
+    throw new Error('Invalid parameter "targetAudioCodec": expected string');
+  }
+  if (fps !== undefined && typeof fps !== 'number') {
+    throw new Error('Invalid parameter "fps": expected number');
+  }
+  if (width !== undefined && typeof width !== 'number') {
+    throw new Error('Invalid parameter "width": expected number');
+  }
+  if (height !== undefined && typeof height !== 'number') {
+    throw new Error('Invalid parameter "height": expected number');
+  }
+
+  const outputDirectory = path.join(app.getPath('documents'), 'The Avid', 'exports', 'handoff');
+  return transcodeExportArtifact({
+    jobId,
+    sourceArtifact,
+    sourceContainer,
+    targetContainer,
+    targetVideoCodec,
+    targetAudioCodec,
+    fps,
+    width,
+    height,
+  }, outputDirectory);
 });
 
 // ─── File System Handlers (path sanitization) ─────────────────────────────────

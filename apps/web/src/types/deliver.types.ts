@@ -196,7 +196,7 @@ export interface CaptionStyle {
   outline: boolean;
 }
 
-/** Complete export settings — configured in the center panel of DeliverPage. */
+/** Complete export settings — configured in the export panel workflow. */
 export interface ExportSettings {
   // Video
   videoCodec: ExportFormat;

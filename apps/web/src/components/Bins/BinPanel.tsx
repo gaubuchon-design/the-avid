@@ -1,6 +1,7 @@
 import React, { useState, memo, useCallback } from 'react';
 import { useEditorStore } from '../../store/editor.store';
 import type { Bin, MediaAsset, SmartBin } from '../../store/editor.store';
+import { extractDesktopDroppedPaths } from '../../lib/desktopDropPaths';
 
 function formatDuration(sec?: number): string {
   if (!sec) return '--:--';
@@ -300,7 +301,18 @@ function SmartBinItem({ smartBin }: { smartBin: SmartBin }) {
 /* ─── Main BinPanel ───────────────────────────────────────────────────── */
 
 export function BinPanel() {
-  const { bins, activeBinAssets, toolbarTab, addBin, selectedBinId, smartBins, importMediaFiles, ingestProgress } = useEditorStore();
+  const {
+    bins,
+    activeBinAssets,
+    toolbarTab,
+    addBin,
+    selectedBinId,
+    smartBins,
+    importMediaFiles,
+    ingestProgress,
+    projectId,
+    loadProject,
+  } = useEditorStore();
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [tab, setTab] = useState<'bins' | 'smart' | 'search'>('bins');
@@ -331,13 +343,66 @@ export function BinPanel() {
       setIsDragOver(false);
     }
   };
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
-    if (e.dataTransfer.files?.length) {
-      importMediaFiles(e.dataTransfer.files, selectedBinId ?? undefined);
+    if (!e.dataTransfer.files?.length) {
+      return;
     }
+
+    const droppedFiles = e.dataTransfer.files;
+    const desktopPaths = extractDesktopDroppedPaths(Array.from(droppedFiles));
+
+    if (window.electronAPI && projectId && desktopPaths.length > 0) {
+      try {
+        await window.electronAPI.importMedia(projectId, desktopPaths, selectedBinId ?? undefined);
+        await loadProject(projectId);
+        return;
+      } catch (error) {
+        console.error('Desktop drag-and-drop ingest failed', error);
+      }
+    }
+
+    importMediaFiles(droppedFiles, selectedBinId ?? undefined);
   };
+
+  const openBrowserFilePicker = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.accept = 'video/*,audio/*,image/*,.svg,.exr,.dpx,.tga,.psd,.mxf,.avi,.mkv';
+    input.onchange = () => {
+      if (input.files?.length) {
+        importMediaFiles(input.files, selectedBinId ?? undefined);
+      }
+    };
+    input.click();
+  }, [importMediaFiles, selectedBinId]);
+
+  const handleImportMediaClick = useCallback(async () => {
+    if (!window.electronAPI || !projectId) {
+      openBrowserFilePicker();
+      return;
+    }
+
+    try {
+      const result = await window.electronAPI.openFile({
+        title: 'Import Media',
+        buttonLabel: 'Import',
+        properties: ['openFile', 'openDirectory', 'multiSelections'],
+      });
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return;
+      }
+
+      await window.electronAPI.importMedia(projectId, result.filePaths, selectedBinId ?? undefined);
+      await loadProject(projectId);
+    } catch (error) {
+      console.error('Desktop file-picker ingest failed', error);
+      openBrowserFilePicker();
+    }
+  }, [loadProject, openBrowserFilePicker, projectId, selectedBinId]);
 
   return (
     <div
@@ -357,7 +422,7 @@ export function BinPanel() {
           pointerEvents: 'none',
         }}>
           <div style={{ color: 'var(--brand-bright)', fontSize: 13, fontWeight: 600, textAlign: 'center' }}>
-            Drop media files to import<br />
+            Drop media files{window.electronAPI ? ' or folders' : ''} to import<br />
             <span style={{ fontSize: 11, opacity: 0.7 }}>Video, Audio, Images, Graphics</span>
           </div>
         </div>
@@ -370,17 +435,7 @@ export function BinPanel() {
             <>
               <button className="tl-btn" title="Import Media" style={{ fontSize: 12 }}
                 onClick={() => {
-                  // Trigger native file picker (mock — in production connects to media ingest pipeline)
-                  const input = document.createElement('input');
-                  input.type = 'file';
-                  input.multiple = true;
-                  input.accept = 'video/*,audio/*,image/*,.svg,.exr,.dpx,.tga,.psd,.mxf,.avi,.mkv';
-                  input.onchange = () => {
-                    if (input.files?.length) {
-                      importMediaFiles(input.files, selectedBinId ?? undefined);
-                    }
-                  };
-                  input.click();
+                  void handleImportMediaClick();
                 }}>+</button>
               <button className="tl-btn" title="New Bin"
                 onClick={() => setShowNewBinInput(true)}>

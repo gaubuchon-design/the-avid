@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { flattenAssets, getProjectDuration } from '../project-library';
+import {
+  buildProject,
+  buildSeedProjectLibrary,
+  flattenAssets,
+  getProjectDuration,
+  hydrateProject,
+} from '../project-library';
 import type { EditorBin, EditorMediaAsset, EditorProject, EditorTrack, EditorClip } from '../project-library';
 
 // =============================================================================
@@ -224,5 +230,225 @@ describe('getProjectDuration', () => {
   it('handles undefined tracks gracefully', () => {
     const project = { tracks: undefined as unknown as EditorTrack[] };
     expect(getProjectDuration(project)).toBe(0);
+  });
+});
+
+describe('hydrateProject editorialState', () => {
+  it('provides editorial defaults for imported projects', () => {
+    const hydrated = hydrateProject({
+      id: 'project-1',
+      name: 'Imported',
+      tracks: [
+        makeTrack({ id: 'v1', type: 'VIDEO' }),
+        makeTrack({ id: 'a1', type: 'AUDIO' }),
+      ],
+      bins: [makeBin({ id: 'b-master' })],
+    });
+
+    expect(hydrated.editorialState.selectedBinId).toBe('b-master');
+    expect(hydrated.editorialState.enabledTrackIds).toEqual(['v1', 'a1']);
+    expect(hydrated.editorialState.syncLockedTrackIds).toEqual([]);
+    expect(hydrated.editorialState.videoMonitorTrackId).toBe('v1');
+    expect(hydrated.editorialState.sourceTrackDescriptors).toEqual([]);
+    expect(hydrated.editorialState.trackPatches).toEqual([]);
+    expect(hydrated.workstationState).toEqual({
+      subtitleTracks: [],
+      titleClips: [],
+      trackHeights: {},
+      activeWorkspaceId: 'source-record',
+      composerLayout: 'source-record',
+      showTrackingInfo: true,
+      trackingInfoFields: ['master-tc', 'duration'],
+      clipTextDisplay: 'name',
+      dupeDetectionEnabled: false,
+      versionHistoryRetentionPreference: 'manual',
+      versionHistoryCompareMode: 'summary',
+    });
+    expect(hydrated.collaboration).toEqual({
+      presenceSnapshots: [],
+      comments: [],
+      activityFeed: [],
+    });
+  });
+
+  it('preserves provided editorial state for valid tracks', () => {
+    const hydrated = hydrateProject({
+      id: 'project-2',
+      name: 'Saved',
+      tracks: [
+        makeTrack({ id: 'v1', type: 'VIDEO' }),
+        makeTrack({ id: 'v2', type: 'VIDEO' }),
+        makeTrack({ id: 'a1', type: 'AUDIO' }),
+      ],
+      bins: [makeBin({ id: 'b-selects' })],
+      editorialState: {
+        selectedBinId: 'b-selects',
+        sourceAssetId: 'asset-1',
+        enabledTrackIds: ['v2'],
+        syncLockedTrackIds: ['a1'],
+        videoMonitorTrackId: 'v2',
+        sourceTrackDescriptors: [
+          { id: 'src-v1', type: 'VIDEO', index: 1 },
+          { id: 'src-a1', type: 'AUDIO', index: 1 },
+        ],
+        trackPatches: [
+          {
+            sourceTrackId: 'src-v1',
+            sourceTrackType: 'VIDEO',
+            sourceTrackIndex: 1,
+            recordTrackId: 'v2',
+            enabled: true,
+          },
+        ],
+      },
+      workstationState: {
+        subtitleTracks: [],
+        titleClips: [],
+        trackHeights: {},
+        activeWorkspaceId: 'audio-mixing',
+        composerLayout: 'full-frame',
+        showTrackingInfo: false,
+        trackingInfoFields: ['duration'],
+        clipTextDisplay: 'source',
+        dupeDetectionEnabled: true,
+        versionHistoryRetentionPreference: 'session',
+        versionHistoryCompareMode: 'details',
+      },
+      collaboration: {
+        presenceSnapshots: [
+          {
+            userId: 'user-1',
+            displayName: 'Robin Producer',
+            avatarUrl: 'avatar://robin',
+            color: '#1f9de8',
+            isOnline: true,
+            cursorFrame: 120,
+            cursorTrackId: 'v2',
+            playheadTime: 5,
+          },
+        ],
+        comments: [
+          {
+            id: 'comment-1',
+            userId: 'user-1',
+            userName: 'Robin Producer',
+            frame: 120,
+            trackId: 'v2',
+            text: 'Tighten this transition.',
+            timestamp: 1000,
+            resolved: false,
+            replies: [
+              {
+                id: 'reply-1',
+                userId: 'user-2',
+                userName: 'Taylor Editor',
+                text: 'Will do.',
+                timestamp: 1100,
+              },
+            ],
+            reactions: [
+              {
+                emoji: '👍',
+                userIds: ['user-2'],
+              },
+            ],
+          },
+        ],
+        activityFeed: [
+          {
+            id: 'activity-1',
+            userId: 'user-1',
+            user: 'Robin Producer',
+            action: 'reviewed',
+            timestamp: 1200,
+            detail: 'Captured new notes.',
+          },
+        ],
+      },
+    });
+
+    expect(hydrated.editorialState).toEqual({
+      selectedBinId: 'b-selects',
+      sourceAssetId: 'asset-1',
+      enabledTrackIds: ['v2'],
+      syncLockedTrackIds: ['a1'],
+      videoMonitorTrackId: 'v2',
+      sourceTrackDescriptors: [
+        { id: 'src-v1', type: 'VIDEO', index: 1 },
+        { id: 'src-a1', type: 'AUDIO', index: 1 },
+      ],
+      trackPatches: [
+        {
+          sourceTrackId: 'src-v1',
+          sourceTrackType: 'VIDEO',
+          sourceTrackIndex: 1,
+          recordTrackId: 'v2',
+          enabled: true,
+        },
+      ],
+    });
+    expect(hydrated.workstationState.versionHistoryRetentionPreference).toBe('session');
+    expect(hydrated.workstationState.versionHistoryCompareMode).toBe('details');
+    expect(hydrated.collaboration?.presenceSnapshots[0]?.userId).toBe('user-1');
+    expect(hydrated.collaboration?.comments[0]?.text).toBe('Tighten this transition.');
+    expect(hydrated.collaboration?.activityFeed[0]?.action).toBe('reviewed');
+  });
+});
+
+describe('buildProject', () => {
+  it('creates blank user projects when seedContent is false', () => {
+    const project = buildProject({
+      name: 'Blank Project',
+      template: 'film',
+      seedContent: false,
+    });
+
+    expect(project.bins).toEqual([]);
+    expect(project.tracks.length).toBeGreaterThan(0);
+    expect(project.tracks.every((track) => track.clips.length === 0)).toBe(true);
+    expect(project.markers).toEqual([]);
+    expect(project.collaborators).toEqual([]);
+    expect(project.transcript).toEqual([]);
+    expect(project.transcriptSpeakers).toEqual([]);
+    expect(project.scriptDocument).toBeNull();
+    expect(project.transcriptionSettings.provider).toBe('local-faster-whisper');
+    expect(project.reviewComments).toEqual([]);
+    expect(project.approvals).toEqual([]);
+    expect(project.publishJobs).toEqual([]);
+    expect(project.progress).toBe(0);
+    expect(project.tokenBalance).toBe(0);
+    expect(project.editorialState.selectedBinId).toBeNull();
+  });
+
+  it('applies explicit creation settings to the persisted project model', () => {
+    const project = buildProject({
+      name: 'News Open',
+      template: 'news',
+      seedContent: false,
+      frameRate: 29.97,
+      width: 1280,
+      height: 720,
+      dropFrame: true,
+      activeWorkspaceId: 'effects',
+      composerLayout: 'full-frame',
+    });
+
+    expect(project.settings.frameRate).toBe(29.97);
+    expect(project.settings.width).toBe(1280);
+    expect(project.settings.height).toBe(720);
+    expect(project.settings.dropFrame).toBe(true);
+    expect(project.workstationState.activeWorkspaceId).toBe('effects');
+    expect(project.workstationState.composerLayout).toBe('full-frame');
+  });
+
+  it('keeps the seed library populated with demo content', () => {
+    const [seededProject] = buildSeedProjectLibrary();
+
+    expect(seededProject).toBeDefined();
+    expect(seededProject!.bins.length).toBeGreaterThan(0);
+    expect(seededProject!.tracks.some((track) => track.clips.length > 0)).toBe(true);
+    expect(seededProject!.reviewComments.length).toBeGreaterThan(0);
+    expect(seededProject!.transcriptSpeakers.length).toBeGreaterThan(0);
+    expect(seededProject!.scriptDocument?.lines.length).toBeGreaterThan(0);
   });
 });

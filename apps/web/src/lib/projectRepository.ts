@@ -9,6 +9,7 @@ import type {
   EditorProject,
   ProjectSummary,
 } from '@mcua/core';
+import { isDisposableProjectCandidate } from './projectCreation';
 
 const DB_NAME = 'the-avid';
 const STORE_NAME = 'projects';
@@ -146,7 +147,10 @@ export async function getProjectFromRepository(projectId: string): Promise<Edito
 }
 
 export async function createProjectInRepository(options: CreateProjectOptions = {}): Promise<EditorProject> {
-  const project = buildProject(options);
+  const project = buildProject({
+    ...options,
+    seedContent: options.seedContent ?? false,
+  });
   return saveProjectToRepository(project);
 }
 
@@ -171,4 +175,15 @@ export async function deleteProjectFromRepository(projectId: string): Promise<vo
   if (hasIndexedDb()) {
     await deleteIndexedDbProject(projectId);
   }
+}
+
+export async function purgeDisposableProjectsFromRepository(): Promise<number> {
+  const projects = await listAllProjects();
+  const disposableProjects = projects.filter((project) => isDisposableProjectCandidate(project));
+
+  await Promise.all(disposableProjects.map(async (project) => {
+    await deleteProjectFromRepository(project.id);
+  }));
+
+  return disposableProjects.length;
 }

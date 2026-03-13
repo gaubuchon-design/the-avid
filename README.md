@@ -216,6 +216,9 @@ Before this application can ship as a production NLE:
 | [Spec Conformance](docs/SPEC_CONFORMANCE_AUDIT.md) | Standards conformance audit |
 | [Competitive Analysis](docs/COMPETITIVE_ANALYSIS.md) | Market positioning analysis |
 | [Avid Parity Matrix](docs/AVID_PARITY_MATRIX.md) | Feature parity tracking vs. Avid Media Composer |
+| [NLE Modernization Program](docs/NLE_MODERNIZATION_PROGRAM.md) | Product and engineering program to reach full NLE depth |
+| [UI/UX Refactor Plan](docs/UI_UX_REFACTOR_PLAN.md) | Editorial shell and workstation UX modernization plan |
+| [Phase Execution Status](docs/PHASE_EXECUTION_STATUS.md) | Current execution status for active modernization phases |
 | [Keyboard Shortcuts](docs/KEYBOARD_SHORTCUTS.md) | Keyboard shortcut reference |
 | [Release Notes](docs/RELEASE_NOTES.md) | Version history and changelog |
 | [Packaging Notes](docs/PACKAGING_NOTES.md) | Desktop build and distribution |

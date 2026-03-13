@@ -7,8 +7,11 @@
 
 import { videoSourceManager } from './VideoSourceManager';
 import { effectsEngine } from './EffectsEngine';
+import { buildPlaybackSnapshot, type PlaybackSnapshot } from './PlaybackSnapshot';
 import { renderTitle } from './TitleRenderer';
 import type { Track, Clip, IntrinsicVideoProps, SubtitleTrack, TitleClipData } from '../store/editor.store';
+import type { ScopeType } from '../store/player.store';
+import { getClipSourceTime } from './clipTiming';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,13 +32,31 @@ export interface CompositingContext {
   isTitleEditing: boolean;
 }
 
+export interface PlaybackCompositingContext {
+  ctx: CanvasRenderingContext2D;
+  canvasW: number;
+  canvasH: number;
+  snapshot: PlaybackSnapshot;
+  currentTitle: any | null;
+  isTitleEditing: boolean;
+  overlayProcessing?: 'pre' | 'post';
+}
+
+export interface PlaybackVideoLayerAvailability {
+  totalVideoLayers: number;
+  drawableVideoLayers: number;
+  pendingVideoLayers: number;
+}
+
+let layerScratchCanvas: HTMLCanvasElement | null = null;
+
 // ─── Exported Helpers ─────────────────────────────────────────────────────────
 
 /** Find the topmost visible video clip at a given timeline time. */
 export function findActiveClip(tracks: Track[], time: number): Clip | null {
   const videoTracks = tracks
     .filter((t) => (t.type === 'VIDEO' || t.type === 'GRAPHIC') && !t.muted)
-    .sort((a, b) => a.sortOrder - b.sortOrder);
+    .sort((a, b) => b.sortOrder - a.sortOrder);
 
   for (const track of videoTracks) {
     const clip = track.clips.find((c) => time >= c.startTime && time < c.endTime);
@@ -44,9 +65,33 @@ export function findActiveClip(tracks: Track[], time: number): Clip | null {
   return null;
 }
 
+/** Find the topmost active timeline media clip, preferring real video over graphic overlays. */
+export function findActiveMediaClip(tracks: Track[], time: number): Clip | null {
+  const findOnTrackType = (trackType: Track['type']) => {
+    const orderedTracks = tracks
+      .filter((track) => track.type === trackType && !track.muted)
+      .sort((left, right) => right.sortOrder - left.sortOrder);
+
+    for (const track of orderedTracks) {
+      const clip = track.clips.find((candidate) => (
+        Boolean(candidate.assetId)
+        && time >= candidate.startTime
+        && time < candidate.endTime
+      ));
+      if (clip?.assetId) {
+        return clip;
+      }
+    }
+
+    return null;
+  };
+
+  return findOnTrackType('VIDEO') ?? findOnTrackType('GRAPHIC');
+}
+
 /** Map timeline time to source media time for a clip. */
 export function getSourceTime(clip: Clip, timelineTime: number): number {
-  return clip.trimStart + (timelineTime - clip.startTime);
+  return getClipSourceTime(clip, timelineTime);
 }
 
 // ─── Intrinsic Transform Application ──────────────────────────────────────────
@@ -81,6 +126,50 @@ function applyIntrinsicTransforms(
   }
 }
 
+function getLayerRenderContext(
+  width: number,
+  height: number,
+): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  if (!layerScratchCanvas) {
+    layerScratchCanvas = document.createElement('canvas');
+  }
+
+  layerScratchCanvas.width = width;
+  layerScratchCanvas.height = height;
+  const layerCtx = layerScratchCanvas.getContext('2d');
+  if (!layerCtx) {
+    return null;
+  }
+
+  layerCtx.setTransform?.(1, 0, 0, 1, 0, 0);
+  layerCtx.clearRect(0, 0, width, height);
+  return {
+    canvas: layerScratchCanvas,
+    ctx: layerCtx,
+  };
+}
+
+function applyClipEffectsToLayer(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  clipId: string,
+  frameNumber: number,
+): void {
+  const clipEffects = effectsEngine.getClipEffects(clipId);
+  if (clipEffects.length === 0) {
+    return;
+  }
+
+  const imageData = ctx.getImageData(0, 0, width, height);
+  effectsEngine.processFrame(imageData, clipEffects, frameNumber);
+  ctx.putImageData(imageData, 0, 0);
+}
+
 // ─── Video Playback Sync ──────────────────────────────────────────────────────
 //  Properly manages video.play()/pause() instead of seeking every frame.
 
@@ -101,6 +190,7 @@ export function syncVideoPlayback(
 
   const vid = source.element;
   const sourceTime = getSourceTime(clip, playheadTime);
+  const frameTolerance = fps > 0 ? Math.max(0.5 / fps, 0.02) : 0.02;
 
   if (isPlaying) {
     // During playback: use native video.play(), only correct excessive drift
@@ -117,7 +207,7 @@ export function syncVideoPlayback(
   } else {
     // When paused: stop video and seek to exact frame
     if (!vid.paused) vid.pause();
-    if (Math.abs(vid.currentTime - sourceTime) > 0.02) {
+    if (!vid.seeking && Math.abs(vid.currentTime - sourceTime) > frameTolerance) {
       vid.currentTime = sourceTime;
     }
   }
@@ -156,6 +246,39 @@ export function tryLoadClipSource(
   search(bins);
 }
 
+export function inspectPlaybackVideoLayerAvailability(
+  snapshot: PlaybackSnapshot,
+): PlaybackVideoLayerAvailability {
+  let totalVideoLayers = 0;
+  let drawableVideoLayers = 0;
+
+  for (const layer of snapshot.videoLayers) {
+    if (!layer.assetId) {
+      continue;
+    }
+
+    totalVideoLayers += 1;
+    const source = videoSourceManager.getSource(layer.assetId);
+    const vid = source?.element;
+    const isDrawable = Boolean(
+      vid
+      && source?.ready
+      && vid.readyState >= 2
+      && (snapshot.isPlaying || !vid.seeking),
+    );
+
+    if (isDrawable) {
+      drawableVideoLayers += 1;
+    }
+  }
+
+  return {
+    totalVideoLayers,
+    drawableVideoLayers,
+    pendingVideoLayers: totalVideoLayers - drawableVideoLayers,
+  };
+}
+
 // ─── Compositing Pipeline ─────────────────────────────────────────────────────
 
 /**
@@ -173,111 +296,125 @@ export function tryLoadClipSource(
  * 6. Draw placeholder if no video was drawn
  */
 export function compositeRecordFrame(cx: CompositingContext): void {
-  const { ctx, canvasW, canvasH, playheadTime, tracks, fps, aspectRatio, showSafeZones } = cx;
+  const snapshot = buildPlaybackSnapshot({
+    tracks: cx.tracks,
+    subtitleTracks: cx.subtitleTracks,
+    titleClips: cx.titleClips,
+    playheadTime: cx.playheadTime,
+    duration: 0,
+    isPlaying: cx.isPlaying,
+    showSafeZones: cx.showSafeZones,
+    activeMonitor: 'record',
+    activeScope: null as ScopeType | null,
+    sequenceSettings: {
+      fps: cx.fps,
+      width: Math.round(cx.aspectRatio * 1000),
+      height: 1000,
+    },
+    projectSettings: {
+      frameRate: cx.fps,
+      width: Math.round(cx.aspectRatio * 1000),
+      height: 1000,
+    },
+  }, 'record-monitor');
+  compositePlaybackSnapshot({
+    ctx: cx.ctx,
+    canvasW: cx.canvasW,
+    canvasH: cx.canvasH,
+    snapshot,
+    currentTitle: cx.currentTitle,
+    isTitleEditing: cx.isTitleEditing,
+  });
+}
+
+export function compositePlaybackSnapshot(cx: PlaybackCompositingContext): void {
+  const { ctx, canvasW, canvasH, snapshot } = cx;
+  const overlayProcessing = cx.overlayProcessing ?? 'post';
+  const compositorOwnsSeeking = !snapshot.isPlaying && (
+    snapshot.consumer === 'export' || snapshot.consumer === 'scope'
+  );
+  const frameTolerance = snapshot.fps > 0 ? Math.max(0.5 / snapshot.fps, 0.02) : 0.02;
 
   // 1. Clear to black
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, canvasW, canvasH);
 
-  // 2. Composite video tracks (bottom-to-top: higher sortOrder = lower in stack = drawn first)
-  const videoTracks = tracks
-    .filter((t) => (t.type === 'VIDEO' || t.type === 'GRAPHIC') && !t.muted)
-    .sort((a, b) => b.sortOrder - a.sortOrder);
-
   let drewVideo = false;
 
-  for (const track of videoTracks) {
-    const clip = track.clips.find((c) => playheadTime >= c.startTime && playheadTime < c.endTime);
-    if (!clip?.assetId) continue;
+  for (const layer of snapshot.videoLayers) {
+    const clip = layer.clip;
+    if (!layer.assetId) continue;
 
-    const source = videoSourceManager.getSource(clip.assetId);
+    const source = videoSourceManager.getSource(layer.assetId);
     const vid = source?.element;
     if (!vid || !source.ready || vid.readyState < 2) continue;
 
-    // Seek to correct clip time (only when not playing — playback sync handles it otherwise)
-    if (!cx.isPlaying) {
-      const sourceTime = getSourceTime(clip, playheadTime);
-      if (!vid.seeking && Math.abs(vid.currentTime - sourceTime) > 0.02) {
-        vid.currentTime = sourceTime;
-      }
+    // Export/scope rendering drives its own seeking. Monitor rendering syncs earlier.
+    if (compositorOwnsSeeking && !vid.seeking && Math.abs(vid.currentTime - layer.sourceTime) > frameTolerance) {
+      vid.currentTime = layer.sourceTime;
     }
 
-    // Skip draw while video is seeking (keeps previous frame visible)
-    if (vid.seeking) continue;
-
-    // 2a. Apply intrinsic transforms
-    ctx.save();
-    applyIntrinsicTransforms(ctx, clip.intrinsicVideo, canvasW, canvasH);
-
-    // 2b. Draw video with letterboxing
+    // 2a. Calculate letterboxed draw rect
     const videoAR = vid.videoWidth / vid.videoHeight;
     let drawW = canvasW, drawH = canvasH, drawX = 0, drawY = 0;
-    if (videoAR > aspectRatio) {
+    if (videoAR > snapshot.aspectRatio) {
       drawH = Math.floor(canvasW / videoAR);
       drawY = Math.floor((canvasH - drawH) / 2);
-    } else if (videoAR < aspectRatio) {
+    } else if (videoAR < snapshot.aspectRatio) {
       drawW = Math.floor(canvasH * videoAR);
       drawX = Math.floor((canvasW - drawW) / 2);
     }
-    ctx.drawImage(vid, drawX, drawY, drawW, drawH);
 
-    ctx.restore();
+    const layerRender = getLayerRenderContext(canvasW, canvasH);
+    const blendMode = (clip.blendMode ?? layer.trackBlendMode ?? 'source-over') as GlobalCompositeOperation;
+
+    if (layerRender) {
+      // Render the clip into an isolated layer so effects only touch that layer.
+      layerRender.ctx.save();
+      applyIntrinsicTransforms(layerRender.ctx, clip.intrinsicVideo, canvasW, canvasH);
+      layerRender.ctx.drawImage(vid, drawX, drawY, drawW, drawH);
+      layerRender.ctx.restore();
+
+      applyClipEffectsToLayer(layerRender.ctx, canvasW, canvasH, clip.id, snapshot.frameNumber);
+
+      ctx.save();
+      ctx.globalCompositeOperation = blendMode;
+      ctx.drawImage(layerRender.canvas, 0, 0, canvasW, canvasH);
+      ctx.restore();
+    } else {
+      ctx.save();
+      ctx.globalCompositeOperation = blendMode;
+      applyIntrinsicTransforms(ctx, clip.intrinsicVideo, canvasW, canvasH);
+      ctx.drawImage(vid, drawX, drawY, drawW, drawH);
+      ctx.restore();
+    }
+
     drewVideo = true;
+  }
 
-    // 2c. Apply clip effects (pixel-level processing after drawing)
-    const clipEffects = effectsEngine.getClipEffects(clip.id);
-    if (clipEffects.length > 0) {
-      const imageData = ctx.getImageData(0, 0, canvasW, canvasH);
-      const currentFrame = Math.floor(playheadTime * fps);
-      effectsEngine.processFrame(imageData, clipEffects, currentFrame);
-      ctx.putImageData(imageData, 0, 0);
+  if (overlayProcessing === 'post') {
+    // 3. Composite title graphics (GRAPHIC track title clips)
+    if (cx.currentTitle && cx.isTitleEditing) {
+      renderTitle(ctx, cx.currentTitle, canvasW, canvasH, snapshot.frameNumber, snapshot.fps);
     }
-  }
 
-  // 3. Composite title graphics (GRAPHIC track title clips)
-  if (cx.currentTitle && cx.isTitleEditing) {
-    const currentFrame = Math.floor(playheadTime * fps);
-    renderTitle(ctx, cx.currentTitle, canvasW, canvasH, currentFrame, fps);
-  }
-
-  const graphicTracks = tracks.filter((t) => t.type === 'GRAPHIC' && !t.muted);
-  for (const gTrack of graphicTracks) {
-    for (const clip of gTrack.clips) {
-      if (playheadTime >= clip.startTime && playheadTime < clip.endTime) {
-        const titleData = cx.titleClips.find((tc) => tc.id === clip.assetId);
-        if (titleData) {
-          const clipFrame = Math.floor((playheadTime - clip.startTime) * fps);
-          renderTitle(ctx, titleData as any, canvasW, canvasH, clipFrame, fps);
-        }
-      }
+    for (const titleLayer of snapshot.titleLayers) {
+      renderTitle(ctx, titleLayer.titleClip as any, canvasW, canvasH, titleLayer.frameOffset, snapshot.fps);
     }
-  }
 
-  // 4. Composite subtitles (SUBTITLE track cues)
-  const subTracks = tracks.filter((t) => t.type === 'SUBTITLE' && !t.muted);
-  for (const sTrack of subTracks) {
-    for (const clip of sTrack.clips) {
-      if (playheadTime >= clip.startTime && playheadTime < clip.endTime) {
-        for (const subTrack of cx.subtitleTracks) {
-          for (const cue of subTrack.cues) {
-            if (playheadTime >= cue.start && playheadTime < cue.end) {
-              renderSubtitleCue(ctx, cue, canvasW, canvasH);
-            }
-          }
-        }
-        break; // Only render first matching subtitle track clip
-      }
+    for (const subtitleCue of snapshot.subtitleCues) {
+      renderSubtitleCue(ctx, subtitleCue.cue, canvasW, canvasH);
     }
-  }
 
-  // 5. Safe zones overlay
-  if (showSafeZones) {
-    drawSafeZones(ctx, canvasW, canvasH);
+    // 5. Safe zones overlay
+    if (snapshot.showSafeZones) {
+      drawSafeZones(ctx, canvasW, canvasH);
+    }
   }
 
   // 6. Placeholder when no video is drawn
-  if (!drewVideo) {
-    drawRecordPlaceholder(ctx, canvasW, canvasH, playheadTime, fps);
+  if (!drewVideo && overlayProcessing === 'post') {
+    drawRecordPlaceholder(ctx, canvasW, canvasH, snapshot.playheadTime, snapshot.fps);
   }
 }
 

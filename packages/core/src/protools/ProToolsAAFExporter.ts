@@ -10,12 +10,22 @@ import type {
   EditorTrack,
   EditorClip,
   EditorMarker,
+  EditorMediaAsset,
 } from '../project-library';
+import {
+  flattenAssets,
+} from '../project-library';
+import { getMediaAssetPrimaryPath } from '../media-helpers';
+import {
+  normalizeAudioChannelLayoutLabel,
+  pickDominantAudioChannelLayout,
+  type AudioChannelLayout,
+} from '../audio/channelLayout';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
 export type AAFHandleSize = '1s' | '2s' | '5s';
-export type AAFChannelAssignment = 'mono' | 'stereo';
+export type AAFChannelAssignment = AudioChannelLayout;
 export type AAFBitDepth = 16 | 24 | 32;
 
 export interface AAFAutomationPoint {
@@ -97,6 +107,24 @@ export interface AAFMarkerDescriptor {
   color: string;
 }
 
+export interface AAFValidationSummary {
+  trackCount: number;
+  clipCount: number;
+  multichannelClipCount: number;
+  missingSourcePathCount: number;
+  resampleRequiredCount: number;
+  mixedLayoutTrackCount: number;
+  insufficientHeadHandleCount: number;
+  insufficientTailHandleCount: number;
+}
+
+export interface AAFValidationResult {
+  valid: boolean;
+  issues: string[];
+  warnings: string[];
+  summary: AAFValidationSummary;
+}
+
 // ─── Constants ─────────────────────────────────────────────────────────────
 
 const HANDLE_SIZE_MAP: Record<AAFHandleSize, number> = {
@@ -137,6 +165,11 @@ function createId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function resolveAssetDurationSeconds(asset: EditorMediaAsset | undefined): number | null {
+  const duration = asset?.technicalMetadata?.durationSeconds ?? asset?.duration;
+  return typeof duration === 'number' && Number.isFinite(duration) ? duration : null;
+}
+
 // ─── Exporter ──────────────────────────────────────────────────────────────
 
 export class ProToolsAAFExporter {
@@ -144,9 +177,11 @@ export class ProToolsAAFExporter {
   private options: AAFExportOptions;
   private errors: string[] = [];
   private warnings: string[] = [];
+  private readonly assetIndex: Map<string, EditorMediaAsset>;
 
   constructor(project: EditorProject, options?: Partial<AAFExportOptions>) {
     this.project = project;
+    this.assetIndex = new Map(flattenAssets(project.bins).map((asset) => [asset.id, asset] as const));
     this.options = {
       handleSize: options?.handleSize ?? '2s',
       sampleRate: options?.sampleRate ?? project.settings.sampleRate ?? DEFAULT_SAMPLE_RATE,
@@ -211,30 +246,97 @@ export class ProToolsAAFExporter {
   /**
    * Validates that the project can be exported to AAF.
    */
-  validate(): { valid: boolean; issues: string[] } {
+  validate(): AAFValidationResult {
     const issues: string[] = [];
+    const warnings: string[] = [];
 
     if (this.options.sampleRate !== 48000 && this.options.sampleRate !== 44100 && this.options.sampleRate !== 96000) {
       issues.push(`Non-standard sample rate: ${this.options.sampleRate}Hz`);
     }
 
     const audioTracks = this.project.tracks.filter((t) => t.type === 'AUDIO');
+    const summary: AAFValidationSummary = {
+      trackCount: audioTracks.length,
+      clipCount: 0,
+      multichannelClipCount: 0,
+      missingSourcePathCount: 0,
+      resampleRequiredCount: 0,
+      mixedLayoutTrackCount: 0,
+      insufficientHeadHandleCount: 0,
+      insufficientTailHandleCount: 0,
+    };
+
     if (audioTracks.length === 0) {
       issues.push('No audio tracks available for export');
     }
 
     for (const track of audioTracks) {
+      const distinctLayouts = Array.from(new Set(track.clips
+        .map((clip) => this.resolveClipChannelAssignment(clip))
+        .filter((layout) => Boolean(layout)),
+      ));
       if (track.clips.length === 0) {
         issues.push(`Track "${track.name}" has no clips`);
       }
+      if (distinctLayouts.length > 1) {
+        issues.push(`Track "${track.name}" mixes incompatible channel layouts: ${distinctLayouts.join(', ')}`);
+        summary.mixedLayoutTrackCount += 1;
+      }
       for (const clip of track.clips) {
+        summary.clipCount += 1;
         if (clip.endTime <= clip.startTime) {
           issues.push(`Clip "${clip.name}" on track "${track.name}" has zero or negative duration`);
+        }
+        const asset = clip.assetId ? this.assetIndex.get(clip.assetId) : undefined;
+        const sourcePath = asset ? getMediaAssetPrimaryPath(asset) : undefined;
+        if (!sourcePath) {
+          issues.push(`Clip "${clip.name}" on track "${track.name}" is missing a resolvable source file path`);
+          summary.missingSourcePathCount += 1;
+        }
+        const requestedHandleSeconds = HANDLE_SIZE_MAP[this.options.handleSize];
+        const availableHeadSeconds = Math.max(0, clip.trimStart ?? 0);
+        if (availableHeadSeconds < requestedHandleSeconds) {
+          warnings.push(
+            `Clip "${clip.name}" on track "${track.name}" only has ${availableHeadSeconds.toFixed(2)}s of head handle for a ${requestedHandleSeconds}s turnover request`,
+          );
+          summary.insufficientHeadHandleCount += 1;
+        }
+        const assetDurationSeconds = resolveAssetDurationSeconds(asset);
+        if (assetDurationSeconds !== null) {
+          const clipPlaybackDuration = Math.max(0, clip.endTime - clip.startTime);
+          const sourceOutSeconds = Math.max(0, clip.trimStart ?? 0) + clipPlaybackDuration;
+          const availableTailSeconds = Math.max(0, assetDurationSeconds - sourceOutSeconds);
+          if (availableTailSeconds < requestedHandleSeconds) {
+            warnings.push(
+              `Clip "${clip.name}" on track "${track.name}" only has ${availableTailSeconds.toFixed(2)}s of tail handle for a ${requestedHandleSeconds}s turnover request`,
+            );
+            summary.insufficientTailHandleCount += 1;
+          }
+        }
+        if ((asset?.technicalMetadata?.audioChannels ?? 0) > 2 && !asset?.technicalMetadata?.audioChannelLayout) {
+          issues.push(`Clip "${clip.name}" is multichannel but missing audio channel layout metadata`);
+        }
+        if ((asset?.technicalMetadata?.audioChannels ?? 0) > 2) {
+          summary.multichannelClipCount += 1;
+        }
+        if (
+          asset?.technicalMetadata?.sampleRate
+          && asset.technicalMetadata.sampleRate !== this.options.sampleRate
+        ) {
+          warnings.push(
+            `Clip "${clip.name}" on track "${track.name}" will be sample-rate converted from ${asset.technicalMetadata.sampleRate}Hz to ${this.options.sampleRate}Hz`,
+          );
+          summary.resampleRequiredCount += 1;
         }
       }
     }
 
-    return { valid: issues.length === 0, issues };
+    return {
+      valid: issues.length === 0,
+      issues,
+      warnings: Array.from(new Set(warnings)),
+      summary,
+    };
   }
 
   /**
@@ -258,14 +360,15 @@ export class ProToolsAAFExporter {
     handleSizeSeconds: number,
     frameRate: number,
   ): AAFTrackDescriptor {
+    const channelAssignment = this.resolveTrackChannelAssignment(track);
     const clips = track.clips.map((clip) =>
-      this.buildClipDescriptor(clip, track, handleSizeSeconds, frameRate)
+      this.buildClipDescriptor(clip, track, handleSizeSeconds, frameRate, channelAssignment)
     );
 
     return {
       trackId: track.id,
       trackName: track.name,
-      channelAssignment: this.options.channelAssignment,
+      channelAssignment,
       panPosition: 0,
       clips,
     };
@@ -276,9 +379,16 @@ export class ProToolsAAFExporter {
     track: EditorTrack,
     handleSizeSeconds: number,
     frameRate: number,
+    channelAssignment: AAFChannelAssignment,
   ): AAFClipDescriptor {
-    const handleBefore = Math.min(handleSizeSeconds, clip.startTime);
-    const handleAfter = handleSizeSeconds;
+    const asset = clip.assetId ? this.assetIndex.get(clip.assetId) : undefined;
+    const handleBefore = Math.min(handleSizeSeconds, Math.max(0, clip.trimStart ?? 0));
+    const assetDurationSeconds = resolveAssetDurationSeconds(asset);
+    const clipPlaybackDuration = Math.max(0, clip.endTime - clip.startTime);
+    const availableTailSeconds = assetDurationSeconds === null
+      ? handleSizeSeconds
+      : Math.max(0, assetDurationSeconds - ((clip.trimStart ?? 0) + clipPlaybackDuration));
+    const handleAfter = Math.min(handleSizeSeconds, availableTailSeconds);
 
     const automation: AAFAutomationEnvelope[] = this.options.includeAutomation
       ? this.buildClipAutomation(clip, track)
@@ -292,7 +402,7 @@ export class ProToolsAAFExporter {
       clipId: clip.id,
       clipName: clip.name,
       trackName: track.name,
-      sourceFilePath: clip.assetId ?? '',
+      sourceFilePath: asset ? (getMediaAssetPrimaryPath(asset) ?? clip.assetId ?? '') : clip.assetId ?? '',
       startTimecodeTC: secondsToTimecode(clip.startTime, frameRate),
       endTimecodeTC: secondsToTimecode(clip.endTime, frameRate),
       timelineStartSeconds: clip.startTime,
@@ -302,10 +412,23 @@ export class ProToolsAAFExporter {
       handleBeforeSeconds: handleBefore,
       handleAfterSeconds: handleAfter,
       gainDb: volumeToDb(track.volume),
-      channelAssignment: this.options.channelAssignment,
+      channelAssignment,
       automation,
       renderedEffects,
     };
+  }
+
+  private resolveTrackChannelAssignment(track: EditorTrack): AAFChannelAssignment {
+    const clipLayouts = track.clips.map((clip) => this.resolveClipChannelAssignment(clip));
+    return pickDominantAudioChannelLayout(clipLayouts, this.options.channelAssignment);
+  }
+
+  private resolveClipChannelAssignment(clip: EditorClip): AAFChannelAssignment {
+    const asset = clip.assetId ? this.assetIndex.get(clip.assetId) : undefined;
+    return normalizeAudioChannelLayoutLabel(
+      asset?.technicalMetadata?.audioChannelLayout,
+      asset?.technicalMetadata?.audioChannels,
+    );
   }
 
   private buildClipAutomation(

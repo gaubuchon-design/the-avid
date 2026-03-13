@@ -69,9 +69,42 @@ export interface SlideState {
   maxSlideRight: number;
 }
 
+export interface TrimRollerDiagnostics {
+  trackId: string;
+  editPointTime: number;
+  side: TrimSide;
+  locked: boolean;
+  missingSides: Array<'A' | 'B'>;
+  availableTrimLeftFrames: number;
+  availableTrimRightFrames: number;
+}
+
+export interface TrimSessionDiagnostics {
+  active: boolean;
+  mode: TrimMode;
+  linkedSelection: boolean;
+  hasLockedRollers: boolean;
+  constrainedTrimLeftFrames: number;
+  constrainedTrimRightFrames: number;
+  rollers: TrimRollerDiagnostics[];
+}
+
+interface TrimConfigurationSnapshot {
+  trackIds: string[];
+  editPointTime: number;
+  mode: TrimMode;
+  linkedSelection: boolean;
+  overwriteTrim: boolean;
+  rollers: Array<{
+    trackId: string;
+    side: TrimSide;
+    editPointTime: number;
+  }>;
+}
+
 // ─── Event Types ────────────────────────────────────────────────────────────────
 
-type TrimEventType = 'enter' | 'exit' | 'trim' | 'modeChange';
+type TrimEventType = 'enter' | 'exit' | 'cancel' | 'trim' | 'modeChange';
 type TrimEventCallback = (...args: unknown[]) => void;
 
 // ─── Constants ──────────────────────────────────────────────────────────────────
@@ -89,6 +122,14 @@ const TIME_EPSILON = 1e-6;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function secondsToFrames(seconds: number, frameRate: number): number {
+  if (!Number.isFinite(seconds) || seconds <= 0 || frameRate <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, Math.floor((seconds * frameRate) + TIME_EPSILON));
 }
 
 /** Returns the clip's visible (timeline) duration. */
@@ -206,6 +247,7 @@ export class TrimEngine {
   private slipState: SlipState | null = null;
   private slideState: SlideState | null = null;
   private overwriteTrim = false;
+  private lastConfiguration: TrimConfigurationSnapshot | null = null;
 
   // ── Events ──────────────────────────────────────────────────────────────────
 
@@ -264,6 +306,56 @@ export class TrimEngine {
         });
       }
     }
+  }
+
+  private snapshotLastConfiguration(): void {
+    if (!this.state.active || this.state.rollers.length === 0) {
+      return;
+    }
+
+    this.lastConfiguration = {
+      trackIds: this.state.rollers.map((roller) => roller.trackId),
+      editPointTime: this.state.rollers[0]!.editPointTime,
+      mode: this.state.mode,
+      linkedSelection: this.state.linkedSelection,
+      overwriteTrim: this.overwriteTrim,
+      rollers: this.state.rollers.map((roller) => ({
+        trackId: roller.trackId,
+        side: roller.side,
+        editPointTime: roller.editPointTime,
+      })),
+    };
+  }
+
+  private deriveModeFromRollers(rollers: TrimRoller[]): TrimMode {
+    const sides = new Set(rollers.map((roller) => roller.side));
+    if (sides.size > 1) {
+      return TrimMode.ASYMMETRIC;
+    }
+
+    const [side] = sides;
+    return side === TrimSide.BOTH ? TrimMode.ROLL : TrimMode.RIPPLE;
+  }
+
+  private activateTrimMode(rollers: TrimRoller[]): TrimState {
+    if (rollers.length === 0) {
+      return this.state;
+    }
+
+    this.state = {
+      active: true,
+      mode: this.deriveModeFromRollers(rollers),
+      rollers,
+      originalState: new Map(),
+      totalDelta: 0,
+      linkedSelection: true,
+    };
+
+    this.snapshotOriginalState();
+    this.notify();
+    this.emit('enter', this.state);
+
+    return { ...this.state };
   }
 
   /**
@@ -357,8 +449,6 @@ export class TrimEngine {
       if (nearestTime === null) continue;
 
       const { clipA, clipB } = getEditPointClips(track, nearestTime);
-
-      // Skip tracks that have no clips at this edit point
       if (!clipA && !clipB) continue;
 
       rollers.push({
@@ -370,32 +460,40 @@ export class TrimEngine {
       });
     }
 
-    if (rollers.length === 0) {
-      return this.state;
+    return this.activateTrimMode(rollers);
+  }
+
+  enterTrimModeWithSelections(
+    selections: Array<{ trackId: string; editPointTime: number; side: TrimSide }>,
+  ): TrimState {
+    if (this.state.active) {
+      this.exitTrimMode();
     }
 
-    // Determine initial mode from side
-    let mode: TrimMode;
-    if (side === TrimSide.BOTH) {
-      mode = TrimMode.ROLL;
-    } else {
-      mode = TrimMode.RIPPLE;
+    const rollers: TrimRoller[] = [];
+
+    for (const selection of selections) {
+      if (this.isTrackLocked(selection.trackId)) continue;
+
+      const track = this.findTrackById(selection.trackId);
+      if (!track) continue;
+
+      const nearestTime = findNearestEditPoint(track, selection.editPointTime);
+      if (nearestTime === null) continue;
+
+      const { clipA, clipB } = getEditPointClips(track, nearestTime);
+      if (!clipA && !clipB) continue;
+
+      rollers.push({
+        trackId: selection.trackId,
+        editPointTime: nearestTime,
+        side: selection.side,
+        clipAId: clipA?.id ?? null,
+        clipBId: clipB?.id ?? null,
+      });
     }
 
-    this.state = {
-      active: true,
-      mode,
-      rollers,
-      originalState: new Map(),
-      totalDelta: 0,
-      linkedSelection: true,
-    };
-
-    this.snapshotOriginalState();
-    this.notify();
-    this.emit('enter', this.state);
-
-    return { ...this.state };
+    return this.activateTrimMode(rollers);
   }
 
   /**
@@ -404,6 +502,7 @@ export class TrimEngine {
   exitTrimMode(): void {
     if (!this.state.active) return;
 
+    this.snapshotLastConfiguration();
     this.slipState = null;
     this.slideState = null;
 
@@ -417,6 +516,7 @@ export class TrimEngine {
     };
 
     this.notify();
+    this.emit('cancel');
     this.emit('exit');
   }
 
@@ -426,6 +526,7 @@ export class TrimEngine {
   cancelTrim(): void {
     if (!this.state.active) return;
 
+    this.snapshotLastConfiguration();
     this.restoreOriginalState();
     this.slipState = null;
     this.slideState = null;
@@ -1005,6 +1106,10 @@ export class TrimEngine {
     };
   }
 
+  getSlipState(): SlipState | null {
+    return this.slipState ? { ...this.slipState } : null;
+  }
+
   // ── Slide Operations ────────────────────────────────────────────────────────
 
   /**
@@ -1195,6 +1300,54 @@ export class TrimEngine {
     };
   }
 
+  getSlideState(): SlideState | null {
+    return this.slideState
+      ? {
+        ...this.slideState,
+        originalPositions: new Map(this.slideState.originalPositions),
+      }
+      : null;
+  }
+
+  hasPreviousConfiguration(): boolean {
+    return this.lastConfiguration !== null;
+  }
+
+  recallPreviousConfiguration(): TrimState {
+    if (!this.lastConfiguration) {
+      return this.getState();
+    }
+
+    const previous = this.lastConfiguration;
+    this.enterTrimModeWithSelections(previous.rollers.map((roller) => ({
+      trackId: roller.trackId,
+      editPointTime: roller.editPointTime,
+      side: roller.side,
+    })));
+    this.state.linkedSelection = previous.linkedSelection;
+    this.overwriteTrim = previous.overwriteTrim;
+
+    if (previous.mode === TrimMode.SLIP || previous.mode === TrimMode.SLIDE) {
+      const roller = this.state.rollers[0];
+      const clipId = roller?.clipBId ?? roller?.clipAId;
+      if (clipId) {
+        const found = this.findClipById(clipId);
+        if (found) {
+          if (previous.mode === TrimMode.SLIP) {
+            this.state.mode = TrimMode.SLIP;
+            this.enterSlip(clipId, found.track.id);
+          } else {
+            this.state.mode = TrimMode.SLIDE;
+            this.enterSlide(clipId, found.track.id);
+          }
+        }
+      }
+    }
+
+    this.notify();
+    return this.getState();
+  }
+
   // ── Asymmetric Trim ─────────────────────────────────────────────────────────
 
   /**
@@ -1300,9 +1453,20 @@ export class TrimEngine {
           if (roller.clipAId) {
             const clipA = track.clips.find((c) => c.id === roller.clipAId);
             if (clipA) {
+              const oldEnd = clipA.endTime;
               clipA.endTime += localDelta;
               clipA.trimEnd = Math.max(0, clipA.trimEnd - localDelta);
               affectedClipIds.push(clipA.id);
+
+              if (roller.side === TrimSide.A_SIDE && !this.overwriteTrim) {
+                for (const c of track.clips) {
+                  if (c.id !== clipA.id && c.startTime >= oldEnd - TIME_EPSILON) {
+                    c.startTime += localDelta;
+                    c.endTime += localDelta;
+                    affectedClipIds.push(c.id);
+                  }
+                }
+              }
             }
           }
         }
@@ -1360,6 +1524,72 @@ export class TrimEngine {
     this.notify();
   }
 
+  isOverwriteTrimEnabled(): boolean {
+    return this.overwriteTrim;
+  }
+
+  private getRollerTrimLimits(roller: TrimRoller): { leftSeconds: number; rightSeconds: number } {
+    if (this.isTrackLocked(roller.trackId)) {
+      return { leftSeconds: 0, rightSeconds: 0 };
+    }
+
+    if (this.state.mode === TrimMode.SLIP) {
+      return {
+        leftSeconds: this.slipState?.maxSlipLeft ?? 0,
+        rightSeconds: this.slipState?.maxSlipRight ?? 0,
+      };
+    }
+
+    if (this.state.mode === TrimMode.SLIDE) {
+      return {
+        leftSeconds: this.slideState?.maxSlideLeft ?? 0,
+        rightSeconds: this.slideState?.maxSlideRight ?? 0,
+      };
+    }
+
+    const resolvedClipA = roller.clipAId ? this.findClipById(roller.clipAId)?.clip ?? null : null;
+    const resolvedClipB = roller.clipBId ? this.findClipById(roller.clipBId)?.clip ?? null : null;
+
+    const leftLimits: number[] = [];
+    const rightLimits: number[] = [];
+
+    const includeASide = this.state.mode === TrimMode.ROLL || roller.side === TrimSide.A_SIDE || roller.side === TrimSide.BOTH;
+    const includeBSide = this.state.mode === TrimMode.ROLL || roller.side === TrimSide.B_SIDE || roller.side === TrimSide.BOTH;
+
+    if (includeASide && resolvedClipA) {
+      leftLimits.push(Math.max(0, clipDuration(resolvedClipA) - MIN_CLIP_DURATION));
+      rightLimits.push(Math.max(0, resolvedClipA.trimEnd));
+    }
+
+    if (includeBSide && resolvedClipB) {
+      leftLimits.push(Math.max(0, resolvedClipB.trimStart));
+      rightLimits.push(Math.max(0, clipDuration(resolvedClipB) - MIN_CLIP_DURATION));
+    }
+
+    if (this.state.mode === TrimMode.ASYMMETRIC && roller.side === TrimSide.A_SIDE && resolvedClipA) {
+      return {
+        leftSeconds: Math.max(0, clipDuration(resolvedClipA) - MIN_CLIP_DURATION),
+        rightSeconds: Math.max(0, resolvedClipA.trimEnd),
+      };
+    }
+
+    if (this.state.mode === TrimMode.ASYMMETRIC && roller.side === TrimSide.B_SIDE && resolvedClipB) {
+      return {
+        leftSeconds: Math.max(0, resolvedClipB.trimStart),
+        rightSeconds: Math.max(0, clipDuration(resolvedClipB) - MIN_CLIP_DURATION),
+      };
+    }
+
+    if (leftLimits.length === 0 && rightLimits.length === 0) {
+      return { leftSeconds: 0, rightSeconds: 0 };
+    }
+
+    return {
+      leftSeconds: leftLimits.length > 0 ? Math.min(...leftLimits) : 0,
+      rightSeconds: rightLimits.length > 0 ? Math.min(...rightLimits) : 0,
+    };
+  }
+
   // ── Query Methods ───────────────────────────────────────────────────────────
 
   /** Get a copy of the current trim state. */
@@ -1392,11 +1622,87 @@ export class TrimEngine {
     const frameRate = projectSettings.frameRate || 24;
 
     const totalFrames = Math.round(this.state.totalDelta * frameRate);
+    const hasASideSelection = this.state.rollers.some((roller) => (
+      roller.side === TrimSide.A_SIDE || roller.side === TrimSide.BOTH
+    ));
+    const hasBSideSelection = this.state.rollers.some((roller) => (
+      roller.side === TrimSide.B_SIDE || roller.side === TrimSide.BOTH
+    ));
+
+    if (this.state.mode === TrimMode.SLIP) {
+      return {
+        aSideFrame: -totalFrames,
+        bSideFrame: totalFrames,
+        trimCounter: totalFrames,
+      };
+    }
+
+    if (hasASideSelection && hasBSideSelection) {
+      return {
+        aSideFrame: -totalFrames,
+        bSideFrame: totalFrames,
+        trimCounter: totalFrames,
+      };
+    }
 
     return {
-      aSideFrame: -totalFrames, // A-side loses frames when trimming right
-      bSideFrame: totalFrames,  // B-side gains frames when trimming right
+      aSideFrame: hasASideSelection ? totalFrames : 0,
+      bSideFrame: hasBSideSelection ? totalFrames : 0,
       trimCounter: totalFrames,
+    };
+  }
+
+  getSessionDiagnostics(frameRate: number): TrimSessionDiagnostics {
+    const safeFrameRate = frameRate > 0
+      ? frameRate
+      : (this.getStore().sequenceSettings.fps || this.getStore().projectSettings.frameRate || 24);
+
+    if (!this.state.active) {
+      return {
+        active: false,
+        mode: this.state.mode,
+        linkedSelection: this.state.linkedSelection,
+        hasLockedRollers: false,
+        constrainedTrimLeftFrames: 0,
+        constrainedTrimRightFrames: 0,
+        rollers: [],
+      };
+    }
+
+    const rollers = this.state.rollers.map<TrimRollerDiagnostics>((roller) => {
+      const { leftSeconds, rightSeconds } = this.getRollerTrimLimits(roller);
+      const includeASide = this.state.mode === TrimMode.ROLL || roller.side === TrimSide.A_SIDE || roller.side === TrimSide.BOTH;
+      const includeBSide = this.state.mode === TrimMode.ROLL || roller.side === TrimSide.B_SIDE || roller.side === TrimSide.BOTH;
+
+      return {
+        trackId: roller.trackId,
+        editPointTime: roller.editPointTime,
+        side: roller.side,
+        locked: this.isTrackLocked(roller.trackId),
+        missingSides: [
+          ...(includeASide && !roller.clipAId ? ['A' as const] : []),
+          ...(includeBSide && !roller.clipBId ? ['B' as const] : []),
+        ],
+        availableTrimLeftFrames: secondsToFrames(leftSeconds, safeFrameRate),
+        availableTrimRightFrames: secondsToFrames(rightSeconds, safeFrameRate),
+      };
+    });
+
+    const availableLeftFrames = rollers
+      .filter((roller) => !roller.locked)
+      .map((roller) => roller.availableTrimLeftFrames);
+    const availableRightFrames = rollers
+      .filter((roller) => !roller.locked)
+      .map((roller) => roller.availableTrimRightFrames);
+
+    return {
+      active: true,
+      mode: this.state.mode,
+      linkedSelection: this.state.linkedSelection,
+      hasLockedRollers: rollers.some((roller) => roller.locked),
+      constrainedTrimLeftFrames: availableLeftFrames.length > 0 ? Math.min(...availableLeftFrames) : 0,
+      constrainedTrimRightFrames: availableRightFrames.length > 0 ? Math.min(...availableRightFrames) : 0,
+      rollers,
     };
   }
 
@@ -1466,7 +1772,7 @@ export class TrimEngine {
    * @returns An unsubscribe function.
    */
   on(
-    event: 'enter' | 'exit' | 'trim' | 'modeChange',
+    event: 'enter' | 'exit' | 'cancel' | 'trim' | 'modeChange',
     cb: (...args: unknown[]) => void,
   ): () => void {
     if (!this.eventListeners.has(event)) {

@@ -20,10 +20,6 @@ const LOCALES = [
 
 const WORKSPACES = [
   { value: 'filmtv', label: 'Film / TV' },
-  { value: 'news', label: 'Broadcast News' },
-  { value: 'sports', label: 'Sports' },
-  { value: 'creator', label: 'Creator' },
-  { value: 'marketing', label: 'Brand & Marketing' },
 ];
 
 export function GeneralSettings() {

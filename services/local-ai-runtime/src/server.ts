@@ -9,6 +9,10 @@
  */
 
 import express, { type Request, type Response, type NextFunction } from 'express';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { SERVICE_NAME, SERVICE_VERSION } from './index';
 import { ModelRegistry } from './ModelRegistry';
 import { createSeededRegistry } from './registry-seed';
@@ -18,6 +22,7 @@ import { TensorRTBackend } from './backends/TensorRTBackend';
 import { LlamaCppBackend } from './backends/LlamaCppBackend';
 import { MLXBackend } from './backends/MLXBackend';
 import { CTranslate2Backend } from './backends/CTranslate2Backend';
+import { FasterWhisperBackend } from './backends/FasterWhisperBackend';
 import { getHealthInfo, runBenchmark } from './health';
 import { generateEmbeddings } from './capabilities/embedding';
 import { transcribe } from './capabilities/stt';
@@ -153,6 +158,37 @@ function sanitizeString(input: string): string {
   return input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 }
 
+function parseBooleanInput(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') {
+      return true;
+    }
+    if (normalized === 'false') {
+      return false;
+    }
+  }
+
+  return undefined;
+}
+
+function sanitizeUploadFilename(filename: string | undefined): string {
+  const fallback = 'transcription-upload.wav';
+  const sanitized = sanitizeString(filename ?? fallback).trim();
+  const basename = path.basename(sanitized || fallback);
+  return basename.replace(/[^a-zA-Z0-9._-]+/g, '_') || fallback;
+}
+
+async function createTemporaryUploadPath(filename: string): Promise<string> {
+  const directory = path.join(os.tmpdir(), 'avid-local-ai-runtime');
+  await fs.mkdir(directory, { recursive: true });
+  return path.join(directory, `${randomUUID()}-${filename}`);
+}
+
 // ---------------------------------------------------------------------------
 // Inference timeout wrapper
 // ---------------------------------------------------------------------------
@@ -205,7 +241,18 @@ app.use(express.json({ limit: '10mb' }));
 app.use((_req: Request, res: Response, next: NextFunction) => {
   res.setHeader('Access-Control-Allow-Origin', envConfig.corsOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    [
+      'Content-Type',
+      'Authorization',
+      'X-Audio-Filename',
+      'X-Transcription-Language',
+      'X-Transcription-Model-Id',
+      'X-Transcription-Diarize',
+      'X-Transcription-Task',
+    ].join(', '),
+  );
   if (_req.method === 'OPTIONS') {
     res.sendStatus(204);
     return;
@@ -261,6 +308,7 @@ const registry: ModelRegistry = createSeededRegistry();
 
 /** All known backend instances (order = preference). */
 const allBackends: IModelBackend[] = [
+  new FasterWhisperBackend(),
   new ONNXBackend(),
   new TensorRTBackend(),
   new LlamaCppBackend(),
@@ -538,14 +586,16 @@ app.post('/embed', async (req: Request, res: Response) => {
  *
  * Shorthand for speech-to-text.
  *
- * Body: `{ audioPath: string, language?: string, modelId?: string }`
+ * Body: `{ audioPath: string, language?: string, modelId?: string, diarize?: boolean, task?: "transcribe" | "translate" }`
  */
 app.post('/transcribe', async (req: Request, res: Response) => {
   try {
-    const { audioPath, language, modelId } = req.body as {
+    const { audioPath, language, modelId, diarize, task } = req.body as {
       audioPath?: string;
       language?: string;
       modelId?: string;
+      diarize?: boolean;
+      task?: 'transcribe' | 'translate';
     };
 
     if (!audioPath || typeof audioPath !== 'string') {
@@ -570,9 +620,19 @@ app.post('/transcribe', async (req: Request, res: Response) => {
       return;
     }
 
+    if (diarize !== undefined && typeof diarize !== 'boolean') {
+      res.status(400).json({ error: '`diarize` must be a boolean.' });
+      return;
+    }
+
+    if (task !== undefined && task !== 'transcribe' && task !== 'translate') {
+      res.status(400).json({ error: '`task` must be either "transcribe" or "translate".' });
+      return;
+    }
+
     const backend = await resolveBackend('stt');
     const result = await withTimeout(
-      transcribe(sanitizedPath, registry, backend, { language, modelId }),
+      transcribe(sanitizedPath, registry, backend, { language, modelId, diarize, task }),
       envConfig.inferenceTimeoutMs,
       'Transcription',
     );
@@ -582,6 +642,85 @@ app.post('/transcribe', async (req: Request, res: Response) => {
     res.status(500).json({ error: (err as Error).message });
   }
 });
+
+/**
+ * POST /transcribe-upload
+ *
+ * Upload raw audio/video bytes directly for transcription.
+ *
+ * Body: application/octet-stream
+ * Headers:
+ * - x-audio-filename
+ * - x-transcription-language
+ * - x-transcription-model-id
+ * - x-transcription-diarize
+ * - x-transcription-task
+ */
+app.post(
+  '/transcribe-upload',
+  express.raw({ type: 'application/octet-stream', limit: '512mb' }),
+  async (req: Request, res: Response) => {
+    let temporaryUploadPath: string | null = null;
+
+    try {
+      const binaryBody = req.body;
+      if (!Buffer.isBuffer(binaryBody) || binaryBody.length === 0) {
+        res.status(400).json({ error: 'Binary request body is required.' });
+        return;
+      }
+
+      const filename = sanitizeUploadFilename(req.header('x-audio-filename') ?? undefined);
+      const language = req.header('x-transcription-language') ?? undefined;
+      const modelId = req.header('x-transcription-model-id') ?? undefined;
+      const diarize = parseBooleanInput(req.header('x-transcription-diarize'));
+      const taskHeader = req.header('x-transcription-task');
+      const task = taskHeader === 'translate' ? 'translate' : taskHeader === 'transcribe' ? 'transcribe' : undefined;
+
+      if (language !== undefined && typeof language !== 'string') {
+        res.status(400).json({ error: '`language` must be a string.' });
+        return;
+      }
+
+      if (taskHeader !== undefined && task === undefined) {
+        res.status(400).json({ error: '`task` must be either "transcribe" or "translate".' });
+        return;
+      }
+
+      if (req.header('x-transcription-diarize') !== undefined && diarize === undefined) {
+        res.status(400).json({ error: '`diarize` must be either "true" or "false".' });
+        return;
+      }
+
+      temporaryUploadPath = await createTemporaryUploadPath(filename);
+      await fs.writeFile(temporaryUploadPath, binaryBody);
+
+      const backend = await resolveBackend('stt');
+      const result = await withTimeout(
+        transcribe(temporaryUploadPath, registry, backend, {
+          language,
+          modelId,
+          diarize,
+          task,
+        }),
+        envConfig.inferenceTimeoutMs,
+        'Transcription upload',
+      );
+
+      res.json(result);
+    } catch (err) {
+      log('error', 'POST /transcribe-upload error', { error: (err as Error).message });
+      res.status(500).json({ error: (err as Error).message });
+    } finally {
+      if (temporaryUploadPath) {
+        try {
+          await fs.unlink(temporaryUploadPath);
+        } catch {
+          // Ignore temp cleanup failures.
+        }
+      }
+    }
+  },
+);
 
 /**
  * POST /translate

@@ -154,6 +154,7 @@ function buildAvidDefaultBindings(): KeyBinding[] {
     createBinding('h', [], 'mark.clearOut', 'Clear OUT', 'marking'),
     createBinding('q', [], 'mark.goToIn', 'Go to IN', 'marking'),
     createBinding('w', [], 'mark.goToOut', 'Go to OUT', 'marking'),
+    createBinding('f', [], 'monitor.matchFrame', 'Match Frame', 'navigation'),
 
     // ═══════════════════════════════════════════════════════════════════════
     //  Editing
@@ -173,6 +174,8 @@ function buildAvidDefaultBindings(): KeyBinding[] {
     //  Trim
     // ═══════════════════════════════════════════════════════════════════════
     createBinding('u', [], 'trim.enterMode', 'Enter Trim Mode', 'trim'),
+    createBinding('u', ['alt'], 'trim.recallPrevious', 'Recall Previous Trim Settings', 'trim'),
+    createBinding('u', ['shift'], 'trim.toggleViewMode', 'Toggle Big/Small Trim View', 'trim'),
     createBinding('p', [], 'trim.selectASide', 'Select A-side Roller', 'trim'),
     createBinding('[', [], 'trim.selectBoth', 'Select Both Sides (Dual Roller)', 'trim'),
     createBinding(']', [], 'trim.selectBSide', 'Select B-side Roller', 'trim'),
@@ -231,8 +234,6 @@ function buildAvidDefaultBindings(): KeyBinding[] {
     createBinding('t', [cmd], 'view.tidy', 'Tidy (Frame View)', 'view'),
     createBinding('e', [cmd], 'view.sortAscending', 'Sort Ascending', 'view'),
     createBinding('e', [cmd, 'alt'], 'view.sortDescending', 'Sort Descending', 'view'),
-    createBinding('f', [], 'view.fullScreen', 'Full Screen Toggle', 'view'),
-
     // ═══════════════════════════════════════════════════════════════════════
     //  File
     // ═══════════════════════════════════════════════════════════════════════

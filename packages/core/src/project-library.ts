@@ -1,3 +1,6 @@
+import { DEFAULT_EDITORIAL_WORKSPACE_ID } from './editorial-experience';
+import type { AudioChannelLayout } from './audio/channelLayout';
+
 export type TrackType = 'VIDEO' | 'AUDIO' | 'EFFECT' | 'SUBTITLE' | 'GRAPHIC';
 export type PanelType = 'edit' | 'color' | 'audio' | 'effects' | 'publish' | 'review' | 'ingest' | 'script' | 'news';
 export type WorkspaceTab = 'video' | 'audio' | 'color' | 'ai';
@@ -35,6 +38,7 @@ export interface EditorMediaTechnicalMetadata {
   container?: string;
   videoCodec?: string;
   audioCodec?: string;
+  audioChannelLayout?: AudioChannelLayout;
   durationSeconds?: number;
   frameRate?: number;
   width?: number;
@@ -197,6 +201,55 @@ export interface EditorTranscriptCue {
   text: string;
   confidence?: number;
   source: 'TRANSCRIPT' | 'SCRIPT';
+  speakerId?: string;
+  language?: string;
+  translation?: string;
+  provider?: string;
+  linkedScriptLineIds?: string[];
+  words?: EditorTranscriptWord[];
+}
+
+export interface EditorTranscriptWord {
+  text: string;
+  startTime: number;
+  endTime: number;
+  confidence: number;
+  speakerId?: string;
+}
+
+export interface EditorTranscriptSpeaker {
+  id: string;
+  label: string;
+  confidence?: number;
+  color?: string;
+  identified: boolean;
+}
+
+export interface EditorScriptDocumentLine {
+  id: string;
+  lineNumber: number;
+  text: string;
+  speaker?: string;
+  linkedCueIds: string[];
+}
+
+export interface EditorScriptDocument {
+  id: string;
+  title: string;
+  source: 'IMPORTED' | 'MANUAL' | 'GENERATED';
+  language: string;
+  text: string;
+  lines: EditorScriptDocumentLine[];
+  updatedAt: string;
+}
+
+export interface EditorTranscriptionSettings {
+  provider: 'local-faster-whisper' | 'cloud-openai-compatible';
+  translationProvider: 'local-runtime' | 'cloud-openai-compatible';
+  preferredLanguage: 'auto' | string;
+  enableDiarization: boolean;
+  enableSpeakerIdentification: boolean;
+  translateToEnglish: boolean;
 }
 
 export interface EditorReviewComment {
@@ -231,12 +284,182 @@ export interface EditorPublishJob {
   outputSummary?: string;
 }
 
+export interface EditorProjectVersionHistoryEntry {
+  id: string;
+  name: string;
+  createdAt: number;
+  createdBy: string;
+  createdByProfile?: {
+    userId?: string;
+    displayName: string;
+    avatarUrl?: string;
+    color?: string;
+  };
+  description: string;
+  snapshotData: unknown;
+  isRestorePoint?: boolean;
+}
+
+export interface EditorProjectCollabReaction {
+  emoji: string;
+  userIds: string[];
+}
+
+export interface EditorProjectCollabReply {
+  id: string;
+  userId: string;
+  userName: string;
+  text: string;
+  timestamp: number;
+}
+
+export interface EditorProjectCollabComment {
+  id: string;
+  userId: string;
+  userName: string;
+  frame: number;
+  trackId?: string;
+  text: string;
+  timestamp: number;
+  resolved: boolean;
+  replies: EditorProjectCollabReply[];
+  reactions: EditorProjectCollabReaction[];
+}
+
+export interface EditorProjectCollabActivityEntry {
+  id: string;
+  userId?: string;
+  user: string;
+  action: string;
+  timestamp: number;
+  detail: string;
+}
+
+export interface EditorProjectCollabPresenceSnapshot {
+  userId: string;
+  displayName: string;
+  avatarUrl?: string;
+  color: string;
+  isOnline: boolean;
+  cursorFrame: number;
+  cursorTrackId: string | null;
+  playheadTime?: number;
+}
+
+export interface EditorProjectCollaborationState {
+  presenceSnapshots: EditorProjectCollabPresenceSnapshot[];
+  comments: EditorProjectCollabComment[];
+  activityFeed: EditorProjectCollabActivityEntry[];
+}
+
 export interface EditorProjectSettings {
   frameRate: number;
   width: number;
   height: number;
   sampleRate: number;
   exportFormat: 'mp4' | 'mov' | 'webm' | 'mp3' | 'wav' | 'aiff';
+  dropFrame?: boolean;
+}
+
+export interface EditorSubtitleCueStyle {
+  fontSize?: number;
+  fontFamily?: string;
+  color?: string;
+  position?: 'top' | 'bottom' | 'custom';
+  y?: number;
+  bgOpacity?: number;
+}
+
+export interface EditorSubtitleCue {
+  id: string;
+  start: number;
+  end: number;
+  text: string;
+  speaker?: string;
+  style?: EditorSubtitleCueStyle;
+}
+
+export interface EditorSubtitleTrack {
+  id: string;
+  name: string;
+  language: string;
+  cues: EditorSubtitleCue[];
+}
+
+export interface EditorTitleClipStyle {
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: number;
+  color: string;
+  outlineColor?: string;
+  outlineWidth?: number;
+  shadowColor?: string;
+  shadowBlur?: number;
+  opacity: number;
+  textAlign: 'left' | 'center' | 'right';
+}
+
+export interface EditorTitleClipPosition {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface EditorTitleClipBackground {
+  type: 'none' | 'solid' | 'gradient';
+  color?: string;
+  gradientColors?: string[];
+  opacity?: number;
+}
+
+export interface EditorTitleClipAnimation {
+  type: 'none' | 'fade-in' | 'slide-up' | 'typewriter' | 'scale-in';
+  duration: number;
+}
+
+export interface EditorTitleClip {
+  id: string;
+  templateId?: string;
+  text: string;
+  style: EditorTitleClipStyle;
+  position: EditorTitleClipPosition;
+  background?: EditorTitleClipBackground;
+  animation?: EditorTitleClipAnimation;
+}
+
+export interface EditorProjectEditorialState {
+  selectedBinId: string | null;
+  sourceAssetId: string | null;
+  enabledTrackIds: string[];
+  syncLockedTrackIds: string[];
+  videoMonitorTrackId: string | null;
+  sourceTrackDescriptors: {
+    id: string;
+    type: 'VIDEO' | 'AUDIO';
+    index: number;
+  }[];
+  trackPatches: {
+    sourceTrackId: string;
+    sourceTrackType: 'VIDEO' | 'AUDIO';
+    sourceTrackIndex: number;
+    recordTrackId: string;
+    enabled: boolean;
+  }[];
+}
+
+export interface EditorProjectWorkstationState {
+  subtitleTracks: EditorSubtitleTrack[];
+  titleClips: EditorTitleClip[];
+  trackHeights: Record<string, number>;
+  activeWorkspaceId: string;
+  composerLayout: 'source-record' | 'full-frame';
+  showTrackingInfo: boolean;
+  trackingInfoFields: string[];
+  clipTextDisplay: 'name' | 'source' | 'media' | 'comments';
+  dupeDetectionEnabled: boolean;
+  versionHistoryRetentionPreference: 'manual' | 'session';
+  versionHistoryCompareMode: 'summary' | 'details';
 }
 
 export interface EditorProject {
@@ -256,11 +479,18 @@ export interface EditorProject {
   collaborators: CollaboratorPresence[];
   aiJobs: EditorAIJob[];
   transcript: EditorTranscriptCue[];
+  transcriptSpeakers: EditorTranscriptSpeaker[];
+  scriptDocument: EditorScriptDocument | null;
+  transcriptionSettings: EditorTranscriptionSettings;
   reviewComments: EditorReviewComment[];
   approvals: EditorApproval[];
   publishJobs: EditorPublishJob[];
   watchFolders: EditorWatchFolder[];
+  versionHistory?: EditorProjectVersionHistoryEntry[];
+  collaboration?: EditorProjectCollaborationState;
   tokenBalance: number;
+  editorialState: EditorProjectEditorialState;
+  workstationState: EditorProjectWorkstationState;
 }
 
 export interface ProjectSummary {
@@ -284,6 +514,15 @@ export interface CreateProjectOptions {
   description?: string;
   template?: ProjectTemplate;
   tags?: string[];
+  seedContent?: boolean;
+  frameRate?: number;
+  width?: number;
+  height?: number;
+  sampleRate?: number;
+  exportFormat?: EditorProjectSettings['exportFormat'];
+  dropFrame?: boolean;
+  activeWorkspaceId?: string;
+  composerLayout?: EditorProjectWorkstationState['composerLayout'];
 }
 
 const STORAGE_KEY = 'the-avid.projects.v1';
@@ -721,8 +960,55 @@ function createTranscriptCues(bins: EditorBin[], template: ProjectTemplate): Edi
       text: templateLines[template][index] ?? `${asset.name} select`,
       confidence: 0.88 - index * 0.04,
       source: index < 3 ? 'TRANSCRIPT' : 'SCRIPT',
+      language: 'en',
+      provider: 'seed',
+      linkedScriptLineIds: [],
     };
   });
+}
+
+function createTranscriptSpeakers(transcript: EditorTranscriptCue[]): EditorTranscriptSpeaker[] {
+  const speakers = new Map<string, EditorTranscriptSpeaker>();
+
+  for (const cue of transcript) {
+    const speakerId = cue.speakerId ?? cue.speaker.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    if (!speakers.has(speakerId)) {
+      speakers.set(speakerId, {
+        id: speakerId,
+        label: cue.speaker,
+        confidence: cue.confidence,
+        identified: false,
+      });
+    }
+  }
+
+  return [...speakers.values()];
+}
+
+function createScriptDocument(template: ProjectTemplate, transcript: EditorTranscriptCue[]): EditorScriptDocument | null {
+  if (transcript.length === 0) {
+    return null;
+  }
+
+  const lines = transcript.map((cue, index) => ({
+    id: generateId('script-line'),
+    lineNumber: index + 1,
+    text: cue.text,
+    speaker: cue.speaker,
+    linkedCueIds: [cue.id],
+  }));
+
+  return {
+    id: generateId('script'),
+    title: `${(template[0] ?? '').toUpperCase()}${template.slice(1)} Script`,
+    source: 'GENERATED',
+    language: 'en',
+    text: lines.map((line) => {
+      return line.speaker ? `${line.speaker}: ${line.text}` : line.text;
+    }).join('\n\n'),
+    lines,
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 function createReviewComments(template: ProjectTemplate): EditorReviewComment[] {
@@ -996,6 +1282,7 @@ function normalizeProject(project: EditorProject): EditorProject {
   const height = Number.isFinite(rawHeight) && rawHeight > 0 ? Math.round(rawHeight) : 1080;
   const rawSampleRate = project.settings?.sampleRate ?? 48000;
   const sampleRate = Number.isFinite(rawSampleRate) && rawSampleRate > 0 ? rawSampleRate : 48000;
+  const dropFrame = project.settings?.dropFrame === true;
 
   // Clamp progress to 0-100
   const rawProgress = typeof project.progress === 'number' ? project.progress : 0;
@@ -1004,6 +1291,32 @@ function normalizeProject(project: EditorProject): EditorProject {
   // Clamp token balance to >= 0
   const rawTokenBalance = typeof project.tokenBalance === 'number' ? project.tokenBalance : 0;
   const tokenBalance = Number.isFinite(rawTokenBalance) ? Math.max(0, rawTokenBalance) : 0;
+  const trackIds = new Set((project.tracks ?? []).map((track) => track.id));
+  const defaultVideoMonitorTrackId = (project.tracks ?? []).find(
+    (track) => track.type === 'VIDEO' || track.type === 'GRAPHIC',
+  )?.id ?? null;
+  const editorialState = project.editorialState ?? {
+    selectedBinId: null,
+    sourceAssetId: null,
+    enabledTrackIds: Array.from(trackIds),
+    syncLockedTrackIds: [],
+    videoMonitorTrackId: defaultVideoMonitorTrackId,
+    sourceTrackDescriptors: [],
+    trackPatches: [],
+  };
+  const workstationState = project.workstationState ?? {
+    subtitleTracks: [],
+    titleClips: [],
+    trackHeights: {},
+    activeWorkspaceId: DEFAULT_EDITORIAL_WORKSPACE_ID,
+    composerLayout: 'source-record' as const,
+    showTrackingInfo: true,
+    trackingInfoFields: ['master-tc', 'duration'],
+    clipTextDisplay: 'name' as const,
+    dupeDetectionEnabled: false,
+    versionHistoryRetentionPreference: 'manual' as const,
+    versionHistoryCompareMode: 'summary' as const,
+  };
 
   return {
     ...project,
@@ -1019,6 +1332,7 @@ function normalizeProject(project: EditorProject): EditorProject {
       height,
       sampleRate,
       exportFormat: project.settings?.exportFormat ?? 'mov',
+      dropFrame,
     },
     tracks: cloneValue(project.tracks ?? []),
     markers: cloneValue(project.markers ?? []),
@@ -1026,11 +1340,81 @@ function normalizeProject(project: EditorProject): EditorProject {
     collaborators: cloneValue(project.collaborators ?? []),
     aiJobs: cloneValue(project.aiJobs ?? []),
     transcript: cloneValue(project.transcript ?? []),
+    transcriptSpeakers: cloneValue(project.transcriptSpeakers ?? createTranscriptSpeakers(project.transcript ?? [])),
+    scriptDocument: project.scriptDocument ? cloneValue(project.scriptDocument) : null,
+    transcriptionSettings: cloneValue(project.transcriptionSettings ?? {
+      provider: 'local-faster-whisper',
+      translationProvider: 'local-runtime',
+      preferredLanguage: 'auto',
+      enableDiarization: true,
+      enableSpeakerIdentification: false,
+      translateToEnglish: false,
+    }),
     reviewComments: cloneValue(project.reviewComments ?? []),
     approvals: cloneValue(project.approvals ?? []),
     publishJobs: cloneValue(project.publishJobs ?? []),
     watchFolders: cloneValue(project.watchFolders ?? []),
+    versionHistory: cloneValue(project.versionHistory ?? []),
+    collaboration: {
+      presenceSnapshots: cloneValue(project.collaboration?.presenceSnapshots ?? []),
+      comments: cloneValue(project.collaboration?.comments ?? []),
+      activityFeed: cloneValue(project.collaboration?.activityFeed ?? []),
+    },
     tokenBalance,
+    editorialState: {
+      selectedBinId: editorialState.selectedBinId ?? null,
+      sourceAssetId: editorialState.sourceAssetId ?? null,
+      enabledTrackIds: cloneValue(
+        (editorialState.enabledTrackIds ?? []).filter((trackId) => trackIds.has(trackId)),
+      ),
+      syncLockedTrackIds: cloneValue(
+        (editorialState.syncLockedTrackIds ?? []).filter((trackId) => trackIds.has(trackId)),
+      ),
+      videoMonitorTrackId: editorialState.videoMonitorTrackId && trackIds.has(editorialState.videoMonitorTrackId)
+        ? editorialState.videoMonitorTrackId
+        : defaultVideoMonitorTrackId,
+      sourceTrackDescriptors: cloneValue(
+        (editorialState.sourceTrackDescriptors ?? [])
+          .filter((descriptor) => (
+            typeof descriptor?.id === 'string'
+            && (descriptor.type === 'VIDEO' || descriptor.type === 'AUDIO')
+            && Number.isFinite(descriptor.index)
+            && descriptor.index > 0
+          ))
+          .map((descriptor) => ({
+            id: descriptor.id,
+            type: descriptor.type,
+            index: Math.round(descriptor.index),
+          })),
+      ),
+      trackPatches: cloneValue(
+        (editorialState.trackPatches ?? []).filter((patch) => (
+          typeof patch?.sourceTrackId === 'string'
+          && typeof patch.recordTrackId === 'string'
+          && trackIds.has(patch.recordTrackId)
+          && (patch.sourceTrackType === 'VIDEO' || patch.sourceTrackType === 'AUDIO')
+          && Number.isFinite(patch.sourceTrackIndex)
+          && patch.sourceTrackIndex > 0
+        )),
+      ),
+    },
+    workstationState: {
+      subtitleTracks: cloneValue(workstationState.subtitleTracks ?? []),
+      titleClips: cloneValue(workstationState.titleClips ?? []),
+      trackHeights: cloneValue(workstationState.trackHeights ?? {}),
+      activeWorkspaceId: workstationState.activeWorkspaceId ?? DEFAULT_EDITORIAL_WORKSPACE_ID,
+      composerLayout: workstationState.composerLayout === 'full-frame' ? 'full-frame' : 'source-record',
+      showTrackingInfo: workstationState.showTrackingInfo ?? true,
+      trackingInfoFields: cloneValue(workstationState.trackingInfoFields ?? ['master-tc', 'duration']),
+      clipTextDisplay: workstationState.clipTextDisplay ?? 'name',
+      dupeDetectionEnabled: workstationState.dupeDetectionEnabled ?? false,
+      versionHistoryRetentionPreference: workstationState.versionHistoryRetentionPreference === 'session'
+        ? 'session'
+        : 'manual',
+      versionHistoryCompareMode: workstationState.versionHistoryCompareMode === 'details'
+        ? 'details'
+        : 'summary',
+    },
   };
 }
 
@@ -1064,6 +1448,11 @@ export function getTemplateMeta(template: ProjectTemplate) {
 export function hydrateProject(project: Partial<EditorProject>): EditorProject {
   const template = project.template ?? 'film';
   const bins = project.bins ?? [];
+  const tracks = project.tracks ?? [];
+  const transcript = project.transcript ?? createTranscriptCues(bins, template);
+  const firstVideoTrackId = tracks.find(
+    (track) => track.type === 'VIDEO' || track.type === 'GRAPHIC',
+  )?.id ?? null;
   return normalizeProject({
     schemaVersion: project.schemaVersion ?? PROJECT_SCHEMA_VERSION,
     id: project.id ?? generateId('project'),
@@ -1080,29 +1469,81 @@ export function hydrateProject(project: Partial<EditorProject>): EditorProject {
       height: 1080,
       sampleRate: 48000,
       exportFormat: 'mov',
+      dropFrame: false,
     },
-    tracks: project.tracks ?? [],
+    tracks,
     markers: project.markers ?? [],
     bins,
     collaborators: project.collaborators ?? [],
     aiJobs: project.aiJobs ?? [],
-    transcript: project.transcript ?? createTranscriptCues(bins, template),
+    transcript,
+    transcriptSpeakers: project.transcriptSpeakers ?? createTranscriptSpeakers(transcript),
+    scriptDocument: project.scriptDocument ?? createScriptDocument(template, transcript),
+    transcriptionSettings: project.transcriptionSettings ?? {
+      provider: 'local-faster-whisper',
+      translationProvider: 'local-runtime',
+      preferredLanguage: 'auto',
+      enableDiarization: true,
+      enableSpeakerIdentification: false,
+      translateToEnglish: false,
+    },
     reviewComments: project.reviewComments ?? createReviewComments(template),
     approvals: project.approvals ?? createApprovals(),
     publishJobs: project.publishJobs ?? createPublishJobs(template),
     watchFolders: project.watchFolders ?? [],
+    versionHistory: project.versionHistory ?? [],
+    collaboration: {
+      presenceSnapshots: project.collaboration?.presenceSnapshots ?? [],
+      comments: project.collaboration?.comments ?? [],
+      activityFeed: project.collaboration?.activityFeed ?? [],
+    },
     tokenBalance: project.tokenBalance ?? 0,
+    editorialState: project.editorialState ?? {
+      selectedBinId: bins[0]?.id ?? null,
+      sourceAssetId: null,
+      enabledTrackIds: tracks.map((track) => track.id),
+      syncLockedTrackIds: [],
+      videoMonitorTrackId: firstVideoTrackId,
+      sourceTrackDescriptors: [],
+      trackPatches: [],
+    },
+    workstationState: project.workstationState ?? {
+      subtitleTracks: [],
+      titleClips: [],
+      trackHeights: {},
+      activeWorkspaceId: DEFAULT_EDITORIAL_WORKSPACE_ID,
+      composerLayout: 'source-record',
+      showTrackingInfo: true,
+      trackingInfoFields: ['master-tc', 'duration'],
+      clipTextDisplay: 'name',
+      dupeDetectionEnabled: false,
+      versionHistoryRetentionPreference: 'manual',
+      versionHistoryCompareMode: 'summary',
+    },
   });
 }
 
 export function buildProject(options: CreateProjectOptions = {}): EditorProject {
   const template = options.template ?? 'film';
+  const seedContent = options.seedContent ?? true;
   const meta = TEMPLATE_META[template];
-  const bins = createTemplateBins(template);
-  const tracks = seedTracksFromBins(createTemplateTracks(template), bins);
-  const transcript = createTranscriptCues(bins, template);
+  const frameRate = options.frameRate ?? meta.resolution.frameRate;
+  const width = options.width ?? meta.resolution.width;
+  const height = options.height ?? meta.resolution.height;
+  const sampleRate = options.sampleRate ?? 48000;
+  const exportFormat = options.exportFormat ?? (template === 'podcast' ? 'wav' : 'mov');
+  const bins = seedContent ? createTemplateBins(template) : [];
+  const tracks = seedContent
+    ? seedTracksFromBins(createTemplateTracks(template), bins)
+    : createTemplateTracks(template);
+  const transcript = seedContent ? createTranscriptCues(bins, template) : [];
+  const transcriptSpeakers = createTranscriptSpeakers(transcript);
+  const scriptDocument = seedContent ? createScriptDocument(template, transcript) : null;
   const now = new Date().toISOString();
   const name = options.name ?? `Untitled ${(template[0] ?? '').toUpperCase()}${template.slice(1)}`;
+  const firstVideoTrackId = tracks.find(
+    (track) => track.type === 'VIDEO' || track.type === 'GRAPHIC',
+  )?.id ?? null;
 
   return normalizeProject({
     schemaVersion: PROJECT_SCHEMA_VERSION,
@@ -1113,46 +1554,94 @@ export function buildProject(options: CreateProjectOptions = {}): EditorProject 
     tags: options.tags?.length ? [...options.tags] : [...meta.tags],
     createdAt: now,
     updatedAt: now,
-    progress: Math.max(18, Math.min(100, Math.round(getProjectDuration({ tracks }) * 2))),
+    progress: seedContent
+      ? Math.max(18, Math.min(100, Math.round(getProjectDuration({ tracks }) * 2)))
+      : 0,
     settings: {
-      frameRate: meta.resolution.frameRate,
-      width: meta.resolution.width,
-      height: meta.resolution.height,
-      sampleRate: 48000,
-      exportFormat: template === 'podcast' ? 'wav' : 'mov',
+      frameRate,
+      width,
+      height,
+      sampleRate,
+      exportFormat,
+      dropFrame: options.dropFrame ?? false,
     },
     tracks,
-    markers: [
-      { id: generateId('marker'), time: 8.5, label: 'Beat marker', color: '#f59e0b' },
-      { id: generateId('marker'), time: 22, label: 'Revision point', color: '#ef4444' },
-    ],
+    markers: seedContent
+      ? [
+          { id: generateId('marker'), time: 8.5, label: 'Beat marker', color: '#f59e0b' },
+          { id: generateId('marker'), time: 22, label: 'Revision point', color: '#ef4444' },
+        ]
+      : [],
     bins,
-    collaborators: [
-      { id: generateId('user'), displayName: 'Sarah K.', color: '#7c5cfc' },
-      { id: generateId('user'), displayName: 'Marcus T.', color: '#25a865' },
-    ],
+    collaborators: seedContent
+      ? [
+          { id: generateId('user'), displayName: 'Sarah K.', color: '#7c5cfc' },
+          { id: generateId('user'), displayName: 'Marcus T.', color: '#25a865' },
+        ]
+      : [],
     aiJobs: [],
     transcript,
-    reviewComments: createReviewComments(template),
-    approvals: createApprovals(),
-    publishJobs: createPublishJobs(template),
+    transcriptSpeakers,
+    scriptDocument,
+    transcriptionSettings: {
+      provider: 'local-faster-whisper',
+      translationProvider: 'local-runtime',
+      preferredLanguage: 'auto',
+      enableDiarization: true,
+      enableSpeakerIdentification: false,
+      translateToEnglish: false,
+    },
+    reviewComments: seedContent ? createReviewComments(template) : [],
+    approvals: seedContent ? createApprovals() : [],
+    publishJobs: seedContent ? createPublishJobs(template) : [],
     watchFolders: [],
-    tokenBalance: template === 'sports' ? 620 : 487,
+    versionHistory: [],
+    collaboration: {
+      presenceSnapshots: [],
+      comments: [],
+      activityFeed: [],
+    },
+    tokenBalance: seedContent ? (template === 'sports' ? 620 : 487) : 0,
+    editorialState: {
+      selectedBinId: bins[0]?.id ?? null,
+      sourceAssetId: null,
+      enabledTrackIds: tracks.map((track) => track.id),
+      syncLockedTrackIds: [],
+      videoMonitorTrackId: firstVideoTrackId,
+      sourceTrackDescriptors: [],
+      trackPatches: [],
+    },
+    workstationState: {
+      subtitleTracks: [],
+      titleClips: [],
+      trackHeights: {},
+      activeWorkspaceId: options.activeWorkspaceId ?? DEFAULT_EDITORIAL_WORKSPACE_ID,
+      composerLayout: options.composerLayout ?? 'source-record',
+      showTrackingInfo: true,
+      trackingInfoFields: ['master-tc', 'duration'],
+      clipTextDisplay: 'name',
+      dupeDetectionEnabled: false,
+      versionHistoryRetentionPreference: 'manual',
+      versionHistoryCompareMode: 'summary',
+    },
   });
 }
 
 export function buildSeedProjectLibrary(): EditorProject[] {
   return [
-    buildProject({ name: 'Demo Feature Film', template: 'film' }),
-    buildProject({ name: 'Brand Campaign Q4', template: 'commercial' }),
-    buildProject({ name: 'Documentary: City Life', template: 'documentary' }),
-    buildProject({ name: 'Sports Highlights Reel', template: 'sports' }),
-    buildProject({ name: 'Podcast Episode 24', template: 'podcast' }),
+    buildProject({ name: 'Demo Feature Film', template: 'film', seedContent: true }),
+    buildProject({ name: 'Brand Campaign Q4', template: 'commercial', seedContent: true }),
+    buildProject({ name: 'Documentary: City Life', template: 'documentary', seedContent: true }),
+    buildProject({ name: 'Sports Highlights Reel', template: 'sports', seedContent: true }),
+    buildProject({ name: 'Podcast Episode 24', template: 'podcast', seedContent: true }),
   ];
 }
 
 export function createProject(options: CreateProjectOptions = {}): EditorProject {
-  return upsertProject(buildProject(options));
+  return upsertProject(buildProject({
+    ...options,
+    seedContent: options.seedContent ?? false,
+  }));
 }
 
 export function ensureProjectLibrary(): EditorProject[] {

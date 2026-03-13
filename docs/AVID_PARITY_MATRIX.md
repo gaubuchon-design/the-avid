@@ -23,11 +23,11 @@ This matrix focuses on core Media Composer expectations rather than every adjace
 | Review notes and approvals | Implemented | Timeline comments, approvals, and review surfaces exist in web and mobile. |
 | Publish / delivery management | Partial | Preset-driven publish jobs exist, but they are metadata-driven queue objects rather than true finishing exports. |
 | Title / subtitle workflow | Partial | Subtitle tracks exist structurally. Real caption authoring, styling, import/export, and burn-in workflows are missing. |
-| Audio editorial basics | Partial | Audio tracks, mute/solo/volume, and waveform metadata support exist. Mixer depth, automation, EQ, bussing, loudness workflows, and Pro Tools turnover do not. |
+| Audio editorial basics | Partial | Audio tracks, mute/solo/volume, and waveform metadata support exist. The desktop parity runtime now has native mix compilation, automation writes, preview handles, and loudness analysis, but full mixer UI depth, EQ/dynamics, bussing, and Pro Tools-grade turnover are still incomplete. |
 | Color / finishing workspace | Gap | Workspace hooks exist, but no real color pipeline or Symphony-grade finishing toolset is present. |
-| VFX / compositing workflow | Gap | There is no real effect graph, compositing engine, keying pipeline, or motion graphics system. |
-| Multicam | Gap | Not implemented. |
-| Interchange: AAF / OMF / EDL / XML | Partial | The desktop export package now writes EDL and OTIO plus relink and audio-turnover metadata. AAF, OMF, and richer XML interchange remain missing. |
+| VFX / compositing workflow | Partial | The desktop parity runtime now owns a native render-graph, frame-composite, and motion-template path, but it is still a parity seam rather than a full finishing compositor with keying, scopes, or artist-facing effect tooling. |
+| Multicam | Partial | Desktop parity runtime now owns multicam group creation, multiview preparation, cut recording, and program-track commit manifests. Full editorial refinement UX and angle/audio policies are still incomplete. |
+| Interchange: AAF / OMF / EDL / XML | Partial | Desktop parity runtime now emits disk-backed EDL, OTIO, XML, AAF, and OMF package artifacts, writes package-audit manifests, validates the exported artifacts themselves, and adds a Pro Tools turnover companion for AAF handoff. Real third-party round-trip testing and richer conform fidelity are still missing. |
 | Media management: relink / transcode / consolidate | Partial | Desktop now imports to managed storage, captures fingerprints and relink keys, writes a media index, and can generate proxies when local tools are available. Full relink UI, watch folders, consolidation policy, and industrial transcode depth are still missing. |
 | Enterprise administration and governance | Gap | Permissions, audit trails, policy, billing, and deployment controls are not implemented. |
 
@@ -45,6 +45,7 @@ This matrix focuses on core Media Composer expectations rather than every adjace
 - AAF-driven interchange and handoff to finishing and audio tools.
 - Collaborative storage and locking semantics.
 - Multicam, advanced subtitles, color finishing, and higher-end audio workflows.
+- The contract-level execution scaffold for the remaining parity gaps now lives in `docs/NLE_PARITY_GAP_ARCHITECTURE.md` and `packages/core/src/parity/`.
 
 ## Recommendation
 

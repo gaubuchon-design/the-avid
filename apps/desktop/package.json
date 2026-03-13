@@ -2,16 +2,20 @@
   "name": "@mcua/desktop",
   "version": "0.1.0",
   "private": true,
+  "description": "The Avid desktop editorial workstation",
+  "author": "The Avid, Inc.",
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "pack": "electron-vite build && electron-builder --dir",
-    "dist": "electron-vite build && electron-builder",
-    "dist:mac": "electron-vite build && electron-builder --mac",
-    "dist:win": "electron-vite build && electron-builder --win",
-    "dist:linux": "electron-vite build && electron-builder --linux",
+    "prepare:packaging": "node scripts/prepare-packaging.js",
+    "pack": "npm run prepare:packaging -- current && electron-vite build && electron-builder --dir --publish never",
+    "dist": "npm run prepare:packaging -- current && electron-vite build && electron-builder --publish never",
+    "dist:mac": "npm run prepare:packaging -- mac && electron-vite build && electron-builder --mac --arm64 --publish never",
+    "dist:mac:x64": "npm run prepare:packaging -- darwin-x64 && electron-vite build && electron-builder --mac --x64 --publish never",
+    "dist:win": "npm run prepare:packaging -- win32-x64 && electron-vite build && electron-builder --win nsis portable --x64 --publish never",
+    "dist:linux": "npm run prepare:packaging -- linux-x64 && electron-vite build && electron-builder --linux --x64 --publish never",
     "postinstall": "electron-builder install-app-deps",
     "lint": "eslint src --ext .ts,.tsx",
     "type-check": "tsc --noEmit",
@@ -40,13 +44,15 @@
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
-    "electron": "^31.0.0",
+    "electron": "31.7.7",
     "electron-builder": "^24.13.0",
     "electron-vite": "^2.3.0",
     "typescript": "^5.4.0",
     "vitest": "^2.0.0"
   },
   "build": {
+    "electronVersion": "31.7.7",
+    "npmRebuild": false,
     "appId": "com.theavid.app",
     "productName": "The Avid",
     "copyright": "Copyright 2026 The Avid, Inc.",
@@ -82,10 +88,7 @@
       "gatekeeperAssess": false,
       "entitlements": "resources/entitlements.mac.plist",
       "entitlementsInherit": "resources/entitlements.mac.inherit.plist",
-      "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] },
-        { "target": "zip", "arch": ["x64", "arm64"] }
-      ],
+      "target": ["dmg", "zip"],
       "darkModeSupport": true,
       "minimumSystemVersion": "12.0"
     },
@@ -104,10 +107,7 @@
     },
     "win": {
       "icon": "resources/icon.ico",
-      "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
-      ],
+      "target": ["nsis", "portable"],
       "publisherName": "The Avid, Inc."
     },
     "nsis": {
@@ -127,10 +127,7 @@
     "linux": {
       "icon": "resources/icons",
       "category": "AudioVideo",
-      "target": [
-        { "target": "AppImage", "arch": ["x64"] },
-        { "target": "deb", "arch": ["x64"] }
-      ],
+      "target": ["AppImage", "deb"],
       "mimeTypes": ["video/mp4", "video/quicktime", "video/x-msvideo", "audio/mpeg", "audio/wav"]
     },
     "fileAssociations": [

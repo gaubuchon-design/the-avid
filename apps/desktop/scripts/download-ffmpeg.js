@@ -12,8 +12,6 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const https = require('https');
-
 const FFMPEG_VERSION = '7.1';
 
 // Static build URLs (using BtbN releases - widely used GPL builds with all codecs)
@@ -68,6 +66,12 @@ async function main() {
   const outDir = path.join(resourcesDir, config.dir);
   fs.mkdirSync(outDir, { recursive: true });
 
+  const existingBinaries = config.bins.every((bin) => fs.existsSync(path.join(outDir, bin)));
+  if (existingBinaries) {
+    console.log(`FFmpeg binaries already present for ${platform} in ${outDir}`);
+    return;
+  }
+
   console.log(`Downloading FFmpeg for ${platform}...`);
   console.log(`Target: ${outDir}`);
 
@@ -90,7 +94,11 @@ async function main() {
 
     const tmpDir = '/tmp/ffmpeg-extract';
     fs.rmSync(tmpDir, { recursive: true, force: true });
-    execSync(`unzip -o "${tmpFile}" -d "${tmpDir}"`, { stdio: 'inherit' });
+    if (process.platform === 'win32') {
+      execSync(`powershell -NoProfile -Command "Expand-Archive -LiteralPath '${tmpFile}' -DestinationPath '${tmpDir}' -Force"`, { stdio: 'inherit' });
+    } else {
+      execSync(`unzip -o "${tmpFile}" -d "${tmpDir}"`, { stdio: 'inherit' });
+    }
 
     // Copy binaries from subdir
     for (const bin of config.bins) {
