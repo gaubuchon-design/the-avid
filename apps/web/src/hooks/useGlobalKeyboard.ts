@@ -44,6 +44,11 @@ export function handleEditorKeyboardEvent(event: KeyboardEvent): boolean {
 
     case 'ArrowLeft':
       event.preventDefault();
+      if (trimEngine.getState().active || editorState.trimActive) {
+        const frameDelta = event.shiftKey ? -10 : -1;
+        trimEngine.trimByFrames(frameDelta, fps);
+        return true;
+      }
       if (activeMonitor === 'source') {
         editorState.setSourcePlayhead(
           Math.max(0, editorState.sourcePlayhead - (event.shiftKey ? 1 : frameDuration)),
@@ -57,6 +62,11 @@ export function handleEditorKeyboardEvent(event: KeyboardEvent): boolean {
 
     case 'ArrowRight':
       event.preventDefault();
+      if (trimEngine.getState().active || editorState.trimActive) {
+        const frameDelta = event.shiftKey ? 10 : 1;
+        trimEngine.trimByFrames(frameDelta, fps);
+        return true;
+      }
       if (activeMonitor === 'source') {
         const sourceDuration = editorState.sourceAsset?.duration ?? Number.POSITIVE_INFINITY;
         editorState.setSourcePlayhead(

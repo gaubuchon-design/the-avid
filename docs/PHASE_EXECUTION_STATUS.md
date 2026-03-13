@@ -37,6 +37,13 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Made trim entry and edit-point navigation safer when no explicit target tracks are enabled.
 - Promoted trim frame counters and roller-side state into shared editor state so monitor/composer feedback stays aligned with the engine.
 - Added monitor-visible trim HUD feedback for record/program monitoring and deeper acceptance tests for ripple, overwrite-trim, and asymmetric trim workflows.
+- Reworked trim around Avid's cut-first model: explicit cut-point selection, forced dual-monitor trim presentation, big/small trim view switching, transition play-loop review, and previous-trim recall.
+- Routed keyboard transport into the trim workspace so `J/K/L`, play/stop, and arrow nudges now behave as trim review and trim nudge controls while a trim session is active.
+- Added big-trim playback-duration presets and made slip/slide monitor controls mode-aware so those review modes no longer expose roll-style A/B selection UI.
+- Extended explicit trim selection so trim sessions can preserve different selected cut times across tracks, keeping the last-picked cut as the session anchor while recall restores those per-track edit points.
+- Began track-patching parity closure with research-backed source/record selector work: same-type patch moves now preserve ordered patch banks when possible, picture monitor follow now tracks moved picture patches, and the patch panel now surfaces source-side vs record-side routing more clearly.
+- Extended trim review control so big trim now supports direct custom pre-roll and post-roll frame editing in addition to the preset duration buttons.
+- Extended track patching so a source patch can stay mapped while being disabled for edits, with the panel exposing explicit source-side `ON/OFF` patch state and edit targeting continuing to honor only enabled patches.
 - Wired smart-tool toggles into the actual engine/store state path and exposed them in the timeline toolbar.
 - Replaced body drag fallbacks with real overwrite/splice segment moves, including undo coverage and acceptance tests for segment drag parity.
 - Consolidated editor keyboard routing so the editor owns monitor-aware shortcuts while the keyboard engine retains the Avid keymap for the remaining actions.

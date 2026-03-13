@@ -53,6 +53,14 @@ function timeToTimecode(sec: number, fps = 24): string {
   );
 }
 
+function formatTrimFrames(value: number): string {
+  if (value === 0) {
+    return '0f';
+  }
+
+  return `${value > 0 ? '+' : ''}${value}f`;
+}
+
 function updateCachedCanvasFrame(
   sourceCanvas: HTMLCanvasElement,
   cacheRef: React.MutableRefObject<HTMLCanvasElement | null>,
@@ -184,6 +192,16 @@ export function RecordMonitor() {
   const setInToPlayhead = useEditorStore((s) => s.setInToPlayhead);
   const setOutToPlayhead = useEditorStore((s) => s.setOutToPlayhead);
   const trimSelectionLabel = useEditorStore((s) => s.trimSelectionLabel);
+  const trimActive = useEditorStore((s) => s.trimActive);
+  const trimMode = useEditorStore((s) => s.trimMode);
+  const trimBSideFrames = useEditorStore((s) => s.trimBSideFrames);
+  const trimViewMode = useEditorStore((s) => s.trimViewMode);
+  const trimLoopPlaybackActive = useEditorStore((s) => s.trimLoopPlaybackActive);
+  const trimLoopPlaybackDirection = useEditorStore((s) => s.trimLoopPlaybackDirection);
+  const trimLoopPlaybackRate = useEditorStore((s) => s.trimLoopPlaybackRate);
+  const trimLoopOffsetFrames = useEditorStore((s) => s.trimLoopOffsetFrames);
+  const toggleTrimLoopPlayback = useEditorStore((s) => s.toggleTrimLoopPlayback);
+  const toggleTrimViewMode = useEditorStore((s) => s.toggleTrimViewMode);
   const tracks = useEditorStore((s) => s.tracks);
   const bins = useEditorStore((s) => s.bins);
   const selectedTrackId = useEditorStore((s) => s.selectedTrackId);
@@ -202,11 +220,16 @@ export function RecordMonitor() {
     videoMonitorTrackId,
     sequenceSettings: { fps },
     projectSettings: { frameRate: projectFrameRate },
+    trimLoopPlaybackActive,
+    trimLoopOffsetFrames,
   });
   const trimPreviewSide = useMemo(() => {
     return trimPreview.recordMonitor ?? trimPreview.bSide ?? trimPreview.aSide;
   }, [trimPreview.aSide, trimPreview.bSide, trimPreview.recordMonitor]);
   const trimPreviewActive = Boolean(trimPreview.active && trimPreviewSide);
+  const trimSessionActive = trimActive || trimPreview.active;
+  const activeTrimMode = trimPreview.active ? trimEngine.getCurrentMode().toLowerCase() : trimMode;
+  const trimSupportsSideSelection = activeTrimMode !== 'slip' && activeTrimMode !== 'slide';
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -222,7 +245,7 @@ export function RecordMonitor() {
     consumer: 'record-monitor',
     canvasRef,
     canvasSize,
-    disabled: trimPreviewActive,
+    disabled: trimSessionActive,
   });
 
   // Responsive canvas sizing
@@ -467,7 +490,7 @@ export function RecordMonitor() {
   }, [playheadTime]);
 
   useEffect(() => {
-    if (trimPreviewActive) {
+    if (trimSessionActive) {
       releaseMonitorAudioOutput('record-monitor');
       return;
     }
@@ -491,7 +514,7 @@ export function RecordMonitor() {
       editorIsPlaying,
       fps,
     );
-  }, [bins, editorIsPlaying, fps, playheadTime, sourceRevision, tracks, trimPreviewActive]);
+  }, [bins, editorIsPlaying, fps, playheadTime, sourceRevision, tracks, trimSessionActive]);
 
   useEffect(() => {
     return () => {
@@ -501,17 +524,22 @@ export function RecordMonitor() {
 
   // Transport handlers
   const nudgeTrim = useCallback((frames: number): boolean => {
-    if (!trimPreviewActive) {
+    if (!trimSessionActive) {
       return false;
     }
 
     trimEngine.trimByFrames(frames, fps);
     return true;
-  }, [fps, trimPreviewActive]);
+  }, [fps, trimSessionActive]);
 
   const handlePlayPause = useCallback(() => {
+    if (trimSessionActive) {
+      toggleTrimLoopPlayback();
+      return;
+    }
+
     editorTogglePlay();
-  }, [editorTogglePlay]);
+  }, [editorTogglePlay, toggleTrimLoopPlayback, trimSessionActive]);
 
   const handleGoToStart = useCallback(() => {
     useEditorStore.getState().setPlayhead(0);
@@ -582,30 +610,30 @@ export function RecordMonitor() {
   }, [setActiveMonitor]);
 
   const handleSelectTrimASide = useCallback(() => {
-    if (trimPreviewActive) {
+    if (trimSessionActive && trimSupportsSideSelection) {
       trimEngine.selectASide();
     }
-  }, [trimPreviewActive]);
+  }, [trimSessionActive, trimSupportsSideSelection]);
 
   const handleSelectTrimBSide = useCallback(() => {
     setActiveMonitor('record');
-    if (trimPreviewActive) {
+    if (trimSessionActive && trimSupportsSideSelection) {
       trimEngine.selectBSide();
     }
-  }, [setActiveMonitor, trimPreviewActive]);
+  }, [setActiveMonitor, trimSessionActive, trimSupportsSideSelection]);
 
   const handleSelectTrimBothSides = useCallback(() => {
-    if (trimPreviewActive) {
+    if (trimSessionActive && trimSupportsSideSelection) {
       trimEngine.selectBothSides();
     }
-  }, [trimPreviewActive]);
+  }, [trimSessionActive, trimSupportsSideSelection]);
 
   const progress = duration > 0 ? (playheadTime / duration) * 100 : 0;
   const inPos = inPoint !== null && duration > 0 ? (inPoint / duration) * 100 : null;
   const outPos = outPoint !== null && duration > 0 ? (outPoint / duration) * 100 : null;
   const scrubToTime = useCallback((clientX: number, previewAudio: boolean) => {
     const bar = scrubRef.current;
-    if (!bar || duration <= 0 || trimPreviewActive) {
+    if (!bar || duration <= 0 || trimSessionActive) {
       return;
     }
 
@@ -633,10 +661,10 @@ export function RecordMonitor() {
     }
 
     previewMonitorAudioOutput('record-monitor', source.element, candidate.sourceTime);
-  }, [duration, editorIsPlaying, setActiveMonitor, trimPreviewActive]);
+  }, [duration, editorIsPlaying, setActiveMonitor, trimSessionActive]);
 
   const scrubBindings = usePointerScrub({
-    disabled: trimPreviewActive || duration <= 0,
+    disabled: trimSessionActive || duration <= 0,
     onScrub: ({ clientX, phase }) => {
       scrubToTime(clientX, audioScrubEnabled && phase === 'end');
     },
@@ -644,7 +672,7 @@ export function RecordMonitor() {
 
   const handleCanvasClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     setActiveMonitor('record');
-    if (!trimPreviewActive) {
+    if (!trimSessionActive) {
       return;
     }
 
@@ -652,17 +680,21 @@ export function RecordMonitor() {
       return;
     }
 
-    trimEngine.selectBSide();
-  }, [setActiveMonitor, trimPreviewActive]);
+    if (trimSupportsSideSelection) {
+      trimEngine.selectBSide();
+    }
+  }, [setActiveMonitor, trimSessionActive, trimSupportsSideSelection]);
 
   const tc = timeToTimecode(trimPreviewActive && trimPreviewSide ? trimPreviewSide.sourceTime : playheadTime, fps);
   const isActive = usePlayerStore((s) => s.activeMonitor === 'record');
-  const trimActive = useEditorStore((s) => s.trimActive);
-  const trimMode = useEditorStore((s) => s.trimMode);
-  const trimCounterFrames = useEditorStore((s) => s.trimCounterFrames);
   const recordLabel = trimPreviewActive ? trimPreviewSide!.monitorLabel : 'RECORD';
   const recordMeta = trimPreviewActive && trimPreviewSide
     ? `${trimPreviewSide.trackName} · ${trimPreviewSide.clipName}`
+    : null;
+  const recordTrimSideActive = trimSessionActive
+    && (trimSelectionLabel === 'B' || trimSelectionLabel === 'AB' || trimSelectionLabel === 'ASYM');
+  const trimLoopStatusLabel = trimLoopPlaybackActive
+    ? `${trimLoopPlaybackDirection < 0 ? 'REV' : 'FWD'} ${trimLoopPlaybackRate}x`
     : null;
 
   return (
@@ -671,12 +703,12 @@ export function RecordMonitor() {
       <div className="monitor-header">
         <button
           type="button"
-          className={`monitor-label monitor-label-button record${trimPreviewActive ? ' trim-side trim-side-b' : ''}`}
+          className={`monitor-label monitor-label-button record${trimSessionActive ? ' trim-side trim-side-b' : ''}${recordTrimSideActive ? ' trim-side-live' : ''}${trimSessionActive && !trimSupportsSideSelection ? ' monitor-label-static' : ''}`}
           onClick={(event) => {
             event.stopPropagation();
             handleSelectTrimBSide();
           }}
-          aria-label={trimPreviewActive ? 'Select B-side trim monitor' : 'Record monitor'}
+          aria-label={trimSessionActive && trimSupportsSideSelection ? 'Select B-side trim monitor' : 'Record monitor'}
         >
           {recordLabel}
         </button>
@@ -685,10 +717,20 @@ export function RecordMonitor() {
             {recordMeta}
           </span>
         )}
-        {trimActive && (
-          <span className="monitor-trim-summary">
-            {trimMode.toUpperCase()} {trimSelectionLabel} {trimCounterFrames > 0 ? '+' : ''}{trimCounterFrames}f
-          </span>
+        {trimSessionActive && (
+          <>
+            <span className={`monitor-trim-indicator${recordTrimSideActive ? ' active' : ''}`}>
+              B {formatTrimFrames(trimBSideFrames)}
+            </span>
+            <span className="monitor-trim-summary">
+              {trimMode.toUpperCase()} · {trimSelectionLabel}
+            </span>
+            {trimLoopPlaybackActive && (
+              <span className="monitor-trim-indicator monitor-trim-indicator-loop">
+                {trimLoopStatusLabel}
+              </span>
+            )}
+          </>
         )}
         <DesktopAudioPreviewDiagnostics consumer="record-monitor" />
         <PlaybackFallbackDiagnostics consumer="record-monitor" />
@@ -712,7 +754,7 @@ export function RecordMonitor() {
         <TrimStatusOverlay />
       </div>
 
-      {!trimPreviewActive && (
+      {!trimSessionActive && (
         <div
           className="composer-scrubbar"
           ref={scrubRef}
@@ -745,7 +787,7 @@ export function RecordMonitor() {
             className="transport-btn monitor-toolbar-btn"
             onClick={handleMatchFrame}
             title="Match Frame (F)"
-            disabled={trimPreviewActive}
+            disabled={trimSessionActive}
           >
             MATCH
           </button>
@@ -753,7 +795,7 @@ export function RecordMonitor() {
             className={`transport-btn monitor-toolbar-btn is-mark${inPoint !== null ? ' active' : ''}`}
             onClick={handleMarkIn}
             title="Mark In (I)"
-            disabled={trimPreviewActive}
+            disabled={trimSessionActive}
           >
             IN
           </button>
@@ -761,21 +803,21 @@ export function RecordMonitor() {
             className={`transport-btn monitor-toolbar-btn is-mark${outPoint !== null ? ' active' : ''}`}
             onClick={handleMarkOut}
             title="Mark Out (O)"
-            disabled={trimPreviewActive}
+            disabled={trimSessionActive}
           >
             OUT
           </button>
           <button
-            className={`transport-btn monitor-toolbar-btn${trimPreviewActive ? ' active' : ''}`}
-            onClick={trimPreviewActive ? () => trimEngine.exitTrimMode() : handleEnterTrim}
-            title={trimPreviewActive ? 'Exit Trim Mode' : 'Enter Trim Mode'}
+            className={`transport-btn monitor-toolbar-btn${trimSessionActive ? ' active' : ''}`}
+            onClick={trimSessionActive ? toggleTrimViewMode : handleEnterTrim}
+            title={trimSessionActive ? 'Toggle big/small trim view' : 'Enter Trim Mode'}
           >
-            {trimPreviewActive ? 'EXIT' : 'TRIM'}
+            {trimSessionActive ? (trimViewMode === 'big' ? 'SMALL' : 'BIG') : 'TRIM'}
           </button>
         </div>
 
         <div className="monitor-footer-group transport-controls" role="group" aria-label="Record transport controls">
-          <button className="transport-btn monitor-toolbar-btn" onClick={handleGoToStart} title="Go to Start (Home)" aria-label="Go to start" disabled={trimPreviewActive}>
+          <button className="transport-btn monitor-toolbar-btn" onClick={handleGoToStart} title="Go to Start (Home)" aria-label="Go to start" disabled={trimSessionActive}>
             |&laquo;
           </button>
           <button className="transport-btn monitor-toolbar-btn" onClick={handleRewind} title={trimPreviewActive ? 'Trim Left 10 Frames' : 'Rewind (J)'}>
@@ -785,12 +827,13 @@ export function RecordMonitor() {
             &lsaquo;
           </button>
           <button
-            className="transport-btn play-btn monitor-toolbar-btn"
+            className={`transport-btn play-btn monitor-toolbar-btn${trimLoopPlaybackActive ? ' active' : ''}`}
             onClick={handlePlayPause}
-            title="Play/Pause (Space)"
-            disabled={trimPreviewActive}
+            title={trimSessionActive
+              ? (trimLoopPlaybackActive ? `Stop transition play loop (${trimLoopStatusLabel})` : 'Play transition loop')
+              : 'Play/Pause (Space)'}
           >
-            {editorIsPlaying ? '\u23F8' : '\u25B6'}
+            {trimSessionActive ? (trimLoopPlaybackActive ? '\u23F9' : '\u25B6') : (editorIsPlaying ? '\u23F8' : '\u25B6')}
           </button>
           <button className="transport-btn monitor-toolbar-btn" onClick={handleNextFrame} title={trimPreviewActive ? 'Trim Right 1 Frame' : 'Next Frame (Right)'}>
             &rsaquo;
@@ -798,42 +841,46 @@ export function RecordMonitor() {
           <button className="transport-btn monitor-toolbar-btn" onClick={handleFastForward} title={trimPreviewActive ? 'Trim Right 10 Frames' : 'Fast Forward (L)'}>
             &raquo;
           </button>
-          <button className="transport-btn monitor-toolbar-btn" onClick={handleGoToEnd} title="Go to End (End)" disabled={trimPreviewActive}>
+          <button className="transport-btn monitor-toolbar-btn" onClick={handleGoToEnd} title="Go to End (End)" disabled={trimSessionActive}>
             &raquo;|
           </button>
         </div>
 
         <div className="monitor-footer-spacer" />
 
-        {trimPreviewActive ? (
+        {trimSessionActive ? (
           <div className="monitor-footer-group monitor-footer-group-trim" role="group" aria-label="Record trim selection">
-            <button
-              type="button"
-              className={`transport-btn monitor-toolbar-btn trim-side-btn${trimSelectionLabel === 'A' ? ' active' : ''}`}
-              onClick={handleSelectTrimASide}
-              aria-label="Select A-side trim"
-            >
-              A
-            </button>
-            <button
-              type="button"
-              className={`transport-btn monitor-toolbar-btn trim-side-btn${trimSelectionLabel === 'AB' ? ' active' : ''}`}
-              onClick={handleSelectTrimBothSides}
-              aria-label="Select both trim sides"
-            >
-              AB
-            </button>
-            <button
-              type="button"
-              className={`transport-btn monitor-toolbar-btn trim-side-btn${trimSelectionLabel === 'B' ? ' active' : ''}`}
-              onClick={handleSelectTrimBSide}
-              aria-label="Select B-side trim"
-            >
-              B
-            </button>
+            {trimSupportsSideSelection && (
+              <>
+                <button
+                  type="button"
+                  className={`transport-btn monitor-toolbar-btn trim-side-btn${trimSelectionLabel === 'A' ? ' active' : ''}`}
+                  onClick={handleSelectTrimASide}
+                  aria-label="Select A-side trim"
+                >
+                  A
+                </button>
+                <button
+                  type="button"
+                  className={`transport-btn monitor-toolbar-btn trim-side-btn${trimSelectionLabel === 'AB' ? ' active' : ''}`}
+                  onClick={handleSelectTrimBothSides}
+                  aria-label="Select both trim sides"
+                >
+                  AB
+                </button>
+                <button
+                  type="button"
+                  className={`transport-btn monitor-toolbar-btn trim-side-btn${trimSelectionLabel === 'B' ? ' active' : ''}`}
+                  onClick={handleSelectTrimBSide}
+                  aria-label="Select B-side trim"
+                >
+                  B
+                </button>
+              </>
+            )}
             {trimPreviewSide && (
               <span className="monitor-toolbar-pill" aria-live="polite">
-                {trimPreviewSide.monitorContext}
+                {trimPreviewSide.monitorContext}{trimLoopStatusLabel ? ` · ${trimLoopStatusLabel}` : ''}
               </span>
             )}
           </div>

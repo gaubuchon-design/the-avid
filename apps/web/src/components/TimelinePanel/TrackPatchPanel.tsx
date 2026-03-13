@@ -25,6 +25,7 @@ function resolveTrackSignature(tracks: Track[]): string {
 function getSourceChipClass(options: {
   selected: boolean;
   patched: boolean;
+  active: boolean;
   sourceType: 'VIDEO' | 'AUDIO';
 }): string {
   return [
@@ -32,6 +33,7 @@ function getSourceChipClass(options: {
     options.sourceType === 'VIDEO' ? 'video' : 'audio',
     options.selected ? 'is-selected' : '',
     options.patched ? 'is-patched' : '',
+    options.patched && !options.active ? 'is-disabled' : '',
   ].filter(Boolean).join(' ');
 }
 
@@ -126,8 +128,29 @@ export function TrackPatchPanel() {
       return;
     }
 
-    trackPatchingEngine.patchSourceToRecord(sourceTrackId, recordTrackId);
-    trackPatchingEngine.enableRecordTrack(recordTrackId);
+    const previousRecordTrackId = trackPatchingEngine.getRecordTrackForSource(sourceTrackId);
+    const orderedMovePreview = trackPatchingEngine.getOrderedPatchMovePreview(sourceTrackId, recordTrackId, tracks);
+    const appliedOrderedMove = trackPatchingEngine.patchSourceToRecordPreservingOrder(sourceTrackId, recordTrackId, tracks);
+
+    if (!appliedOrderedMove) {
+      trackPatchingEngine.patchSourceToRecord(sourceTrackId, recordTrackId);
+    }
+
+    const routedRecordTrackIds = orderedMovePreview && appliedOrderedMove
+      ? orderedMovePreview.map((patch) => patch.recordTrackId)
+      : [recordTrackId];
+    for (const routedRecordTrackId of routedRecordTrackIds) {
+      trackPatchingEngine.enableRecordTrack(routedRecordTrackId);
+    }
+
+    if (
+      descriptor.type === 'VIDEO'
+      && (trackPatchingEngine.getVideoMonitorTrack() === null
+        || trackPatchingEngine.getVideoMonitorTrack() === previousRecordTrackId)
+    ) {
+      useEditorStore.getState().setVideoMonitorTrack(recordTrackId);
+    }
+
     clearRoutingState();
   }, [clearRoutingState, sourceTrackById, tracks]);
 
@@ -216,14 +239,14 @@ export function TrackPatchPanel() {
 
       <div className={`track-patch-panel-status${routingSourceTrack ? ' is-routing' : ''}`} aria-live="polite">
         {routingSourceTrack
-          ? `Routing ${trackLabel(routingSourceTrack.type, routingSourceTrack.index)} to a compatible record lane`
-          : 'Select or drag a source lane, then drop it on a record lane.'}
+          ? `Source ${trackLabel(routingSourceTrack.type, routingSourceTrack.index)} is armed. Route it to a compatible record lane${patchBySource.get(routingSourceTrack.id) ? ' and order-preserving bank shifts will be used when available.' : '.'}`
+          : 'Select or drag a source lane, then route it onto the record side.'}
       </div>
 
       <div className="track-patch-panel-source-bank">
         <div className="track-patch-panel-section-header">
-          <span className="track-patch-panel-section-label">Source Lanes</span>
-          <span className="track-patch-panel-section-note">Click to arm, drag to reroute</span>
+          <span className="track-patch-panel-section-label">Source Side</span>
+          <span className="track-patch-panel-section-note">Click to arm, drag to repatch</span>
         </div>
         {([
           { key: 'video', label: 'Picture', tracks: sourceTrackGroups.video },
@@ -240,33 +263,51 @@ export function TrackPatchPanel() {
                 {group.tracks.map((descriptor) => {
                   const patch = patchBySource.get(descriptor.id);
                   const selected = activeSourceTrackId === descriptor.id || dragSourceTrackId === descriptor.id;
+                  const patchEnabled = patch?.enabled ?? true;
+                  const sourceLabel = trackLabel(descriptor.type, descriptor.index);
 
                   return (
-                    <button
-                      key={descriptor.id}
-                      type="button"
-                      draggable
-                      onClick={() => handleSourceSelect(descriptor)}
-                      onMouseDown={() => handleStartDrag(descriptor.id)}
-                      onDragStart={() => handleStartDrag(descriptor.id)}
-                      onDragEnd={() => {
-                        setDragSourceTrackId(null);
-                        setDropTargetTrackId(null);
-                      }}
-                      aria-label={selected
-                        ? `Source ${trackLabel(descriptor.type, descriptor.index)} is selected for routing`
-                        : `Select source ${trackLabel(descriptor.type, descriptor.index)} for patching`}
-                      title={patch
-                        ? `${trackLabel(descriptor.type, descriptor.index)} is patched to ${tracks.find((track) => track.id === patch.recordTrackId)?.name ?? patch.recordTrackId}. Select to reroute or drag to move.`
-                        : `Select ${trackLabel(descriptor.type, descriptor.index)}, then click a record slot.`}
-                      className={getSourceChipClass({
-                        selected,
-                        patched: Boolean(patch),
-                        sourceType: descriptor.type,
-                      })}
-                    >
-                      {trackLabel(descriptor.type, descriptor.index)}
-                    </button>
+                    <div key={descriptor.id} className="track-patch-source-item">
+                      <button
+                        type="button"
+                        draggable
+                        onClick={() => handleSourceSelect(descriptor)}
+                        onMouseDown={() => handleStartDrag(descriptor.id)}
+                        onDragStart={() => handleStartDrag(descriptor.id)}
+                        onDragEnd={() => {
+                          setDragSourceTrackId(null);
+                          setDropTargetTrackId(null);
+                        }}
+                        aria-label={selected
+                          ? `Source ${sourceLabel} is selected for routing`
+                          : `Select source ${sourceLabel} for patching`}
+                        title={patch
+                          ? `${sourceLabel} is patched to ${tracks.find((track) => track.id === patch.recordTrackId)?.name ?? patch.recordTrackId}${patch.enabled ? '' : ' but currently disabled for edits'}. Select to reroute or drag to move.`
+                          : `Select ${sourceLabel}, then click a record slot.`}
+                        className={getSourceChipClass({
+                          selected,
+                          patched: Boolean(patch),
+                          active: patchEnabled,
+                          sourceType: descriptor.type,
+                        })}
+                      >
+                        {sourceLabel}
+                      </button>
+                      {patch && (
+                        <button
+                          type="button"
+                          className={`track-patch-activation-btn${patch.enabled ? ' active' : ''}`}
+                          aria-label={`${patch.enabled ? 'Disable' : 'Enable'} source patch ${sourceLabel} to ${tracks.find((track) => track.id === patch.recordTrackId)?.name ?? patch.recordTrackId}`}
+                          title={`${patch.enabled ? 'Disable' : 'Enable'} ${sourceLabel} without removing its patch`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            trackPatchingEngine.togglePatchEnabled(patch.sourceTrackId);
+                          }}
+                        >
+                          {patch.enabled ? 'ON' : 'OFF'}
+                        </button>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -276,7 +317,7 @@ export function TrackPatchPanel() {
       </div>
 
       <div className="track-patch-panel-grid-head" aria-hidden="true">
-        <span>Record</span>
+        <span>Record Side</span>
         <span>Patch</span>
         <span>Edit</span>
         <span>Sync</span>
@@ -287,6 +328,10 @@ export function TrackPatchPanel() {
           const patch = patchByRecord.get(track.id);
           const isEnabled = trackPatchingEngine.isRecordTrackEnabled(track.id);
           const isSyncLocked = trackPatchingEngine.isSyncLocked(track.id);
+          const orderedMovePreview = routingSourceTrackId
+            ? trackPatchingEngine.getOrderedPatchMovePreview(routingSourceTrackId, track.id, tracks)
+            : null;
+          const shiftsPatchBank = Boolean(orderedMovePreview && orderedMovePreview.length > 1);
           const canRouteHere = Boolean(
             routingSourceTrack
             && !track.locked
@@ -321,7 +366,9 @@ export function TrackPatchPanel() {
                   'track-patch-slot',
                   isDropTarget ? 'is-drop-target' : '',
                   canRouteHere ? 'can-route' : '',
+                  shiftsPatchBank ? 'is-bank-shift' : '',
                   patch ? 'is-patched' : '',
+                  patch && !patch.enabled ? 'is-patch-disabled' : '',
                 ].filter(Boolean).join(' ')}
                 onClick={() => {
                   if (routingSourceTrackId) {
@@ -361,7 +408,9 @@ export function TrackPatchPanel() {
                   }
                 }}
                 title={routingSourceTrack
-                  ? `Route ${trackLabel(routingSourceTrack.type, routingSourceTrack.index)} to ${track.name}`
+                  ? shiftsPatchBank
+                    ? `Route ${trackLabel(routingSourceTrack.type, routingSourceTrack.index)} to ${track.name} and shift the patched ${routingSourceTrack.type === 'VIDEO' ? 'picture' : 'sound'} bank in order`
+                    : `Route ${trackLabel(routingSourceTrack.type, routingSourceTrack.index)} to ${track.name}`
                   : patch
                     ? `${patchLabel} is patched to ${track.name}`
                     : `Select a source above, then click to route it to ${track.name}`}
@@ -370,11 +419,15 @@ export function TrackPatchPanel() {
                   <span className="track-patch-slot-track">{track.name}</span>
                   <span className="track-patch-slot-hint">
                     {patch
-                      ? `${patchLabel} armed`
+                      ? patch.enabled
+                        ? `${patchLabel} armed`
+                        : `${patchLabel} mapped · off`
                       : track.locked
                         ? 'Locked'
-                        : canRouteHere
-                          ? 'Click or drop to route'
+                        : shiftsPatchBank
+                          ? 'Shift bank here'
+                          : canRouteHere
+                            ? 'Click or drop to route'
                           : 'Awaiting compatible source'}
                   </span>
                 </div>
@@ -404,6 +457,7 @@ export function TrackPatchPanel() {
                       className={getSourceChipClass({
                         selected: dragSourceTrackId === patch.sourceTrackId || activeSourceTrackId === patch.sourceTrackId,
                         patched: true,
+                        active: patch.enabled,
                         sourceType: patch.sourceTrackType,
                       })}
                     >

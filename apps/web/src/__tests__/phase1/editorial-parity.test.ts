@@ -225,6 +225,63 @@ describe('phase 1 editorial parity', () => {
     expect(track2!.clips[0]!.endTime).toBe(7);
   });
 
+  it('ignores disabled source patches during overwrite targeting', () => {
+    trackPatchingEngine.setSourceTracks([{ id: 'src-v1', type: 'VIDEO', index: 1 }]);
+    trackPatchingEngine.patchSourceToRecord('src-v1', 'v2');
+    trackPatchingEngine.setPatchEnabled('src-v1', false);
+    trackPatchingEngine.enableRecordTrack('v2');
+
+    useEditorStore.setState({
+      tracks: [
+        {
+          id: 'v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [],
+        },
+        {
+          id: 'v2',
+          name: 'V2',
+          type: 'VIDEO',
+          sortOrder: 1,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#818cf8',
+          clips: [],
+        },
+      ],
+      selectedTrackId: 'v1',
+      playheadTime: 4,
+      sourceAsset: {
+        id: 'src-3b',
+        name: 'Selected Track Shot',
+        type: 'VIDEO',
+        duration: 3,
+        status: 'READY',
+        tags: [],
+        isFavorite: false,
+      },
+      sourceInPoint: 0,
+      sourceOutPoint: 3,
+      duration: 20,
+    });
+
+    useEditorStore.getState().overwriteEdit();
+
+    const [track1, track2] = useEditorStore.getState().tracks;
+    expect(track1!.clips).toHaveLength(1);
+    expect(track1!.clips[0]!.name).toBe('Selected Track Shot');
+    expect(track2!.clips).toHaveLength(0);
+  });
+
   it('match frame opens the source monitor on the topmost active media clip', () => {
     const baseAsset = {
       id: 'asset-video-1',

@@ -141,4 +141,113 @@ describe('phase 1 trim cut selection', () => {
       root.unmount();
     });
   });
+
+  it('preserves different selected cut times across tracks and enters trim from the latest anchor cut', () => {
+    const videoTrack = {
+      id: 'v1',
+      name: 'V1',
+      type: 'VIDEO' as const,
+      sortOrder: 0,
+      muted: false,
+      locked: false,
+      solo: false,
+      volume: 1,
+      color: '#5b6af5',
+      clips: [
+        makeClip({
+          id: 'v1-left',
+          trackId: 'v1',
+          name: 'Video Left',
+          startTime: 0,
+          endTime: 4,
+          trimStart: 0,
+          trimEnd: 1,
+          type: 'video',
+        }),
+        makeClip({
+          id: 'v1-right',
+          trackId: 'v1',
+          name: 'Video Right',
+          startTime: 4,
+          endTime: 8,
+          trimStart: 1,
+          trimEnd: 0,
+          type: 'video',
+        }),
+        makeClip({
+          id: 'v1-tail',
+          trackId: 'v1',
+          name: 'Video Tail',
+          startTime: 8,
+          endTime: 12,
+          trimStart: 0,
+          trimEnd: 0,
+          type: 'video',
+        }),
+      ],
+    };
+    const audioTrack = {
+      id: 'a1',
+      name: 'A1',
+      type: 'AUDIO' as const,
+      sortOrder: 1,
+      muted: false,
+      locked: false,
+      solo: false,
+      volume: 1,
+      color: '#22c55e',
+      clips: [
+        makeClip({
+          id: 'a1-left',
+          trackId: 'a1',
+          name: 'Audio Left',
+          startTime: 0,
+          endTime: 6,
+          trimStart: 0,
+          trimEnd: 1,
+          type: 'audio',
+        }),
+        makeClip({
+          id: 'a1-right',
+          trackId: 'a1',
+          name: 'Audio Right',
+          startTime: 6,
+          endTime: 12,
+          trimStart: 1,
+          trimEnd: 0,
+          type: 'audio',
+        }),
+      ],
+    };
+
+    useEditorStore.setState({
+      tracks: [videoTrack, audioTrack],
+      duration: 12,
+      selectedTrackId: 'v1',
+      enabledTrackIds: ['v1', 'a1'],
+      videoMonitorTrackId: 'v1',
+      playheadTime: 6,
+    });
+
+    const state = useEditorStore.getState();
+    state.selectTrimEditPoint({ trackId: 'v1', editPointTime: 4, side: 'A_SIDE' });
+    state.selectTrimEditPoint({ trackId: 'a1', editPointTime: 6, side: 'B_SIDE' }, true);
+
+    expect(useEditorStore.getState().selectedTrimEditPoints).toEqual([
+      { trackId: 'v1', editPointTime: 4, side: 'A_SIDE' },
+      { trackId: 'a1', editPointTime: 6, side: 'B_SIDE' },
+    ]);
+
+    const target = enterTrimModeFromContext(useEditorStore.getState());
+
+    expect(target).toEqual(expect.objectContaining({
+      anchorTrackId: 'a1',
+      editPointTime: 6,
+      trackIds: ['a1', 'v1'],
+    }));
+    expect(trimEngine.getState().rollers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ trackId: 'a1', editPointTime: 6, side: TrimSide.B_SIDE }),
+      expect.objectContaining({ trackId: 'v1', editPointTime: 4, side: TrimSide.A_SIDE }),
+    ]));
+  });
 });

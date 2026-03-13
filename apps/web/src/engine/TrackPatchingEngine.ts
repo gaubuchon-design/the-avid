@@ -71,6 +71,17 @@ function inferTrackType(sourceTrackId: string): 'VIDEO' | 'AUDIO' | null {
   return null;
 }
 
+function isCompatibleRecordTrack(
+  track: Pick<Track, 'type'>,
+  sourceTrackType: 'VIDEO' | 'AUDIO',
+): boolean {
+  if (sourceTrackType === 'VIDEO') {
+    return track.type === 'VIDEO' || track.type === 'GRAPHIC';
+  }
+
+  return track.type === 'AUDIO';
+}
+
 // ─── Engine ─────────────────────────────────────────────────────────────────
 
 /**
@@ -179,6 +190,8 @@ export class TrackPatchingEngine {
       return;
     }
 
+    const previousPatch = this.patchMap.get(sourceTrackId);
+
     // Remove any existing patch from this source track.
     this.removeExistingPatch(sourceTrackId);
 
@@ -193,12 +206,128 @@ export class TrackPatchingEngine {
       sourceTrackType: descriptor.type,
       sourceTrackIndex: descriptor.index,
       recordTrackId,
-      enabled: true,
+      enabled: previousPatch?.enabled ?? true,
     };
 
     this.patchMap.set(sourceTrackId, patch);
     this.reversePatchMap.set(recordTrackId, sourceTrackId);
     this.notify();
+  }
+
+  setPatchEnabled(sourceTrackId: string, enabled: boolean): void {
+    const patch = this.patchMap.get(sourceTrackId);
+    if (!patch) {
+      return;
+    }
+
+    patch.enabled = enabled;
+    this.notify();
+  }
+
+  togglePatchEnabled(sourceTrackId: string): void {
+    const patch = this.patchMap.get(sourceTrackId);
+    if (!patch) {
+      return;
+    }
+
+    this.setPatchEnabled(sourceTrackId, !patch.enabled);
+  }
+
+  isPatchEnabled(sourceTrackId: string): boolean {
+    return this.patchMap.get(sourceTrackId)?.enabled ?? false;
+  }
+
+  /**
+   * Preview an order-preserving same-type patch-bank move.
+   *
+   * This mirrors the source/record selector behavior used by Avid-style
+   * patching: when a patched source lane is moved to another compatible
+   * record lane, the rest of the patched bank can move with it while
+   * preserving source order.
+   */
+  getOrderedPatchMovePreview(
+    sourceTrackId: string,
+    targetRecordTrackId: string,
+    recordTracks: Track[],
+  ): TrackPatch[] | null {
+    const descriptor = this.sourceTracks.find((track) => track.id === sourceTrackId);
+    const currentPatch = this.patchMap.get(sourceTrackId);
+    if (!descriptor || !currentPatch) {
+      return null;
+    }
+
+    const compatibleRecordTracks = recordTracks
+      .filter((track) => !track.locked && isCompatibleRecordTrack(track, descriptor.type))
+      .sort((left, right) => left.sortOrder - right.sortOrder);
+    const targetIndex = compatibleRecordTracks.findIndex((track) => track.id === targetRecordTrackId);
+    const currentTargetIndex = compatibleRecordTracks.findIndex((track) => track.id === currentPatch.recordTrackId);
+    if (targetIndex < 0 || currentTargetIndex < 0 || targetIndex === currentTargetIndex) {
+      return null;
+    }
+
+    const patchedSourceBank = this.sourceTracks
+      .filter((track) => track.type === descriptor.type && this.patchMap.has(track.id))
+      .sort((left, right) => left.index - right.index);
+    if (patchedSourceBank.length < 2) {
+      return null;
+    }
+
+    const sourceOrderIndex = patchedSourceBank.findIndex((track) => track.id === sourceTrackId);
+    if (sourceOrderIndex < 0) {
+      return null;
+    }
+
+    const windowStart = targetIndex - sourceOrderIndex;
+    const windowEnd = windowStart + patchedSourceBank.length - 1;
+    if (windowStart < 0 || windowEnd >= compatibleRecordTracks.length) {
+      return null;
+    }
+
+    return patchedSourceBank.map((track, index) => {
+      const existingPatch = this.patchMap.get(track.id);
+      return {
+        sourceTrackId: track.id,
+        sourceTrackType: track.type,
+        sourceTrackIndex: track.index,
+        recordTrackId: compatibleRecordTracks[windowStart + index]!.id,
+        enabled: existingPatch?.enabled ?? true,
+      };
+    });
+  }
+
+  /**
+   * Apply an order-preserving same-type patch-bank move when possible.
+   *
+   * Returns `true` when a full bank move was applied; callers can fall back
+   * to single-lane patching when it returns `false`.
+   */
+  patchSourceToRecordPreservingOrder(
+    sourceTrackId: string,
+    targetRecordTrackId: string,
+    recordTracks: Track[],
+  ): boolean {
+    const preview = this.getOrderedPatchMovePreview(sourceTrackId, targetRecordTrackId, recordTracks);
+    if (!preview) {
+      return false;
+    }
+
+    const sourceTrackIds = new Set(preview.map((patch) => patch.sourceTrackId));
+    for (const patch of preview) {
+      this.removeExistingPatch(patch.sourceTrackId);
+    }
+
+    for (const patch of preview) {
+      const existingSource = this.reversePatchMap.get(patch.recordTrackId);
+      if (existingSource && !sourceTrackIds.has(existingSource)) {
+        this.removeExistingPatch(existingSource);
+      }
+
+      this.patchMap.set(patch.sourceTrackId, { ...patch });
+      this.reversePatchMap.set(patch.recordTrackId, patch.sourceTrackId);
+    }
+
+    this.notify();
+    return true;
   }
 
   /**

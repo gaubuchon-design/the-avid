@@ -358,6 +358,35 @@ type SaveStatus = 'idle' | 'saved' | 'saving' | 'error';
 let loadProjectRequestSequence = 0;
 const MIN_CLIP_DURATION = 1 / 120;
 
+function getTrimDurationPresetFromFrames(
+  preRollFrames: number,
+  postRollFrames: number,
+  fps: number,
+): EditorState['trimLoopDurationPreset'] {
+  if (preRollFrames !== postRollFrames) {
+    return 'custom';
+  }
+
+  const normalizedFps = Math.max(1, fps);
+  const shortFrames = Math.max(1, Math.round(0.5 * normalizedFps));
+  const mediumFrames = Math.max(1, Math.round(1 * normalizedFps));
+  const longFrames = Math.max(1, Math.round(2 * normalizedFps));
+
+  if (preRollFrames === shortFrames) {
+    return 'short';
+  }
+
+  if (preRollFrames === mediumFrames) {
+    return 'medium';
+  }
+
+  if (preRollFrames === longFrames) {
+    return 'long';
+  }
+
+  return 'custom';
+}
+
 interface EditorialOperationSnapshot {
   tracks: Track[];
   selectedClipIds: string[];
@@ -493,6 +522,14 @@ interface EditorState {
   trimASideFrames: number;
   trimBSideFrames: number;
   trimSelectionLabel: 'OFF' | 'A' | 'B' | 'AB' | 'ASYM';
+  trimViewMode: 'small' | 'big';
+  trimLoopPlaybackActive: boolean;
+  trimLoopOffsetFrames: number;
+  trimLoopPlaybackDirection: -1 | 1;
+  trimLoopPlaybackRate: number;
+  trimLoopDurationPreset: 'short' | 'medium' | 'long' | 'custom';
+  trimLoopPreRollFrames: number;
+  trimLoopPostRollFrames: number;
 
   // Smart Tool State
   smartToolLiftOverwrite: boolean;
@@ -698,6 +735,15 @@ interface EditorActions {
   // Trim Mode
   setTrimMode: (mode: EditorState['trimMode']) => void;
   setTrimActive: (active: boolean) => void;
+  setTrimViewMode: (mode: EditorState['trimViewMode']) => void;
+  toggleTrimViewMode: () => void;
+  setTrimLoopPlaybackActive: (active: boolean) => void;
+  toggleTrimLoopPlayback: () => void;
+  setTrimLoopOffsetFrames: (frames: number) => void;
+  setTrimLoopPlaybackDirection: (direction: -1 | 1) => void;
+  setTrimLoopPlaybackRate: (rate: number) => void;
+  setTrimLoopDurationPreset: (preset: EditorState['trimLoopDurationPreset']) => void;
+  setTrimLoopRollFrames: (preRollFrames: number, postRollFrames: number) => void;
 
   // Smart Tool
   toggleSmartToolLiftOverwrite: () => void;
@@ -1191,6 +1237,14 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         s.trimASideFrames = 0;
         s.trimBSideFrames = 0;
         s.trimSelectionLabel = 'OFF';
+        s.trimViewMode = 'small';
+        s.trimLoopPlaybackActive = false;
+        s.trimLoopOffsetFrames = 0;
+        s.trimLoopPlaybackDirection = 1;
+        s.trimLoopPlaybackRate = 1;
+        s.trimLoopDurationPreset = 'short';
+        s.trimLoopPreRollFrames = 12;
+        s.trimLoopPostRollFrames = 12;
       });
 
       get().setSourceAsset(hydrated.sourceAsset);
@@ -1310,6 +1364,14 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     trimASideFrames: 0,
     trimBSideFrames: 0,
     trimSelectionLabel: 'OFF' as EditorState['trimSelectionLabel'],
+    trimViewMode: 'small' as EditorState['trimViewMode'],
+    trimLoopPlaybackActive: false,
+    trimLoopOffsetFrames: 0,
+    trimLoopPlaybackDirection: 1 as -1 | 1,
+    trimLoopPlaybackRate: 1,
+    trimLoopDurationPreset: 'short' as EditorState['trimLoopDurationPreset'],
+    trimLoopPreRollFrames: 12,
+    trimLoopPostRollFrames: 12,
 
     // Smart Tool State
     smartToolLiftOverwrite: true,
@@ -1503,22 +1565,14 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         editPointTime: selection.editPointTime,
         side: selection.side,
       };
-      const sameGroup = s.selectedTrimEditPoints.length === 0
-        || Math.abs(s.selectedTrimEditPoints[0]!.editPointTime - normalizedSelection.editPointTime) <= 1e-6;
 
-      if (!multi || !sameGroup) {
+      if (!multi) {
         s.selectedTrimEditPoints = [normalizedSelection];
       } else {
-        const existingIndex = s.selectedTrimEditPoints.findIndex((candidate) => (
-          candidate.trackId === normalizedSelection.trackId
-            && Math.abs(candidate.editPointTime - normalizedSelection.editPointTime) <= 1e-6
-        ));
-
-        if (existingIndex >= 0) {
-          s.selectedTrimEditPoints[existingIndex] = normalizedSelection;
-        } else {
-          s.selectedTrimEditPoints.push(normalizedSelection);
-        }
+        s.selectedTrimEditPoints = [
+          ...s.selectedTrimEditPoints.filter((candidate) => candidate.trackId !== normalizedSelection.trackId),
+          normalizedSelection,
+        ];
       }
 
       s.selectedClipIds = [];
@@ -2289,7 +2343,65 @@ export const useEditorStore = create<EditorState & EditorActions>()(
 
     // ─── Trim Mode ────────────────────────────────────────────────────────────
     setTrimMode: (mode) => set((s) => { s.trimMode = mode; }),
-    setTrimActive: (active) => set((s) => { s.trimActive = active; }),
+    setTrimActive: (active) => set((s) => {
+      s.trimActive = active;
+      if (!active) {
+        s.trimLoopPlaybackActive = false;
+        s.trimLoopOffsetFrames = 0;
+        s.trimLoopPlaybackDirection = 1;
+        s.trimLoopPlaybackRate = 1;
+      }
+    }),
+    setTrimViewMode: (mode) => set((s) => { s.trimViewMode = mode; }),
+    toggleTrimViewMode: () => set((s) => {
+      s.trimViewMode = s.trimViewMode === 'small' ? 'big' : 'small';
+    }),
+    setTrimLoopPlaybackActive: (active) => set((s) => {
+      s.trimLoopPlaybackActive = active;
+      if (!active) {
+        s.trimLoopOffsetFrames = 0;
+        s.trimLoopPlaybackDirection = 1;
+        s.trimLoopPlaybackRate = 1;
+      }
+    }),
+    toggleTrimLoopPlayback: () => set((s) => {
+      s.trimLoopPlaybackActive = !s.trimLoopPlaybackActive;
+      if (!s.trimLoopPlaybackActive) {
+        s.trimLoopOffsetFrames = 0;
+        s.trimLoopPlaybackDirection = 1;
+        s.trimLoopPlaybackRate = 1;
+      }
+    }),
+    setTrimLoopOffsetFrames: (frames) => set((s) => {
+      s.trimLoopOffsetFrames = frames;
+    }),
+    setTrimLoopPlaybackDirection: (direction) => set((s) => {
+      s.trimLoopPlaybackDirection = direction < 0 ? -1 : 1;
+    }),
+    setTrimLoopPlaybackRate: (rate) => set((s) => {
+      s.trimLoopPlaybackRate = Math.max(0.25, Math.min(8, rate || 1));
+    }),
+    setTrimLoopDurationPreset: (preset) => set((s) => {
+      const fps = Math.max(1, s.sequenceSettings.fps || s.projectSettings.frameRate || 24);
+      const seconds = preset === 'short'
+        ? 0.5
+        : preset === 'long'
+          ? 2
+          : 1;
+      const frames = Math.max(1, Math.round(seconds * fps));
+      s.trimLoopDurationPreset = preset;
+      s.trimLoopPreRollFrames = frames;
+      s.trimLoopPostRollFrames = frames;
+    }),
+    setTrimLoopRollFrames: (preRollFrames, postRollFrames) => set((s) => {
+      s.trimLoopPreRollFrames = Math.max(1, Math.round(preRollFrames));
+      s.trimLoopPostRollFrames = Math.max(1, Math.round(postRollFrames));
+      s.trimLoopDurationPreset = getTrimDurationPresetFromFrames(
+        s.trimLoopPreRollFrames,
+        s.trimLoopPostRollFrames,
+        s.sequenceSettings.fps || s.projectSettings.frameRate || 24,
+      );
+    }),
 
     // ─── Smart Tool ───────────────────────────────────────────────────────────
     toggleSmartToolLiftOverwrite: () => set((s) => {

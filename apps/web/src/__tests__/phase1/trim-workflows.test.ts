@@ -134,4 +134,68 @@ describe('phase 1 trim workflows', () => {
     expect(audioLeft!.endTime).toBe(5);
     expect(audioRight!.startTime).toBe(6);
   });
+
+  it('recalls the previous trim configuration including slip mode', () => {
+    useEditorStore.setState({
+      tracks: [makeTrimTrack('v1', 'VIDEO', '#5b6af5')],
+    });
+
+    trimEngine.enterTrimMode(['v1'], 5, TrimSide.BOTH);
+    trimEngine.cycleTrimMode();
+    trimEngine.exitTrimMode();
+
+    const recalledState = trimEngine.recallPreviousConfiguration();
+
+    expect(recalledState.active).toBe(true);
+    expect(trimEngine.getCurrentMode()).toBe('SLIP');
+    expect(recalledState.rollers.find((roller) => roller.trackId === 'v1')?.side).toBe(TrimSide.BOTH);
+  });
+
+  it('recalls an explicit multi-cut trim configuration without collapsing edit times', () => {
+    useEditorStore.setState({
+      tracks: [
+        makeTrimTrack('v1', 'VIDEO', '#5b6af5'),
+        {
+          ...makeTrimTrack('a1', 'AUDIO', '#22c55e'),
+          clips: [
+            makeClip({
+              id: 'a1-left',
+              trackId: 'a1',
+              name: 'a1 Left',
+              startTime: 0,
+              endTime: 6,
+              trimStart: 0,
+              trimEnd: 3,
+              type: 'audio',
+            }),
+            makeClip({
+              id: 'a1-right',
+              trackId: 'a1',
+              name: 'a1 Right',
+              startTime: 6,
+              endTime: 11,
+              trimStart: 3,
+              trimEnd: 0,
+              type: 'audio',
+            }),
+          ],
+        },
+      ],
+    });
+
+    trimEngine.enterTrimModeWithSelections([
+      { trackId: 'v1', editPointTime: 5, side: TrimSide.A_SIDE },
+      { trackId: 'a1', editPointTime: 6, side: TrimSide.B_SIDE },
+    ]);
+    trimEngine.exitTrimMode();
+
+    const recalledState = trimEngine.recallPreviousConfiguration();
+
+    expect(recalledState.active).toBe(true);
+    expect(recalledState.rollers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ trackId: 'v1', editPointTime: 5, side: TrimSide.A_SIDE }),
+      expect.objectContaining({ trackId: 'a1', editPointTime: 6, side: TrimSide.B_SIDE }),
+    ]));
+    expect(trimEngine.getCurrentMode()).toBe('ASYMMETRIC');
+  });
 });

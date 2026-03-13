@@ -34,6 +34,26 @@ function getLiveTrimSelectionLabel(trimState: ReturnType<typeof trimEngine.getSt
   }
 }
 
+function getTrimDisplayLabels(trimMode: string): { left: string; right: string } {
+  if (trimMode === 'slip') {
+    return { left: 'IN', right: 'OUT' };
+  }
+
+  if (trimMode === 'slide') {
+    return { left: 'LEFT', right: 'RIGHT' };
+  }
+
+  return { left: 'A', right: 'B' };
+}
+
+function clampTrimRollFrames(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+
+  return Math.max(1, Math.round(value));
+}
+
 export function TrimStatusOverlay() {
   const trimActive = useEditorStore((s) => s.trimActive);
   const trimMode = useEditorStore((s) => s.trimMode);
@@ -41,6 +61,17 @@ export function TrimStatusOverlay() {
   const trimCounterFrames = useEditorStore((s) => s.trimCounterFrames);
   const trimASideFrames = useEditorStore((s) => s.trimASideFrames);
   const trimBSideFrames = useEditorStore((s) => s.trimBSideFrames);
+  const trimViewMode = useEditorStore((s) => s.trimViewMode);
+  const trimLoopPlaybackActive = useEditorStore((s) => s.trimLoopPlaybackActive);
+  const trimLoopPlaybackDirection = useEditorStore((s) => s.trimLoopPlaybackDirection);
+  const trimLoopPlaybackRate = useEditorStore((s) => s.trimLoopPlaybackRate);
+  const trimLoopDurationPreset = useEditorStore((s) => s.trimLoopDurationPreset);
+  const trimLoopPreRollFrames = useEditorStore((s) => s.trimLoopPreRollFrames);
+  const trimLoopPostRollFrames = useEditorStore((s) => s.trimLoopPostRollFrames);
+  const toggleTrimViewMode = useEditorStore((s) => s.toggleTrimViewMode);
+  const toggleTrimLoopPlayback = useEditorStore((s) => s.toggleTrimLoopPlayback);
+  const setTrimLoopDurationPreset = useEditorStore((s) => s.setTrimLoopDurationPreset);
+  const setTrimLoopRollFrames = useEditorStore((s) => s.setTrimLoopRollFrames);
   const tracks = useEditorStore((s) => s.tracks);
   const fps = useEditorStore((s) => s.sequenceSettings.fps || s.projectSettings.frameRate || 24);
   const trimState = useTrimEngineSnapshot();
@@ -58,6 +89,10 @@ export function TrimStatusOverlay() {
       trackName: tracks.find((track) => track.id === roller.trackId)?.name ?? roller.trackId,
     }));
   }, [tracks, trimState.rollers]);
+  const trimLoopStatusLabel = trimLoopPlaybackActive
+    ? `${trimLoopPlaybackDirection < 0 ? 'REV' : 'FWD'} ${trimLoopPlaybackRate}x`
+    : 'IDLE';
+  const trimDisplayLabels = getTrimDisplayLabels(displayTrimMode);
 
   const setAllToASide = useCallback(() => {
     trimEngine.selectASide();
@@ -101,6 +136,30 @@ export function TrimStatusOverlay() {
     trimEngine.toggleLinkedSelection();
   }, []);
 
+  const toggleLoopPlayback = useCallback(() => {
+    if (!trimState.active) {
+      return;
+    }
+
+    toggleTrimLoopPlayback();
+  }, [toggleTrimLoopPlayback, trimState.active]);
+
+  const toggleViewMode = useCallback(() => {
+    if (!trimState.active) {
+      return;
+    }
+
+    toggleTrimViewMode();
+  }, [toggleTrimViewMode, trimState.active]);
+
+  const handlePreRollChange = useCallback((value: number) => {
+    setTrimLoopRollFrames(clampTrimRollFrames(value), trimLoopPostRollFrames);
+  }, [setTrimLoopRollFrames, trimLoopPostRollFrames]);
+
+  const handlePostRollChange = useCallback((value: number) => {
+    setTrimLoopRollFrames(trimLoopPreRollFrames, clampTrimRollFrames(value));
+  }, [setTrimLoopRollFrames, trimLoopPreRollFrames]);
+
   if (!trimActive && !trimState.active) {
     return null;
   }
@@ -113,24 +172,114 @@ export function TrimStatusOverlay() {
           <span className="trim-status-side">{displayTrimMode.toUpperCase()}</span>
           <span className="trim-status-counter">{formatTrimFrames(displayTrimCounter)}</span>
         </div>
-        {trimState.active && (
-          <button
-            type="button"
-            className="trim-control-btn trim-control-btn-utility"
-            onClick={exitTrimMode}
-            aria-label="Exit trim mode"
-          >
-            Exit
-          </button>
-        )}
+        <div className="trim-status-header-actions">
+          {trimState.active && (
+            <>
+              <button
+                type="button"
+                className={`trim-control-btn trim-control-btn-utility${trimLoopPlaybackActive ? ' active' : ''}`}
+                onClick={toggleLoopPlayback}
+                aria-label={trimLoopPlaybackActive ? 'Stop trim loop playback' : 'Start trim loop playback'}
+              >
+                Loop
+              </button>
+              <button
+                type="button"
+                className="trim-control-btn trim-control-btn-utility"
+                onClick={toggleViewMode}
+                aria-label="Toggle big and small trim view"
+              >
+                {trimViewMode === 'big' ? 'Small' : 'Big'}
+              </button>
+              <button
+                type="button"
+                className="trim-control-btn trim-control-btn-utility"
+                onClick={exitTrimMode}
+                aria-label="Exit trim mode"
+              >
+                Exit
+              </button>
+            </>
+          )}
+        </div>
       </div>
       <div className="trim-status-overlay-body">
-        <span>A {formatTrimFrames(displayASideFrames)}</span>
-        <span>B {formatTrimFrames(displayBSideFrames)}</span>
+        <span>{trimDisplayLabels.left} {formatTrimFrames(displayASideFrames)}</span>
+        <span>{trimDisplayLabels.right} {formatTrimFrames(displayBSideFrames)}</span>
         <span>{displaySelectionLabel}</span>
       </div>
       {trimState.active && (
+        <div className="trim-status-settings">
+          <span>{trimViewMode === 'big' ? 'BIG TRIM' : 'SMALL TRIM'}</span>
+          <span>{trimLoopStatusLabel}</span>
+          <span>{trimLoopPreRollFrames}f PRE</span>
+          <span>{trimLoopPostRollFrames}f POST</span>
+        </div>
+      )}
+      {trimState.active && (
         <>
+          {trimViewMode === 'big' && (
+            <>
+              <div className="trim-control-row" aria-label="Trim playback duration controls">
+                <button
+                  type="button"
+                  className={`trim-control-btn trim-control-btn-utility${trimLoopDurationPreset === 'short' ? ' active' : ''}`}
+                  onClick={() => setTrimLoopDurationPreset('short')}
+                  aria-label="Set short trim playback duration"
+                >
+                  0.5s
+                </button>
+                <button
+                  type="button"
+                  className={`trim-control-btn trim-control-btn-utility${trimLoopDurationPreset === 'medium' ? ' active' : ''}`}
+                  onClick={() => setTrimLoopDurationPreset('medium')}
+                  aria-label="Set medium trim playback duration"
+                >
+                  1.0s
+                </button>
+                <button
+                  type="button"
+                  className={`trim-control-btn trim-control-btn-utility${trimLoopDurationPreset === 'long' ? ' active' : ''}`}
+                  onClick={() => setTrimLoopDurationPreset('long')}
+                  aria-label="Set long trim playback duration"
+                >
+                  2.0s
+                </button>
+              </div>
+              <div className="trim-duration-editor" aria-label="Custom trim playback duration">
+                <label className="trim-duration-field">
+                  <span className="trim-duration-label">Pre</span>
+                  <input
+                    className="trim-duration-input"
+                    aria-label="Set trim preroll frames"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={trimLoopPreRollFrames}
+                    onChange={(event) => handlePreRollChange(Number.parseInt(event.currentTarget.value || '0', 10))}
+                  />
+                  <span className="trim-duration-unit">f</span>
+                </label>
+                <label className="trim-duration-field">
+                  <span className="trim-duration-label">Post</span>
+                  <input
+                    className="trim-duration-input"
+                    aria-label="Set trim postroll frames"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={trimLoopPostRollFrames}
+                    onChange={(event) => handlePostRollChange(Number.parseInt(event.currentTarget.value || '0', 10))}
+                  />
+                  <span className="trim-duration-unit">f</span>
+                </label>
+                <span className="trim-duration-preset">
+                  {trimLoopDurationPreset === 'custom' ? 'Custom' : trimLoopDurationPreset.toUpperCase()}
+                </span>
+              </div>
+            </>
+          )}
+
           <div className="trim-control-row">
             <button
               type="button"

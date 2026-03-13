@@ -316,4 +316,87 @@ describe('trim monitor preview', () => {
       root.unmount();
     });
   });
+
+  it('keeps slip review mode-specific and does not expose A/B trim-side switching', async () => {
+    useEditorStore.setState({
+      bins: [
+        {
+          id: 'bin-master',
+          name: 'Master',
+          color: '#5b6af5',
+          isOpen: true,
+          children: [],
+          assets: [
+            { id: 'asset-main', name: 'Main Clip', type: 'VIDEO', status: 'READY', tags: [], isFavorite: false },
+          ],
+        },
+      ],
+      tracks: [
+        {
+          id: 'v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [
+            makeClip({
+              id: 'main',
+              trackId: 'v1',
+              name: 'Main',
+              startTime: 2,
+              endTime: 6,
+              trimStart: 3,
+              trimEnd: 5,
+              type: 'video',
+              assetId: 'asset-main',
+            }),
+          ],
+        },
+      ],
+      selectedTrackId: 'v1',
+      enabledTrackIds: ['v1'],
+      videoMonitorTrackId: 'v1',
+      trimActive: true,
+      trimMode: 'roll',
+      trimSelectionLabel: 'AB',
+      playheadTime: 4,
+    });
+
+    trimEngine.enterTrimMode(['v1'], 4, TrimSide.BOTH);
+    trimEngine.cycleTrimMode();
+
+    const container = document.createElement('div');
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <>
+          <SourceMonitor />
+          <RecordMonitor />
+        </>,
+      );
+    });
+    await flushAnimationFrames();
+
+    expect(container.textContent).toContain('SLIP IN');
+    expect(container.textContent).toContain('SLIP OUT');
+    expect(container.querySelector('[aria-label="Select both trim sides"]')).toBeNull();
+
+    const sourceLabel = container.querySelector('.monitor-label-button.source');
+    expect(sourceLabel).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      sourceLabel?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(trimEngine.getCurrentMode()).toBe('SLIP');
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
 });

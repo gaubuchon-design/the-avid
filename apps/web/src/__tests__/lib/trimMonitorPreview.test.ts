@@ -18,6 +18,8 @@ function buildPreviewState(): TrimMonitorPreviewState {
     videoMonitorTrackId: state.videoMonitorTrackId,
     sequenceSettings: { fps: state.sequenceSettings.fps },
     projectSettings: { frameRate: state.projectSettings.frameRate },
+    trimLoopPlaybackActive: state.trimLoopPlaybackActive,
+    trimLoopOffsetFrames: state.trimLoopOffsetFrames,
   };
 }
 
@@ -346,5 +348,64 @@ describe('trim monitor preview', () => {
     expect(preview.recordMonitor?.clipId).toBe('right');
     expect(preview.sourceMonitor?.monitorContext).toBe('PREV CUT');
     expect(preview.recordMonitor?.monitorContext).toBe('NEXT CUT');
+  });
+
+  it('applies transition play loop offsets to slip previews', () => {
+    useEditorStore.setState({
+      bins: [
+        {
+          id: 'bin-master',
+          name: 'Master',
+          color: '#5b6af5',
+          isOpen: true,
+          children: [],
+          assets: [
+            { id: 'asset-main', name: 'Main Clip', type: 'VIDEO', status: 'READY', tags: [], isFavorite: false },
+          ],
+        },
+      ],
+      tracks: [
+        {
+          id: 'v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [
+            makeClip({
+              id: 'main',
+              trackId: 'v1',
+              name: 'Main',
+              startTime: 2,
+              endTime: 6,
+              trimStart: 3,
+              trimEnd: 5,
+              type: 'video',
+              assetId: 'asset-main',
+            }),
+          ],
+        },
+      ],
+      selectedTrackId: 'v1',
+      enabledTrackIds: ['v1'],
+      videoMonitorTrackId: 'v1',
+      playheadTime: 4,
+      trimLoopPlaybackActive: true,
+      trimLoopOffsetFrames: 6,
+    });
+
+    trimEngine.enterTrimMode(['v1'], 4, TrimSide.BOTH);
+    trimEngine.cycleTrimMode();
+
+    const preview = resolveTrimMonitorPreview(buildPreviewState(), trimEngine.getState());
+
+    expect(preview.sourceMonitor?.monitorLabel).toBe('SLIP IN');
+    expect(preview.recordMonitor?.monitorLabel).toBe('SLIP OUT');
+    expect(preview.sourceMonitor?.sourceTime).toBeGreaterThan(3.0208333);
+    expect(preview.recordMonitor?.sourceTime).toBeGreaterThan(6.9791666);
   });
 });

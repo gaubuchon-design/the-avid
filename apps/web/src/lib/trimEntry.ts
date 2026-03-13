@@ -27,6 +27,7 @@ export interface TrimEntryTarget {
   side: TrimSide;
   rollerSelections: Array<{
     trackId: string;
+    editPointTime: number;
     side: TrimSide;
   }>;
 }
@@ -101,6 +102,35 @@ function trackHasEditPointAtTime(track: Track, editPointTime: number, tolerance:
   ));
 }
 
+function normalizeExplicitSelections(
+  state: TrimEntryState,
+  selections: TrimEditPointSelection[],
+  anchorTrackId: string | null,
+  tolerance: number,
+): TrimEditPointSelection[] {
+  const validSelections = selections.filter((selection) => {
+    const track = findTrackById(state.tracks, selection.trackId);
+    return Boolean(
+      track
+        && !track.locked
+        && trackHasEditPointAtTime(track, selection.editPointTime, tolerance),
+    );
+  });
+
+  if (validSelections.length === 0) {
+    return [];
+  }
+
+  const trailingSelections = validSelections.filter((selection) => selection.trackId !== anchorTrackId);
+  const anchorSelection = anchorTrackId
+    ? validSelections.find((selection) => selection.trackId === anchorTrackId) ?? null
+    : validSelections[validSelections.length - 1] ?? null;
+
+  return anchorSelection
+    ? [anchorSelection, ...trailingSelections]
+    : trailingSelections;
+}
+
 function normalizeFocusedTrackIds(state: TrimEntryState, anchorTrackId: string | null): string[] {
   if (anchorTrackId) {
     const enabledTrackIds = state.enabledTrackIds.filter((trackId) => trackId !== anchorTrackId);
@@ -136,42 +166,33 @@ export function resolveTrimEntryTarget(
   const tolerance = getFrameTolerance(state);
 
   if (explicitSelections.length > 0) {
-    const explicitGroup = explicitSelections.filter((selection) => (
-      Math.abs(selection.editPointTime - requestedEditPointTime) <= tolerance + TIME_EPSILON
+    const explicitSelectionsByTrackId = new Map(
+      normalizeExplicitSelections(state, explicitSelections, anchorTrackId, tolerance)
+        .map((selection) => [selection.trackId, selection] as const),
+    );
+    const orderedSelections = [
+      ...explicitSelectionsByTrackId.values(),
+      ...focusedTrackIds
+        .map((trackId) => explicitSelectionsByTrackId.get(trackId) ?? null)
+        .filter((selection): selection is TrimEditPointSelection => selection !== null),
+    ].filter((selection, index, selections) => (
+      selections.findIndex((candidate) => candidate.trackId === selection.trackId) === index
     ));
 
-    if (explicitGroup.length > 0) {
-      const orderedSelections = focusedTrackIds
-        .map((trackId) => explicitGroup.find((selection) => selection.trackId === trackId) ?? null)
-        .filter((selection): selection is TrimEditPointSelection => {
-          if (!selection) {
-            return false;
-          }
+    if (orderedSelections.length > 0) {
+      const explicitAnchorSelection = orderedSelections[0]!;
 
-          const track = findTrackById(state.tracks, selection.trackId);
-          return Boolean(
-            track
-              && !track.locked
-              && trackHasEditPointAtTime(track, selection.editPointTime, tolerance),
-          );
-        });
-
-      if (orderedSelections.length > 0) {
-        const explicitAnchorTrackId = anchorTrackId && orderedSelections.some((selection) => selection.trackId === anchorTrackId)
-          ? anchorTrackId
-          : orderedSelections[0]!.trackId;
-
-        return {
-          anchorTrackId: explicitAnchorTrackId,
-          editPointTime: orderedSelections[0]!.editPointTime,
-          trackIds: orderedSelections.map((selection) => selection.trackId),
-          side: options.side ?? deriveGroupSide(orderedSelections),
-          rollerSelections: orderedSelections.map((selection) => ({
-            trackId: selection.trackId,
-            side: mapSelectionSide(selection.side),
-          })),
-        };
-      }
+      return {
+        anchorTrackId: explicitAnchorSelection.trackId,
+        editPointTime: explicitAnchorSelection.editPointTime,
+        trackIds: orderedSelections.map((selection) => selection.trackId),
+        side: options.side ?? deriveGroupSide(orderedSelections),
+        rollerSelections: orderedSelections.map((selection) => ({
+          trackId: selection.trackId,
+          editPointTime: selection.editPointTime,
+          side: mapSelectionSide(selection.side),
+        })),
+      };
     }
   }
 
@@ -220,6 +241,7 @@ export function resolveTrimEntryTarget(
     side,
     rollerSelections: (trackIds.length > 0 ? trackIds : [chosen.trackId]).map((trackId) => ({
       trackId,
+      editPointTime: chosen.editPointTime,
       side,
     })),
   };
@@ -234,20 +256,7 @@ export function enterTrimModeFromContext(
     return null;
   }
 
-  const requestedSides = target.rollerSelections.map((selection) => selection.side);
-  const uniformSide = requestedSides.length > 0 && requestedSides.every((side) => side === requestedSides[0])
-    ? requestedSides[0]!
-    : TrimSide.BOTH;
-
-  trimEngine.enterTrimMode(target.trackIds, target.editPointTime, uniformSide);
-
-  if (uniformSide === TrimSide.BOTH) {
-    for (const selection of target.rollerSelections) {
-      if (selection.side !== TrimSide.BOTH) {
-        trimEngine.setAsymmetricRoller(selection.trackId, selection.side);
-      }
-    }
-  }
+  trimEngine.enterTrimModeWithSelections(target.rollerSelections);
 
   return target;
 }

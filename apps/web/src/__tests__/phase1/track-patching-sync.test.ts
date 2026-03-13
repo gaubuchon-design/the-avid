@@ -198,4 +198,34 @@ describe('phase 1 track patching synchronization', () => {
     expect(trackPatchingEngine.getEnabledRecordTracks()).toEqual(['t-v1']);
     expect(trackPatchingEngine.getSyncLockedTracks()).toEqual(['t-a1']);
   });
+
+  it('keeps disabled source patches out of active patch labels while preserving their mapping', () => {
+    useEditorStore.setState({
+      tracks: [
+        {
+          id: 't-v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [],
+        },
+      ],
+    });
+
+    trackPatchingEngine.setSourceTracks([
+      { id: 'src-v1', type: 'VIDEO', index: 1 },
+    ]);
+    trackPatchingEngine.patchSourceToRecord('src-v1', 't-v1');
+    trackPatchingEngine.setPatchEnabled('src-v1', false);
+
+    syncTrackPatchingStateToStore();
+
+    expect(trackPatchingEngine.getRecordTrackForSource('src-v1')).toBe('t-v1');
+    expect(useEditorStore.getState().trackPatchLabels).toEqual([]);
+  });
 });

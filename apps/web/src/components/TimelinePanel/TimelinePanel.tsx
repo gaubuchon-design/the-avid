@@ -129,8 +129,16 @@ export function TimelinePanel() {
       return null;
     }
 
-    const sharedEditPointTime = selectedTrimEditPoints[selectedTrimEditPoints.length - 1]!.editPointTime;
+    const anchorEditPointTime = selectedTrimEditPoints[selectedTrimEditPoints.length - 1]!.editPointTime;
     const sides = new Set(selectedTrimEditPoints.map((selection) => selection.side));
+    const distinctEditPointTimes = selectedTrimEditPoints.reduce<number[]>((times, selection) => {
+      if (times.some((time) => Math.abs(time - selection.editPointTime) <= frameDuration)) {
+        return times;
+      }
+
+      times.push(selection.editPointTime);
+      return times;
+    }, []);
     const selectionLabel = sides.size > 1
       ? 'ASYM'
       : sides.has('A_SIDE')
@@ -141,10 +149,12 @@ export function TimelinePanel() {
 
     return {
       count: selectedTrimEditPoints.length,
-      sharedEditPointTime,
+      anchorEditPointTime,
+      distinctEditPointCount: distinctEditPointTimes.length,
+      hasMultipleEditPoints: distinctEditPointTimes.length > 1,
       selectionLabel,
     };
-  }, [selectedTrimEditPoints]);
+  }, [frameDuration, selectedTrimEditPoints]);
 
   const contentRef = useRef<HTMLDivElement>(null);
   const totalWidth = Math.max(duration * zoom + 200, 800);
@@ -282,7 +292,7 @@ export function TimelinePanel() {
           <button
             className={`tl-btn tl-btn-labeled tl-trim-entry${trimActive ? ' active' : ''}`}
             title={trimSelectionSummary
-              ? `Enter trim from ${trimSelectionSummary.count} selected cut${trimSelectionSummary.count > 1 ? 's' : ''}`
+              ? `Enter trim from ${trimSelectionSummary.count} selected cut${trimSelectionSummary.count > 1 ? 's' : ''}${trimSelectionSummary.hasMultipleEditPoints ? ` across ${trimSelectionSummary.distinctEditPointCount} edit points` : ''}`
               : 'Enter Trim Mode'}
             aria-label={trimActive
               ? 'Trim mode is active'
@@ -343,8 +353,13 @@ export function TimelinePanel() {
                       ASYM
                     </span>
                   )}
+                  {trimSelectionSummary.hasMultipleEditPoints && (
+                    <span className="timeline-toolbar-pill" aria-live="polite">
+                      {trimSelectionSummary.distinctEditPointCount} PTS
+                    </span>
+                  )}
                   <span className="timeline-toolbar-pill timeline-toolbar-pill-emphasis" aria-live="polite">
-                    {formatTimelineTimecode(trimSelectionSummary.sharedEditPointTime, fps)}
+                    {formatTimelineTimecode(trimSelectionSummary.anchorEditPointTime, fps)}
                   </span>
                   <button
                     className="tl-btn tl-btn-labeled"

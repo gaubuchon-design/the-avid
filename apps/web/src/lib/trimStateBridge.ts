@@ -78,7 +78,13 @@ export function syncTrimStateToStore(): void {
     return;
   }
 
-  useEditorStore.setState(next);
+  useEditorStore.setState((state) => ({
+    ...next,
+    trimLoopPlaybackActive: next.trimActive ? state.trimLoopPlaybackActive : false,
+    trimLoopOffsetFrames: next.trimActive ? state.trimLoopOffsetFrames : 0,
+    trimLoopPlaybackDirection: next.trimActive ? state.trimLoopPlaybackDirection : 1,
+    trimLoopPlaybackRate: next.trimActive ? state.trimLoopPlaybackRate : 1,
+  }));
 }
 
 export function subscribeTrimStateToStore(): () => void {

@@ -173,6 +173,8 @@ function buildAvidDefaultBindings(): KeyBinding[] {
     //  Trim
     // ═══════════════════════════════════════════════════════════════════════
     createBinding('u', [], 'trim.enterMode', 'Enter Trim Mode', 'trim'),
+    createBinding('u', ['alt'], 'trim.recallPrevious', 'Recall Previous Trim Settings', 'trim'),
+    createBinding('u', ['shift'], 'trim.toggleViewMode', 'Toggle Big/Small Trim View', 'trim'),
     createBinding('p', [], 'trim.selectASide', 'Select A-side Roller', 'trim'),
     createBinding('[', [], 'trim.selectBoth', 'Select Both Sides (Dual Roller)', 'trim'),
     createBinding(']', [], 'trim.selectBSide', 'Select B-side Roller', 'trim'),

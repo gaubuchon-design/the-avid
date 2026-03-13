@@ -7,6 +7,13 @@ import { makeClip, useEditorStore } from '../../store/editor.store';
 
 const initialEditorState = useEditorStore.getState();
 
+function setInputValue(input: HTMLInputElement, nextValue: string): void {
+  const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+  valueSetter?.call(input, nextValue);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
 describe('trim status overlay', () => {
   beforeEach(() => {
     useEditorStore.setState(initialEditorState, true);
@@ -192,5 +199,71 @@ describe('trim status overlay', () => {
     });
 
     consoleError.mockRestore();
+  });
+
+  it('toggles trim loop playback and trim view mode from the overlay', async () => {
+    const container = document.createElement('div');
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<TrimStatusOverlay />);
+    });
+
+    const loopButton = container.querySelector('[aria-label="Start trim loop playback"]');
+    const viewButton = container.querySelector('[aria-label="Toggle big and small trim view"]');
+
+    expect(loopButton).toBeInstanceOf(HTMLButtonElement);
+    expect(viewButton).toBeInstanceOf(HTMLButtonElement);
+    expect(useEditorStore.getState().trimLoopPlaybackActive).toBe(false);
+    expect(useEditorStore.getState().trimViewMode).toBe('small');
+
+    await act(async () => {
+      loopButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(useEditorStore.getState().trimLoopPlaybackActive).toBe(true);
+
+    await act(async () => {
+      viewButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(useEditorStore.getState().trimViewMode).toBe('big');
+
+    const longDurationButton = container.querySelector('[aria-label="Set long trim playback duration"]');
+    expect(longDurationButton).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      longDurationButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(useEditorStore.getState().trimLoopDurationPreset).toBe('long');
+    expect(useEditorStore.getState().trimLoopPreRollFrames).toBe(48);
+    expect(useEditorStore.getState().trimLoopPostRollFrames).toBe(48);
+
+    const preRollInput = container.querySelector('[aria-label="Set trim preroll frames"]') as HTMLInputElement | null;
+    const postRollInput = container.querySelector('[aria-label="Set trim postroll frames"]') as HTMLInputElement | null;
+
+    expect(preRollInput).toBeInstanceOf(HTMLInputElement);
+    expect(postRollInput).toBeInstanceOf(HTMLInputElement);
+
+    await act(async () => {
+      if (preRollInput) {
+        setInputValue(preRollInput, '30');
+      }
+    });
+
+    await act(async () => {
+      if (postRollInput) {
+        setInputValue(postRollInput, '18');
+      }
+    });
+
+    expect(useEditorStore.getState().trimLoopDurationPreset).toBe('custom');
+    expect(useEditorStore.getState().trimLoopPreRollFrames).toBe(30);
+    expect(useEditorStore.getState().trimLoopPostRollFrames).toBe(18);
+
+    await act(async () => {
+      root.unmount();
+    });
   });
 });

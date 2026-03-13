@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { ErrorBoundary, PanelErrorBoundary } from '../components/ErrorBoundary';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { TrimSide, trimEngine } from '../engine/TrimEngine';
+import { keyboardEngine } from '../engine/KeyboardEngine';
 import { trackPatchingEngine } from '../engine/TrackPatchingEngine';
 import { Toolbar } from '../components/Toolbar/Toolbar';
 import { BinPanel } from '../components/Bins/BinPanel';
@@ -17,6 +18,7 @@ import { TitleTool } from '../components/TitleTool/TitleTool';
 import { SubtitleEditor } from '../components/SubtitleEditor/SubtitleEditor';
 import { useEditorStore } from '../store/editor.store';
 import { useGlobalKeyboard } from '../hooks/useGlobalKeyboard';
+import { useTrimLoopPlayback } from '../hooks/useTrimLoopPlayback';
 import { UserSettingsPanel } from '../components/UserSettings/UserSettingsPanel';
 import { useKeyboardAction } from '../hooks/useKeyboardAction';
 import { editEngine } from '../engine/EditEngine';
@@ -71,6 +73,7 @@ export function EditorPage() {
   const [activePage, setActivePage] = useState<PageId>(() => resolveEditorPageParam(searchParams.get('page')));
   // Centralized keyboard dispatch — routes keys based on active monitor
   useGlobalKeyboard();
+  useTrimLoopPlayback();
 
   // ─── Register core keyboard actions with the KeyboardEngine ──────────
   const insertEdit = useEditorStore((s) => s.insertEdit);
@@ -87,15 +90,30 @@ export function EditorPage() {
   const toggleSmartToolExtractSplice = useEditorStore((s) => s.toggleSmartToolExtractSplice);
   const toggleSmartToolOverwriteTrim = useEditorStore((s) => s.toggleSmartToolOverwriteTrim);
   const toggleSmartToolRippleTrim = useEditorStore((s) => s.toggleSmartToolRippleTrim);
+  const toggleTrimViewMode = useEditorStore((s) => s.toggleTrimViewMode);
 
   // Read from store directly to avoid stale closures in frame-stepping callbacks
   const stepForward = useCallback(() => {
+    if (trimEngine.getState().active || useEditorStore.getState().trimActive) {
+      const state = useEditorStore.getState();
+      const frameRate = state.sequenceSettings?.fps || state.projectSettings.frameRate || 24;
+      trimEngine.trimByFrames(1, frameRate);
+      return;
+    }
+
     const { playheadTime, duration, setPlayhead } = useEditorStore.getState();
     const safeDuration = Number.isFinite(duration) ? duration : 0;
     const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
     setPlayhead(Math.min(safeTime + 1 / 24, safeDuration));
   }, []);
   const stepBackward = useCallback(() => {
+    if (trimEngine.getState().active || useEditorStore.getState().trimActive) {
+      const state = useEditorStore.getState();
+      const frameRate = state.sequenceSettings?.fps || state.projectSettings.frameRate || 24;
+      trimEngine.trimByFrames(-1, frameRate);
+      return;
+    }
+
     const { playheadTime, setPlayhead } = useEditorStore.getState();
     const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
     setPlayhead(Math.max(safeTime - 1 / 24, 0));
@@ -127,17 +145,93 @@ export function EditorPage() {
   const trimRightOneFrame = useCallback(() => trimByFrames(1), [trimByFrames]);
   const trimLeftTenFrames = useCallback(() => trimByFrames(-10), [trimByFrames]);
   const trimRightTenFrames = useCallback(() => trimByFrames(10), [trimByFrames]);
+  const startTrimTransport = useCallback((direction: -1 | 1, requestedSpeed?: number) => {
+    const state = useEditorStore.getState();
+    if (!state.trimActive) {
+      const target = enterTrimModeFromContext(state, { side: TrimSide.BOTH });
+      if (!target) {
+        return false;
+      }
+      useEditorStore.getState().setActiveTool('trim');
+      useEditorStore.getState().selectTrack(target.anchorTrackId);
+      useEditorStore.getState().clearTrimEditPoints();
+    }
 
-  useKeyboardAction('transport.playForward', playForwardForActiveMonitor, []);
-  useKeyboardAction('transport.playReverse', playReverseForActiveMonitor, []);
-  useKeyboardAction('transport.stop', stopActiveMonitorPlayback, []);
-  useKeyboardAction('transport.playStop', togglePlayForActiveMonitor, []);
-  useKeyboardAction('transport.playToggle', togglePlayForActiveMonitor, []);
+    const speed = Math.max(
+      0.25,
+      Math.min(8, requestedSpeed ?? (Math.abs(keyboardEngine.getJKLSpeed()) || 1)),
+    );
+    useEditorStore.getState().setTrimLoopPlaybackDirection(direction);
+    useEditorStore.getState().setTrimLoopPlaybackRate(speed);
+    useEditorStore.getState().setTrimLoopPlaybackActive(true);
+    return true;
+  }, []);
+  const stopTrimTransport = useCallback(() => {
+    if (trimEngine.getState().active || useEditorStore.getState().trimActive) {
+      useEditorStore.getState().setTrimLoopPlaybackActive(false);
+      return;
+    }
+
+    stopActiveMonitorPlayback();
+  }, []);
+  const toggleTrimAwarePlayback = useCallback(() => {
+    const state = useEditorStore.getState();
+    if (trimEngine.getState().active || state.trimActive) {
+      if (state.trimLoopPlaybackActive) {
+        state.setTrimLoopPlaybackActive(false);
+        return;
+      }
+
+      startTrimTransport(1, 1);
+      return;
+    }
+
+    togglePlayForActiveMonitor();
+  }, [startTrimTransport]);
+  const playTrimForward = useCallback(() => {
+    if (trimEngine.getState().active || useEditorStore.getState().trimActive) {
+      void startTrimTransport(1);
+      return;
+    }
+
+    playForwardForActiveMonitor();
+  }, [startTrimTransport]);
+  const playTrimReverse = useCallback(() => {
+    if (trimEngine.getState().active || useEditorStore.getState().trimActive) {
+      void startTrimTransport(-1);
+      return;
+    }
+
+    playReverseForActiveMonitor();
+  }, [startTrimTransport]);
+  const playTrimLoop = useCallback(() => {
+    const state = useEditorStore.getState();
+    if (state.trimLoopPlaybackActive) {
+      state.setTrimLoopPlaybackActive(false);
+      return;
+    }
+
+    startTrimTransport(1, 1);
+  }, [startTrimTransport]);
+  const recallPreviousTrimConfiguration = useCallback(() => {
+    const nextState = trimEngine.recallPreviousConfiguration();
+    if (nextState.active && nextState.rollers.length > 0) {
+      useEditorStore.getState().setActiveTool('trim');
+      useEditorStore.getState().selectTrack(nextState.rollers[0]!.trackId);
+    }
+  }, []);
+
+  useKeyboardAction('transport.playForward', playTrimForward, [playTrimForward]);
+  useKeyboardAction('transport.playReverse', playTrimReverse, [playTrimReverse]);
+  useKeyboardAction('transport.stop', stopTrimTransport, [stopTrimTransport]);
+  useKeyboardAction('transport.playStop', toggleTrimAwarePlayback, [toggleTrimAwarePlayback]);
+  useKeyboardAction('transport.playToggle', toggleTrimAwarePlayback, [toggleTrimAwarePlayback]);
   useKeyboardAction('transport.stepForward', stepForward, [stepForward]);
   useKeyboardAction('transport.stepBack', stepBackward, [stepBackward]);
   useKeyboardAction('transport.stepBackward', stepBackward, [stepBackward]);
   useKeyboardAction('transport.goToStart', goToStart, [goToStart]);
   useKeyboardAction('transport.goToEnd', goToEnd, [goToEnd]);
+  useKeyboardAction('transport.playLoop', playTrimLoop, [playTrimLoop]);
   useKeyboardAction('mark.in', markInForActiveMonitor, []);
   useKeyboardAction('mark.out', markOutForActiveMonitor, []);
   useKeyboardAction('mark.clip', markClipForActiveMonitor, []);
@@ -165,6 +259,8 @@ export function EditorPage() {
   useKeyboardAction('trim.right1', trimRightOneFrame, [trimRightOneFrame]);
   useKeyboardAction('trim.left10', trimLeftTenFrames, [trimLeftTenFrames]);
   useKeyboardAction('trim.right10', trimRightTenFrames, [trimRightTenFrames]);
+  useKeyboardAction('trim.recallPrevious', recallPreviousTrimConfiguration, [recallPreviousTrimConfiguration]);
+  useKeyboardAction('trim.toggleViewMode', toggleTrimViewMode, [toggleTrimViewMode]);
   useKeyboardAction('nav.prevEdit', goToPrevEditPoint, [goToPrevEditPoint]);
   useKeyboardAction('nav.nextEdit', goToNextEditPoint, [goToNextEditPoint]);
   useKeyboardAction('smartTool.toggleLiftOverwrite', toggleSmartToolLiftOverwrite, [toggleSmartToolLiftOverwrite]);

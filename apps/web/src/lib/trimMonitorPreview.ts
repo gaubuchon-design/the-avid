@@ -26,6 +26,8 @@ export interface TrimMonitorPreviewState {
   videoMonitorTrackId: string | null;
   sequenceSettings: Pick<SequenceSettings, 'fps'>;
   projectSettings: Pick<ProjectSettings, 'frameRate'>;
+  trimLoopPlaybackActive?: boolean;
+  trimLoopOffsetFrames?: number;
 }
 
 export interface TrimPreviewSide {
@@ -123,6 +125,30 @@ function getRolePreviewTime(
   return Math.max(minTime, Math.min(maxTime, clip.startTime + frameOffset));
 }
 
+function getPlaybackOffsetSeconds(state: TrimMonitorPreviewState): number {
+  const fps = Math.max(state.sequenceSettings.fps || state.projectSettings.frameRate || 24, 1);
+  return (state.trimLoopPlaybackActive ? (state.trimLoopOffsetFrames ?? 0) : 0) / fps;
+}
+
+function getLoopAdjustedPreviewTime(
+  clip: Track['clips'][number],
+  timelineTime: number,
+  frameOffset: number,
+  playbackOffsetSeconds: number,
+): { sourceTime: number; timelineTime: number } {
+  const minTime = clip.startTime;
+  const maxTime = Math.max(clip.startTime, clip.endTime - frameOffset);
+  const adjustedTimelineTime = Math.max(
+    minTime,
+    Math.min(maxTime, timelineTime + playbackOffsetSeconds),
+  );
+
+  return {
+    sourceTime: getClipSourceTime(clip, adjustedTimelineTime),
+    timelineTime: adjustedTimelineTime,
+  };
+}
+
 function getFocusRank(trackId: string, focusedTrackIds: string[]): number {
   const focusedIndex = focusedTrackIds.indexOf(trackId);
   if (focusedIndex < 0) {
@@ -138,6 +164,7 @@ function buildPreviewSide(args: {
   clip: Track['clips'][number];
   asset: MediaAsset | null;
   timelineTime: number;
+  sourceTime?: number;
   selected: boolean;
   rollerSide: TrimSide;
   monitorLabel: string;
@@ -154,11 +181,36 @@ function buildPreviewSide(args: {
     clipName: args.clip.name,
     assetId: args.clip.assetId ?? null,
     asset: args.asset,
-    sourceTime: getClipSourceTime(args.clip, args.timelineTime),
+    sourceTime: args.sourceTime ?? getClipSourceTime(args.clip, args.timelineTime),
     timelineTime: args.timelineTime,
     playable: isVisualTrack(args.track) && isPlayableAsset(args.asset),
     selected: args.selected,
     rollerSide: args.rollerSide,
+  };
+}
+
+function getTrimLoopSourceTime(
+  role: 'A' | 'B',
+  clip: Track['clips'][number],
+  frameOffset: number,
+  playbackOffsetSeconds: number,
+): { sourceTime: number; timelineTime: number } {
+  const clipVisibleDuration = clip.endTime - clip.startTime;
+  const totalSourceDuration = clipVisibleDuration + clip.trimStart + clip.trimEnd;
+  const anchorSourceTime = role === 'A'
+    ? clip.trimStart + clipVisibleDuration - frameOffset
+    : clip.trimStart;
+  const clampedSourceTime = Math.max(
+    0,
+    Math.min(totalSourceDuration - frameOffset, anchorSourceTime + playbackOffsetSeconds),
+  );
+  const timelineAnchor = role === 'A'
+    ? clip.endTime - frameOffset
+    : clip.startTime;
+
+  return {
+    sourceTime: clampedSourceTime,
+    timelineTime: timelineAnchor + playbackOffsetSeconds,
   };
 }
 
@@ -189,13 +241,18 @@ function buildSideCandidate(
   const preferredForSelection = role === 'A'
     ? roller.side === TrimSide.A_SIDE || roller.side === TrimSide.BOTH
     : roller.side === TrimSide.B_SIDE || roller.side === TrimSide.BOTH;
-  const timelineTime = getRolePreviewTime(role, clip, frameOffset);
+  const playbackOffsetSeconds = getPlaybackOffsetSeconds(state);
+  const loopPreviewTime = state.trimLoopPlaybackActive
+    ? getTrimLoopSourceTime(role, clip, frameOffset, playbackOffsetSeconds)
+    : null;
+  const timelineTime = loopPreviewTime?.timelineTime ?? getRolePreviewTime(role, clip, frameOffset);
   const preview = buildPreviewSide({
     role,
     track,
     clip,
     asset,
     timelineTime,
+    sourceTime: loopPreviewTime?.sourceTime,
     selected: trimSelectionLabel === 'AB'
       || trimSelectionLabel === role
       || (trimSelectionLabel === 'ASYM' && preferredForSelection),
@@ -283,6 +340,7 @@ function resolvePreviewFromState(
   role: 'A' | 'B',
   monitorLabel: string,
   monitorContext: string,
+  frameOffset: number,
 ): TrimPreviewSide | null {
   if (!clipId) {
     return null;
@@ -299,12 +357,18 @@ function resolvePreviewFromState(
   }
 
   const asset = clip.assetId ? findAssetInBins(state.bins, clip.assetId) : null;
+  const playbackOffsetSeconds = getPlaybackOffsetSeconds(state);
+  const loopPreviewTime = state.trimLoopPlaybackActive
+    ? getLoopAdjustedPreviewTime(clip, timelineTime, frameOffset, playbackOffsetSeconds)
+    : null;
+
   return buildPreviewSide({
     role,
     track,
     clip,
     asset,
-    timelineTime,
+    timelineTime: loopPreviewTime?.timelineTime ?? timelineTime,
+    sourceTime: loopPreviewTime?.sourceTime,
     selected: true,
     rollerSide: TrimSide.BOTH,
     monitorLabel,
@@ -345,6 +409,7 @@ function resolveSlipPreview(
     'A',
     'SLIP IN',
     'SOURCE HEAD',
+    frameOffset,
   );
   const recordMonitor = resolvePreviewFromState(
     state,
@@ -354,6 +419,7 @@ function resolveSlipPreview(
     'B',
     'SLIP OUT',
     'SOURCE TAIL',
+    frameOffset,
   );
 
   return {
@@ -399,6 +465,7 @@ function resolveSlidePreview(
     'A',
     'SLIDE LEFT',
     slideState.leftNeighborId ? 'PREV CUT' : 'CLIP HEAD',
+    frameOffset,
   );
   const rightPreview = resolvePreviewFromState(
     state,
@@ -410,6 +477,7 @@ function resolveSlidePreview(
     'B',
     'SLIDE RIGHT',
     slideState.rightNeighborId ? 'NEXT CUT' : 'CLIP TAIL',
+    frameOffset,
   );
 
   return {
@@ -504,6 +572,8 @@ export function useTrimMonitorPreview(state: TrimMonitorPreviewState): TrimMonit
     state.projectSettings.frameRate,
     state.selectedTrackId,
     state.sequenceSettings.fps,
+    state.trimLoopOffsetFrames,
+    state.trimLoopPlaybackActive,
     state.tracks,
     state.videoMonitorTrackId,
     trimState,
