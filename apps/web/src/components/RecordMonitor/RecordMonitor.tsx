@@ -20,7 +20,13 @@ import {
   pauseVideoSource,
   tryLoadClipSource,
 } from '../../engine/compositeRecordFrame';
-import { matchFrameAtPlayhead } from '../../lib/editorMonitorActions';
+import {
+  activateRecordMonitor,
+  activateSourceMonitor,
+  clearMarksForActiveMonitor,
+  markClipForActiveMonitor,
+  matchFrameAtPlayhead,
+} from '../../lib/editorMonitorActions';
 import { videoSourceManager } from '../../engine/VideoSourceManager';
 import {
   findTimelineMonitorMediaSource,
@@ -194,6 +200,8 @@ export function RecordMonitor() {
   const outPoint = useEditorStore((s) => s.outPoint);
   const setInToPlayhead = useEditorStore((s) => s.setInToPlayhead);
   const setOutToPlayhead = useEditorStore((s) => s.setOutToPlayhead);
+  const liftEdit = useEditorStore((s) => s.liftEdit);
+  const extractEdit = useEditorStore((s) => s.extractEdit);
   const trimSelectionLabel = useEditorStore((s) => s.trimSelectionLabel);
   const trimActive = useEditorStore((s) => s.trimActive);
   const trimMode = useEditorStore((s) => s.trimMode);
@@ -606,8 +614,8 @@ export function RecordMonitor() {
       return;
     }
     const current = useEditorStore.getState().playheadTime;
-    useEditorStore.getState().setPlayhead(current + 1 / fps);
-  }, [fps, nudgeTrim]);
+    useEditorStore.getState().setPlayhead(Math.min(duration, current + 1 / fps));
+  }, [duration, fps, nudgeTrim]);
 
   const handleRewind = useCallback(() => {
     if (nudgeTrim(-10)) {
@@ -622,8 +630,8 @@ export function RecordMonitor() {
       return;
     }
     const current = useEditorStore.getState().playheadTime;
-    useEditorStore.getState().setPlayhead(current + 2);
-  }, [nudgeTrim]);
+    useEditorStore.getState().setPlayhead(Math.min(duration, current + 2));
+  }, [duration, nudgeTrim]);
 
   const handleMatchFrame = useCallback(() => {
     matchFrameAtPlayhead();
@@ -637,6 +645,26 @@ export function RecordMonitor() {
     setOutToPlayhead();
   }, [setOutToPlayhead]);
 
+  const handleMarkClip = useCallback(() => {
+    activateRecordMonitor();
+    markClipForActiveMonitor();
+  }, []);
+
+  const handleClearMarks = useCallback(() => {
+    activateRecordMonitor();
+    clearMarksForActiveMonitor();
+  }, []);
+
+  const handleLift = useCallback(() => {
+    activateRecordMonitor();
+    liftEdit();
+  }, [liftEdit]);
+
+  const handleExtract = useCallback(() => {
+    activateRecordMonitor();
+    extractEdit();
+  }, [extractEdit]);
+
   const handleEnterTrim = useCallback(() => {
     requestTrimWorkspace();
   }, []);
@@ -644,6 +672,14 @@ export function RecordMonitor() {
   const handleFocus = useCallback(() => {
     setActiveMonitor('record');
   }, [setActiveMonitor]);
+
+  const handleActivateSource = useCallback(() => {
+    activateSourceMonitor();
+  }, []);
+
+  const handleActivateRecord = useCallback(() => {
+    activateRecordMonitor();
+  }, []);
 
   const handleSelectTrimASide = useCallback(() => {
     if (trimSessionActive && trimSupportsSideSelection) {
@@ -722,6 +758,7 @@ export function RecordMonitor() {
   }, [setActiveMonitor, trimSessionActive, trimSupportsSideSelection]);
 
   const tc = timeToTimecode(trimPreviewActive && trimPreviewSide ? trimPreviewSide.sourceTime : playheadTime, fps);
+  const durationTc = duration > 0 ? timeToTimecode(duration, fps) : null;
   const isActive = activeMonitor === 'record';
   const recordLabel = trimPreviewActive ? trimPreviewSide!.monitorLabel : 'RECORD';
   const recordMeta = trimPreviewActive && trimPreviewSide
@@ -818,6 +855,27 @@ export function RecordMonitor() {
 
       {/* Footer / Transport */}
       <div className="monitor-footer">
+        <div className="monitor-footer-group monitor-focus-group" role="group" aria-label="Monitor focus controls">
+          <button
+            type="button"
+            className={`transport-btn monitor-toolbar-btn is-monitor${activeMonitor === 'source' ? ' active' : ''}`}
+            onClick={handleActivateSource}
+            aria-pressed={activeMonitor === 'source'}
+            title="Activate Source Monitor"
+          >
+            SRC
+          </button>
+          <button
+            type="button"
+            className={`transport-btn monitor-toolbar-btn is-monitor${activeMonitor === 'record' ? ' active' : ''}`}
+            onClick={handleActivateRecord}
+            aria-pressed={activeMonitor === 'record'}
+            title="Activate Record Monitor"
+          >
+            REC
+          </button>
+        </div>
+
         <div className="monitor-footer-group" role="group" aria-label="Record edit controls">
           <button
             className="transport-btn monitor-toolbar-btn"
@@ -844,6 +902,22 @@ export function RecordMonitor() {
             OUT
           </button>
           <button
+            className="transport-btn monitor-toolbar-btn"
+            onClick={handleMarkClip}
+            title="Mark Clip (E)"
+            disabled={trimSessionActive}
+          >
+            CLIP
+          </button>
+          <button
+            className="transport-btn monitor-toolbar-btn"
+            onClick={handleClearMarks}
+            title="Clear Marks (D)"
+            disabled={trimSessionActive}
+          >
+            CLR
+          </button>
+          <button
             className={`transport-btn monitor-toolbar-btn${trimSessionActive ? ' active' : ''}`}
             onClick={trimSessionActive ? toggleTrimViewMode : handleEnterTrim}
             title={trimSessionActive ? 'Toggle big/small trim view' : 'Enter Trim Mode'}
@@ -851,6 +925,25 @@ export function RecordMonitor() {
             {trimSessionActive ? (trimViewMode === 'big' ? 'SMALL' : 'BIG') : 'TRIM'}
           </button>
         </div>
+
+        {!trimSessionActive && (
+          <div className="monitor-footer-group" role="group" aria-label="Record timeline edit controls">
+            <button
+              className="transport-btn monitor-toolbar-btn"
+              onClick={handleLift}
+              title="Lift (Z)"
+            >
+              LIFT
+            </button>
+            <button
+              className="transport-btn monitor-toolbar-btn"
+              onClick={handleExtract}
+              title="Extract (X)"
+            >
+              EXT
+            </button>
+          </div>
+        )}
 
         <div className="monitor-footer-group transport-controls" role="group" aria-label="Record transport controls">
           <button className="transport-btn monitor-toolbar-btn" onClick={handleGoToStart} title="Go to Start (Home)" aria-label="Go to start" disabled={trimSessionActive}>
@@ -924,7 +1017,7 @@ export function RecordMonitor() {
 
         <div className="monitor-footer-group">
           <div className="timecode-display monitor-footer-timecode" role="status" aria-live="polite" aria-label="Current timecode">
-            {tc}
+            {durationTc ? `${tc} / ${durationTc}` : tc}
           </div>
         </div>
       </div>

@@ -28,10 +28,14 @@ import { TrackerPanel } from '../components/TrackerPanel/TrackerPanel';
 import { TrackingOverlay } from '../components/TrackerPanel/TrackingOverlay';
 import { type EditorPage as PageId } from '../components/PageNavigation/PageNavigation';
 import {
+  activateRecordMonitor,
+  activateSourceMonitor,
   clearInForActiveMonitor,
   clearMarksForActiveMonitor,
   clearOutForActiveMonitor,
+  goToEndForActiveMonitor,
   goToInForActiveMonitor,
+  goToStartForActiveMonitor,
   goToOutForActiveMonitor,
   matchFrameAtPlayhead,
   markClipForActiveMonitor,
@@ -39,7 +43,9 @@ import {
   markOutForActiveMonitor,
   playForwardForActiveMonitor,
   playReverseForActiveMonitor,
+  stepFramesForActiveMonitor,
   stopActiveMonitorPlayback,
+  toggleMonitorFocus,
   togglePlayForActiveMonitor,
 } from '../lib/editorMonitorActions';
 import { buildProjectPersistenceSnapshot, getProjectPersistenceHash } from '../lib/editorProjectState';
@@ -100,8 +106,6 @@ export function EditorPage() {
   // ─── Register core keyboard actions with the KeyboardEngine ──────────
   const insertEdit = useEditorStore((s) => s.insertEdit);
   const overwriteEdit = useEditorStore((s) => s.overwriteEdit);
-  const goToStart = useEditorStore((s) => s.goToStart);
-  const goToEnd = useEditorStore((s) => s.goToEnd);
   const goToNextEditPoint = useEditorStore((s) => s.goToNextEditPoint);
   const goToPrevEditPoint = useEditorStore((s) => s.goToPrevEditPoint);
   const deleteSelectedClips = useEditorStore((s) => s.deleteSelectedClips);
@@ -123,10 +127,7 @@ export function EditorPage() {
       return;
     }
 
-    const { playheadTime, duration, setPlayhead } = useEditorStore.getState();
-    const safeDuration = Number.isFinite(duration) ? duration : 0;
-    const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
-    setPlayhead(Math.min(safeTime + 1 / 24, safeDuration));
+    stepFramesForActiveMonitor(1);
   }, []);
   const stepBackward = useCallback(() => {
     if (trimEngine.getState().active || useEditorStore.getState().trimActive) {
@@ -136,9 +137,7 @@ export function EditorPage() {
       return;
     }
 
-    const { playheadTime, setPlayhead } = useEditorStore.getState();
-    const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
-    setPlayhead(Math.max(safeTime - 1 / 24, 0));
+    stepFramesForActiveMonitor(-1);
   }, []);
   const enterTrimMode = useCallback(() => {
     requestTrimWorkspace();
@@ -242,8 +241,8 @@ export function EditorPage() {
   useKeyboardAction('transport.stepForward', stepForward, [stepForward]);
   useKeyboardAction('transport.stepBack', stepBackward, [stepBackward]);
   useKeyboardAction('transport.stepBackward', stepBackward, [stepBackward]);
-  useKeyboardAction('transport.goToStart', goToStart, [goToStart]);
-  useKeyboardAction('transport.goToEnd', goToEnd, [goToEnd]);
+  useKeyboardAction('transport.goToStart', goToStartForActiveMonitor, []);
+  useKeyboardAction('transport.goToEnd', goToEndForActiveMonitor, []);
   useKeyboardAction('transport.playLoop', playTrimLoop, [playTrimLoop]);
   useKeyboardAction('mark.in', markInForActiveMonitor, []);
   useKeyboardAction('mark.out', markOutForActiveMonitor, []);
@@ -259,6 +258,9 @@ export function EditorPage() {
       matchFrameAtPlayhead();
     }
   }, []);
+  useKeyboardAction('monitor.toggleSourceRecord', toggleMonitorFocus, []);
+  useKeyboardAction('monitor.activateSource', activateSourceMonitor, []);
+  useKeyboardAction('monitor.activateRecord', activateRecordMonitor, []);
   useKeyboardAction('edit.spliceIn', insertEdit, [insertEdit]);
   useKeyboardAction('edit.overwrite', overwriteEdit, [overwriteEdit]);
   useKeyboardAction('edit.lift', liftEdit, [liftEdit]);

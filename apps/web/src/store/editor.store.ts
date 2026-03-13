@@ -2450,7 +2450,13 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     // ─── Source Monitor ──────────────────────────────────────────────────────────
     setSourceInPoint: (t) => set((s) => { s.sourceInPoint = t; }),
     setSourceOutPoint: (t) => set((s) => { s.sourceOutPoint = t; }),
-    setSourcePlayhead: (t) => set((s) => { s.sourcePlayhead = isFinite(t) ? Math.max(0, t) : 0; }),
+    setSourcePlayhead: (t) => set((s) => {
+      const sourceDuration = s.sourceAsset?.duration;
+      const clampedTime = isFinite(t) ? Math.max(0, t) : 0;
+      s.sourcePlayhead = Number.isFinite(sourceDuration)
+        ? Math.min(clampedTime, Math.max(0, sourceDuration!))
+        : clampedTime;
+    }),
     setSourceInToPlayhead: () => set((s) => { s.sourceInPoint = s.sourcePlayhead; }),
     setSourceOutToPlayhead: () => set((s) => { s.sourceOutPoint = s.sourcePlayhead; }),
     clearSourceInOut: () => set((s) => { s.sourceInPoint = null; s.sourceOutPoint = null; }),

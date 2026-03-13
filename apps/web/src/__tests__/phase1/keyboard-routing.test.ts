@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { keyboardEngine } from '../../engine/KeyboardEngine';
-import { matchFrameAtPlayhead } from '../../lib/editorMonitorActions';
+import { matchFrameAtPlayhead, toggleMonitorFocus } from '../../lib/editorMonitorActions';
 import { handleEditorKeyboardEvent } from '../../hooks/useGlobalKeyboard';
 import { makeClip, useEditorStore } from '../../store/editor.store';
 import { usePlayerStore } from '../../store/player.store';
@@ -18,12 +18,16 @@ describe('phase 1 keyboard routing', () => {
         matchFrameAtPlayhead();
       }
     });
+    keyboardEngine.registerAction('monitor.toggleSourceRecord', () => {
+      toggleMonitorFocus();
+    });
     vi.restoreAllMocks();
   });
 
   afterEach(() => {
     keyboardEngine.unregisterAction('view.fullScreen');
     keyboardEngine.unregisterAction('monitor.matchFrame');
+    keyboardEngine.unregisterAction('monitor.toggleSourceRecord');
     keyboardEngine.unregisterAction('nav.nextEdit');
   });
 
@@ -172,6 +176,18 @@ describe('phase 1 keyboard routing', () => {
     handleEditorKeyboardEvent(new KeyboardEvent('keydown', { key: 'End' }));
     expect(useEditorStore.getState().sourcePlayhead).toBe(10);
     expect(useEditorStore.getState().playheadTime).toBe(7);
+  });
+
+  it('binds Tab to toggle source and record monitor focus', () => {
+    usePlayerStore.setState({ activeMonitor: 'record' });
+
+    const firstToggleHandled = handleEditorKeyboardEvent(new KeyboardEvent('keydown', { key: 'Tab' }));
+    expect(firstToggleHandled).toBe(true);
+    expect(usePlayerStore.getState().activeMonitor).toBe('source');
+
+    const secondToggleHandled = handleEditorKeyboardEvent(new KeyboardEvent('keydown', { key: 'Tab' }));
+    expect(secondToggleHandled).toBe(true);
+    expect(usePlayerStore.getState().activeMonitor).toBe('record');
   });
 
   it('does not treat C or Y as legacy generic tool shortcuts', () => {

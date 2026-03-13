@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { playbackEngine } from '../../engine/PlaybackEngine';
 import {
+  activateRecordMonitor,
+  activateSourceMonitor,
   clearInForActiveMonitor,
   clearMarksForActiveMonitor,
   clearOutForActiveMonitor,
+  goToEndForActiveMonitor,
   goToInForActiveMonitor,
+  goToStartForActiveMonitor,
   goToOutForActiveMonitor,
   markClipForActiveMonitor,
   markInForActiveMonitor,
@@ -13,7 +17,9 @@ import {
   playForwardForActiveMonitor,
   playReverseForActiveMonitor,
   resetSourceMonitorShuttleState,
+  stepFramesForActiveMonitor,
   stopActiveMonitorPlayback,
+  toggleMonitorFocus,
   togglePlayForActiveMonitor,
 } from '../../lib/editorMonitorActions';
 import { makeClip, useEditorStore } from '../../store/editor.store';
@@ -230,6 +236,50 @@ describe('phase 1 editor monitor keyboard actions', () => {
 
     expect(shuttleSpy).toHaveBeenNthCalledWith(1, 'l');
     expect(shuttleSpy).toHaveBeenNthCalledWith(2, 'j');
+  });
+
+  it('toggles monitor focus and routes start/end and frame stepping to the visible monitor', () => {
+    usePlayerStore.setState({ activeMonitor: 'record' });
+    useEditorStore.setState({
+      sourceAsset: {
+        id: 'asset-source',
+        name: 'Source',
+        type: 'VIDEO',
+        status: 'READY',
+        duration: 12,
+        tags: [],
+        isFavorite: false,
+      },
+      sourcePlayhead: 3,
+      playheadTime: 9,
+      duration: 30,
+      sequenceSettings: {
+        ...useEditorStore.getState().sequenceSettings,
+        fps: 24,
+      },
+    });
+
+    toggleMonitorFocus();
+    expect(usePlayerStore.getState().activeMonitor).toBe('source');
+
+    stepFramesForActiveMonitor(1);
+    expect(useEditorStore.getState().sourcePlayhead).toBeCloseTo(3 + (1 / 24), 5);
+    expect(useEditorStore.getState().playheadTime).toBe(9);
+
+    goToStartForActiveMonitor();
+    expect(useEditorStore.getState().sourcePlayhead).toBe(0);
+
+    goToEndForActiveMonitor();
+    expect(useEditorStore.getState().sourcePlayhead).toBe(12);
+
+    activateRecordMonitor();
+    expect(usePlayerStore.getState().activeMonitor).toBe('record');
+
+    stepFramesForActiveMonitor(-1);
+    expect(useEditorStore.getState().playheadTime).toBeCloseTo(9 - (1 / 24), 5);
+
+    activateSourceMonitor();
+    expect(usePlayerStore.getState().activeMonitor).toBe('source');
   });
 
   it('loads the record clip into the source monitor for match frame', () => {

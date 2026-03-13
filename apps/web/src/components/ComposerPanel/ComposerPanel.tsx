@@ -1,5 +1,6 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useEditorStore } from '../../store/editor.store';
+import { usePlayerStore } from '../../store/player.store';
 import { SourceMonitor } from '../SourceMonitor/SourceMonitor';
 import { RecordMonitor } from '../RecordMonitor/RecordMonitor';
 import { MonitorArea } from '../Monitor/MonitorArea';
@@ -72,6 +73,7 @@ export function ComposerPanel({
   const trimActive = useEditorStore((s) => s.trimActive);
   const trimViewMode = useEditorStore((s) => s.trimViewMode);
   const setTrimViewMode = useEditorStore((s) => s.setTrimViewMode);
+  const activeMonitor = usePlayerStore((s) => s.activeMonitor);
 
   // Local state for 'full-source' since the store only has 'source-record' | 'full-frame'
   const [sourceOnly, setSourceOnly] = useState(false);
@@ -122,6 +124,14 @@ export function ComposerPanel({
       store.selectTrack(nextState.rollers[0]!.trackId);
     }
   }, []);
+
+  useEffect(() => {
+    if (trimActive || composerLayout !== 'full-frame') {
+      return;
+    }
+
+    setSourceOnly(activeMonitor === 'source');
+  }, [activeMonitor, composerLayout, trimActive]);
 
   // ── Active monitor label ────────────────────────────────────────────────
 
