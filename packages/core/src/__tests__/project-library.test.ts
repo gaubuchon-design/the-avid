@@ -409,6 +409,9 @@ describe('buildProject', () => {
     expect(project.markers).toEqual([]);
     expect(project.collaborators).toEqual([]);
     expect(project.transcript).toEqual([]);
+    expect(project.transcriptSpeakers).toEqual([]);
+    expect(project.scriptDocument).toBeNull();
+    expect(project.transcriptionSettings.provider).toBe('local-faster-whisper');
     expect(project.reviewComments).toEqual([]);
     expect(project.approvals).toEqual([]);
     expect(project.publishJobs).toEqual([]);
@@ -445,5 +448,7 @@ describe('buildProject', () => {
     expect(seededProject!.bins.length).toBeGreaterThan(0);
     expect(seededProject!.tracks.some((track) => track.clips.length > 0)).toBe(true);
     expect(seededProject!.reviewComments.length).toBeGreaterThan(0);
+    expect(seededProject!.transcriptSpeakers.length).toBeGreaterThan(0);
+    expect(seededProject!.scriptDocument?.lines.length).toBeGreaterThan(0);
   });
 });

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useEditorStore } from '../../store/editor.store';
+import { useUserSettingsStore } from '../../store/userSettings.store';
 import { usePlayerStore } from '../../store/player.store';
 import { useTitleStore } from '../../store/title.store';
 import { TrimStatusOverlay } from '../Editor/TrimStatusOverlay';
@@ -25,6 +26,7 @@ import {
   findTimelineMonitorMediaSource,
   previewMonitorAudioOutput,
   releaseMonitorAudioOutput,
+  reviewMonitorAudioOutput,
   syncMonitorAudioOutput,
 } from '../../lib/monitorPlayback';
 import { usePointerScrub } from '../../hooks/usePointerScrub';
@@ -34,7 +36,8 @@ import {
   useTrimMonitorPreview,
   type TrimPreviewSide,
 } from '../../lib/trimMonitorPreview';
-import { enterTrimModeFromContext } from '../../lib/trimEntry';
+import { resolveTrimAudioPreviewRoute } from '../../lib/trimAudioPreview';
+import { requestTrimWorkspace } from '../../lib/trimWorkspace';
 import { trimEngine } from '../../engine/TrimEngine';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -199,6 +202,7 @@ export function RecordMonitor() {
   const trimLoopPlaybackActive = useEditorStore((s) => s.trimLoopPlaybackActive);
   const trimLoopPlaybackDirection = useEditorStore((s) => s.trimLoopPlaybackDirection);
   const trimLoopPlaybackRate = useEditorStore((s) => s.trimLoopPlaybackRate);
+  const showTrimCountersInMonitorHeaders = useUserSettingsStore((s) => s.settings.showTrimCountersInMonitorHeaders);
   const trimLoopOffsetFrames = useEditorStore((s) => s.trimLoopOffsetFrames);
   const toggleTrimLoopPlayback = useEditorStore((s) => s.toggleTrimLoopPlayback);
   const toggleTrimViewMode = useEditorStore((s) => s.toggleTrimViewMode);
@@ -209,7 +213,7 @@ export function RecordMonitor() {
   const videoMonitorTrackId = useEditorStore((s) => s.videoMonitorTrackId);
   const projectFrameRate = useEditorStore((s) => s.projectSettings.frameRate);
 
-  const { setActiveMonitor } = usePlayerStore();
+  const { setActiveMonitor, activeMonitor } = usePlayerStore();
   const audioScrubEnabled = useEditorStore((s) => s.audioScrubEnabled);
   const monitorTransport = useMonitorTransportState(playheadTime, editorIsPlaying);
   const trimPreview = useTrimMonitorPreview({
@@ -226,6 +230,9 @@ export function RecordMonitor() {
   const trimPreviewSide = useMemo(() => {
     return trimPreview.recordMonitor ?? trimPreview.bSide ?? trimPreview.aSide;
   }, [trimPreview.aSide, trimPreview.bSide, trimPreview.recordMonitor]);
+  const trimAudioRoute = useMemo(() => (
+    resolveTrimAudioPreviewRoute(trimPreview, activeMonitor)
+  ), [activeMonitor, trimPreview]);
   const trimPreviewActive = Boolean(trimPreview.active && trimPreviewSide);
   const trimSessionActive = trimActive || trimPreview.active;
   const activeTrimMode = trimPreview.active ? trimEngine.getCurrentMode().toLowerCase() : trimMode;
@@ -491,7 +498,32 @@ export function RecordMonitor() {
 
   useEffect(() => {
     if (trimSessionActive) {
-      releaseMonitorAudioOutput('record-monitor');
+      const trimAudioPreview = trimAudioRoute.channel === 'record'
+        ? trimAudioRoute.side
+        : null;
+
+      if (!trimAudioPreview?.assetId || !trimAudioPreview.playable) {
+        releaseMonitorAudioOutput('record-monitor');
+        return;
+      }
+
+      tryLoadClipSource(trimAudioPreview.assetId, bins as any);
+      const source = videoSourceManager.getSource(trimAudioPreview.assetId);
+      if (!source?.ready) {
+        return;
+      }
+
+      reviewMonitorAudioOutput(
+        'record-monitor',
+        source.element,
+        trimAudioPreview.sourceTime,
+        {
+          active: trimLoopPlaybackActive,
+          direction: trimLoopPlaybackDirection,
+          rate: trimLoopPlaybackRate,
+          fps,
+        },
+      );
       return;
     }
 
@@ -514,7 +546,19 @@ export function RecordMonitor() {
       editorIsPlaying,
       fps,
     );
-  }, [bins, editorIsPlaying, fps, playheadTime, sourceRevision, tracks, trimSessionActive]);
+  }, [
+    bins,
+    editorIsPlaying,
+    fps,
+    playheadTime,
+    sourceRevision,
+    tracks,
+    trimAudioRoute,
+    trimLoopPlaybackActive,
+    trimLoopPlaybackDirection,
+    trimLoopPlaybackRate,
+    trimSessionActive,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -594,15 +638,7 @@ export function RecordMonitor() {
   }, [setOutToPlayhead]);
 
   const handleEnterTrim = useCallback(() => {
-    const state = useEditorStore.getState();
-    const target = enterTrimModeFromContext(state);
-    if (!target) {
-      return;
-    }
-
-    useEditorStore.getState().setActiveTool('trim');
-    useEditorStore.getState().selectTrack(target.anchorTrackId);
-    useEditorStore.getState().clearTrimEditPoints();
+    requestTrimWorkspace();
   }, []);
 
   const handleFocus = useCallback(() => {
@@ -686,7 +722,7 @@ export function RecordMonitor() {
   }, [setActiveMonitor, trimSessionActive, trimSupportsSideSelection]);
 
   const tc = timeToTimecode(trimPreviewActive && trimPreviewSide ? trimPreviewSide.sourceTime : playheadTime, fps);
-  const isActive = usePlayerStore((s) => s.activeMonitor === 'record');
+  const isActive = activeMonitor === 'record';
   const recordLabel = trimPreviewActive ? trimPreviewSide!.monitorLabel : 'RECORD';
   const recordMeta = trimPreviewActive && trimPreviewSide
     ? `${trimPreviewSide.trackName} · ${trimPreviewSide.clipName}`
@@ -717,7 +753,7 @@ export function RecordMonitor() {
             {recordMeta}
           </span>
         )}
-        {trimSessionActive && (
+        {trimSessionActive && showTrimCountersInMonitorHeaders && (
           <>
             <span className={`monitor-trim-indicator${recordTrimSideActive ? ' active' : ''}`}>
               B {formatTrimFrames(trimBSideFrames)}

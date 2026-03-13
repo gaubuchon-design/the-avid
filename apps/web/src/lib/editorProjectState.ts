@@ -37,6 +37,9 @@ export interface EditorProjectPersistenceSource {
   markers: Marker[];
   bins: Bin[];
   transcript: TranscriptCue[];
+  transcriptSpeakers: EditorProject['transcriptSpeakers'];
+  scriptDocument: EditorProject['scriptDocument'];
+  transcriptionSettings: EditorProject['transcriptionSettings'];
   reviewComments: ReviewComment[];
   approvals: Approval[];
   publishJobs: PublishJob[];
@@ -73,6 +76,9 @@ export interface EditorProjectPersistenceSnapshot {
   markers: Marker[];
   bins: Bin[];
   transcript: TranscriptCue[];
+  transcriptSpeakers: EditorProject['transcriptSpeakers'];
+  scriptDocument: EditorProject['scriptDocument'];
+  transcriptionSettings: EditorProject['transcriptionSettings'];
   reviewComments: ReviewComment[];
   approvals: Approval[];
   publishJobs: PublishJob[];
@@ -111,6 +117,9 @@ export interface HydratedEditorProjectState {
   markers: Marker[];
   bins: Bin[];
   transcript: TranscriptCue[];
+  transcriptSpeakers: EditorProject['transcriptSpeakers'];
+  scriptDocument: EditorProject['scriptDocument'];
+  transcriptionSettings: EditorProject['transcriptionSettings'];
   reviewComments: ReviewComment[];
   approvals: Approval[];
   publishJobs: PublishJob[];
@@ -412,6 +421,9 @@ export function buildProjectPersistenceSnapshot(
     markers: state.markers,
     bins: state.bins,
     transcript: state.transcript,
+    transcriptSpeakers: state.transcriptSpeakers,
+    scriptDocument: state.scriptDocument,
+    transcriptionSettings: state.transcriptionSettings,
     reviewComments: state.reviewComments,
     approvals: state.approvals,
     publishJobs: state.publishJobs,
@@ -454,6 +466,9 @@ export function getProjectPersistenceHash(snapshot: EditorProjectPersistenceSnap
     markers: snapshot.markers,
     bins: snapshot.bins,
     transcript: snapshot.transcript,
+    transcriptSpeakers: snapshot.transcriptSpeakers,
+    scriptDocument: snapshot.scriptDocument,
+    transcriptionSettings: snapshot.transcriptionSettings,
     reviewComments: serializeReviewComments(snapshot.reviewComments),
     approvals: serializeApprovals(snapshot.approvals),
     publishJobs: serializePublishJobs(snapshot.publishJobs),
@@ -505,6 +520,9 @@ export function buildProjectFromEditorState(
     collaborators: [],
     aiJobs: [],
     transcript: snapshot.transcript,
+    transcriptSpeakers: snapshot.transcriptSpeakers,
+    scriptDocument: snapshot.scriptDocument,
+    transcriptionSettings: snapshot.transcriptionSettings,
     reviewComments: serializeReviewComments(snapshot.reviewComments),
     approvals: serializeApprovals(snapshot.approvals),
     publishJobs: serializePublishJobs(snapshot.publishJobs),
@@ -574,6 +592,9 @@ export function hydrateEditorStateFromProject(project: EditorProject): HydratedE
     markers: project.markers as Marker[],
     bins,
     transcript: project.transcript as TranscriptCue[],
+    transcriptSpeakers: project.transcriptSpeakers,
+    scriptDocument: project.scriptDocument,
+    transcriptionSettings: project.transcriptionSettings,
     reviewComments: project.reviewComments as ReviewComment[],
     approvals: project.approvals as Approval[],
     publishJobs: project.publishJobs as PublishJob[],

@@ -266,4 +266,109 @@ describe('trim status overlay', () => {
       root.unmount();
     });
   });
+
+  it('shows trim diagnostics and disables unavailable trim directions', async () => {
+    useEditorStore.setState({
+      tracks: [
+        {
+          id: 'v1',
+          name: 'V1',
+          type: 'VIDEO',
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#5b6af5',
+          clips: [
+            makeClip({
+              id: 'v1-left-tight',
+              trackId: 'v1',
+              name: 'V1 Left Tight',
+              startTime: 0,
+              endTime: 5,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+            makeClip({
+              id: 'v1-right-tight',
+              trackId: 'v1',
+              name: 'V1 Right Tight',
+              startTime: 5,
+              endTime: 10,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+        {
+          id: 'v2',
+          name: 'V2',
+          type: 'VIDEO',
+          sortOrder: 1,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#818cf8',
+          clips: [
+            makeClip({
+              id: 'v2-left',
+              trackId: 'v2',
+              name: 'V2 Left',
+              startTime: 0,
+              endTime: 5,
+              trimStart: 0,
+              trimEnd: 4,
+              type: 'video',
+            }),
+            makeClip({
+              id: 'v2-right',
+              trackId: 'v2',
+              name: 'V2 Right',
+              startTime: 5,
+              endTime: 10,
+              trimStart: 2,
+              trimEnd: 0,
+              type: 'video',
+            }),
+          ],
+        },
+      ],
+      trimActive: true,
+      trimMode: 'roll',
+      trimSelectionLabel: 'AB',
+    });
+    trimEngine.enterTrimMode(['v1', 'v2'], 5, TrimSide.BOTH);
+    useEditorStore.setState((state) => ({
+      tracks: state.tracks.map((track) => (
+        track.id === 'v2'
+          ? { ...track, locked: true }
+          : track
+      )),
+    }));
+
+    const container = document.createElement('div');
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<TrimStatusOverlay />);
+    });
+
+    expect(container.textContent).toContain('LOCKED V2');
+    expect(container.textContent).toContain('L 0f');
+    expect(container.textContent).toContain('R 0f');
+
+    const leftOneButton = container.querySelector('[aria-label="Trim left 1 frame"]') as HTMLButtonElement | null;
+    const rightOneButton = container.querySelector('[aria-label="Trim right 1 frame"]') as HTMLButtonElement | null;
+
+    expect(leftOneButton?.disabled).toBe(true);
+    expect(rightOneButton?.disabled).toBe(true);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
 });

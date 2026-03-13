@@ -4,6 +4,10 @@
 
 This trim pass was based on Avid's own trim documentation and keyboard/reference material, not third-party summaries.
 
+See also:
+
+- `/Users/guillaumeaubuchon/GitHub/the-avid/docs/AVID_EDITORIAL_TRIM_PARITY_AUDIT.md`
+
 - Media Composer Guide: `MCGS.PDF`
   - https://resources.avid.com/SupportFiles/attach/MCGS.PDF
 - Media Composer Guide 10.0: `GSGuide_v10_0.pdf`
@@ -54,6 +58,13 @@ The web editor now treats trim as a dedicated editorial workspace with the follo
   - repeated `J`/`L` presses raise trim review speed using the existing shuttle tiers
   - `K` and space stop/toggle trim review instead of falling back to normal transport
   - arrow keys become trim nudges while trim is active, with `Shift+Arrow` using the larger 10-frame nudge
+- Audio-backed trim review:
+  - trim review now routes monitor audio to one trim side at a time instead of forcing silent visual-only trim playback
+  - `A`-side trim review routes to the source monitor audio path
+  - `B`-side trim review routes to the record monitor audio path
+  - `AB` and asymmetrical trim review route audio to the currently active trim monitor so dual-monitor trim does not double-play audio
+  - forward `1x` trim loop review uses continuous monitor audio sync
+  - reverse and accelerated trim review use repeated short audio previews rather than falling back to silence
 - Recall previous trim:
   - the keyboard path exists with `Alt+U`
   - the composer toolbar exposes `Recall Trim` when a previous configuration is available
@@ -61,6 +72,10 @@ The web editor now treats trim as a dedicated editorial workspace with the follo
 - Asymmetrical multi-track trim:
   - each roller can be assigned to `A`, `AB`, or `B`
   - the trim HUD keeps per-track roller assignment controls
+- Trim diagnostics:
+  - the trim HUD now reports constrained left/right trim availability in frames
+  - fine trim buttons disable when the current trim session cannot move further in that direction
+  - per-track diagnostics now show locked rollers and missing-side conditions directly in the trim HUD instead of failing silently
 - Mode-aware slip/slide review:
   - slip and slide no longer present roll/ripple side-selection controls
   - trim labels switch to `IN/OUT` and `LEFT/RIGHT` in the HUD instead of always showing `A/B`
@@ -77,6 +92,8 @@ The web editor now treats trim as a dedicated editorial workspace with the follo
   - `/Users/guillaumeaubuchon/GitHub/the-avid/apps/web/src/lib/trimStateBridge.ts`
 - Monitor trim representation:
   - `/Users/guillaumeaubuchon/GitHub/the-avid/apps/web/src/lib/trimMonitorPreview.ts`
+  - `/Users/guillaumeaubuchon/GitHub/the-avid/apps/web/src/lib/trimAudioPreview.ts`
+  - `/Users/guillaumeaubuchon/GitHub/the-avid/apps/web/src/lib/monitorPlayback.ts`
   - `/Users/guillaumeaubuchon/GitHub/the-avid/apps/web/src/components/SourceMonitor/SourceMonitor.tsx`
   - `/Users/guillaumeaubuchon/GitHub/the-avid/apps/web/src/components/RecordMonitor/RecordMonitor.tsx`
   - `/Users/guillaumeaubuchon/GitHub/the-avid/apps/web/src/components/Editor/TrimStatusOverlay.tsx`
@@ -89,10 +106,10 @@ The web editor now treats trim as a dedicated editorial workspace with the follo
 
 This is materially closer to Media Composer trim, but it is still not complete parity.
 
-- No full audio-backed Avid-style dynamic trim review yet
-- No dedicated keyboard-first big/small trim monitor choreography beyond the implemented toggle
-- No lasso/select-many transition workflow on the same track beyond the current one-cut-per-track selection model
-- No trim-specific sync diagnostics or lock-conflict UI
-- No deeper dedicated slip/slide trim review playback beyond the updated monitor labeling, mode-aware controls, and loop-aware preview timing
+- Dynamic trim audio is now monitor-routed, but it is not yet full Avid-grade transition playback with mixed timeline/program audio behavior across every shuttle tier
+- No dedicated keyboard-first big/small trim monitor choreography beyond the implemented toggle and review-state feedback
+- No lasso-select UI yet for staggered multi-transition trim selection across tracks; the current model is explicit cut selection and shift-accumulation
+- No deeper trim-specific sync/lock conflict presentation beyond the new constraint and locked-roller diagnostics
+- No deeper dedicated slip/slide trim review playback beyond the updated monitor labeling, monitor-routed audio review, mode-aware controls, and loop-aware preview timing
 
 Those are the next trim slices if the goal is to keep pushing toward Media Composer-grade editorial parity rather than stopping at a cleaner modern approximation.

@@ -198,4 +198,49 @@ describe('phase 1 trim workflows', () => {
     ]));
     expect(trimEngine.getCurrentMode()).toBe('ASYMMETRIC');
   });
+
+  it('reports locked rollers and per-direction trim limits in session diagnostics', () => {
+    useEditorStore.setState({
+      tracks: [
+        makeTrimTrack('v1', 'VIDEO', '#5b6af5'),
+        makeTrimTrack('a1', 'AUDIO', '#22c55e'),
+      ],
+      sequenceSettings: {
+        ...useEditorStore.getState().sequenceSettings,
+        fps: 24,
+      },
+      projectSettings: {
+        ...useEditorStore.getState().projectSettings,
+        frameRate: 24,
+      },
+    });
+
+    trimEngine.enterTrimMode(['v1', 'a1'], 5, TrimSide.BOTH);
+    useEditorStore.setState((state) => ({
+      tracks: state.tracks.map((track) => (
+        track.id === 'a1'
+          ? { ...track, locked: true }
+          : track
+      )),
+    }));
+
+    const diagnostics = trimEngine.getSessionDiagnostics(24);
+    const videoDiagnostics = diagnostics.rollers.find((roller) => roller.trackId === 'v1');
+    const audioDiagnostics = diagnostics.rollers.find((roller) => roller.trackId === 'a1');
+
+    expect(diagnostics.active).toBe(true);
+    expect(diagnostics.hasLockedRollers).toBe(true);
+    expect(diagnostics.constrainedTrimLeftFrames).toBe(3 * 24);
+    expect(diagnostics.constrainedTrimRightFrames).toBe(3 * 24);
+    expect(videoDiagnostics).toEqual(expect.objectContaining({
+      locked: false,
+      availableTrimLeftFrames: 3 * 24,
+      availableTrimRightFrames: 3 * 24,
+    }));
+    expect(audioDiagnostics).toEqual(expect.objectContaining({
+      locked: true,
+      availableTrimLeftFrames: 0,
+      availableTrimRightFrames: 0,
+    }));
+  });
 });

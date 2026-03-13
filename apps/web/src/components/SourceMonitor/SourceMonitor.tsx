@@ -1,14 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePlayerStore, ScopeType } from '../../store/player.store';
 import { useEditorStore } from '../../store/editor.store';
+import { useUserSettingsStore } from '../../store/userSettings.store';
 import {
   attachMonitorAudioOutput,
   previewMonitorAudioOutput,
   releaseMonitorAudioOutput,
+  reviewMonitorAudioOutput,
 } from '../../lib/monitorPlayback';
 import { usePointerScrub } from '../../hooks/usePointerScrub';
 import { useTrimMonitorPreview } from '../../lib/trimMonitorPreview';
 import { trimEngine } from '../../engine/TrimEngine';
+import { resolveTrimAudioPreviewRoute } from '../../lib/trimAudioPreview';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -55,6 +58,7 @@ export function SourceMonitor() {
     toggleSafeZones,
     setActiveScope,
     setActiveMonitor,
+    activeMonitor,
   } = usePlayerStore();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -102,6 +106,7 @@ export function SourceMonitor() {
   const trimLoopPlaybackActive = useEditorStore((s) => s.trimLoopPlaybackActive);
   const trimLoopPlaybackDirection = useEditorStore((s) => s.trimLoopPlaybackDirection);
   const trimLoopPlaybackRate = useEditorStore((s) => s.trimLoopPlaybackRate);
+  const showTrimCountersInMonitorHeaders = useUserSettingsStore((s) => s.settings.showTrimCountersInMonitorHeaders);
   const trimLoopOffsetFrames = useEditorStore((s) => s.trimLoopOffsetFrames);
   const toggleTrimLoopPlayback = useEditorStore((s) => s.toggleTrimLoopPlayback);
   const tracks = useEditorStore((s) => s.tracks);
@@ -126,6 +131,9 @@ export function SourceMonitor() {
   const trimPreviewSide = useMemo(() => {
     return trimPreview.sourceMonitor ?? trimPreview.aSide ?? trimPreview.bSide;
   }, [trimPreview.aSide, trimPreview.bSide, trimPreview.sourceMonitor]);
+  const trimAudioRoute = useMemo(() => (
+    resolveTrimAudioPreviewRoute(trimPreview, activeMonitor)
+  ), [activeMonitor, trimPreview]);
   const trimPreviewActive = Boolean(trimPreview.active && trimPreviewSide);
   const trimSessionActive = trimActive || trimPreview.active;
   const activeTrimMode = trimPreview.active ? trimEngine.getCurrentMode().toLowerCase() : trimMode;
@@ -407,6 +415,42 @@ export function SourceMonitor() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!trimSessionActive) {
+      return;
+    }
+
+    const video = videoRef.current;
+    const audioPreview = trimAudioRoute.channel === 'source'
+      ? trimAudioRoute.side
+      : null;
+
+    if (!video || !audioPreview?.playable) {
+      releaseMonitorAudioOutput('source-monitor');
+      return;
+    }
+
+    reviewMonitorAudioOutput(
+      'source-monitor',
+      video,
+      audioPreview.sourceTime,
+      {
+        active: trimLoopPlaybackActive,
+        direction: trimLoopPlaybackDirection,
+        rate: trimLoopPlaybackRate,
+        fps,
+      },
+    );
+  }, [
+    fps,
+    trimAudioRoute,
+    trimLoopPlaybackActive,
+    trimLoopPlaybackDirection,
+    trimLoopPlaybackRate,
+    trimSessionActive,
+    videoReady,
+  ]);
+
   function drawMarkers(
     c: CanvasRenderingContext2D,
     cw: number,
@@ -611,7 +655,7 @@ export function SourceMonitor() {
   const inPct = displayedInPoint !== null && dur > 0 ? (displayedInPoint / dur) * 100 : null;
   const outPct = displayedOutPoint !== null && dur > 0 ? (displayedOutPoint / dur) * 100 : null;
 
-  const isActive = usePlayerStore((s) => s.activeMonitor === 'source');
+  const isActive = activeMonitor === 'source';
   const sourceLabel = trimPreviewActive ? trimPreviewSide!.monitorLabel : 'SOURCE';
   const sourceMeta = trimPreviewActive && trimPreviewSide
     ? `${trimPreviewSide.trackName} · ${trimPreviewSide.clipName}`
@@ -637,7 +681,7 @@ export function SourceMonitor() {
             {sourceMeta}
           </span>
         )}
-        {trimSessionActive && (
+        {trimSessionActive && showTrimCountersInMonitorHeaders && (
           <>
             <span className={`monitor-trim-indicator${sourceTrimSideActive ? ' active' : ''}`}>
               A {formatTrimFrames(trimASideFrames)}

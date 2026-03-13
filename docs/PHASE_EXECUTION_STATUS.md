@@ -41,6 +41,8 @@ This file tracks the first concrete execution slices of the NLE modernization pr
 - Routed keyboard transport into the trim workspace so `J/K/L`, play/stop, and arrow nudges now behave as trim review and trim nudge controls while a trim session is active.
 - Added big-trim playback-duration presets and made slip/slide monitor controls mode-aware so those review modes no longer expose roll-style A/B selection UI.
 - Extended explicit trim selection so trim sessions can preserve different selected cut times across tracks, keeping the last-picked cut as the session anchor while recall restores those per-track edit points.
+- Added monitor-routed audio trim review so active trim playback now auditions one trim side at a time instead of staying silent, with forward review using continuous monitor sync and reverse/accelerated review falling back to repeated preview bursts.
+- Added trim-session diagnostics in the trim engine and HUD so constrained left/right trim availability, locked rollers, and missing trim sides are visible and actionable during the trim session instead of failing silently.
 - Began track-patching parity closure with research-backed source/record selector work: same-type patch moves now preserve ordered patch banks when possible, picture monitor follow now tracks moved picture patches, and the patch panel now surfaces source-side vs record-side routing more clearly.
 - Extended trim review control so big trim now supports direct custom pre-roll and post-roll frame editing in addition to the preset duration buttons.
 - Extended track patching so a source patch can stay mapped while being disabled for edits, with the panel exposing explicit source-side `ON/OFF` patch state and edit targeting continuing to honor only enabled patches.

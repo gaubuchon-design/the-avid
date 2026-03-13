@@ -80,6 +80,7 @@ export function syncTrimStateToStore(): void {
 
   useEditorStore.setState((state) => ({
     ...next,
+    activeTool: !next.trimActive && state.activeTool === 'trim' ? 'select' : state.activeTool,
     trimLoopPlaybackActive: next.trimActive ? state.trimLoopPlaybackActive : false,
     trimLoopOffsetFrames: next.trimActive ? state.trimLoopOffsetFrames : 0,
     trimLoopPlaybackDirection: next.trimActive ? state.trimLoopPlaybackDirection : 1,

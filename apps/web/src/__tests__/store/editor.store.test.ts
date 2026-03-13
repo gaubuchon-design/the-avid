@@ -177,6 +177,57 @@ describe('useEditorStore', () => {
     expect(useEditorStore.getState().showNewProjectDialog).toBe(false);
   });
 
+  it('updates transcript cues and keeps speaker inventory in sync', () => {
+    useEditorStore.setState({
+      transcript: [
+        {
+          id: 'cue-1',
+          assetId: 'asset-video-long',
+          speaker: 'Sarah',
+          text: 'Hello there.',
+          startTime: 0,
+          endTime: 1.5,
+          source: 'TRANSCRIPT',
+        },
+      ],
+    });
+
+    useEditorStore.getState().updateTranscriptCue('cue-1', {
+      speaker: 'Marcus',
+      text: 'Updated transcript line.',
+    });
+
+    const state = useEditorStore.getState();
+    expect(state.transcript[0]?.speaker).toBe('Marcus');
+    expect(state.transcript[0]?.text).toBe('Updated transcript line.');
+    expect(state.transcriptSpeakers.map((speaker) => speaker.label)).toContain('Marcus');
+  });
+
+  it('builds and syncs a script document against transcript cues', () => {
+    useEditorStore.setState({
+      transcript: [
+        {
+          id: 'cue-sync',
+          assetId: 'asset-video-long',
+          speaker: 'Sarah',
+          text: 'We need to talk about the project deadline.',
+          startTime: 0,
+          endTime: 2.5,
+          source: 'TRANSCRIPT',
+        },
+      ],
+    });
+
+    useEditorStore.getState().updateScriptDocumentText(
+      'SARAH: We need to talk about the project deadline.',
+    );
+
+    const state = useEditorStore.getState();
+    expect(state.scriptDocument).not.toBeNull();
+    expect(state.scriptDocument?.lines[0]?.linkedCueIds).toEqual(['cue-sync']);
+    expect(state.transcript[0]?.linkedScriptLineIds?.length).toBe(1);
+  });
+
   // ── Playhead ──────────────────────────────────────────────────────────
 
   it('should set playhead', () => {

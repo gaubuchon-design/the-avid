@@ -27,6 +27,11 @@ import {
   getProjectPersistenceHash,
   hydrateEditorStateFromProject,
 } from '../lib/editorProjectState';
+import {
+  buildScriptDocumentFromText,
+  deriveTranscriptSpeakers,
+  syncScriptDocumentToTranscript as syncTranscriptWorkbench,
+} from '../lib/transcriptWorkbench';
 import { getProjectFromRepository, saveProjectToRepository } from '../lib/projectRepository';
 import { usePlayerStore } from './player.store';
 import type { ProjectMediaSettings } from '../engine/MediaDatabaseEngine';
@@ -213,7 +218,57 @@ export interface TranscriptCue {
   text: string;
   startTime: number;
   endTime: number;
+  confidence?: number;
   source: 'SCRIPT' | 'TRANSCRIPT';
+  speakerId?: string;
+  language?: string;
+  translation?: string;
+  provider?: string;
+  linkedScriptLineIds?: string[];
+  words?: TranscriptWord[];
+}
+
+export interface TranscriptWord {
+  text: string;
+  startTime: number;
+  endTime: number;
+  confidence: number;
+  speakerId?: string;
+}
+
+export interface TranscriptSpeaker {
+  id: string;
+  label: string;
+  confidence?: number;
+  color?: string;
+  identified: boolean;
+}
+
+export interface ScriptDocumentLine {
+  id: string;
+  lineNumber: number;
+  text: string;
+  speaker?: string;
+  linkedCueIds: string[];
+}
+
+export interface ScriptDocument {
+  id: string;
+  title: string;
+  source: 'IMPORTED' | 'MANUAL' | 'GENERATED';
+  language: string;
+  text: string;
+  lines: ScriptDocumentLine[];
+  updatedAt: string;
+}
+
+export interface TranscriptionSettings {
+  provider: 'local-faster-whisper' | 'cloud-openai-compatible';
+  translationProvider: 'local-runtime' | 'cloud-openai-compatible';
+  preferredLanguage: 'auto' | string;
+  enableDiarization: boolean;
+  enableSpeakerIdentification: boolean;
+  translateToEnglish: boolean;
 }
 
 export interface ReviewComment {
@@ -479,6 +534,9 @@ interface EditorState {
   isFullscreen: boolean;
 
   transcript: TranscriptCue[];
+  transcriptSpeakers: TranscriptSpeaker[];
+  scriptDocument: ScriptDocument | null;
+  transcriptionSettings: TranscriptionSettings;
   reviewComments: ReviewComment[];
   approvals: Approval[];
   publishJobs: PublishJob[];
@@ -612,6 +670,12 @@ interface EditorActions {
     status: DesktopMonitorAudioPreviewStatus | null,
   ) => void;
   clearDesktopMonitorAudioPreview: (consumer: DesktopMonitorConsumer) => void;
+  updateTranscriptCue: (cueId: string, patch: Partial<TranscriptCue>) => void;
+  replaceTranscript: (cues: TranscriptCue[], speakers?: TranscriptSpeaker[]) => void;
+  setScriptDocument: (document: ScriptDocument | null) => void;
+  updateScriptDocumentText: (text: string) => void;
+  syncScriptDocumentToTranscript: () => void;
+  updateTranscriptionSettings: (patch: Partial<TranscriptionSettings>) => void;
 
   // Monitor
   setInPoint: (t: number | null) => void;
@@ -829,6 +893,15 @@ const INITIAL_SMART_BINS: SmartBin[] = [
 ];
 
 const INITIAL_TRANSCRIPT: TranscriptCue[] = [];
+const INITIAL_TRANSCRIPT_SPEAKERS: TranscriptSpeaker[] = [];
+const INITIAL_TRANSCRIPTION_SETTINGS: TranscriptionSettings = {
+  provider: 'local-faster-whisper',
+  translationProvider: 'local-runtime',
+  preferredLanguage: 'auto',
+  enableDiarization: true,
+  enableSpeakerIdentification: false,
+  translateToEnglish: false,
+};
 const INITIAL_APPROVALS: Approval[] = [];
 const INITIAL_REVIEW_COMMENTS: ReviewComment[] = [];
 
@@ -1208,6 +1281,9 @@ export const useEditorStore = create<EditorState & EditorActions>()(
           'program-monitor': null,
         };
         s.transcript = hydrated.transcript;
+        s.transcriptSpeakers = hydrated.transcriptSpeakers;
+        s.scriptDocument = hydrated.scriptDocument;
+        s.transcriptionSettings = hydrated.transcriptionSettings;
         s.reviewComments = hydrated.reviewComments;
         s.approvals = hydrated.approvals;
         s.publishJobs = hydrated.publishJobs;
@@ -1331,6 +1407,9 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     showSettingsPanel: false,
     isFullscreen: false,
     transcript: INITIAL_TRANSCRIPT,
+    transcriptSpeakers: INITIAL_TRANSCRIPT_SPEAKERS,
+    scriptDocument: null,
+    transcriptionSettings: INITIAL_TRANSCRIPTION_SETTINGS,
     reviewComments: INITIAL_REVIEW_COMMENTS,
     approvals: INITIAL_APPROVALS,
     publishJobs: [],
@@ -1668,6 +1747,67 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         return;
       }
       s.desktopMonitorAudioPreview[consumer] = null;
+    }),
+    updateTranscriptCue: (cueId, patch) => set((s) => {
+      const cue = s.transcript.find((entry) => entry.id === cueId);
+      if (!cue) {
+        return;
+      }
+      Object.assign(cue, patch);
+      s.transcriptSpeakers = deriveTranscriptSpeakers(s.transcript);
+      if (s.scriptDocument) {
+        const synced = syncTranscriptWorkbench(s.scriptDocument, s.transcript);
+        s.scriptDocument = synced.scriptDocument;
+        s.transcript = synced.transcript;
+      }
+    }),
+    replaceTranscript: (cues, speakers) => set((s) => {
+      s.transcript = cues.map((cue) => ({
+        ...cue,
+        linkedScriptLineIds: [...(cue.linkedScriptLineIds ?? [])],
+        words: cue.words ? cue.words.map((word) => ({ ...word })) : undefined,
+      }));
+      s.transcriptSpeakers = speakers
+        ? speakers.map((speaker) => ({ ...speaker }))
+        : deriveTranscriptSpeakers(s.transcript);
+      if (s.scriptDocument) {
+        const synced = syncTranscriptWorkbench(s.scriptDocument, s.transcript);
+        s.scriptDocument = synced.scriptDocument;
+        s.transcript = synced.transcript;
+      }
+    }),
+    setScriptDocument: (document) => set((s) => {
+      s.scriptDocument = document
+        ? {
+            ...document,
+            lines: document.lines.map((line) => ({
+              ...line,
+              linkedCueIds: [...line.linkedCueIds],
+            })),
+          }
+        : null;
+      if (s.scriptDocument) {
+        const synced = syncTranscriptWorkbench(s.scriptDocument, s.transcript);
+        s.scriptDocument = synced.scriptDocument;
+        s.transcript = synced.transcript;
+      }
+    }),
+    updateScriptDocumentText: (text) => set((s) => {
+      const nextDocument = buildScriptDocumentFromText(text, s.scriptDocument);
+      const synced = syncTranscriptWorkbench(nextDocument, s.transcript);
+      s.scriptDocument = synced.scriptDocument;
+      s.transcript = synced.transcript;
+    }),
+    syncScriptDocumentToTranscript: () => set((s) => {
+      const synced = syncTranscriptWorkbench(s.scriptDocument, s.transcript);
+      s.scriptDocument = synced.scriptDocument;
+      s.transcript = synced.transcript;
+    }),
+    updateTranscriptionSettings: (patch) => set((s) => {
+      s.transcriptionSettings = {
+        ...s.transcriptionSettings,
+        ...patch,
+      };
     }),
     setInPoint: (t) => set((s) => { s.inPoint = t; }),
     setOutPoint: (t) => set((s) => { s.outPoint = t; }),

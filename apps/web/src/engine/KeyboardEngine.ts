@@ -154,6 +154,7 @@ function buildAvidDefaultBindings(): KeyBinding[] {
     createBinding('h', [], 'mark.clearOut', 'Clear OUT', 'marking'),
     createBinding('q', [], 'mark.goToIn', 'Go to IN', 'marking'),
     createBinding('w', [], 'mark.goToOut', 'Go to OUT', 'marking'),
+    createBinding('f', [], 'monitor.matchFrame', 'Match Frame', 'navigation'),
 
     // ═══════════════════════════════════════════════════════════════════════
     //  Editing
@@ -233,8 +234,6 @@ function buildAvidDefaultBindings(): KeyBinding[] {
     createBinding('t', [cmd], 'view.tidy', 'Tidy (Frame View)', 'view'),
     createBinding('e', [cmd], 'view.sortAscending', 'Sort Ascending', 'view'),
     createBinding('e', [cmd, 'alt'], 'view.sortDescending', 'Sort Descending', 'view'),
-    createBinding('f', [], 'view.fullScreen', 'Full Screen Toggle', 'view'),
-
     // ═══════════════════════════════════════════════════════════════════════
     //  File
     // ═══════════════════════════════════════════════════════════════════════

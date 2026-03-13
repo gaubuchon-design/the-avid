@@ -13,6 +13,7 @@ import { TensorRTBackend } from '../backends/TensorRTBackend';
 import { LlamaCppBackend } from '../backends/LlamaCppBackend';
 import { MLXBackend } from '../backends/MLXBackend';
 import { CTranslate2Backend } from '../backends/CTranslate2Backend';
+import { FasterWhisperBackend } from '../backends/FasterWhisperBackend';
 import { createSeededRegistry } from '../registry-seed';
 import { generateEmbeddings } from '../capabilities/embedding';
 import { transcribe } from '../capabilities/stt';
@@ -63,6 +64,11 @@ describe('Backend fallback', () => {
   it('CTranslate2Backend should not be available in test environment', async () => {
     const backend = new CTranslate2Backend();
     expect(await backend.isAvailable()).toBe(false);
+  });
+
+  it('FasterWhisperBackend availability probe returns a boolean', async () => {
+    const backend = new FasterWhisperBackend();
+    expect(typeof (await backend.isAvailable())).toBe('boolean');
   });
 
   it('MockBackend should always be available', async () => {

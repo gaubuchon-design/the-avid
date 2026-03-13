@@ -107,6 +107,7 @@ describe('phase 1 trim state synchronization', () => {
     });
 
     const unsubscribe = subscribeTrimStateToStore();
+    useEditorStore.getState().setActiveTool('trim');
     trimEngine.enterTrimMode(['v1'], 5, TrimSide.BOTH);
     expect(useEditorStore.getState().trimMode).toBe('roll');
 
@@ -122,6 +123,7 @@ describe('phase 1 trim state synchronization', () => {
     expect(useEditorStore.getState().trimActive).toBe(false);
     expect(useEditorStore.getState().trimMode).toBe('off');
     expect(useEditorStore.getState().trimSelectionLabel).toBe('OFF');
+    expect(useEditorStore.getState().activeTool).toBe('select');
 
     unsubscribe();
   });

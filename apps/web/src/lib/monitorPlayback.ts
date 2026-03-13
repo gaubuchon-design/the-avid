@@ -13,6 +13,8 @@ export interface TimelineMonitorMediaSource {
 interface MonitorAudioChannelState {
   element: HTMLMediaElement | null;
   previewTimeoutId: number | null;
+  lastPreviewAt: number;
+  lastPreviewSourceTime: number | null;
 }
 
 const monitorAudioChannels = new Map<string, MonitorAudioChannelState>();
@@ -68,6 +70,8 @@ function getMonitorAudioChannelState(channelId: string): MonitorAudioChannelStat
   const created: MonitorAudioChannelState = {
     element: null,
     previewTimeoutId: null,
+    lastPreviewAt: 0,
+    lastPreviewSourceTime: null,
   };
   monitorAudioChannels.set(channelId, created);
   return created;
@@ -164,6 +168,8 @@ export function previewMonitorAudioOutput(
 
   const state = attachMonitorAudioChannel(channelId, element);
   clearPreviewTimeout(state);
+  state.lastPreviewAt = performance.now();
+  state.lastPreviewSourceTime = sourceTime;
 
   element.currentTime = Math.max(0, sourceTime);
   element.playbackRate = 1;
@@ -178,6 +184,43 @@ export function previewMonitorAudioOutput(
     element.pause();
     currentState.previewTimeoutId = null;
   }, 45);
+}
+
+export function reviewMonitorAudioOutput(
+  channelId: string,
+  element: HTMLMediaElement,
+  sourceTime: number,
+  options: {
+    active: boolean;
+    direction: -1 | 1;
+    rate: number;
+    fps: number;
+  },
+): void {
+  const safeRate = Math.max(0.25, Math.min(8, options.rate || 1));
+  if (!options.active) {
+    syncMonitorAudioOutput(channelId, element, sourceTime, false, options.fps);
+    return;
+  }
+
+  if (options.direction > 0 && Math.abs(safeRate - 1) < 0.01) {
+    syncMonitorAudioOutput(channelId, element, sourceTime, true, options.fps);
+    return;
+  }
+
+  const state = getMonitorAudioChannelState(channelId);
+  const frameDuration = options.fps > 0 ? 1 / options.fps : 1 / 24;
+  const previewThresholdMs = Math.max(45, 120 / safeRate);
+  const now = performance.now();
+  const sourceDrift = state.lastPreviewSourceTime === null
+    ? Number.POSITIVE_INFINITY
+    : Math.abs(state.lastPreviewSourceTime - sourceTime);
+
+  if ((now - state.lastPreviewAt) < previewThresholdMs && sourceDrift < frameDuration * 2) {
+    return;
+  }
+
+  previewMonitorAudioOutput(channelId, element, sourceTime);
 }
 
 export function releaseMonitorAudioOutput(channelId: string): void {

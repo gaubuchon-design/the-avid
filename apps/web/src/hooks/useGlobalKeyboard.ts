@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { keyboardEngine } from '../engine/KeyboardEngine';
 import { trimEngine } from '../engine/TrimEngine';
-import { matchFrameAtPlayhead } from '../lib/editorMonitorActions';
 import { suspendKeyboardProviderDispatch } from '../lib/keyboardProviderGate';
 import { useEditorStore } from '../store/editor.store';
 import { usePlayerStore } from '../store/player.store';
@@ -31,17 +30,6 @@ export function handleEditorKeyboardEvent(event: KeyboardEvent): boolean {
   const frameDuration = 1 / fps;
 
   switch (key) {
-    case 'f':
-    case 'F':
-      if (!isMod && !event.shiftKey) {
-        event.preventDefault();
-        if (usePlayerStore.getState().activeMonitor !== 'source') {
-          matchFrameAtPlayhead();
-        }
-        return true;
-      }
-      break;
-
     case 'ArrowLeft':
       event.preventDefault();
       if (trimEngine.getState().active || editorState.trimActive) {
@@ -114,27 +102,6 @@ export function handleEditorKeyboardEvent(event: KeyboardEvent): boolean {
       if (isMod && editorState.selectedClipIds.length > 0) {
         event.preventDefault();
         editorState.duplicateClip(editorState.selectedClipIds[0]!);
-        return true;
-      }
-      break;
-
-    case 'c':
-      if (!isMod && !event.shiftKey) {
-        event.preventDefault();
-        if (editorState.selectedClipIds.length > 0) {
-          editorState.splitClip(editorState.selectedClipIds[0]!, editorState.playheadTime);
-        } else {
-          editorState.setActiveTool('razor');
-        }
-        return true;
-      }
-      break;
-
-    case 'y':
-    case 'Y':
-      if (!isMod && !event.shiftKey) {
-        event.preventDefault();
-        editorState.setActiveTool('slip');
         return true;
       }
       break;

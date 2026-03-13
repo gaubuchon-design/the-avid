@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { ErrorBoundary, PanelErrorBoundary } from '../components/ErrorBoundary';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { TrimSide, trimEngine } from '../engine/TrimEngine';
+import { trimEngine } from '../engine/TrimEngine';
 import { keyboardEngine } from '../engine/KeyboardEngine';
 import { trackPatchingEngine } from '../engine/TrackPatchingEngine';
 import { Toolbar } from '../components/Toolbar/Toolbar';
@@ -17,6 +17,7 @@ import { SequenceDialog } from '../components/SequenceDialog/SequenceDialog';
 import { TitleTool } from '../components/TitleTool/TitleTool';
 import { SubtitleEditor } from '../components/SubtitleEditor/SubtitleEditor';
 import { useEditorStore } from '../store/editor.store';
+import { usePlayerStore } from '../store/player.store';
 import { useGlobalKeyboard } from '../hooks/useGlobalKeyboard';
 import { useTrimLoopPlayback } from '../hooks/useTrimLoopPlayback';
 import { UserSettingsPanel } from '../components/UserSettings/UserSettingsPanel';
@@ -32,6 +33,7 @@ import {
   clearOutForActiveMonitor,
   goToInForActiveMonitor,
   goToOutForActiveMonitor,
+  matchFrameAtPlayhead,
   markClipForActiveMonitor,
   markInForActiveMonitor,
   markOutForActiveMonitor,
@@ -43,10 +45,10 @@ import {
 import { buildProjectPersistenceSnapshot, getProjectPersistenceHash } from '../lib/editorProjectState';
 import { isLegacyExportPageParam, resolveEditorPageParam } from '../lib/editorUrlState';
 import { subscribeSmartToolStateToStore } from '../lib/smartToolStateBridge';
-import { enterTrimModeFromContext } from '../lib/trimEntry';
 import { subscribeTrimHistoryToEditEngine } from '../lib/trimHistoryBridge';
 import { subscribeTrimStateToStore } from '../lib/trimStateBridge';
 import { subscribeTrackPatchingStateToStore } from '../lib/trackPatchingStateBridge';
+import { requestTrimWorkspace } from '../lib/trimWorkspace';
 import { MediaPage } from './MediaPage';
 
 // Playback is driven by PlaybackEngine (RAF-based) via editor.store.ts togglePlay().
@@ -119,14 +121,8 @@ export function EditorPage() {
     setPlayhead(Math.max(safeTime - 1 / 24, 0));
   }, []);
   const enterTrimMode = useCallback(() => {
-    const state = useEditorStore.getState();
-    setActiveTool('trim');
-    const target = enterTrimModeFromContext(state, { side: TrimSide.BOTH });
-    if (target) {
-      useEditorStore.getState().selectTrack(target.anchorTrackId);
-      useEditorStore.getState().clearTrimEditPoints();
-    }
-  }, [setActiveTool]);
+    requestTrimWorkspace();
+  }, []);
   const selectTrimASide = useCallback(() => {
     trimEngine.selectASide();
   }, []);
@@ -148,13 +144,10 @@ export function EditorPage() {
   const startTrimTransport = useCallback((direction: -1 | 1, requestedSpeed?: number) => {
     const state = useEditorStore.getState();
     if (!state.trimActive) {
-      const target = enterTrimModeFromContext(state, { side: TrimSide.BOTH });
-      if (!target) {
+      const request = requestTrimWorkspace();
+      if (request.outcome === 'noop') {
         return false;
       }
-      useEditorStore.getState().setActiveTool('trim');
-      useEditorStore.getState().selectTrack(target.anchorTrackId);
-      useEditorStore.getState().clearTrimEditPoints();
     }
 
     const speed = Math.max(
@@ -241,6 +234,11 @@ export function EditorPage() {
   useKeyboardAction('mark.clearOut', clearOutForActiveMonitor, []);
   useKeyboardAction('mark.goToIn', goToInForActiveMonitor, []);
   useKeyboardAction('mark.goToOut', goToOutForActiveMonitor, []);
+  useKeyboardAction('monitor.matchFrame', () => {
+    if (usePlayerStore.getState().activeMonitor !== 'source') {
+      matchFrameAtPlayhead();
+    }
+  }, []);
   useKeyboardAction('edit.spliceIn', insertEdit, [insertEdit]);
   useKeyboardAction('edit.overwrite', overwriteEdit, [overwriteEdit]);
   useKeyboardAction('edit.lift', liftEdit, [liftEdit]);

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { keyboardEngine } from '../../engine/KeyboardEngine';
+import { matchFrameAtPlayhead } from '../../lib/editorMonitorActions';
 import { handleEditorKeyboardEvent } from '../../hooks/useGlobalKeyboard';
 import { makeClip, useEditorStore } from '../../store/editor.store';
 import { usePlayerStore } from '../../store/player.store';
@@ -12,11 +13,17 @@ describe('phase 1 keyboard routing', () => {
     useEditorStore.setState(initialEditorState, true);
     usePlayerStore.setState(initialPlayerState, true);
     keyboardEngine.resetToDefaults();
+    keyboardEngine.registerAction('monitor.matchFrame', () => {
+      if (usePlayerStore.getState().activeMonitor !== 'source') {
+        matchFrameAtPlayhead();
+      }
+    });
     vi.restoreAllMocks();
   });
 
   afterEach(() => {
     keyboardEngine.unregisterAction('view.fullScreen');
+    keyboardEngine.unregisterAction('monitor.matchFrame');
     keyboardEngine.unregisterAction('nav.nextEdit');
   });
 
@@ -165,5 +172,19 @@ describe('phase 1 keyboard routing', () => {
     handleEditorKeyboardEvent(new KeyboardEvent('keydown', { key: 'End' }));
     expect(useEditorStore.getState().sourcePlayhead).toBe(10);
     expect(useEditorStore.getState().playheadTime).toBe(7);
+  });
+
+  it('does not treat C or Y as legacy generic tool shortcuts', () => {
+    useEditorStore.setState({
+      activeTool: 'select',
+      selectedClipIds: [],
+    });
+
+    const cutHandled = handleEditorKeyboardEvent(new KeyboardEvent('keydown', { key: 'c' }));
+    const slipHandled = handleEditorKeyboardEvent(new KeyboardEvent('keydown', { key: 'y' }));
+
+    expect(cutHandled).toBe(false);
+    expect(slipHandled).toBe(false);
+    expect(useEditorStore.getState().activeTool).toBe('select');
   });
 });

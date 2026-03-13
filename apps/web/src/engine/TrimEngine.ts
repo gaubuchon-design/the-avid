@@ -69,6 +69,26 @@ export interface SlideState {
   maxSlideRight: number;
 }
 
+export interface TrimRollerDiagnostics {
+  trackId: string;
+  editPointTime: number;
+  side: TrimSide;
+  locked: boolean;
+  missingSides: Array<'A' | 'B'>;
+  availableTrimLeftFrames: number;
+  availableTrimRightFrames: number;
+}
+
+export interface TrimSessionDiagnostics {
+  active: boolean;
+  mode: TrimMode;
+  linkedSelection: boolean;
+  hasLockedRollers: boolean;
+  constrainedTrimLeftFrames: number;
+  constrainedTrimRightFrames: number;
+  rollers: TrimRollerDiagnostics[];
+}
+
 interface TrimConfigurationSnapshot {
   trackIds: string[];
   editPointTime: number;
@@ -102,6 +122,14 @@ const TIME_EPSILON = 1e-6;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function secondsToFrames(seconds: number, frameRate: number): number {
+  if (!Number.isFinite(seconds) || seconds <= 0 || frameRate <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, Math.floor((seconds * frameRate) + TIME_EPSILON));
 }
 
 /** Returns the clip's visible (timeline) duration. */
@@ -1500,6 +1528,68 @@ export class TrimEngine {
     return this.overwriteTrim;
   }
 
+  private getRollerTrimLimits(roller: TrimRoller): { leftSeconds: number; rightSeconds: number } {
+    if (this.isTrackLocked(roller.trackId)) {
+      return { leftSeconds: 0, rightSeconds: 0 };
+    }
+
+    if (this.state.mode === TrimMode.SLIP) {
+      return {
+        leftSeconds: this.slipState?.maxSlipLeft ?? 0,
+        rightSeconds: this.slipState?.maxSlipRight ?? 0,
+      };
+    }
+
+    if (this.state.mode === TrimMode.SLIDE) {
+      return {
+        leftSeconds: this.slideState?.maxSlideLeft ?? 0,
+        rightSeconds: this.slideState?.maxSlideRight ?? 0,
+      };
+    }
+
+    const resolvedClipA = roller.clipAId ? this.findClipById(roller.clipAId)?.clip ?? null : null;
+    const resolvedClipB = roller.clipBId ? this.findClipById(roller.clipBId)?.clip ?? null : null;
+
+    const leftLimits: number[] = [];
+    const rightLimits: number[] = [];
+
+    const includeASide = this.state.mode === TrimMode.ROLL || roller.side === TrimSide.A_SIDE || roller.side === TrimSide.BOTH;
+    const includeBSide = this.state.mode === TrimMode.ROLL || roller.side === TrimSide.B_SIDE || roller.side === TrimSide.BOTH;
+
+    if (includeASide && resolvedClipA) {
+      leftLimits.push(Math.max(0, clipDuration(resolvedClipA) - MIN_CLIP_DURATION));
+      rightLimits.push(Math.max(0, resolvedClipA.trimEnd));
+    }
+
+    if (includeBSide && resolvedClipB) {
+      leftLimits.push(Math.max(0, resolvedClipB.trimStart));
+      rightLimits.push(Math.max(0, clipDuration(resolvedClipB) - MIN_CLIP_DURATION));
+    }
+
+    if (this.state.mode === TrimMode.ASYMMETRIC && roller.side === TrimSide.A_SIDE && resolvedClipA) {
+      return {
+        leftSeconds: Math.max(0, clipDuration(resolvedClipA) - MIN_CLIP_DURATION),
+        rightSeconds: Math.max(0, resolvedClipA.trimEnd),
+      };
+    }
+
+    if (this.state.mode === TrimMode.ASYMMETRIC && roller.side === TrimSide.B_SIDE && resolvedClipB) {
+      return {
+        leftSeconds: Math.max(0, resolvedClipB.trimStart),
+        rightSeconds: Math.max(0, clipDuration(resolvedClipB) - MIN_CLIP_DURATION),
+      };
+    }
+
+    if (leftLimits.length === 0 && rightLimits.length === 0) {
+      return { leftSeconds: 0, rightSeconds: 0 };
+    }
+
+    return {
+      leftSeconds: leftLimits.length > 0 ? Math.min(...leftLimits) : 0,
+      rightSeconds: rightLimits.length > 0 ? Math.min(...rightLimits) : 0,
+    };
+  }
+
   // ── Query Methods ───────────────────────────────────────────────────────────
 
   /** Get a copy of the current trim state. */
@@ -1559,6 +1649,60 @@ export class TrimEngine {
       aSideFrame: hasASideSelection ? totalFrames : 0,
       bSideFrame: hasBSideSelection ? totalFrames : 0,
       trimCounter: totalFrames,
+    };
+  }
+
+  getSessionDiagnostics(frameRate: number): TrimSessionDiagnostics {
+    const safeFrameRate = frameRate > 0
+      ? frameRate
+      : (this.getStore().sequenceSettings.fps || this.getStore().projectSettings.frameRate || 24);
+
+    if (!this.state.active) {
+      return {
+        active: false,
+        mode: this.state.mode,
+        linkedSelection: this.state.linkedSelection,
+        hasLockedRollers: false,
+        constrainedTrimLeftFrames: 0,
+        constrainedTrimRightFrames: 0,
+        rollers: [],
+      };
+    }
+
+    const rollers = this.state.rollers.map<TrimRollerDiagnostics>((roller) => {
+      const { leftSeconds, rightSeconds } = this.getRollerTrimLimits(roller);
+      const includeASide = this.state.mode === TrimMode.ROLL || roller.side === TrimSide.A_SIDE || roller.side === TrimSide.BOTH;
+      const includeBSide = this.state.mode === TrimMode.ROLL || roller.side === TrimSide.B_SIDE || roller.side === TrimSide.BOTH;
+
+      return {
+        trackId: roller.trackId,
+        editPointTime: roller.editPointTime,
+        side: roller.side,
+        locked: this.isTrackLocked(roller.trackId),
+        missingSides: [
+          ...(includeASide && !roller.clipAId ? ['A' as const] : []),
+          ...(includeBSide && !roller.clipBId ? ['B' as const] : []),
+        ],
+        availableTrimLeftFrames: secondsToFrames(leftSeconds, safeFrameRate),
+        availableTrimRightFrames: secondsToFrames(rightSeconds, safeFrameRate),
+      };
+    });
+
+    const availableLeftFrames = rollers
+      .filter((roller) => !roller.locked)
+      .map((roller) => roller.availableTrimLeftFrames);
+    const availableRightFrames = rollers
+      .filter((roller) => !roller.locked)
+      .map((roller) => roller.availableTrimRightFrames);
+
+    return {
+      active: true,
+      mode: this.state.mode,
+      linkedSelection: this.state.linkedSelection,
+      hasLockedRollers: rollers.some((roller) => roller.locked),
+      constrainedTrimLeftFrames: availableLeftFrames.length > 0 ? Math.min(...availableLeftFrames) : 0,
+      constrainedTrimRightFrames: availableRightFrames.length > 0 ? Math.min(...availableRightFrames) : 0,
+      rollers,
     };
   }
 

@@ -240,6 +240,8 @@ export class MockBackend implements IModelBackend {
         endTime: 3.2,
         text: 'Welcome to the local AI runtime.',
         confidence: 0.97,
+        speakerId: 'speaker-1',
+        speakerName: 'Speaker 1',
         words: [
           { text: 'Welcome', startTime: 0.0, endTime: 0.45, confidence: 0.98 },
           { text: 'to', startTime: 0.45, endTime: 0.6, confidence: 0.99 },
@@ -254,6 +256,8 @@ export class MockBackend implements IModelBackend {
         endTime: 7.1,
         text: 'This is a mock transcription segment for testing.',
         confidence: 0.94,
+        speakerId: 'speaker-2',
+        speakerName: 'Speaker 2',
         words: [
           { text: 'This', startTime: 3.4, endTime: 3.6, confidence: 0.95 },
           { text: 'is', startTime: 3.6, endTime: 3.72, confidence: 0.98 },
@@ -270,9 +274,21 @@ export class MockBackend implements IModelBackend {
         endTime: 11.0,
         text: 'Each segment includes word-level timestamps and confidence scores.',
         confidence: 0.95,
+        speakerId: 'speaker-1',
+        speakerName: 'Speaker 1',
       },
     ];
-    return { transcriptSegments: segments };
+    return {
+      transcriptSegments: segments,
+      transcriptLanguage: {
+        code: 'en',
+        confidence: 0.99,
+      },
+      transcriptSpeakers: [
+        { id: 'speaker-1', name: 'Speaker 1', confidence: 0.98, identified: false },
+        { id: 'speaker-2', name: 'Speaker 2', confidence: 0.96, identified: false },
+      ],
+    };
   }
 
   /** Return a prefixed "translation". */

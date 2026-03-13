@@ -89,6 +89,17 @@ export function TrimStatusOverlay() {
       trackName: tracks.find((track) => track.id === roller.trackId)?.name ?? roller.trackId,
     }));
   }, [tracks, trimState.rollers]);
+  const trimDiagnostics = useMemo(() => (
+    trimState.active ? trimEngine.getSessionDiagnostics(fps) : null
+  ), [fps, trimState]);
+  const lockedTrackNames = useMemo(() => (
+    trimDiagnostics?.rollers
+      .filter((roller) => roller.locked)
+      .map((roller) => tracks.find((track) => track.id === roller.trackId)?.name ?? roller.trackId)
+      ?? []
+  ), [tracks, trimDiagnostics]);
+  const canTrimLeft = (trimDiagnostics?.constrainedTrimLeftFrames ?? 0) > 0;
+  const canTrimRight = (trimDiagnostics?.constrainedTrimRightFrames ?? 0) > 0;
   const trimLoopStatusLabel = trimLoopPlaybackActive
     ? `${trimLoopPlaybackDirection < 0 ? 'REV' : 'FWD'} ${trimLoopPlaybackRate}x`
     : 'IDLE';
@@ -214,6 +225,13 @@ export function TrimStatusOverlay() {
           <span>{trimLoopStatusLabel}</span>
           <span>{trimLoopPreRollFrames}f PRE</span>
           <span>{trimLoopPostRollFrames}f POST</span>
+        </div>
+      )}
+      {trimState.active && trimDiagnostics && (
+        <div className="trim-status-settings trim-status-diagnostics" aria-label="Trim diagnostics">
+          <span>L {trimDiagnostics.constrainedTrimLeftFrames}f</span>
+          <span>R {trimDiagnostics.constrainedTrimRightFrames}f</span>
+          <span>{trimDiagnostics.hasLockedRollers ? `LOCKED ${lockedTrackNames.join(', ')}` : 'LOCKS CLEAR'}</span>
         </div>
       )}
       {trimState.active && (
@@ -350,6 +368,7 @@ export function TrimStatusOverlay() {
               className="trim-control-btn trim-control-btn-fine"
               onClick={() => trimByFrames(-10)}
               aria-label="Trim left 10 frames"
+              disabled={!canTrimLeft}
             >
               -10
             </button>
@@ -358,6 +377,7 @@ export function TrimStatusOverlay() {
               className="trim-control-btn trim-control-btn-fine"
               onClick={() => trimByFrames(-1)}
               aria-label="Trim left 1 frame"
+              disabled={!canTrimLeft}
             >
               -1
             </button>
@@ -366,6 +386,7 @@ export function TrimStatusOverlay() {
               className="trim-control-btn trim-control-btn-fine"
               onClick={() => trimByFrames(1)}
               aria-label="Trim right 1 frame"
+              disabled={!canTrimRight}
             >
               +1
             </button>
@@ -374,6 +395,7 @@ export function TrimStatusOverlay() {
               className="trim-control-btn trim-control-btn-fine"
               onClick={() => trimByFrames(10)}
               aria-label="Trim right 10 frames"
+              disabled={!canTrimRight}
             >
               +10
             </button>
@@ -381,9 +403,20 @@ export function TrimStatusOverlay() {
 
           {trimRollers.length > 1 && (
             <div className="trim-roller-grid" aria-label="Asymmetrical trim controls">
-              {trimRollers.map((roller) => (
+              {trimRollers.map((roller) => {
+                const rollerDiagnostics = trimDiagnostics?.rollers.find((candidate) => candidate.trackId === roller.trackId);
+
+                return (
                 <div key={roller.trackId} className="trim-roller-row">
                   <span className="trim-roller-track">{roller.trackName}</span>
+                  {rollerDiagnostics && (
+                    <span className="trim-roller-meta">
+                      {rollerDiagnostics.locked
+                        ? 'LOCKED'
+                        : `L ${rollerDiagnostics.availableTrimLeftFrames}f / R ${rollerDiagnostics.availableTrimRightFrames}f`}
+                      {rollerDiagnostics.missingSides.length > 0 && ` · MISS ${rollerDiagnostics.missingSides.join('+')}`}
+                    </span>
+                  )}
                   <div className="trim-roller-actions">
                     <button
                       type="button"
@@ -411,7 +444,7 @@ export function TrimStatusOverlay() {
                     </button>
                   </div>
                 </div>
-              ))}
+              );})}
             </div>
           )}
         </>

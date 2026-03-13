@@ -201,6 +201,55 @@ export interface EditorTranscriptCue {
   text: string;
   confidence?: number;
   source: 'TRANSCRIPT' | 'SCRIPT';
+  speakerId?: string;
+  language?: string;
+  translation?: string;
+  provider?: string;
+  linkedScriptLineIds?: string[];
+  words?: EditorTranscriptWord[];
+}
+
+export interface EditorTranscriptWord {
+  text: string;
+  startTime: number;
+  endTime: number;
+  confidence: number;
+  speakerId?: string;
+}
+
+export interface EditorTranscriptSpeaker {
+  id: string;
+  label: string;
+  confidence?: number;
+  color?: string;
+  identified: boolean;
+}
+
+export interface EditorScriptDocumentLine {
+  id: string;
+  lineNumber: number;
+  text: string;
+  speaker?: string;
+  linkedCueIds: string[];
+}
+
+export interface EditorScriptDocument {
+  id: string;
+  title: string;
+  source: 'IMPORTED' | 'MANUAL' | 'GENERATED';
+  language: string;
+  text: string;
+  lines: EditorScriptDocumentLine[];
+  updatedAt: string;
+}
+
+export interface EditorTranscriptionSettings {
+  provider: 'local-faster-whisper' | 'cloud-openai-compatible';
+  translationProvider: 'local-runtime' | 'cloud-openai-compatible';
+  preferredLanguage: 'auto' | string;
+  enableDiarization: boolean;
+  enableSpeakerIdentification: boolean;
+  translateToEnglish: boolean;
 }
 
 export interface EditorReviewComment {
@@ -430,6 +479,9 @@ export interface EditorProject {
   collaborators: CollaboratorPresence[];
   aiJobs: EditorAIJob[];
   transcript: EditorTranscriptCue[];
+  transcriptSpeakers: EditorTranscriptSpeaker[];
+  scriptDocument: EditorScriptDocument | null;
+  transcriptionSettings: EditorTranscriptionSettings;
   reviewComments: EditorReviewComment[];
   approvals: EditorApproval[];
   publishJobs: EditorPublishJob[];
@@ -908,8 +960,55 @@ function createTranscriptCues(bins: EditorBin[], template: ProjectTemplate): Edi
       text: templateLines[template][index] ?? `${asset.name} select`,
       confidence: 0.88 - index * 0.04,
       source: index < 3 ? 'TRANSCRIPT' : 'SCRIPT',
+      language: 'en',
+      provider: 'seed',
+      linkedScriptLineIds: [],
     };
   });
+}
+
+function createTranscriptSpeakers(transcript: EditorTranscriptCue[]): EditorTranscriptSpeaker[] {
+  const speakers = new Map<string, EditorTranscriptSpeaker>();
+
+  for (const cue of transcript) {
+    const speakerId = cue.speakerId ?? cue.speaker.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    if (!speakers.has(speakerId)) {
+      speakers.set(speakerId, {
+        id: speakerId,
+        label: cue.speaker,
+        confidence: cue.confidence,
+        identified: false,
+      });
+    }
+  }
+
+  return [...speakers.values()];
+}
+
+function createScriptDocument(template: ProjectTemplate, transcript: EditorTranscriptCue[]): EditorScriptDocument | null {
+  if (transcript.length === 0) {
+    return null;
+  }
+
+  const lines = transcript.map((cue, index) => ({
+    id: generateId('script-line'),
+    lineNumber: index + 1,
+    text: cue.text,
+    speaker: cue.speaker,
+    linkedCueIds: [cue.id],
+  }));
+
+  return {
+    id: generateId('script'),
+    title: `${(template[0] ?? '').toUpperCase()}${template.slice(1)} Script`,
+    source: 'GENERATED',
+    language: 'en',
+    text: lines.map((line) => {
+      return line.speaker ? `${line.speaker}: ${line.text}` : line.text;
+    }).join('\n\n'),
+    lines,
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 function createReviewComments(template: ProjectTemplate): EditorReviewComment[] {
@@ -1241,6 +1340,16 @@ function normalizeProject(project: EditorProject): EditorProject {
     collaborators: cloneValue(project.collaborators ?? []),
     aiJobs: cloneValue(project.aiJobs ?? []),
     transcript: cloneValue(project.transcript ?? []),
+    transcriptSpeakers: cloneValue(project.transcriptSpeakers ?? createTranscriptSpeakers(project.transcript ?? [])),
+    scriptDocument: project.scriptDocument ? cloneValue(project.scriptDocument) : null,
+    transcriptionSettings: cloneValue(project.transcriptionSettings ?? {
+      provider: 'local-faster-whisper',
+      translationProvider: 'local-runtime',
+      preferredLanguage: 'auto',
+      enableDiarization: true,
+      enableSpeakerIdentification: false,
+      translateToEnglish: false,
+    }),
     reviewComments: cloneValue(project.reviewComments ?? []),
     approvals: cloneValue(project.approvals ?? []),
     publishJobs: cloneValue(project.publishJobs ?? []),
@@ -1340,6 +1449,7 @@ export function hydrateProject(project: Partial<EditorProject>): EditorProject {
   const template = project.template ?? 'film';
   const bins = project.bins ?? [];
   const tracks = project.tracks ?? [];
+  const transcript = project.transcript ?? createTranscriptCues(bins, template);
   const firstVideoTrackId = tracks.find(
     (track) => track.type === 'VIDEO' || track.type === 'GRAPHIC',
   )?.id ?? null;
@@ -1366,7 +1476,17 @@ export function hydrateProject(project: Partial<EditorProject>): EditorProject {
     bins,
     collaborators: project.collaborators ?? [],
     aiJobs: project.aiJobs ?? [],
-    transcript: project.transcript ?? createTranscriptCues(bins, template),
+    transcript,
+    transcriptSpeakers: project.transcriptSpeakers ?? createTranscriptSpeakers(transcript),
+    scriptDocument: project.scriptDocument ?? createScriptDocument(template, transcript),
+    transcriptionSettings: project.transcriptionSettings ?? {
+      provider: 'local-faster-whisper',
+      translationProvider: 'local-runtime',
+      preferredLanguage: 'auto',
+      enableDiarization: true,
+      enableSpeakerIdentification: false,
+      translateToEnglish: false,
+    },
     reviewComments: project.reviewComments ?? createReviewComments(template),
     approvals: project.approvals ?? createApprovals(),
     publishJobs: project.publishJobs ?? createPublishJobs(template),
@@ -1417,6 +1537,8 @@ export function buildProject(options: CreateProjectOptions = {}): EditorProject 
     ? seedTracksFromBins(createTemplateTracks(template), bins)
     : createTemplateTracks(template);
   const transcript = seedContent ? createTranscriptCues(bins, template) : [];
+  const transcriptSpeakers = createTranscriptSpeakers(transcript);
+  const scriptDocument = seedContent ? createScriptDocument(template, transcript) : null;
   const now = new Date().toISOString();
   const name = options.name ?? `Untitled ${(template[0] ?? '').toUpperCase()}${template.slice(1)}`;
   const firstVideoTrackId = tracks.find(
@@ -1459,6 +1581,16 @@ export function buildProject(options: CreateProjectOptions = {}): EditorProject 
       : [],
     aiJobs: [],
     transcript,
+    transcriptSpeakers,
+    scriptDocument,
+    transcriptionSettings: {
+      provider: 'local-faster-whisper',
+      translationProvider: 'local-runtime',
+      preferredLanguage: 'auto',
+      enableDiarization: true,
+      enableSpeakerIdentification: false,
+      translateToEnglish: false,
+    },
     reviewComments: seedContent ? createReviewComments(template) : [],
     approvals: seedContent ? createApprovals() : [],
     publishJobs: seedContent ? createPublishJobs(template) : [],
