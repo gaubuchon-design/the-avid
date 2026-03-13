@@ -7,6 +7,7 @@ import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import type { AgentPlan } from '../ai/AgentEngine';
 import type { PhraseFindResult } from '../lib/transcriptWorkbench';
+import { isDevelopmentEnvironment } from '../lib/runtimeEnvironment';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -167,7 +168,7 @@ export const useAIStore = create<AIState & AIActions>()(
         }],
       }), true, 'ai/resetStore'),
     })),
-    { name: 'AIStore', enabled: import.meta.env.DEV },
+    { name: 'AIStore', enabled: isDevelopmentEnvironment() },
   )
 );
 

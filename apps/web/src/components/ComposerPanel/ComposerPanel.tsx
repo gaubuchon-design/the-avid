@@ -4,6 +4,7 @@ import { SourceMonitor } from '../SourceMonitor/SourceMonitor';
 import { RecordMonitor } from '../RecordMonitor/RecordMonitor';
 import { MonitorArea } from '../Monitor/MonitorArea';
 import { trimEngine } from '../../engine/TrimEngine';
+import { PanelResizeHandle } from '../Layout/PanelResizeHandle';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -57,7 +58,15 @@ function storeToMode(storeLayout: 'source-record' | 'full-frame'): ComposerLayou
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export function ComposerPanel() {
+interface ComposerPanelProps {
+  dualMonitorSplit?: number;
+  onDualMonitorSplitChange?: (value: number) => void;
+}
+
+export function ComposerPanel({
+  dualMonitorSplit = 50,
+  onDualMonitorSplitChange,
+}: ComposerPanelProps) {
   const composerLayout = useEditorStore((s) => s.composerLayout);
   const setComposerLayout = useEditorStore((s) => s.setComposerLayout);
   const trimActive = useEditorStore((s) => s.trimActive);
@@ -202,12 +211,24 @@ export function ComposerPanel() {
       {/* Monitor area */}
       <div
         className={`composer-panel-monitors ${isDual ? 'composer-panel-dual' : 'composer-panel-single'}`}
+        style={isDual ? {
+          gridTemplateColumns: `minmax(0, ${dualMonitorSplit}fr) var(--panel-divider-w) minmax(0, ${100 - dualMonitorSplit}fr)`,
+        } : undefined}
       >
         {isDual && (
           <>
             <div className="composer-panel-monitor-slot">
               <SourceMonitor />
             </div>
+            <PanelResizeHandle
+              axis="horizontal"
+              ariaLabel="Resize source and record monitors"
+              value={dualMonitorSplit}
+              min={30}
+              max={70}
+              className="composer-panel-resize-handle resize-handle-h"
+              onChange={(next) => onDualMonitorSplitChange?.(next)}
+            />
             <div className="composer-panel-monitor-slot">
               <RecordMonitor />
             </div>

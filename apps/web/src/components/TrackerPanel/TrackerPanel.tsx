@@ -15,12 +15,11 @@ const panelStyle: React.CSSProperties = {
   flexDirection: 'column',
   gap: 12,
   padding: 16,
-  backgroundColor: '#1e1e2e',
-  borderLeft: '1px solid #313244',
-  width: 280,
+  backgroundColor: 'var(--bg-surface)',
+  width: '100%',
   height: '100%',
-  color: '#cdd6f4',
-  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  color: 'var(--text-primary)',
+  fontFamily: 'var(--font-ui)',
   fontSize: 13,
   overflow: 'auto',
 };
@@ -29,7 +28,7 @@ const headerStyle: React.CSSProperties = {
   fontSize: 15,
   fontWeight: 600,
   paddingBottom: 8,
-  borderBottom: '1px solid #313244',
+  borderBottom: '1px solid var(--border-default)',
   display: 'flex',
   alignItems: 'center',
   gap: 8,
@@ -43,7 +42,7 @@ const sectionStyle: React.CSSProperties = {
 
 const labelStyle: React.CSSProperties = {
   fontSize: 11,
-  color: '#6c7086',
+  color: 'var(--text-tertiary)',
   textTransform: 'uppercase' as const,
   letterSpacing: '0.05em',
 };
@@ -56,9 +55,9 @@ const btnRow: React.CSSProperties = {
 const btnBase: React.CSSProperties = {
   padding: '6px 12px',
   borderRadius: 6,
-  border: '1px solid #313244',
-  backgroundColor: '#313244',
-  color: '#cdd6f4',
+  border: '1px solid var(--border-default)',
+  backgroundColor: 'var(--bg-overlay)',
+  color: 'var(--text-primary)',
   fontSize: 12,
   fontWeight: 500,
   cursor: 'pointer',
@@ -69,36 +68,36 @@ const btnBase: React.CSSProperties = {
 
 const btnPrimary: React.CSSProperties = {
   ...btnBase,
-  backgroundColor: '#89b4fa',
-  color: '#1e1e2e',
-  border: '1px solid #89b4fa',
+  backgroundColor: 'var(--bg-selected)',
+  color: 'var(--text-primary)',
+  border: '1px solid var(--border-strong)',
 };
 
 const btnDanger: React.CSSProperties = {
   ...btnBase,
-  backgroundColor: '#f38ba8',
-  color: '#1e1e2e',
-  border: '1px solid #f38ba8',
+  backgroundColor: 'var(--bg-selected)',
+  color: 'var(--text-primary)',
+  border: '1px solid var(--border-strong)',
 };
 
 const progressContainer: React.CSSProperties = {
   height: 4,
   borderRadius: 2,
-  backgroundColor: '#313244',
+  backgroundColor: 'var(--bg-overlay)',
   overflow: 'hidden',
 };
 
 const progressBar = (pct: number): React.CSSProperties => ({
   height: '100%',
   width: `${pct * 100}%`,
-  backgroundColor: '#a6e3a1',
+  backgroundColor: 'var(--brand)',
   borderRadius: 2,
   transition: 'width 0.2s ease',
 });
 
 const statusText: React.CSSProperties = {
   fontSize: 12,
-  color: '#a6adc8',
+  color: 'var(--text-secondary)',
   display: 'flex',
   alignItems: 'center',
   gap: 6,
@@ -110,15 +109,15 @@ const regionChip: React.CSSProperties = {
   justifyContent: 'space-between',
   padding: '6px 10px',
   borderRadius: 6,
-  border: '1px solid #313244',
-  backgroundColor: 'rgba(137, 180, 250, 0.08)',
+  border: '1px solid var(--border-default)',
+  backgroundColor: 'var(--bg-elevated)',
   fontSize: 12,
 };
 
 const noClipStyle: React.CSSProperties = {
   padding: 20,
   textAlign: 'center' as const,
-  color: '#6c7086',
+  color: 'var(--text-muted)',
   fontSize: 13,
 };
 
@@ -221,7 +220,7 @@ export const TrackerPanel: React.FC = () => {
               style={{
                 background: 'none',
                 border: 'none',
-                color: '#f38ba8',
+                color: 'var(--text-secondary)',
                 cursor: 'pointer',
                 fontSize: 14,
               }}
@@ -263,13 +262,13 @@ export const TrackerPanel: React.FC = () => {
           )}
 
           {trackingStatus === 'completed' && (
-            <div style={{ ...statusText, color: '#a6e3a1' }}>
+            <div style={{ ...statusText, color: 'var(--text-primary)' }}>
               Tracking complete — {frameCount} frames
             </div>
           )}
 
           {trackingStatus === 'failed' && (
-            <div style={{ ...statusText, color: '#f38ba8' }}>
+            <div style={{ ...statusText, color: 'var(--text-primary)' }}>
               Tracking failed: {activeSession?.data?.error}
             </div>
           )}
@@ -295,7 +294,7 @@ export const TrackerPanel: React.FC = () => {
       {/* ── Tracking Data View ── */}
       {activeSession?.data && (
         <div style={sectionStyle}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#a6adc8', cursor: 'pointer' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>
             <input
               type="checkbox"
               checked={showTrackingData}

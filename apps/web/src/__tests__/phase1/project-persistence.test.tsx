@@ -13,6 +13,7 @@ import { RecordMonitor } from '../../components/RecordMonitor/RecordMonitor';
 import { VersionHistoryPanel } from '../../components/VersionHistory/VersionHistoryPanel';
 import { trackPatchingEngine } from '../../engine/TrackPatchingEngine';
 import { useGlobalKeyboard } from '../../hooks/useGlobalKeyboard';
+import { useKeyboardAction } from '../../hooks/useKeyboardAction';
 import { useCollabStore } from '../../store/collab.store';
 import { makeClip } from '../../store/editor.store';
 import { usePlayerStore } from '../../store/player.store';
@@ -35,7 +36,9 @@ const initialPlayerState = usePlayerStore.getState();
 const initialCollabState = useCollabStore.getState();
 
 function KeyboardHarness() {
+  const deleteSelectedClips = useEditorStore((state) => state.deleteSelectedClips);
   useGlobalKeyboard();
+  useKeyboardAction('edit.delete', deleteSelectedClips, [deleteSelectedClips]);
   return <div>keyboard harness</div>;
 }
 
@@ -842,7 +845,7 @@ describe('phase 1 project persistence', () => {
     });
   });
 
-  it('supports keyboard-first split edits through the mounted global keyboard hook', async () => {
+  it('supports keyboard-first deletes through the mounted global keyboard hook', async () => {
     useEditorStore.setState({
       playheadTime: 2,
       tracks: [
@@ -881,10 +884,10 @@ describe('phase 1 project persistence', () => {
     });
 
     await act(async () => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }));
     });
 
-    expect(useEditorStore.getState().tracks[0]?.clips).toHaveLength(2);
+    expect(useEditorStore.getState().tracks[0]?.clips).toHaveLength(0);
 
     await act(async () => {
       root.unmount();

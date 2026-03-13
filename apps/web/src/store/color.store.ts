@@ -8,6 +8,7 @@ import {
   NodeParams,
   colorEngine,
 } from '../engine/ColorEngine';
+import { isDevelopmentEnvironment } from '../lib/runtimeEnvironment';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -323,7 +324,7 @@ export const useColorStore = create<ColorState & ColorActions>()(
           s.abWipePosition = 50;
         }, false, 'color/resetStore'),
     })),
-    { name: 'ColorStore', enabled: import.meta.env.DEV },
+    { name: 'ColorStore', enabled: isDevelopmentEnvironment() },
   )
 );
 

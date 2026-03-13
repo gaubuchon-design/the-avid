@@ -92,10 +92,13 @@ export const db: PrismaClient =
 
 // ─── Query logging & metrics (dev only for detailed, all envs for slow) ─────
 const SLOW_QUERY_THRESHOLD_MS = config.isDev ? 200 : 500;
+const dbEventClient = db as unknown as {
+  $on(event: string, callback: (event: any) => void): void;
+};
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- Prisma event types require runtime string keys */
 if (config.isDev) {
-  db.$on('query' as any, (e: { duration?: number; query?: string; params?: string }) => {
+  dbEventClient.$on('query', (e: { duration?: number; query?: string; params?: string }) => {
     queryMetrics.totalQueries++;
     queryMetrics.totalDurationMs += (e.duration ?? 0);
 
@@ -112,11 +115,11 @@ if (config.isDev) {
 }
 
 // ─── Warning and error logging (all environments) ────────────────────────────
-db.$on('warn' as any, (e: { message: string }) => {
+dbEventClient.$on('warn', (e: { message: string }) => {
   logger.warn('Prisma warning', { message: e.message });
 });
 
-db.$on('error' as any, (e: { message: string; target?: string }) => {
+dbEventClient.$on('error', (e: { message: string; target?: string }) => {
   logger.error('Prisma error', { message: e.message, target: e.target });
 });
 /* eslint-enable @typescript-eslint/no-explicit-any */

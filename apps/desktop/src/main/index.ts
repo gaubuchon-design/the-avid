@@ -970,7 +970,7 @@ async function importMediaIntoProject(
   const mediaPaths = createProjectMediaPaths(getProjectPackagePath(projectId));
   const resolvedPaths = await resolveImportSourcePaths(filePaths);
   if (resolvedPaths.length === 0) {
-    throw new Error('No supported media files were found in the dropped selection');
+    throw new Error('No importable files were found in the dropped selection');
   }
   const targetBin = ensureDesktopImportBin(project, binId);
 

@@ -1,6 +1,7 @@
 import { Server as SocketServer, Socket } from 'socket.io';
 import { Server as HttpServer } from 'http';
 import jwt from 'jsonwebtoken';
+import { renderJobSubmissionSchema } from '@mcua/media-backend';
 import { db } from '../db/client';
 import { config } from '../config';
 import { logger } from '../utils/logger';
@@ -115,7 +116,7 @@ export function initWebSocket(httpServer: HttpServer) {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- attaching user to socket for downstream handlers
       (socket as any).user = user;
-      socketUsers.set(socket.id, user);
+      socketUsers.set(socket.id, { userId: user.id, displayName: user.displayName });
       next();
     } catch (err: unknown) {
       logger.error('WebSocket auth failed', { error: (err as Error).message, socketId: socket.id });
@@ -284,7 +285,13 @@ export function initWebSocket(httpServer: HttpServer) {
     });
 
     socket.on('render:job:submit', (payload) => {
-      const job = renderFarmService.submitJob(payload);
+      const parsed = renderJobSubmissionSchema.safeParse(payload);
+      if (!parsed.success) {
+        socket.emit('error', { message: 'Invalid render job payload', code: 'INVALID_PAYLOAD' });
+        return;
+      }
+
+      const job = renderFarmService.submitJob(parsed.data);
       socket.emit('render:job:queued', { job });
     });
 

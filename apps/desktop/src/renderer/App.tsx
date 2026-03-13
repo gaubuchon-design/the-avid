@@ -31,14 +31,14 @@ class ErrorBoundary extends React.Component<{ children: ReactNode }, ErrorBounda
           alignItems: 'center',
           justifyContent: 'center',
           height: '100vh',
-          backgroundColor: '#0f172a',
-          color: '#f1f5f9',
+          backgroundColor: '#101013',
+          color: '#efeff2',
           fontFamily: 'system-ui, sans-serif',
           padding: 32,
           textAlign: 'center',
         }}>
           <h1 style={{ fontSize: 24, marginBottom: 16 }}>Something went wrong</h1>
-          <p style={{ color: '#94a3b8', marginBottom: 24, maxWidth: 480 }}>
+          <p style={{ color: '#9d9da7', marginBottom: 24, maxWidth: 480 }}>
             {this.state.error.message}
           </p>
           <button
@@ -47,8 +47,8 @@ class ErrorBoundary extends React.Component<{ children: ReactNode }, ErrorBounda
               window.location.hash = '/';
             }}
             style={{
-              backgroundColor: '#6366f1',
-              color: '#fff',
+              backgroundColor: '#81818d',
+              color: '#ffffff',
               border: 'none',
               borderRadius: 8,
               padding: '10px 24px',
@@ -110,11 +110,11 @@ function UpdateBanner() {
       position: 'fixed',
       bottom: 16,
       right: 16,
-      backgroundColor: '#312e81',
-      border: '1px solid #6366f1',
+      backgroundColor: '#232329',
+      border: '1px solid #50505a',
       borderRadius: 8,
       padding: '12px 16px',
-      color: '#e0e7ff',
+      color: '#efeff2',
       fontSize: 13,
       zIndex: 9999,
       maxWidth: 360,
@@ -128,8 +128,8 @@ function UpdateBanner() {
           <button
             onClick={() => window.electronAPI?.app.installUpdate()}
             style={{
-              backgroundColor: '#6366f1',
-              color: '#fff',
+              backgroundColor: '#81818d',
+              color: '#ffffff',
               border: 'none',
               borderRadius: 6,
               padding: '6px 12px',
@@ -144,7 +144,7 @@ function UpdateBanner() {
             onClick={() => setDismissed(true)}
             style={{
               backgroundColor: 'transparent',
-              color: '#94a3b8',
+              color: '#9d9da7',
               border: 'none',
               fontSize: 12,
               cursor: 'pointer',
@@ -165,8 +165,8 @@ function UpdateBanner() {
           <button
             onClick={handleDownload}
             style={{
-              backgroundColor: '#6366f1',
-              color: '#fff',
+              backgroundColor: '#81818d',
+              color: '#ffffff',
               border: 'none',
               borderRadius: 6,
               padding: '6px 12px',
@@ -181,7 +181,7 @@ function UpdateBanner() {
             onClick={() => setDismissed(true)}
             style={{
               backgroundColor: 'transparent',
-              color: '#94a3b8',
+              color: '#9d9da7',
               border: 'none',
               fontSize: 12,
               cursor: 'pointer',

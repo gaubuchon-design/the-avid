@@ -7,6 +7,8 @@ This repo now has a repeatable desktop installer flow for macOS and Windows thro
 From the repo root:
 
 ```bash
+npm run dist:desktop:refresh:mac
+npm run dist:desktop:refresh:win
 npm run dist:desktop:mac
 npm run dist:desktop:win
 ```
@@ -14,9 +16,23 @@ npm run dist:desktop:win
 From the desktop workspace directly:
 
 ```bash
+npm run dist:refresh -- --targets=mac
+npm run dist:refresh -- --targets=win
 npm run dist:mac
 npm run dist:win
 ```
+
+The refresh commands are the preferred entry point because they delete stale outputs before rebuilding fresh installers from the current code.
+
+Canonical automation entry point:
+
+- [rebuild-installers.js](/Users/guillaumeaubuchon/GitHub/the-avid/apps/desktop/scripts/rebuild-installers.js)
+  - removes stale `apps/desktop/out` and `apps/desktop/dist`
+  - rebuilds requested installer targets through the existing desktop packaging scripts
+
+Detailed automation guide:
+
+- [DESKTOP_INSTALLER_AUTOMATION.md](/Users/guillaumeaubuchon/GitHub/the-avid/docs/DESKTOP_INSTALLER_AUTOMATION.md)
 
 ## What the packaging prep does
 
@@ -62,6 +78,12 @@ It builds:
 - Windows installers on `windows-2022`
 
 and uploads the packaged artifacts for testing.
+
+The workflow now also supports:
+
+- manual target selection through `workflow_dispatch`
+- scheduled periodic rebuilds
+- the same clean-and-rebuild entry point used locally
 
 ## Platform notes
 

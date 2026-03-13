@@ -1,4 +1,9 @@
 import { DEFAULT_EDITORIAL_WORKSPACE_ID } from './editorial-experience';
+import {
+  createAssetCapabilityReport,
+  inferMediaSupportTier as inferSharedMediaSupportTier,
+  type AssetCapabilityInput as SharedAssetCapabilityInput,
+} from '@mcua/media-backend';
 import type { AudioChannelLayout } from './audio/channelLayout';
 
 export type TrackType = 'VIDEO' | 'AUDIO' | 'EFFECT' | 'SUBTITLE' | 'GRAPHIC';
@@ -11,6 +16,180 @@ export type MediaStorageMode = 'COPY' | 'LINK';
 export type MediaProxyStatus = 'NOT_REQUESTED' | 'QUEUED' | 'READY' | 'FAILED' | 'SKIPPED';
 export type MediaWaveformStatus = 'PENDING' | 'READY' | 'FAILED' | 'UNAVAILABLE';
 export type MediaSemanticStatus = 'PENDING' | 'READY' | 'FAILED' | 'SKIPPED';
+export type MediaSupportTier = 'native' | 'normalized' | 'adapter' | 'unsupported';
+export type MediaAssetClass = 'video' | 'audio' | 'subtitle' | 'bitmap' | 'vector' | 'layered-graphic' | 'document';
+export type MediaReferenceRole =
+  | 'original'
+  | 'managed'
+  | 'playback'
+  | 'proxy'
+  | 'waveform'
+  | 'subtitle-sidecar'
+  | 'graphic-source'
+  | 'graphic-render';
+export type MediaReferenceLocator = 'absolute-path' | 'package-relative-path' | 'file-url' | 'http-url';
+export type StreamKind = 'video' | 'audio' | 'subtitle' | 'data' | 'attachment';
+export type VariantPurpose =
+  | 'source'
+  | 'managed'
+  | 'playback'
+  | 'proxy'
+  | 'waveform'
+  | 'subtitle'
+  | 'graphic-render'
+  | 'conform';
+export type VariantAvailability = 'ready' | 'pending' | 'failed' | 'missing';
+export type CapabilitySurface = 'desktop' | 'web' | 'mobile' | 'worker';
+export type CapabilityDisposition = 'native' | 'proxy-only' | 'mezzanine-required' | 'adapter-required' | 'unsupported';
+export type MediaAlphaMode = 'none' | 'straight' | 'premultiplied' | 'unknown';
+export type ProbeSideDataDescriptor = {
+  type: string;
+  metadata: Record<string, unknown>;
+};
+export type CaptionDescriptor = {
+  kind: 'embedded-608' | 'embedded-708' | 'subtitle-stream' | 'sidecar' | 'teletext' | 'dvb-subtitle' | 'unknown';
+  codec?: string;
+  language?: string;
+  streamIndex?: number;
+  serviceName?: string;
+};
+
+export interface TimebaseDescriptor {
+  numerator: number;
+  denominator: number;
+  framesPerSecond?: number;
+  displayString?: string;
+  dropFrame?: boolean;
+}
+
+export type RationalTimebase = TimebaseDescriptor;
+
+export interface ColorDescriptor {
+  colorSpace?: string;
+  primaries?: string;
+  transfer?: string;
+  matrix?: string;
+  range?: 'full' | 'limited' | 'unknown';
+  bitDepth?: number;
+  chromaSubsampling?: string;
+  alphaMode?: MediaAlphaMode;
+  hdrMode?: 'sdr' | 'hlg' | 'pq' | 'dolby-vision' | 'unknown';
+  iccProfileName?: string;
+  masteringDisplayMetadata?: string;
+  contentLightLevelMetadata?: string;
+}
+
+export interface GraphicDescriptor {
+  kind: Extract<MediaAssetClass, 'bitmap' | 'vector' | 'layered-graphic'>;
+  sourceFormat?: string;
+  canvasWidth?: number;
+  canvasHeight?: number;
+  pageCount?: number;
+  layerCount?: number;
+  hasAlpha?: boolean;
+  orientation?: number;
+  flatteningRequired?: boolean;
+  renderStrategy?: 'direct' | 'rasterize' | 'flatten';
+}
+
+export interface MediaReference {
+  id: string;
+  role: MediaReferenceRole;
+  locator: MediaReferenceLocator;
+  path?: string;
+  relativePath?: string;
+  url?: string;
+  fileName?: string;
+  fileExtension?: string;
+  container?: string;
+  mimeType?: string;
+  checksum?: string;
+  sizeBytes?: number;
+  isPreferred?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface StreamDescriptor {
+  id: string;
+  index: number;
+  kind: StreamKind;
+  codec?: string;
+  codecLongName?: string;
+  codecTag?: string;
+  codecProfile?: string;
+  language?: string;
+  title?: string;
+  disposition?: string[];
+  durationSeconds?: number;
+  bitRate?: number;
+  timebase?: TimebaseDescriptor;
+  frameRate?: RationalTimebase;
+  averageFrameRate?: RationalTimebase;
+  width?: number;
+  height?: number;
+  sampleAspectRatio?: string;
+  displayAspectRatio?: string;
+  fieldOrder?: string;
+  pixelFormat?: string;
+  audioChannels?: number;
+  audioChannelLayout?: AudioChannelLayout;
+  sampleRate?: number;
+  sampleFormat?: string;
+  reelName?: string;
+  timecodeStart?: string;
+  colorDescriptor?: ColorDescriptor;
+  sideData?: ProbeSideDataDescriptor[];
+  captions?: CaptionDescriptor[];
+}
+
+export interface VariantRecord {
+  id: string;
+  name: string;
+  purpose: VariantPurpose;
+  availability: VariantAvailability;
+  supportTier: MediaSupportTier;
+  referenceIds: string[];
+  streamIds: string[];
+  container?: string;
+  videoCodec?: string;
+  audioCodec?: string;
+  width?: number;
+  height?: number;
+  frameRate?: number;
+  colorDescriptor?: ColorDescriptor;
+  error?: string;
+}
+
+export interface CapabilitySurfaceReport {
+  surface: CapabilitySurface;
+  disposition: CapabilityDisposition;
+  supportTier: MediaSupportTier;
+  preferredVariantId?: string;
+  reasons: string[];
+}
+
+export interface CapabilityReport {
+  primarySurface: CapabilitySurface;
+  primaryDisposition: CapabilityDisposition;
+  sourceSupportTier: MediaSupportTier;
+  preferredVariantId?: string;
+  surfaces: CapabilitySurfaceReport[];
+  issues: string[];
+  updatedAt?: string;
+}
+
+export interface AssetRecord {
+  assetClass: MediaAssetClass;
+  supportTier: MediaSupportTier;
+  references: MediaReference[];
+  streams: StreamDescriptor[];
+  variants: VariantRecord[];
+  capabilityReport?: CapabilityReport;
+  timebase?: TimebaseDescriptor;
+  colorDescriptor?: ColorDescriptor;
+  graphicDescriptor?: GraphicDescriptor;
+}
 
 export interface EditorMediaFingerprint {
   algorithm: 'sha1-partial';
@@ -36,8 +215,10 @@ export interface EditorMediaLocations {
 
 export interface EditorMediaTechnicalMetadata {
   container?: string;
+  containerLongName?: string;
   videoCodec?: string;
   audioCodec?: string;
+  subtitleCodec?: string;
   audioChannelLayout?: AudioChannelLayout;
   durationSeconds?: number;
   frameRate?: number;
@@ -48,6 +229,15 @@ export interface EditorMediaTechnicalMetadata {
   bitRate?: number;
   timecodeStart?: string;
   reelName?: string;
+  timebase?: TimebaseDescriptor;
+  averageFrameRate?: RationalTimebase;
+  colorDescriptor?: ColorDescriptor;
+  graphicDescriptor?: GraphicDescriptor;
+  subtitleLanguages?: string[];
+  sideData?: ProbeSideDataDescriptor[];
+  captions?: CaptionDescriptor[];
+  formatTags?: Record<string, string>;
+  isVariableFrameRate?: boolean;
 }
 
 export interface EditorMediaRelinkIdentity {
@@ -142,6 +332,8 @@ export interface EditorMediaAsset {
   id: string;
   name: string;
   type: 'VIDEO' | 'AUDIO' | 'IMAGE' | 'GRAPHIC' | 'DOCUMENT';
+  assetClass?: AssetRecord['assetClass'];
+  supportTier?: AssetRecord['supportTier'];
   duration?: number;
   status: 'UPLOADING' | 'PROCESSING' | 'READY' | 'ERROR' | 'INGESTING' | 'OFFLINE';
   thumbnailUrl?: string;
@@ -158,6 +350,13 @@ export interface EditorMediaAsset {
   proxyMetadata?: EditorMediaProxyMetadata;
   waveformMetadata?: EditorMediaWaveformMetadata;
   semanticMetadata?: EditorMediaSemanticMetadata;
+  references?: AssetRecord['references'];
+  streams?: AssetRecord['streams'];
+  variants?: AssetRecord['variants'];
+  capabilityReport?: AssetRecord['capabilityReport'];
+  timebase?: AssetRecord['timebase'];
+  colorDescriptor?: AssetRecord['colorDescriptor'];
+  graphicDescriptor?: AssetRecord['graphicDescriptor'];
   tags: string[];
   isFavorite: boolean;
 }
@@ -649,27 +848,849 @@ function normalizeAssetName(name: string): string {
   return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+const NTSC_TIMEBASES = [
+  { rate: 23.976, numerator: 24000, denominator: 1001 },
+  { rate: 29.97, numerator: 30000, denominator: 1001 },
+  { rate: 47.952, numerator: 48000, denominator: 1001 },
+  { rate: 59.94, numerator: 60000, denominator: 1001 },
+  { rate: 119.88, numerator: 120000, denominator: 1001 },
+] as const;
+
+const RAW_VIDEO_EXTENSIONS = new Set(['ari', 'braw', 'cin', 'crm', 'dng', 'exr', 'r3d']);
+const SUBTITLE_FILE_EXTENSIONS = new Set(['ass', 'dfxp', 'itt', 'scc', 'srt', 'ssa', 'stl', 'sub', 'ttml', 'vtt']);
+const VECTOR_FILE_EXTENSIONS = new Set(['ai', 'eps', 'pdf', 'svg']);
+const LAYERED_GRAPHIC_EXTENSIONS = new Set(['afdesign', 'kra', 'psb', 'psd', 'xcf']);
+const ALPHA_FRIENDLY_EXTENSIONS = new Set(['exr', 'gif', 'png', 'psb', 'psd', 'svg', 'tif', 'tiff', 'webp']);
+
+function greatestCommonDivisor(a: number, b: number): number {
+  let left = Math.abs(Math.trunc(a));
+  let right = Math.abs(Math.trunc(b));
+  while (right !== 0) {
+    const remainder = left % right;
+    left = right;
+    right = remainder;
+  }
+  return left || 1;
+}
+
+function sanitizeRecordFragment(value: string | undefined, fallback: string): string {
+  const sanitized = (value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return sanitized || fallback;
+}
+
+function buildRecordId(prefix: string, value: string | undefined, fallback: string): string {
+  return `${prefix}-${sanitizeRecordFragment(value, fallback)}`;
+}
+
+function inferAssetExtension(asset: Pick<EditorMediaAsset, 'fileExtension' | 'name'>): string {
+  if (asset.fileExtension) {
+    return asset.fileExtension.replace(/^\./, '').toLowerCase();
+  }
+
+  const match = asset.name.match(/\.([a-z0-9]+)$/i);
+  return match ? match[1]!.toLowerCase() : '';
+}
+
+function normalizeTimebaseDescriptor(value?: TimebaseDescriptor): TimebaseDescriptor | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const numerator = Math.max(1, Math.round(value.numerator));
+  const denominator = Math.max(1, Math.round(value.denominator));
+  const framesPerSecond = Number.isFinite(value.framesPerSecond)
+    ? value.framesPerSecond
+    : numerator / denominator;
+
+  return {
+    numerator,
+    denominator,
+    framesPerSecond,
+    displayString: value.displayString ?? `${numerator}/${denominator}`,
+    dropFrame: Boolean(value.dropFrame),
+  };
+}
+
+function createTimebaseDescriptor(rate?: number): TimebaseDescriptor | undefined {
+  if (!rate || !Number.isFinite(rate) || rate <= 0) {
+    return undefined;
+  }
+
+  const ntsc = NTSC_TIMEBASES.find((candidate) => Math.abs(candidate.rate - rate) < 0.0005);
+  if (ntsc) {
+    return {
+      numerator: ntsc.numerator,
+      denominator: ntsc.denominator,
+      framesPerSecond: ntsc.rate,
+      displayString: `${ntsc.numerator}/${ntsc.denominator}`,
+      dropFrame: Math.abs(ntsc.rate - 29.97) < 0.0005 || Math.abs(ntsc.rate - 59.94) < 0.0005,
+    };
+  }
+
+  const scaledNumerator = Math.round(rate * 1000);
+  const divisor = greatestCommonDivisor(scaledNumerator, 1000);
+  return {
+    numerator: scaledNumerator / divisor,
+    denominator: 1000 / divisor,
+    framesPerSecond: rate,
+    displayString: `${scaledNumerator / divisor}/${1000 / divisor}`,
+    dropFrame: false,
+  };
+}
+
+function inferAlphaMode(extension: string, colorDescriptor?: ColorDescriptor, graphicDescriptor?: GraphicDescriptor): MediaAlphaMode {
+  if (colorDescriptor?.alphaMode) {
+    return colorDescriptor.alphaMode;
+  }
+  if (graphicDescriptor?.hasAlpha) {
+    return 'straight';
+  }
+  return ALPHA_FRIENDLY_EXTENSIONS.has(extension) ? 'straight' : 'none';
+}
+
+function normalizeColorDescriptor(value?: ColorDescriptor): ColorDescriptor | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  return {
+    ...value,
+    range: value.range ?? 'unknown',
+    alphaMode: value.alphaMode ?? 'unknown',
+    hdrMode: value.hdrMode ?? 'unknown',
+  };
+}
+
+function normalizeGraphicDescriptor(value?: GraphicDescriptor): GraphicDescriptor | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  return {
+    ...value,
+    kind: value.kind,
+    renderStrategy: value.renderStrategy
+      ?? (value.kind === 'bitmap' ? 'direct' : value.kind === 'vector' ? 'rasterize' : 'flatten'),
+    flatteningRequired: value.flatteningRequired ?? value.kind !== 'bitmap',
+  };
+}
+
+function normalizeSideDataDescriptors(value?: ProbeSideDataDescriptor[]): ProbeSideDataDescriptor[] {
+  return uniqueList((value ?? []).map((entry) => JSON.stringify({
+    type: entry.type,
+    metadata: entry.metadata ?? {},
+  }))).map((serialized) => JSON.parse(serialized) as ProbeSideDataDescriptor);
+}
+
+function normalizeCaptionDescriptors(value?: CaptionDescriptor[]): CaptionDescriptor[] {
+  return uniqueList((value ?? []).map((entry) => JSON.stringify({
+    kind: entry.kind,
+    codec: entry.codec,
+    language: entry.language,
+    streamIndex: entry.streamIndex,
+    serviceName: entry.serviceName,
+  }))).map((serialized) => JSON.parse(serialized) as CaptionDescriptor);
+}
+
+function inferAssetClass(asset: EditorMediaAsset): MediaAssetClass {
+  if (asset.assetClass) {
+    return asset.assetClass;
+  }
+
+  const extension = inferAssetExtension(asset);
+
+  if (SUBTITLE_FILE_EXTENSIONS.has(extension) || asset.technicalMetadata?.subtitleCodec || asset.streams?.some((stream) => stream.kind === 'subtitle')) {
+    return 'subtitle';
+  }
+  if (LAYERED_GRAPHIC_EXTENSIONS.has(extension) || asset.graphicDescriptor?.kind === 'layered-graphic' || asset.technicalMetadata?.graphicDescriptor?.kind === 'layered-graphic') {
+    return 'layered-graphic';
+  }
+  if (VECTOR_FILE_EXTENSIONS.has(extension) || asset.graphicDescriptor?.kind === 'vector' || asset.technicalMetadata?.graphicDescriptor?.kind === 'vector') {
+    return 'vector';
+  }
+
+  switch (asset.type) {
+    case 'VIDEO':
+      return 'video';
+    case 'AUDIO':
+      return 'audio';
+    case 'IMAGE':
+      return 'bitmap';
+    case 'GRAPHIC':
+      return 'vector';
+    default:
+      return 'document';
+  }
+}
+
+function inferSupportTier(asset: EditorMediaAsset, assetClass: MediaAssetClass): MediaSupportTier {
+  if (asset.supportTier) {
+    return asset.supportTier;
+  }
+
+  return inferSharedMediaSupportTier({
+    assetId: asset.id,
+    assetName: asset.name,
+    assetClass,
+    fileExtension: inferAssetExtension(asset) || undefined,
+    container: asset.technicalMetadata?.container,
+    containerLongName: asset.technicalMetadata?.containerLongName,
+    videoCodec: asset.technicalMetadata?.videoCodec,
+    audioCodec: asset.technicalMetadata?.audioCodec,
+    subtitleCodec: asset.technicalMetadata?.subtitleCodec,
+    audioChannels: asset.technicalMetadata?.audioChannels,
+    audioChannelLayout: asset.technicalMetadata?.audioChannelLayout,
+    timebase: normalizeTimebaseDescriptor(asset.technicalMetadata?.timebase),
+    averageFrameRate: normalizeTimebaseDescriptor(asset.technicalMetadata?.averageFrameRate),
+    colorDescriptor: normalizeColorDescriptor(asset.technicalMetadata?.colorDescriptor),
+    graphicDescriptor: normalizeGraphicDescriptor(asset.graphicDescriptor ?? asset.technicalMetadata?.graphicDescriptor),
+    streams: (asset.streams ?? []).map((stream) => ({
+      ...stream,
+      disposition: stream.disposition ?? [],
+      timebase: normalizeTimebaseDescriptor(stream.timebase),
+      frameRate: normalizeTimebaseDescriptor(stream.frameRate),
+      averageFrameRate: normalizeTimebaseDescriptor(stream.averageFrameRate),
+      colorDescriptor: normalizeColorDescriptor(stream.colorDescriptor),
+      sideData: normalizeSideDataDescriptors(stream.sideData),
+      captions: normalizeCaptionDescriptors(stream.captions),
+    })),
+    variants: (asset.variants ?? []).map((variant) => ({
+      id: variant.id,
+      purpose: variant.purpose,
+      availability: variant.availability,
+      supportTier: variant.supportTier,
+      container: variant.container,
+      videoCodec: variant.videoCodec,
+      audioCodec: variant.audioCodec,
+    })),
+  });
+}
+
+function inferColorDescriptor(asset: EditorMediaAsset, assetClass: MediaAssetClass): ColorDescriptor | undefined {
+  const extension = inferAssetExtension(asset);
+  const explicit = normalizeColorDescriptor(
+    asset.colorDescriptor
+    ?? asset.technicalMetadata?.colorDescriptor
+    ?? asset.streams?.find((stream) => stream.kind === 'video')?.colorDescriptor,
+  );
+
+  if (explicit) {
+    return {
+      ...explicit,
+      alphaMode: inferAlphaMode(extension, explicit, asset.graphicDescriptor ?? asset.technicalMetadata?.graphicDescriptor),
+    };
+  }
+
+  if (assetClass !== 'video' && assetClass !== 'bitmap' && assetClass !== 'vector' && assetClass !== 'layered-graphic') {
+    return undefined;
+  }
+
+  return {
+    colorSpace: assetClass === 'video' ? undefined : 'sRGB',
+    range: 'unknown',
+    alphaMode: inferAlphaMode(extension, undefined, asset.graphicDescriptor ?? asset.technicalMetadata?.graphicDescriptor),
+    hdrMode: 'unknown',
+  };
+}
+
+function inferGraphicDescriptor(asset: EditorMediaAsset, assetClass: MediaAssetClass): GraphicDescriptor | undefined {
+  const explicit = normalizeGraphicDescriptor(asset.graphicDescriptor ?? asset.technicalMetadata?.graphicDescriptor);
+  if (explicit) {
+    return explicit;
+  }
+
+  if (assetClass !== 'bitmap' && assetClass !== 'vector' && assetClass !== 'layered-graphic') {
+    return undefined;
+  }
+
+  const extension = inferAssetExtension(asset);
+  return {
+    kind: assetClass,
+    sourceFormat: extension || undefined,
+    canvasWidth: asset.technicalMetadata?.width,
+    canvasHeight: asset.technicalMetadata?.height,
+    hasAlpha: inferAlphaMode(extension) !== 'none',
+    flatteningRequired: assetClass !== 'bitmap',
+    renderStrategy: assetClass === 'bitmap' ? 'direct' : assetClass === 'vector' ? 'rasterize' : 'flatten',
+  };
+}
+
+function inferTimebase(asset: EditorMediaAsset): TimebaseDescriptor | undefined {
+  return normalizeTimebaseDescriptor(asset.timebase ?? asset.technicalMetadata?.timebase ?? createTimebaseDescriptor(asset.technicalMetadata?.frameRate));
+}
+
+function normalizeMediaReference(reference: MediaReference): MediaReference {
+  const locator = reference.locator
+    ?? (reference.url?.startsWith('http://') || reference.url?.startsWith('https://')
+      ? 'http-url'
+      : reference.url?.startsWith('file://')
+      ? 'file-url'
+      : reference.relativePath
+      ? 'package-relative-path'
+      : 'absolute-path');
+
+  return {
+    ...reference,
+    id: reference.id || buildRecordId('ref', `${reference.role}-${reference.fileName ?? reference.path ?? reference.url}`, 'media'),
+    locator,
+    isPreferred: Boolean(reference.isPreferred),
+  };
+}
+
+function pushMediaReference(target: MediaReference[], candidate?: MediaReference): void {
+  if (!candidate) {
+    return;
+  }
+
+  const normalized = normalizeMediaReference(candidate);
+  const key = `${normalized.role}:${normalized.path ?? ''}:${normalized.relativePath ?? ''}:${normalized.url ?? ''}`;
+  const existingIndex = target.findIndex((value) => `${value.role}:${value.path ?? ''}:${value.relativePath ?? ''}:${value.url ?? ''}` === key);
+
+  if (existingIndex >= 0) {
+    target[existingIndex] = {
+      ...target[existingIndex],
+      ...normalized,
+      isPreferred: normalized.isPreferred || target[existingIndex]!.isPreferred,
+    };
+    return;
+  }
+
+  target.push(normalized);
+}
+
+function buildMediaReferences(asset: EditorMediaAsset, assetClass: MediaAssetClass, playbackUrl: string | undefined): MediaReference[] {
+  const extension = inferAssetExtension(asset);
+  const references = (asset.references ?? []).map((reference) => normalizeMediaReference({ ...reference }));
+  const checksum = asset.fingerprint?.digest;
+  const sizeBytes = asset.fileSizeBytes ?? asset.fingerprint?.sizeBytes;
+  const fileName = asset.ingestMetadata?.originalFileName ?? asset.name;
+  const updatedAt = asset.ingestMetadata?.importedAt;
+
+  pushMediaReference(references, asset.locations?.originalPath
+    ? {
+        id: buildRecordId('ref', asset.locations.originalPath, 'original'),
+        role: 'original',
+        locator: 'absolute-path',
+        path: asset.locations.originalPath,
+        fileName,
+        fileExtension: extension || undefined,
+        checksum,
+        sizeBytes,
+        container: asset.technicalMetadata?.container,
+        updatedAt,
+      }
+    : undefined);
+
+  pushMediaReference(references, asset.locations?.managedPath
+    ? {
+        id: buildRecordId('ref', asset.locations.managedPath, 'managed'),
+        role: 'managed',
+        locator: asset.locations.relativeManagedPath ? 'package-relative-path' : 'absolute-path',
+        path: asset.locations.managedPath,
+        relativePath: asset.locations.relativeManagedPath,
+        fileName,
+        fileExtension: extension || undefined,
+        checksum,
+        sizeBytes,
+        container: asset.technicalMetadata?.container,
+        updatedAt,
+      }
+    : undefined);
+
+  pushMediaReference(references, playbackUrl
+    ? {
+        id: buildRecordId('ref', playbackUrl, 'playback'),
+        role: 'playback',
+        locator: playbackUrl.startsWith('http://') || playbackUrl.startsWith('https://') ? 'http-url' : 'file-url',
+        url: playbackUrl,
+        fileName,
+        fileExtension: extension || undefined,
+        container: asset.proxyMetadata?.status === 'READY' ? asset.proxyMetadata.codec : asset.technicalMetadata?.container,
+        isPreferred: asset.proxyMetadata?.status !== 'READY',
+        updatedAt,
+      }
+    : undefined);
+
+  pushMediaReference(references, asset.proxyMetadata?.filePath || asset.proxyMetadata?.playbackUrl
+    ? {
+        id: buildRecordId('ref', asset.proxyMetadata.filePath ?? asset.proxyMetadata.playbackUrl, 'proxy'),
+        role: 'proxy',
+        locator: asset.proxyMetadata.filePath
+          ? 'absolute-path'
+          : asset.proxyMetadata.playbackUrl?.startsWith('http://') || asset.proxyMetadata.playbackUrl?.startsWith('https://')
+          ? 'http-url'
+          : 'file-url',
+        path: asset.proxyMetadata.filePath,
+        url: asset.proxyMetadata.playbackUrl,
+        fileName,
+        fileExtension: extension || undefined,
+        container: asset.proxyMetadata.codec,
+        isPreferred: asset.proxyMetadata.status === 'READY',
+        updatedAt: asset.proxyMetadata.updatedAt ?? updatedAt,
+      }
+    : undefined);
+
+  if (assetClass === 'subtitle') {
+    pushMediaReference(references, asset.locations?.originalPath
+      ? {
+          id: buildRecordId('ref', `${asset.locations.originalPath}-subtitle`, 'subtitle'),
+          role: 'subtitle-sidecar',
+          locator: 'absolute-path',
+          path: asset.locations.originalPath,
+          fileName,
+          fileExtension: extension || undefined,
+          checksum,
+          sizeBytes,
+          updatedAt,
+        }
+      : undefined);
+  }
+
+  if ((assetClass === 'vector' || assetClass === 'layered-graphic') && asset.locations?.originalPath) {
+    pushMediaReference(references, {
+      id: buildRecordId('ref', `${asset.locations.originalPath}-graphic`, 'graphic'),
+      role: 'graphic-source',
+      locator: 'absolute-path',
+      path: asset.locations.originalPath,
+      fileName,
+      fileExtension: extension || undefined,
+      checksum,
+      sizeBytes,
+      updatedAt,
+    });
+  }
+
+  return references;
+}
+
+function normalizeStreamDescriptor(stream: StreamDescriptor): StreamDescriptor {
+  return {
+    ...stream,
+    id: stream.id || buildRecordId('stream', `${stream.kind}-${stream.index}`, 'primary'),
+    disposition: uniqueList(stream.disposition ?? []),
+    timebase: normalizeTimebaseDescriptor(stream.timebase),
+    frameRate: normalizeTimebaseDescriptor(stream.frameRate),
+    averageFrameRate: normalizeTimebaseDescriptor(stream.averageFrameRate),
+    colorDescriptor: normalizeColorDescriptor(stream.colorDescriptor),
+    sideData: normalizeSideDataDescriptors(stream.sideData),
+    captions: normalizeCaptionDescriptors(stream.captions),
+  };
+}
+
+function pushStreamDescriptor(target: StreamDescriptor[], candidate?: StreamDescriptor): void {
+  if (!candidate) {
+    return;
+  }
+
+  const normalized = normalizeStreamDescriptor(candidate);
+  const existingIndex = target.findIndex((stream) => stream.kind === normalized.kind && stream.index === normalized.index);
+  if (existingIndex >= 0) {
+    target[existingIndex] = {
+      ...target[existingIndex],
+      ...normalized,
+      disposition: uniqueList([
+        ...(target[existingIndex]!.disposition ?? []),
+        ...(normalized.disposition ?? []),
+      ]),
+    };
+    return;
+  }
+
+  target.push(normalized);
+}
+
+function buildStreamDescriptors(
+  asset: EditorMediaAsset,
+  assetClass: MediaAssetClass,
+  timebase: TimebaseDescriptor | undefined,
+  colorDescriptor: ColorDescriptor | undefined,
+): StreamDescriptor[] {
+  const streams = (asset.streams ?? []).map((stream) => normalizeStreamDescriptor({ ...stream }));
+  const technicalMetadata = asset.technicalMetadata;
+
+  pushStreamDescriptor(streams, (assetClass === 'video' || assetClass === 'bitmap' || assetClass === 'vector' || assetClass === 'layered-graphic'
+    || technicalMetadata?.videoCodec || technicalMetadata?.width || technicalMetadata?.height)
+    ? {
+        id: buildRecordId('stream', `${asset.id}-video-0`, 'video'),
+        index: 0,
+        kind: 'video',
+        codec: technicalMetadata?.videoCodec ?? (assetClass === 'bitmap' || assetClass === 'vector' || assetClass === 'layered-graphic' ? inferAssetExtension(asset) || undefined : undefined),
+        width: technicalMetadata?.width,
+        height: technicalMetadata?.height,
+        durationSeconds: technicalMetadata?.durationSeconds ?? asset.duration,
+        bitRate: technicalMetadata?.bitRate,
+        timebase,
+        frameRate: normalizeTimebaseDescriptor(technicalMetadata?.timebase ?? timebase),
+        averageFrameRate: normalizeTimebaseDescriptor(technicalMetadata?.averageFrameRate),
+        reelName: technicalMetadata?.reelName ?? asset.relinkIdentity?.reelName,
+        timecodeStart: technicalMetadata?.timecodeStart ?? asset.relinkIdentity?.sourceTimecodeStart,
+        audioChannelLayout: undefined,
+        colorDescriptor,
+        sideData: normalizeSideDataDescriptors(technicalMetadata?.sideData),
+        captions: normalizeCaptionDescriptors(technicalMetadata?.captions),
+      }
+    : undefined);
+
+  pushStreamDescriptor(streams, (assetClass === 'audio' || technicalMetadata?.audioCodec || technicalMetadata?.audioChannels || technicalMetadata?.sampleRate)
+    ? {
+        id: buildRecordId('stream', `${asset.id}-audio-0`, 'audio'),
+        index: streams.some((stream) => stream.kind === 'video') ? 1 : 0,
+        kind: 'audio',
+        codec: technicalMetadata?.audioCodec,
+        durationSeconds: technicalMetadata?.durationSeconds ?? asset.duration,
+        bitRate: technicalMetadata?.bitRate,
+        audioChannels: technicalMetadata?.audioChannels,
+        audioChannelLayout: technicalMetadata?.audioChannelLayout,
+        sampleRate: technicalMetadata?.sampleRate,
+        sampleFormat: undefined,
+        reelName: technicalMetadata?.reelName ?? asset.relinkIdentity?.reelName,
+        timecodeStart: technicalMetadata?.timecodeStart ?? asset.relinkIdentity?.sourceTimecodeStart,
+        sideData: normalizeSideDataDescriptors(technicalMetadata?.sideData),
+        captions: normalizeCaptionDescriptors(technicalMetadata?.captions),
+      }
+    : undefined);
+
+  pushStreamDescriptor(streams, (assetClass === 'subtitle' || technicalMetadata?.subtitleCodec || (technicalMetadata?.subtitleLanguages?.length ?? 0) > 0)
+    ? {
+        id: buildRecordId('stream', `${asset.id}-subtitle-0`, 'subtitle'),
+        index: streams.length,
+        kind: 'subtitle',
+        codec: technicalMetadata?.subtitleCodec ?? (inferAssetExtension(asset) || undefined),
+        language: technicalMetadata?.subtitleLanguages?.[0],
+        durationSeconds: technicalMetadata?.durationSeconds ?? asset.duration,
+        timebase,
+        captions: normalizeCaptionDescriptors(
+          technicalMetadata?.captions?.length
+            ? technicalMetadata.captions
+            : [{
+                kind: 'sidecar',
+                codec: technicalMetadata?.subtitleCodec ?? (inferAssetExtension(asset) || undefined),
+                language: technicalMetadata?.subtitleLanguages?.[0],
+                streamIndex: streams.length,
+              }],
+        ),
+      }
+    : undefined);
+
+  return streams;
+}
+
+function normalizeVariantRecord(variant: VariantRecord): VariantRecord {
+  return {
+    ...variant,
+    id: variant.id || buildRecordId('variant', `${variant.purpose}-${variant.name}`, 'primary'),
+    availability: variant.availability,
+    supportTier: variant.supportTier,
+    referenceIds: uniqueList(variant.referenceIds ?? []),
+    streamIds: uniqueList(variant.streamIds ?? []),
+    colorDescriptor: normalizeColorDescriptor(variant.colorDescriptor),
+  };
+}
+
+function pushVariantRecord(target: VariantRecord[], candidate?: VariantRecord): void {
+  if (!candidate) {
+    return;
+  }
+
+  const normalized = normalizeVariantRecord(candidate);
+  const key = `${normalized.purpose}:${normalized.referenceIds.join(',')}:${normalized.streamIds.join(',')}`;
+  const existingIndex = target.findIndex((variant) => `${variant.purpose}:${variant.referenceIds.join(',')}:${variant.streamIds.join(',')}` === key);
+
+  if (existingIndex >= 0) {
+    target[existingIndex] = {
+      ...target[existingIndex],
+      ...normalized,
+      referenceIds: uniqueList([
+        ...target[existingIndex]!.referenceIds,
+        ...normalized.referenceIds,
+      ]),
+      streamIds: uniqueList([
+        ...target[existingIndex]!.streamIds,
+        ...normalized.streamIds,
+      ]),
+    };
+    return;
+  }
+
+  target.push(normalized);
+}
+
+function resolveVariantAvailability(asset: EditorMediaAsset, purpose: VariantPurpose): VariantAvailability {
+  if (purpose === 'proxy' || purpose === 'playback') {
+    if (asset.proxyMetadata?.status === 'READY') {
+      return 'ready';
+    }
+    if (asset.proxyMetadata?.status === 'QUEUED' || asset.proxyMetadata?.status === 'NOT_REQUESTED') {
+      return 'pending';
+    }
+    if (asset.proxyMetadata?.status === 'FAILED') {
+      return 'failed';
+    }
+  }
+
+  if (asset.status === 'ERROR' || asset.status === 'OFFLINE') {
+    return 'missing';
+  }
+
+  return 'ready';
+}
+
+function buildVariantRecords(
+  asset: EditorMediaAsset,
+  assetClass: MediaAssetClass,
+  supportTier: MediaSupportTier,
+  references: MediaReference[],
+  streams: StreamDescriptor[],
+  colorDescriptor: ColorDescriptor | undefined,
+): VariantRecord[] {
+  const variants = (asset.variants ?? []).map((variant) => normalizeVariantRecord({ ...variant }));
+  const streamIds = streams.map((stream) => stream.id);
+  const sourceReferenceIds = references
+    .filter((reference) => reference.role === 'original' || reference.role === 'graphic-source' || reference.role === 'subtitle-sidecar')
+    .map((reference) => reference.id);
+  const managedReferenceIds = references.filter((reference) => reference.role === 'managed').map((reference) => reference.id);
+  const proxyReferenceIds = references.filter((reference) => reference.role === 'proxy').map((reference) => reference.id);
+  const playbackReferenceIds = references.filter((reference) => reference.role === 'playback').map((reference) => reference.id);
+
+  pushVariantRecord(variants, sourceReferenceIds.length > 0
+    ? {
+        id: buildRecordId('variant', `${asset.id}-source`, 'source'),
+        name: 'Source',
+        purpose: assetClass === 'subtitle' ? 'subtitle' : 'source',
+        availability: resolveVariantAvailability(asset, assetClass === 'subtitle' ? 'subtitle' : 'source'),
+        supportTier,
+        referenceIds: sourceReferenceIds,
+        streamIds,
+        container: asset.technicalMetadata?.container,
+        videoCodec: asset.technicalMetadata?.videoCodec,
+        audioCodec: asset.technicalMetadata?.audioCodec,
+        width: asset.technicalMetadata?.width,
+        height: asset.technicalMetadata?.height,
+        frameRate: asset.technicalMetadata?.frameRate,
+        colorDescriptor,
+      }
+    : undefined);
+
+  pushVariantRecord(variants, managedReferenceIds.length > 0
+    ? {
+        id: buildRecordId('variant', `${asset.id}-managed`, 'managed'),
+        name: 'Managed',
+        purpose: 'managed',
+        availability: resolveVariantAvailability(asset, 'managed'),
+        supportTier,
+        referenceIds: managedReferenceIds,
+        streamIds,
+        container: asset.technicalMetadata?.container,
+        videoCodec: asset.technicalMetadata?.videoCodec,
+        audioCodec: asset.technicalMetadata?.audioCodec,
+        width: asset.technicalMetadata?.width,
+        height: asset.technicalMetadata?.height,
+        frameRate: asset.technicalMetadata?.frameRate,
+        colorDescriptor,
+      }
+    : undefined);
+
+  pushVariantRecord(variants, proxyReferenceIds.length > 0
+    ? {
+        id: buildRecordId('variant', `${asset.id}-proxy`, 'proxy'),
+        name: 'Proxy',
+        purpose: assetClass === 'vector' || assetClass === 'layered-graphic' ? 'graphic-render' : 'proxy',
+        availability: resolveVariantAvailability(asset, 'proxy'),
+        supportTier: assetClass === 'vector' || assetClass === 'layered-graphic' || supportTier === 'adapter'
+          ? 'adapter'
+          : 'normalized',
+        referenceIds: proxyReferenceIds,
+        streamIds,
+        container: asset.proxyMetadata?.codec ?? asset.technicalMetadata?.container,
+        videoCodec: asset.proxyMetadata?.codec ?? asset.technicalMetadata?.videoCodec,
+        audioCodec: asset.technicalMetadata?.audioCodec,
+        width: asset.proxyMetadata?.width ?? asset.technicalMetadata?.width,
+        height: asset.proxyMetadata?.height ?? asset.technicalMetadata?.height,
+        frameRate: asset.technicalMetadata?.frameRate,
+        colorDescriptor,
+        error: asset.proxyMetadata?.error,
+      }
+    : undefined);
+
+  pushVariantRecord(variants, playbackReferenceIds.length > 0
+    ? {
+        id: buildRecordId('variant', `${asset.id}-playback`, 'playback'),
+        name: 'Playback',
+        purpose: 'playback',
+        availability: resolveVariantAvailability(asset, 'playback'),
+        supportTier: proxyReferenceIds.length > 0 && supportTier !== 'adapter' ? 'normalized' : supportTier,
+        referenceIds: playbackReferenceIds,
+        streamIds,
+        container: asset.proxyMetadata?.status === 'READY' ? asset.proxyMetadata.codec : asset.technicalMetadata?.container,
+        videoCodec: asset.proxyMetadata?.status === 'READY' ? asset.proxyMetadata.codec : asset.technicalMetadata?.videoCodec,
+        audioCodec: asset.technicalMetadata?.audioCodec,
+        width: asset.proxyMetadata?.width ?? asset.technicalMetadata?.width,
+        height: asset.proxyMetadata?.height ?? asset.technicalMetadata?.height,
+        frameRate: asset.technicalMetadata?.frameRate,
+        colorDescriptor,
+      }
+    : undefined);
+
+  return variants;
+}
+
+function buildSharedCapabilityInput(
+  asset: EditorMediaAsset,
+  assetClass: MediaAssetClass,
+  supportTier: MediaSupportTier,
+  variants: VariantRecord[],
+  streams: StreamDescriptor[],
+): SharedAssetCapabilityInput {
+  return {
+    assetId: asset.id,
+    assetName: asset.name,
+    assetClass,
+    supportTier,
+    fileExtension: inferAssetExtension(asset) || undefined,
+    mimeType: asset.references?.find((reference) => reference.mimeType)?.mimeType,
+    container: asset.technicalMetadata?.container,
+    containerLongName: asset.technicalMetadata?.containerLongName,
+    videoCodec: asset.technicalMetadata?.videoCodec,
+    audioCodec: asset.technicalMetadata?.audioCodec,
+    subtitleCodec: asset.technicalMetadata?.subtitleCodec,
+    audioChannels: asset.technicalMetadata?.audioChannels,
+    audioChannelLayout: asset.technicalMetadata?.audioChannelLayout,
+    timebase: normalizeTimebaseDescriptor(asset.technicalMetadata?.timebase ?? asset.timebase),
+    averageFrameRate: normalizeTimebaseDescriptor(asset.technicalMetadata?.averageFrameRate),
+    colorDescriptor: normalizeColorDescriptor(asset.colorDescriptor ?? asset.technicalMetadata?.colorDescriptor),
+    graphicDescriptor: normalizeGraphicDescriptor(asset.graphicDescriptor ?? asset.technicalMetadata?.graphicDescriptor),
+    streams: streams.map((stream) => ({
+      ...stream,
+      disposition: stream.disposition ?? [],
+      timebase: normalizeTimebaseDescriptor(stream.timebase),
+      frameRate: normalizeTimebaseDescriptor(stream.frameRate),
+      averageFrameRate: normalizeTimebaseDescriptor(stream.averageFrameRate),
+      colorDescriptor: normalizeColorDescriptor(stream.colorDescriptor),
+      sideData: normalizeSideDataDescriptors(stream.sideData),
+      captions: normalizeCaptionDescriptors(stream.captions),
+    })),
+    variants: variants.map((variant) => ({
+      id: variant.id,
+      purpose: variant.purpose,
+      availability: variant.availability,
+      supportTier: variant.supportTier,
+      container: variant.container,
+      videoCodec: variant.videoCodec,
+      audioCodec: variant.audioCodec,
+    })),
+  };
+}
+
+function buildCapabilityReport(
+  asset: EditorMediaAsset,
+  assetClass: MediaAssetClass,
+  supportTier: MediaSupportTier,
+  variants: VariantRecord[],
+  streams: StreamDescriptor[],
+): CapabilityReport {
+  const report = createAssetCapabilityReport(
+    buildSharedCapabilityInput(asset, assetClass, supportTier, variants, streams),
+    {
+      primarySurface: asset.capabilityReport?.primarySurface ?? 'desktop',
+      updatedAt: asset.capabilityReport?.updatedAt ?? asset.ingestMetadata?.importedAt,
+    },
+  );
+
+  const explicitSurfaceMap = new Map((asset.capabilityReport?.surfaces ?? []).map((surface) => [surface.surface, surface]));
+  const surfaces: CapabilitySurfaceReport[] = report.surfaces.map((surface) => {
+    const explicit = explicitSurfaceMap.get(surface.surface);
+    if (!explicit) {
+      return {
+        surface: surface.surface,
+        disposition: surface.disposition,
+        supportTier: surface.supportTier,
+        preferredVariantId: surface.preferredVariantId,
+        reasons: uniqueList(surface.reasons),
+      };
+    }
+
+    return {
+      surface: explicit.surface,
+      disposition: explicit.disposition,
+      supportTier: explicit.supportTier,
+      preferredVariantId: explicit.preferredVariantId ?? surface.preferredVariantId,
+      reasons: uniqueList([
+        ...surface.reasons,
+        ...(explicit.reasons ?? []),
+      ]),
+    };
+  });
+
+  return {
+    primarySurface: report.primarySurface,
+    primaryDisposition: asset.capabilityReport?.primaryDisposition ?? report.primaryDisposition,
+    sourceSupportTier: asset.capabilityReport?.sourceSupportTier ?? report.sourceSupportTier,
+    preferredVariantId: asset.capabilityReport?.preferredVariantId ?? report.preferredVariantId,
+    surfaces,
+    issues: uniqueList([
+      ...report.issues,
+      ...(asset.capabilityReport?.issues ?? []),
+    ]),
+    updatedAt: report.updatedAt,
+  };
+}
+
 function normalizeMediaAsset(asset: EditorMediaAsset): EditorMediaAsset {
   const waveformPeaks = asset.waveformMetadata?.peaks ?? asset.waveformData ?? [];
-  const technicalMetadata = asset.technicalMetadata
-    ? {
-        ...asset.technicalMetadata,
-        durationSeconds: asset.technicalMetadata.durationSeconds ?? asset.duration,
-      }
-    : asset.duration
-    ? { durationSeconds: asset.duration }
-    : undefined;
   const playbackUrl = asset.proxyMetadata?.status === 'READY'
     ? asset.proxyMetadata.playbackUrl ?? asset.playbackUrl ?? asset.locations?.playbackUrl
     : asset.playbackUrl ?? asset.locations?.playbackUrl;
   const fileNameStem = asset.name.replace(/\.[a-z0-9]+$/i, '');
+  const assetClass = inferAssetClass(asset);
+  const supportTier = inferSupportTier(asset, assetClass);
+  const timebase = inferTimebase(asset);
+  const graphicDescriptor = inferGraphicDescriptor(asset, assetClass);
+  const colorDescriptor = inferColorDescriptor(asset, assetClass);
+  const technicalMetadata = asset.technicalMetadata
+    ? {
+        ...asset.technicalMetadata,
+        durationSeconds: asset.technicalMetadata.durationSeconds ?? asset.duration,
+        timebase: normalizeTimebaseDescriptor(asset.technicalMetadata.timebase ?? timebase),
+        averageFrameRate: normalizeTimebaseDescriptor(asset.technicalMetadata.averageFrameRate),
+        colorDescriptor: normalizeColorDescriptor(asset.technicalMetadata.colorDescriptor ?? colorDescriptor),
+        graphicDescriptor: normalizeGraphicDescriptor(asset.technicalMetadata.graphicDescriptor ?? graphicDescriptor),
+        subtitleLanguages: uniqueList(asset.technicalMetadata.subtitleLanguages ?? []),
+        sideData: normalizeSideDataDescriptors(asset.technicalMetadata.sideData),
+        captions: normalizeCaptionDescriptors(asset.technicalMetadata.captions),
+        formatTags: { ...(asset.technicalMetadata.formatTags ?? {}) },
+        isVariableFrameRate: asset.technicalMetadata.isVariableFrameRate
+          ?? (asset.technicalMetadata.frameRate !== undefined
+            && asset.technicalMetadata.averageFrameRate?.framesPerSecond !== undefined
+            ? Math.abs(asset.technicalMetadata.frameRate - asset.technicalMetadata.averageFrameRate.framesPerSecond) > 0.01
+            : asset.technicalMetadata.timebase?.framesPerSecond !== undefined
+            && asset.technicalMetadata.averageFrameRate?.framesPerSecond !== undefined
+            ? Math.abs(asset.technicalMetadata.timebase.framesPerSecond - asset.technicalMetadata.averageFrameRate.framesPerSecond) > 0.01
+            : undefined),
+      }
+    : asset.duration || timebase || colorDescriptor || graphicDescriptor
+    ? {
+        durationSeconds: asset.duration,
+        timebase,
+        colorDescriptor,
+        graphicDescriptor,
+        sideData: [],
+        captions: [],
+        formatTags: {},
+      }
+    : undefined;
+  const references = buildMediaReferences(asset, assetClass, playbackUrl);
+  const streams = buildStreamDescriptors(asset, assetClass, timebase, colorDescriptor);
+  const variants = buildVariantRecords(asset, assetClass, supportTier, references, streams, colorDescriptor);
+  const capabilityReport = buildCapabilityReport(asset, assetClass, supportTier, variants, streams);
 
   return {
     ...asset,
+    assetClass,
+    supportTier,
     duration: asset.duration ?? technicalMetadata?.durationSeconds,
     playbackUrl,
     waveformData: [...waveformPeaks],
-    fileExtension: asset.fileExtension,
+    fileExtension: asset.fileExtension ?? (inferAssetExtension(asset) || undefined),
     fileSizeBytes: asset.fileSizeBytes ?? asset.fingerprint?.sizeBytes,
     indexStatus: asset.indexStatus ?? (
       asset.status === 'ERROR'
@@ -690,7 +1711,11 @@ function normalizeMediaAsset(asset: EditorMediaAsset): EditorMediaAsset {
       ? {
           ...asset.locations,
           playbackUrl: asset.locations.playbackUrl ?? playbackUrl,
-          pathHistory: uniqueList(asset.locations.pathHistory ?? []),
+          pathHistory: uniqueList([
+            ...(asset.locations.pathHistory ?? []),
+            asset.locations.originalPath ?? '',
+            asset.locations.managedPath ?? '',
+          ]),
         }
       : undefined,
     fingerprint: asset.fingerprint ? { ...asset.fingerprint } : undefined,
@@ -700,7 +1725,11 @@ function normalizeMediaAsset(asset: EditorMediaAsset): EditorMediaAsset {
           ...asset.relinkIdentity,
           normalizedName: asset.relinkIdentity.normalizedName || normalizeAssetName(asset.name),
           sourceFileStem: asset.relinkIdentity.sourceFileStem || fileNameStem,
-          lastKnownPaths: uniqueList(asset.relinkIdentity.lastKnownPaths ?? []),
+          lastKnownPaths: uniqueList([
+            ...(asset.relinkIdentity.lastKnownPaths ?? []),
+            asset.locations?.originalPath ?? '',
+            asset.locations?.managedPath ?? '',
+          ]),
         }
       : undefined,
     proxyMetadata: asset.proxyMetadata
@@ -727,6 +1756,13 @@ function normalizeMediaAsset(asset: EditorMediaAsset): EditorMediaAsset {
           scenes: uniqueList(asset.semanticMetadata.scenes ?? []),
         }
       : undefined,
+    references,
+    streams,
+    variants,
+    capabilityReport,
+    timebase,
+    colorDescriptor,
+    graphicDescriptor,
   };
 }
 
@@ -737,6 +1773,10 @@ function normalizeBins(bins: EditorBin[]): EditorBin[] {
     assets: (bin.assets ?? []).map(normalizeMediaAsset),
     isOpen: Boolean(bin.isOpen),
   }));
+}
+
+export function hydrateMediaAsset(asset: EditorMediaAsset): EditorMediaAsset {
+  return normalizeMediaAsset(asset);
 }
 
 function createTemplateTracks(template: ProjectTemplate): EditorTrack[] {
@@ -820,22 +1860,281 @@ function createTemplateTracks(template: ProjectTemplate): EditorTrack[] {
   ];
 }
 
+function createSeedMediaAsset(overrides: Partial<EditorMediaAsset> & Pick<EditorMediaAsset, 'name' | 'type'>): EditorMediaAsset {
+  const fileName = overrides.name;
+  const fileExtension = overrides.fileExtension ?? inferAssetExtension({ fileExtension: overrides.fileExtension, name: fileName });
+  const stem = fileName.replace(/\.[a-z0-9]+$/i, '');
+  const importedAt = overrides.ingestMetadata?.importedAt ?? '2026-01-10T12:00:00.000Z';
+  const originalPath = overrides.locations?.originalPath ?? `/seed-media/originals/${sanitizeRecordFragment(fileName, 'asset')}`;
+  const managedPath = overrides.locations?.managedPath ?? `/seed-media/managed/${sanitizeRecordFragment(fileName, 'asset')}`;
+  const playbackUrl = overrides.playbackUrl
+    ?? overrides.proxyMetadata?.playbackUrl
+    ?? overrides.locations?.playbackUrl
+    ?? `file://${managedPath}`;
+  const technicalMetadata = overrides.technicalMetadata ?? {};
+  const relinkPaths = uniqueList([
+    originalPath,
+    managedPath,
+    ...(overrides.relinkIdentity?.lastKnownPaths ?? []),
+  ]);
+
+  return normalizeMediaAsset({
+    id: overrides.id ?? generateId('asset'),
+    status: overrides.status ?? 'READY',
+    tags: overrides.tags ?? [],
+    isFavorite: overrides.isFavorite ?? false,
+    fileExtension,
+    ingestMetadata: overrides.ingestMetadata ?? {
+      importedAt,
+      storageMode: 'COPY',
+      importedFileName: fileName,
+      originalFileName: fileName,
+    },
+    locations: overrides.locations ?? {
+      originalPath,
+      managedPath,
+      relativeManagedPath: `managed/${sanitizeRecordFragment(fileName, 'asset')}`,
+      playbackUrl,
+      pathHistory: relinkPaths,
+    },
+    relinkIdentity: overrides.relinkIdentity ?? {
+      assetKey: `${normalizeAssetName(stem)}:${fileExtension}`,
+      normalizedName: normalizeAssetName(stem),
+      sourceFileStem: stem,
+      lastKnownPaths: relinkPaths,
+      reelName: technicalMetadata.reelName,
+      sourceTimecodeStart: technicalMetadata.timecodeStart,
+      frameRate: technicalMetadata.frameRate,
+      durationSeconds: technicalMetadata.durationSeconds ?? overrides.duration,
+    },
+    technicalMetadata,
+    playbackUrl,
+    ...overrides,
+  });
+}
+
 function createTemplateBins(template: ProjectTemplate): EditorBin[] {
   const rootColor = TEMPLATE_META[template].color;
   const rushesAssets: EditorMediaAsset[] = [
-    { id: generateId('asset'), name: 'Scene 01 - Take 01', type: 'VIDEO', duration: 45.2, status: 'READY', tags: ['dialogue'], isFavorite: true },
-    { id: generateId('asset'), name: 'Scene 01 - Take 02', type: 'VIDEO', duration: 48.7, status: 'READY', tags: ['dialogue'], isFavorite: false },
-    { id: generateId('asset'), name: template === 'sports' ? 'Goal Cam - Wide' : 'Scene 02 - Insert', type: 'VIDEO', duration: 22.1, status: 'READY', tags: template === 'sports' ? ['action'] : ['insert'], isFavorite: false },
+    createSeedMediaAsset({
+      name: 'Scene 01 - Take 01.mxf',
+      type: 'VIDEO',
+      duration: 45.2,
+      tags: ['dialogue', 'native'],
+      isFavorite: true,
+      technicalMetadata: {
+        container: 'mxf',
+        videoCodec: 'xdcamhd422',
+        audioCodec: 'pcm_s24le',
+        durationSeconds: 45.2,
+        frameRate: 23.976,
+        width: 1920,
+        height: 1080,
+        audioChannels: 4,
+        audioChannelLayout: 'quad',
+        sampleRate: 48000,
+        bitRate: 50000000,
+        timecodeStart: '01:00:00:00',
+        reelName: 'A001',
+        colorDescriptor: {
+          colorSpace: 'Rec.709',
+          primaries: 'bt709',
+          transfer: 'bt709',
+          matrix: 'bt709',
+          range: 'limited',
+          hdrMode: 'sdr',
+        },
+      },
+      proxyMetadata: {
+        status: 'READY',
+        filePath: '/seed-media/proxies/scene-01-take-01-proxy.mp4',
+        playbackUrl: 'file:///seed-media/proxies/scene-01-take-01-proxy.mp4',
+        codec: 'h264',
+        width: 1280,
+        height: 720,
+        updatedAt: '2026-01-10T12:05:00.000Z',
+      },
+    }),
+    createSeedMediaAsset({
+      name: 'Scene 01 - Take 02.r3d',
+      type: 'VIDEO',
+      duration: 48.7,
+      tags: ['dialogue', 'raw'],
+      technicalMetadata: {
+        container: 'r3d',
+        videoCodec: 'redcode_raw',
+        audioCodec: 'pcm_s24le',
+        durationSeconds: 48.7,
+        frameRate: 23.976,
+        width: 6144,
+        height: 3160,
+        audioChannels: 2,
+        audioChannelLayout: 'stereo',
+        sampleRate: 48000,
+        bitRate: 180000000,
+        timecodeStart: '01:00:45:05',
+        reelName: 'A002',
+        colorDescriptor: {
+          colorSpace: 'Rec.2020',
+          primaries: 'bt2020',
+          transfer: 'smpte2084',
+          matrix: 'bt2020nc',
+          range: 'full',
+          hdrMode: 'pq',
+        },
+      },
+      proxyMetadata: {
+        status: 'READY',
+        filePath: '/seed-media/proxies/scene-01-take-02-proxy.mov',
+        playbackUrl: 'file:///seed-media/proxies/scene-01-take-02-proxy.mov',
+        codec: 'prores',
+        width: 2048,
+        height: 1080,
+        updatedAt: '2026-01-10T12:12:00.000Z',
+      },
+    }),
+    createSeedMediaAsset({
+      name: template === 'sports' ? 'Goal Cam - Wide.mov' : 'Scene 02 - Insert.mov',
+      type: 'VIDEO',
+      duration: 22.1,
+      tags: template === 'sports' ? ['action', 'slow-motion'] : ['insert', 'coverage'],
+      technicalMetadata: {
+        container: 'mov',
+        videoCodec: 'prores_422',
+        audioCodec: 'pcm_s16le',
+        durationSeconds: 22.1,
+        frameRate: template === 'sports' ? 59.94 : 24,
+        width: 3840,
+        height: 2160,
+        audioChannels: 2,
+        audioChannelLayout: 'stereo',
+        sampleRate: 48000,
+        bitRate: 180000000,
+        timecodeStart: '02:12:00:00',
+        reelName: template === 'sports' ? 'GCAM1' : 'B012',
+        colorDescriptor: {
+          colorSpace: template === 'sports' ? 'HLG' : 'Rec.709',
+          primaries: template === 'sports' ? 'bt2020' : 'bt709',
+          transfer: template === 'sports' ? 'arib-std-b67' : 'bt709',
+          matrix: template === 'sports' ? 'bt2020nc' : 'bt709',
+          range: 'limited',
+          hdrMode: template === 'sports' ? 'hlg' : 'sdr',
+        },
+      },
+    }),
   ];
 
   const secondaryAssets: EditorMediaAsset[] = [
-    { id: generateId('asset'), name: template === 'documentary' ? 'Interview Selects' : 'B-Roll City', type: 'VIDEO', duration: 67.5, status: 'READY', tags: ['selects'], isFavorite: false },
-    { id: generateId('asset'), name: template === 'social' ? 'Vertical Hero Shot' : 'Close-up Alt', type: 'VIDEO', duration: 31.2, status: 'READY', tags: ['coverage'], isFavorite: false },
+    createSeedMediaAsset({
+      name: template === 'documentary' ? 'Interview Selects.mp4' : 'B-Roll City.mp4',
+      type: 'VIDEO',
+      duration: 67.5,
+      tags: ['selects'],
+      technicalMetadata: {
+        container: 'mp4',
+        videoCodec: 'h264',
+        audioCodec: 'aac',
+        durationSeconds: 67.5,
+        frameRate: 24,
+        width: 1920,
+        height: 1080,
+        audioChannels: 2,
+        audioChannelLayout: 'stereo',
+        sampleRate: 48000,
+        bitRate: 12000000,
+        timecodeStart: '10:15:03:12',
+        reelName: 'BR001',
+        colorDescriptor: {
+          colorSpace: 'Rec.709',
+          primaries: 'bt709',
+          transfer: 'bt709',
+          matrix: 'bt709',
+          range: 'limited',
+          hdrMode: 'sdr',
+        },
+      },
+    }),
+    createSeedMediaAsset({
+      name: template === 'social' ? 'Vertical Hero Shot.mp4' : 'Close-up Alt.mp4',
+      type: 'VIDEO',
+      duration: 31.2,
+      tags: ['coverage', template === 'social' ? 'vertical' : 'alternate'],
+      technicalMetadata: {
+        container: 'mp4',
+        videoCodec: 'h265',
+        audioCodec: 'aac',
+        durationSeconds: 31.2,
+        frameRate: template === 'social' ? 30 : 24,
+        width: template === 'social' ? 1080 : 1920,
+        height: template === 'social' ? 1920 : 1080,
+        audioChannels: 2,
+        audioChannelLayout: 'stereo',
+        sampleRate: 48000,
+        bitRate: 9000000,
+        timecodeStart: '10:16:24:00',
+        reelName: 'ALT02',
+        colorDescriptor: {
+          colorSpace: 'Display-P3',
+          primaries: 'display-p3',
+          transfer: 'iec61966-2-1',
+          matrix: 'bt709',
+          range: 'full',
+          hdrMode: 'sdr',
+        },
+      },
+    }),
   ];
 
   const musicAssets: EditorMediaAsset[] = [
-    { id: generateId('asset'), name: template === 'podcast' ? 'Theme Sting' : 'Main Theme', type: 'AUDIO', duration: 180, status: 'READY', tags: ['music'], isFavorite: true, waveformData: createWaveform(120, 5) },
-    { id: generateId('asset'), name: template === 'sports' ? 'Crowd Lift' : 'Tension Bed', type: 'AUDIO', duration: 90, status: 'READY', tags: ['music'], isFavorite: false, waveformData: createWaveform(120, 18) },
+    createSeedMediaAsset({
+      name: template === 'podcast' ? 'Theme Sting.wav' : 'Main Theme.wav',
+      type: 'AUDIO',
+      duration: 180,
+      tags: ['music', 'surround'],
+      isFavorite: true,
+      waveformData: createWaveform(120, 5),
+      technicalMetadata: {
+        container: 'wav',
+        audioCodec: 'pcm_s24le',
+        durationSeconds: 180,
+        audioChannels: 6,
+        audioChannelLayout: '5.1',
+        sampleRate: 48000,
+        bitRate: 6912000,
+        timecodeStart: '00:58:00:00',
+        reelName: 'MUS01',
+      },
+      waveformMetadata: {
+        status: 'READY',
+        peaks: createWaveform(120, 5),
+        sampleCount: 120,
+        updatedAt: '2026-01-10T12:03:00.000Z',
+      },
+    }),
+    createSeedMediaAsset({
+      name: template === 'sports' ? 'Crowd Lift.aiff' : 'Tension Bed.aiff',
+      type: 'AUDIO',
+      duration: 90,
+      tags: ['music', 'stereo'],
+      waveformData: createWaveform(120, 18),
+      technicalMetadata: {
+        container: 'aiff',
+        audioCodec: 'pcm_s16be',
+        durationSeconds: 90,
+        audioChannels: 2,
+        audioChannelLayout: 'stereo',
+        sampleRate: 48000,
+        bitRate: 1536000,
+        timecodeStart: '00:59:12:00',
+        reelName: 'MUS02',
+      },
+      waveformMetadata: {
+        status: 'READY',
+        peaks: createWaveform(120, 18),
+        sampleCount: 120,
+        updatedAt: '2026-01-10T12:03:30.000Z',
+      },
+    }),
   ];
 
   return [
@@ -879,8 +2178,135 @@ function createTemplateBins(template: ProjectTemplate): EditorBin[] {
       isOpen: false,
       children: [],
       assets: [
-        { id: generateId('asset'), name: 'Title Card', type: 'IMAGE', status: 'READY', tags: ['graphics'], isFavorite: false },
-        { id: generateId('asset'), name: 'Lower Third', type: 'IMAGE', status: 'READY', tags: ['graphics'], isFavorite: false },
+        createSeedMediaAsset({
+          name: 'Title Card.png',
+          type: 'IMAGE',
+          tags: ['graphics', 'bitmap'],
+          technicalMetadata: {
+            container: 'png_pipe',
+            videoCodec: 'png',
+            width: 3840,
+            height: 2160,
+            colorDescriptor: {
+              colorSpace: 'sRGB',
+              primaries: 'bt709',
+              transfer: 'iec61966-2-1',
+              matrix: 'rgb',
+              range: 'full',
+              hdrMode: 'sdr',
+              alphaMode: 'straight',
+            },
+            graphicDescriptor: {
+              kind: 'bitmap',
+              sourceFormat: 'png',
+              canvasWidth: 3840,
+              canvasHeight: 2160,
+              hasAlpha: true,
+              flatteningRequired: false,
+              renderStrategy: 'direct',
+            },
+          },
+        }),
+        createSeedMediaAsset({
+          name: 'Lower Third.svg',
+          type: 'GRAPHIC',
+          tags: ['graphics', 'vector'],
+          proxyMetadata: {
+            status: 'READY',
+            filePath: '/seed-media/renders/lower-third.png',
+            playbackUrl: 'file:///seed-media/renders/lower-third.png',
+            codec: 'png',
+            width: 1920,
+            height: 1080,
+            updatedAt: '2026-01-10T12:07:00.000Z',
+          },
+          technicalMetadata: {
+            container: 'svg',
+            width: 1920,
+            height: 1080,
+            graphicDescriptor: {
+              kind: 'vector',
+              sourceFormat: 'svg',
+              canvasWidth: 1920,
+              canvasHeight: 1080,
+              hasAlpha: true,
+              flatteningRequired: true,
+              renderStrategy: 'rasterize',
+            },
+            colorDescriptor: {
+              colorSpace: 'sRGB',
+              primaries: 'bt709',
+              transfer: 'iec61966-2-1',
+              matrix: 'rgb',
+              range: 'full',
+              hdrMode: 'sdr',
+              alphaMode: 'straight',
+            },
+          },
+        }),
+        createSeedMediaAsset({
+          name: 'Segment Opener.psd',
+          type: 'GRAPHIC',
+          tags: ['graphics', 'layered'],
+          proxyMetadata: {
+            status: 'READY',
+            filePath: '/seed-media/renders/segment-opener.png',
+            playbackUrl: 'file:///seed-media/renders/segment-opener.png',
+            codec: 'png',
+            width: 3840,
+            height: 2160,
+            updatedAt: '2026-01-10T12:09:00.000Z',
+          },
+          technicalMetadata: {
+            container: 'psd',
+            width: 3840,
+            height: 2160,
+            graphicDescriptor: {
+              kind: 'layered-graphic',
+              sourceFormat: 'psd',
+              canvasWidth: 3840,
+              canvasHeight: 2160,
+              layerCount: 12,
+              hasAlpha: true,
+              flatteningRequired: true,
+              renderStrategy: 'flatten',
+            },
+            colorDescriptor: {
+              colorSpace: 'Adobe RGB',
+              primaries: 'adobe-rgb',
+              transfer: 'iec61966-2-1',
+              matrix: 'rgb',
+              range: 'full',
+              hdrMode: 'sdr',
+              alphaMode: 'straight',
+            },
+          },
+        }),
+      ],
+    },
+    {
+      id: generateId('bin'),
+      name: 'Captions',
+      color: '#6bc5e3',
+      isOpen: false,
+      children: [],
+      assets: [
+        createSeedMediaAsset({
+          name: 'Scene 01 English.srt',
+          type: 'DOCUMENT',
+          duration: 48.7,
+          tags: ['subtitle', 'english'],
+          technicalMetadata: {
+            container: 'srt',
+            subtitleCodec: 'subrip',
+            durationSeconds: 48.7,
+            frameRate: 23.976,
+            timebase: createTimebaseDescriptor(23.976),
+            subtitleLanguages: ['en'],
+            timecodeStart: '01:00:45:05',
+            reelName: 'A002',
+          },
+        }),
       ],
     },
     {

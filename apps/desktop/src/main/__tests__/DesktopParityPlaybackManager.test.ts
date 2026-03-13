@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EditorBin, EditorClip, EditorMediaAsset, EditorProject, EditorTrack } from '@mcua/core';
 import { DesktopParityPlaybackManager } from '../parity/DesktopParityPlaybackManager';
+import { createDesktopProjectFixture } from './projectTestFactory';
 
 function makeAsset(sourcePath: string): EditorMediaAsset {
   return {
@@ -77,60 +78,18 @@ function makeBin(asset: EditorMediaAsset): EditorBin {
 
 function makeProject(sourcePath: string): EditorProject {
   const asset = makeAsset(sourcePath);
-  return {
-    schemaVersion: 2,
+  return createDesktopProjectFixture({
     id: 'desktop-project-bridge',
     name: 'Desktop Playback Bridge',
-    description: '',
-    template: 'film',
-    tags: [],
-    createdAt: '2024-01-01T00:00:00Z',
-    updatedAt: '2024-01-01T00:00:00Z',
-    progress: 0,
-    settings: {
-      frameRate: 24,
-      width: 1920,
-      height: 1080,
-      sampleRate: 48000,
-      exportFormat: 'mov',
-    },
+    bins: [makeBin(asset)],
     tracks: [
       makeTrack('V1', 'VIDEO', [makeClip('clip-v1', 'V1', asset.id, 'video')]),
       makeTrack('A1', 'AUDIO', [makeClip('clip-a1', 'A1', asset.id, 'audio')]),
     ],
-    markers: [],
-    bins: [makeBin(asset)],
-    collaborators: [],
-    aiJobs: [],
-    transcript: [],
-    reviewComments: [],
-    approvals: [],
-    publishJobs: [],
-    watchFolders: [],
-    tokenBalance: 1000,
-    editorialState: {
-      selectedBinId: 'main',
-      sourceAssetId: asset.id,
-      enabledTrackIds: ['V1', 'A1'],
-      syncLockedTrackIds: [],
-      videoMonitorTrackId: 'V1',
-      sourceTrackDescriptors: [],
-      trackPatches: [],
-    },
-    workstationState: {
-      subtitleTracks: [],
-      titleClips: [],
-      trackHeights: {},
-      activeWorkspaceId: 'source-record',
-      composerLayout: 'source-record',
-      showTrackingInfo: true,
-      trackingInfoFields: ['master-tc'],
-      clipTextDisplay: 'name',
-      dupeDetectionEnabled: false,
-      versionHistoryRetentionPreference: 'manual',
-      versionHistoryCompareMode: 'summary',
-    },
-  };
+    sourceAssetId: asset.id,
+    enabledTrackIds: ['V1', 'A1'],
+    videoMonitorTrackId: 'V1',
+  });
 }
 
 describe('DesktopParityPlaybackManager', () => {

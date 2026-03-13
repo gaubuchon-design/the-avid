@@ -5,6 +5,8 @@ This program turns The Avid from a broad product foundation into a credible prof
 Related assessment:
 
 - `docs/MEDIA_COMPOSER_UNIFICATION_ASSESSMENT.md` captures the current cross-surface architecture verdict, remaining Media Composer parity gaps, and production-oriented Codex prompts for closing them.
+- `docs/UNIVERSAL_MEDIA_BACKEND_ARCHITECTURE.md` defines the repo plan for a real media middle layer that can run locally or as distributed services.
+- `docs/UNIVERSAL_MEDIA_BACKEND_PROMPTS.md` turns that backend plan into implementation-ready Codex prompts.
 
 ## Starting Point
 

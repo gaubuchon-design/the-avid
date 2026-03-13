@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useEditorStore } from '../../store/editor.store';
 import { Timecode } from '../../lib/timecode';
 import { UserAvatarMenu } from '../UserAvatarMenu';
+import { hydrateProject } from '@mcua/core';
+import { saveProjectToRepository } from '../../lib/projectRepository';
 
 export function Toolbar() {
   const navigate = useNavigate();
@@ -23,6 +25,30 @@ export function Toolbar() {
     ? `${projectSettings.width}x${projectSettings.height} · ${projectSettings.frameRate}fps`
     : 'Project settings';
   const transportLabel = isPlaying ? 'Playing' : 'Parked';
+  const handleOpenProject = React.useCallback(async () => {
+    if (!window.electronAPI?.openFile) {
+      return;
+    }
+
+    const result = await window.electronAPI.openFile({
+      title: 'Open The Avid Project',
+      filters: [{ name: 'The Avid Project', extensions: ['avidproj'] }],
+      properties: ['openFile'],
+    });
+
+    const filePath = result.filePaths[0];
+    if (result.canceled || !filePath) {
+      return;
+    }
+
+    const serialized = await window.electronAPI.readTextFile(filePath);
+    if (!serialized) {
+      return;
+    }
+
+    const project = await saveProjectToRepository(hydrateProject(JSON.parse(serialized)));
+    navigate(`/editor/${project.id}`);
+  }, [navigate]);
 
   // Undo/Redo now handled by global KeyboardEngine via EditorPage registrations
 
@@ -44,7 +70,7 @@ export function Toolbar() {
               <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9 22 9 12 15 12 15 22" />
             </svg>
           </button>
-          <button className="toolbar-icon-btn" title="Open Project" aria-label="Open Project">
+          <button className="toolbar-icon-btn" title="Open Project" aria-label="Open Project" onClick={() => void handleOpenProject()}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
             </svg>

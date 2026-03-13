@@ -2,6 +2,12 @@
 
 This brief defines the first production-grade media-engine direction for The Avid. It exists to stop feature work from drifting ahead of playback, compositing, caching, and export reliability.
 
+Related deep dives:
+
+- `docs/MEDIA_PIPELINE_ARCHITECTURE.md`
+- `docs/UNIVERSAL_MEDIA_BACKEND_ARCHITECTURE.md`
+- `docs/UNIVERSAL_MEDIA_BACKEND_PROMPTS.md`
+
 ## Purpose
 
 The current web editor can render and preview, but it still behaves like a screener pipeline rather than a workstation media engine. The next architecture needs to support:

@@ -18,6 +18,23 @@ router.use(authenticate);
 const sessionIdParam = z.object({ id: z.string().uuid() });
 const sessionIdOnlyParam = z.object({ sessionId: z.string().uuid() });
 
+function parseMarkerTimecode(timecode: string, frameRate = 30): number {
+  const numericTime = Number(timecode);
+  if (Number.isFinite(numericTime)) {
+    return numericTime;
+  }
+
+  const [hours = 0, minutes = 0, seconds = 0, frames = 0] = timecode
+    .split(/[:;.]/)
+    .map((segment) => Number(segment));
+
+  if ([hours, minutes, seconds, frames].some((segment) => Number.isNaN(segment))) {
+    return 0;
+  }
+
+  return hours * 3600 + minutes * 60 + seconds + frames / frameRate;
+}
+
 // ─── Pro Tools Sessions ──────────────────────────────────────────────────────
 
 router.get('/sessions/:projectId', validate(projectIdParam, 'params'), async (req: Request, res: Response) => {
@@ -87,10 +104,16 @@ router.post(
   '/sessions/:sessionId/markers',
   validateAll({ params: sessionIdOnlyParam, body: schemas.createMarkerSync }),
   async (req: Request, res: Response) => {
+    const sessionId = req.params['sessionId']!;
     const marker = await db.markerSync.create({
       data: {
-        sessionId: req.params['sessionId'],
-        ...req.body,
+        sessionId,
+        avidMarkerId: req.body.avidMarkerId,
+        proToolsLocId: req.body.proToolsLocId,
+        timecode: parseMarkerTimecode(req.body.timecode),
+        label: req.body.label,
+        color: req.body.color,
+        syncDirection: req.body.syncDirection,
       },
     });
     res.status(201).json({ marker });
@@ -101,15 +124,16 @@ router.post(
   '/sessions/:sessionId/markers/sync',
   validateAll({ params: sessionIdOnlyParam, body: schemas.batchMarkerSync }),
   async (req: Request, res: Response) => {
+    const sessionId = req.params['sessionId']!;
     const { direction, markers } = req.body;
     const created = await Promise.all(
       markers.map((m: { avidMarkerId?: string; proToolsLocId?: string; timecode: string; label?: string; color?: string }) =>
         db.markerSync.create({
           data: {
-            sessionId: req.params['sessionId'],
+            sessionId,
             avidMarkerId: m.avidMarkerId,
             proToolsLocId: m.proToolsLocId,
-            timecode: m.timecode,
+            timecode: parseMarkerTimecode(m.timecode),
             label: m.label,
             color: m.color,
             syncDirection: direction,

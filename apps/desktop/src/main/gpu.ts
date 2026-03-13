@@ -19,7 +19,9 @@ export interface GPUInfo {
   };
 }
 
-export async function detectGPU(): Promise<GPUInfo> {
+let cachedGPUInfoPromise: Promise<GPUInfo> | null = null;
+
+async function detectGPUUncached(): Promise<GPUInfo> {
   // Default to software fallback
   const info: GPUInfo = {
     vendor: 'unknown',
@@ -32,6 +34,10 @@ export async function detectGPU(): Promise<GPUInfo> {
     vram: 0,
     supportedCodecs: { encode: ['libx264', 'libx265'], decode: ['h264', 'hevc'] },
   };
+
+  if (typeof app?.getGPUInfo !== 'function') {
+    return info;
+  }
 
   try {
     // Parse GPU info from Chromium
@@ -135,6 +141,14 @@ export async function detectGPU(): Promise<GPUInfo> {
   }
 
   return info;
+}
+
+export async function detectGPU(): Promise<GPUInfo> {
+  if (!cachedGPUInfoPromise) {
+    cachedGPUInfoPromise = detectGPUUncached();
+  }
+
+  return cachedGPUInfoPromise;
 }
 
 /** Build FFmpeg hardware acceleration flags based on detected GPU */

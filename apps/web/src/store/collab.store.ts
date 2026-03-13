@@ -24,6 +24,7 @@ import {
   type VersionRetentionPreset,
 } from '../collab/CollabEngine';
 import { buildProjectFromEditorState, buildProjectPersistenceSnapshot } from '../lib/editorProjectState';
+import { isDevelopmentEnvironment } from '../lib/runtimeEnvironment';
 import { getProjectFromRepository, saveProjectToRepository } from '../lib/projectRepository';
 import { useEditorStore } from './editor.store';
 
@@ -968,7 +969,7 @@ export const useCollabStore = create<CollabState & CollabActions>()(
         }), true, 'collab/resetStore');
       },
     })),
-    { name: 'CollabStore', enabled: import.meta.env.DEV },
+    { name: 'CollabStore', enabled: isDevelopmentEnvironment() },
   )
 );
 

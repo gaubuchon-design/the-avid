@@ -3,6 +3,9 @@ import { immer } from 'zustand/middleware/immer';
 import {
   DEFAULT_EDITORIAL_WORKSPACE_ID,
   PROJECT_SCHEMA_VERSION,
+  hydrateMediaAsset,
+  type EditorMediaAsset,
+  type EditorMediaTechnicalMetadata,
   type EditorProject,
   type ProjectTemplate,
 } from '@mcua/core';
@@ -151,7 +154,7 @@ export interface Marker {
   color: string;
 }
 
-export interface MediaAsset {
+export interface MediaAsset extends EditorMediaAsset {
   id: string;
   name: string;
   type: 'VIDEO' | 'AUDIO' | 'IMAGE' | 'GRAPHIC' | 'DOCUMENT';
@@ -177,6 +180,7 @@ export interface MediaAsset {
   startTimecode?: string;
   bitDepth?: number;
   mimeType?: string;
+  technicalMetadata?: EditorMediaTechnicalMetadata;
   colorLabel?: string;
   rating?: number;
   // File reference for re-probe or relink
@@ -2807,7 +2811,21 @@ export const useEditorStore = create<EditorState & EditorActions>()(
             tags: [],
             isFavorite: false,
             fileSize: file!.size!,
+            fileSizeBytes: file!.size!,
+            fileExtension: ext || undefined,
             mimeType: mime,
+            indexStatus: 'INDEXING',
+            ingestMetadata: {
+              importedAt: new Date().toISOString(),
+              storageMode: 'LINK',
+              importedFileName: file!.name!,
+              originalFileName: file!.name!,
+            },
+            locations: {
+              originalPath: file!.name!,
+              playbackUrl: url,
+              pathHistory: [file!.name!],
+            },
             fileHandle: file,
           };
 
@@ -2858,27 +2876,99 @@ export const useEditorStore = create<EditorState & EditorActions>()(
             }
             const asset = findAsset(s.bins);
             if (asset) {
-              asset.status = 'READY';
-              asset.duration = isFinite(metadata.duration) ? metadata.duration : 0;
-              asset.width = metadata.width;
-              asset.height = metadata.height;
-              asset.fps = metadata.fps;
-              asset.codec = metadata.codec;
-              asset.colorSpace = metadata.colorSpace;
-              asset.hasAlpha = metadata.hasAlpha;
-              // Alpha mode will be set after dialog resolves (see below)
-              asset.audioChannels = metadata.audioChannels;
-              asset.audioChannelLayout = metadata.audioChannelLayout;
-              asset.sampleRate = metadata.sampleRate;
-              asset.fileSize = metadata.fileSize;
-              asset.startTimecode = metadata.startTimecode;
-              asset.bitDepth = metadata.bitDepth;
-              asset.mimeType = metadata.mimeType;
-              asset.thumbnailUrl = metadata.thumbnailUrl;
-              if (metadata.waveformData) {
-                asset.waveformData = Array.from(metadata.waveformData);
-              }
-              asset.mediaDbId = assetId;
+              const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+              const isGraphicAsset = asset.type === 'GRAPHIC' || asset.type === 'IMAGE';
+              const technicalMetadata: EditorMediaTechnicalMetadata = {
+                container: ext || undefined,
+                videoCodec: asset.type === 'VIDEO' || asset.type === 'IMAGE' || asset.type === 'GRAPHIC' ? metadata.codec.toLowerCase() : undefined,
+                audioCodec: asset.type === 'AUDIO' ? metadata.codec.toLowerCase() : asset.type === 'VIDEO' ? undefined : undefined,
+                durationSeconds: isFinite(metadata.duration) ? metadata.duration : 0,
+                frameRate: metadata.fps || undefined,
+                width: metadata.width || undefined,
+                height: metadata.height || undefined,
+                audioChannels: metadata.audioChannels > 0 ? metadata.audioChannels : undefined,
+                audioChannelLayout: metadata.audioChannelLayout !== 'none'
+                  ? metadata.audioChannelLayout as EditorMediaTechnicalMetadata['audioChannelLayout']
+                  : undefined,
+                sampleRate: metadata.sampleRate || undefined,
+                timecodeStart: metadata.startTimecode || undefined,
+                colorDescriptor: {
+                  colorSpace: metadata.colorSpace !== 'n/a' ? metadata.colorSpace : undefined,
+                  range: 'unknown',
+                  alphaMode: metadata.hasAlpha ? 'straight' : 'none',
+                  hdrMode: 'unknown',
+                  bitDepth: metadata.bitDepth || undefined,
+                },
+                graphicDescriptor: isGraphicAsset
+                  ? {
+                      kind: asset.type === 'GRAPHIC' ? (ext === 'svg' || ext === 'pdf' ? 'vector' : 'layered-graphic') : 'bitmap',
+                      sourceFormat: ext || undefined,
+                      canvasWidth: metadata.width || undefined,
+                      canvasHeight: metadata.height || undefined,
+                      hasAlpha: metadata.hasAlpha,
+                      flatteningRequired: asset.type === 'GRAPHIC',
+                      renderStrategy: asset.type === 'GRAPHIC'
+                        ? (ext === 'svg' || ext === 'pdf' ? 'rasterize' : 'flatten')
+                        : 'direct',
+                    }
+                  : undefined,
+                sideData: [],
+                captions: [],
+                formatTags: {},
+              };
+              const hydrated = hydrateMediaAsset({
+                id: asset.id,
+                name: asset.name,
+                type: asset.type,
+                duration: isFinite(metadata.duration) ? metadata.duration : 0,
+                status: 'READY',
+                playbackUrl: asset.playbackUrl,
+                thumbnailUrl: metadata.thumbnailUrl,
+                waveformData: metadata.waveformData ? Array.from(metadata.waveformData) : undefined,
+                fileExtension: ext || undefined,
+                fileSizeBytes: metadata.fileSize,
+                indexStatus: 'READY',
+                ingestMetadata: asset.ingestMetadata,
+                locations: asset.locations,
+                technicalMetadata,
+                proxyMetadata: {
+                  status: 'NOT_REQUESTED',
+                },
+                waveformMetadata: metadata.waveformData
+                  ? {
+                      status: 'READY',
+                      peaks: Array.from(metadata.waveformData),
+                      sampleCount: metadata.waveformData.length,
+                      updatedAt: new Date().toISOString(),
+                    }
+                  : {
+                      status: 'UNAVAILABLE',
+                      peaks: [],
+                      sampleCount: 0,
+                    },
+                tags: asset.tags,
+                isFavorite: asset.isFavorite,
+              });
+
+              Object.assign(asset, hydrated, {
+                status: 'READY',
+                width: metadata.width,
+                height: metadata.height,
+                fps: metadata.fps,
+                codec: metadata.codec,
+                colorSpace: metadata.colorSpace,
+                hasAlpha: metadata.hasAlpha,
+                audioChannels: metadata.audioChannels,
+                audioChannelLayout: metadata.audioChannelLayout,
+                sampleRate: metadata.sampleRate,
+                fileSize: metadata.fileSize,
+                startTimecode: metadata.startTimecode,
+                bitDepth: metadata.bitDepth,
+                mimeType: metadata.mimeType,
+                thumbnailUrl: metadata.thumbnailUrl,
+                waveformData: metadata.waveformData ? Array.from(metadata.waveformData) : asset.waveformData,
+                mediaDbId: assetId,
+              });
             }
             delete s.ingestProgress[assetId];
 
@@ -2934,7 +3024,25 @@ export const useEditorStore = create<EditorState & EditorActions>()(
               return null;
             }
             const asset = findAsset(s.bins);
-            if (asset) asset.status = 'ERROR';
+            if (asset) {
+              const message = err instanceof Error ? err.message : 'Media probe failed';
+              asset.status = 'ERROR';
+              asset.indexStatus = 'ERROR';
+              asset.capabilityReport = {
+                primarySurface: window.electronAPI ? 'desktop' : 'web',
+                primaryDisposition: 'unsupported',
+                sourceSupportTier: asset.supportTier ?? 'unsupported',
+                preferredVariantId: asset.capabilityReport?.preferredVariantId,
+                surfaces: ['desktop', 'web', 'mobile', 'worker'].map((surface) => ({
+                  surface: surface as 'desktop' | 'web' | 'mobile' | 'worker',
+                  disposition: 'unsupported' as const,
+                  supportTier: asset.supportTier ?? 'unsupported',
+                  preferredVariantId: asset.capabilityReport?.preferredVariantId,
+                  reasons: [message],
+                })),
+                issues: [message],
+              };
+            }
             delete s.ingestProgress[assetId];
           });
         }

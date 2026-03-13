@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { afterEach, describe, expect, it } from 'vitest';
 import type { EditorBin, EditorClip, EditorMediaAsset, EditorProject, EditorTrack } from '@mcua/core';
 import { createDesktopNativeParityRuntime, DesktopNativeMediaManagementAdapter } from '../parity/DesktopNativeParityRuntime';
+import { createDesktopProjectFixture } from './projectTestFactory';
 
 function makeAsset(overrides: Partial<EditorMediaAsset> & Pick<EditorMediaAsset, 'id' | 'name'>): EditorMediaAsset {
   return {
@@ -119,60 +120,18 @@ function makeProject(sourcePath: string, offlineStem: string): EditorProject {
     },
   });
 
-  return {
-    schemaVersion: 2,
+  return createDesktopProjectFixture({
     id: 'desktop-project-1',
     name: 'Desktop Native Runtime',
-    description: '',
-    template: 'film',
-    tags: [],
-    createdAt: '2024-01-01T00:00:00Z',
-    updatedAt: '2024-01-01T00:00:00Z',
-    progress: 0,
-    settings: {
-      frameRate: 24,
-      width: 1920,
-      height: 1080,
-      sampleRate: 48000,
-      exportFormat: 'mov',
-    },
+    bins: [makeBin('main', [onlineAsset, offlineAsset])],
     tracks: [
       makeTrack('V1', 'VIDEO', [makeClip('clip-1', 'V1', 'asset-online', 0, 10, 'video')]),
       makeTrack('A1', 'AUDIO', [makeClip('clip-2', 'A1', 'asset-online', 0, 10, 'audio')]),
     ],
-    markers: [],
-    bins: [makeBin('main', [onlineAsset, offlineAsset])],
-    collaborators: [],
-    aiJobs: [],
-    transcript: [],
-    reviewComments: [],
-    approvals: [],
-    publishJobs: [],
-    watchFolders: [],
-    tokenBalance: 1000,
-    editorialState: {
-      selectedBinId: 'main',
-      sourceAssetId: 'asset-online',
-      enabledTrackIds: ['V1', 'A1'],
-      syncLockedTrackIds: [],
-      videoMonitorTrackId: 'V1',
-      sourceTrackDescriptors: [],
-      trackPatches: [],
-    },
-    workstationState: {
-      subtitleTracks: [],
-      titleClips: [],
-      trackHeights: {},
-      activeWorkspaceId: 'source-record',
-      composerLayout: 'source-record',
-      showTrackingInfo: true,
-      trackingInfoFields: ['master-tc'],
-      clipTextDisplay: 'name',
-      dupeDetectionEnabled: false,
-      versionHistoryRetentionPreference: 'manual',
-      versionHistoryCompareMode: 'summary',
-    },
-  };
+    sourceAssetId: 'asset-online',
+    enabledTrackIds: ['V1', 'A1'],
+    videoMonitorTrackId: 'V1',
+  });
 }
 
 function makeMultichannelProject(sourcePath: string): EditorProject {
@@ -197,59 +156,17 @@ function makeMultichannelProject(sourcePath: string): EditorProject {
     },
   });
 
-  return {
-    schemaVersion: 2,
+  return createDesktopProjectFixture({
     id: 'desktop-project-surround',
     name: 'Desktop Surround Runtime',
-    description: '',
-    template: 'film',
-    tags: [],
-    createdAt: '2024-01-01T00:00:00Z',
-    updatedAt: '2024-01-01T00:00:00Z',
-    progress: 0,
-    settings: {
-      frameRate: 24,
-      width: 1920,
-      height: 1080,
-      sampleRate: 48000,
-      exportFormat: 'mov',
-    },
+    bins: [makeBin('main', [surroundAsset])],
     tracks: [
       makeTrack('A1', 'AUDIO', [makeClip('clip-surround', 'A1', surroundAsset.id, 0, 12, 'audio')]),
     ],
-    markers: [],
-    bins: [makeBin('main', [surroundAsset])],
-    collaborators: [],
-    aiJobs: [],
-    transcript: [],
-    reviewComments: [],
-    approvals: [],
-    publishJobs: [],
-    watchFolders: [],
-    tokenBalance: 1000,
-    editorialState: {
-      selectedBinId: 'main',
-      sourceAssetId: surroundAsset.id,
-      enabledTrackIds: ['A1'],
-      syncLockedTrackIds: [],
-      videoMonitorTrackId: 'V1',
-      sourceTrackDescriptors: [],
-      trackPatches: [],
-    },
-    workstationState: {
-      subtitleTracks: [],
-      titleClips: [],
-      trackHeights: {},
-      activeWorkspaceId: 'source-record',
-      composerLayout: 'source-record',
-      showTrackingInfo: true,
-      trackingInfoFields: ['master-tc'],
-      clipTextDisplay: 'name',
-      dupeDetectionEnabled: false,
-      versionHistoryRetentionPreference: 'manual',
-      versionHistoryCompareMode: 'summary',
-    },
-  };
+    sourceAssetId: surroundAsset.id,
+    enabledTrackIds: ['A1'],
+    videoMonitorTrackId: 'V1',
+  });
 }
 
 async function readManifestByField<T extends Record<string, unknown>>(

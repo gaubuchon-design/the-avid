@@ -1,3 +1,4 @@
+import { MarketplaceItemType, Prisma } from '@prisma/client';
 import { Router, Request, Response } from 'express';
 import { db } from '../../db/client';
 import { authenticate } from '../../middleware/auth';
@@ -34,13 +35,16 @@ router.get('/', validate(marketplaceListQuery, 'query'), async (req: Request, re
   const type = req.query['type'] as string | undefined;
   const featured = req.query['featured'] as string | undefined;
   const search = req.query['search'] as string | undefined;
+  const itemType = type && Object.values(MarketplaceItemType).includes(type as MarketplaceItemType)
+    ? (type as MarketplaceItemType)
+    : undefined;
 
   const allowedSortFields = ['downloadCount', 'createdAt', 'name', 'priceTokens'];
   const safeSortBy = allowedSortFields.includes(sort) ? sort : 'downloadCount';
 
-  const where: Record<string, unknown> = {
+  const where: Prisma.MarketplaceItemWhereInput = {
     isPublished: true,
-    ...(type ? { type } : {}),
+    ...(itemType ? { type: itemType } : {}),
     ...(featured === 'true' ? { isFeatured: true } : {}),
     ...(search
       ? {
@@ -53,16 +57,19 @@ router.get('/', validate(marketplaceListQuery, 'query'), async (req: Request, re
       : {}),
   };
 
-  const cursorClause = cursor ? { cursor: { id: cursor }, skip: 1 } : {};
+  const findManyArgs: Prisma.MarketplaceItemFindManyArgs = {
+    where,
+    take: limit + 1,
+    orderBy: { [safeSortBy]: order } as Prisma.MarketplaceItemOrderByWithRelationInput,
+    include: { author: { select: { id: true, displayName: true, avatarUrl: true } } },
+  };
+  if (cursor) {
+    findManyArgs.cursor = { id: cursor };
+    findManyArgs.skip = 1;
+  }
 
   const [items, total] = await Promise.all([
-    db.marketplaceItem.findMany({
-      where,
-      take: limit + 1,
-      orderBy: { [safeSortBy]: order },
-      include: { author: { select: { id: true, displayName: true, avatarUrl: true } } },
-      ...cursorClause,
-    }),
+    db.marketplaceItem.findMany(findManyArgs),
     db.marketplaceItem.count({ where }),
   ]);
 

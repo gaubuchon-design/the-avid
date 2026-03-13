@@ -8,30 +8,12 @@
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import type { WorkerCapabilityReport } from '@mcua/media-backend';
 
 const execFileAsync = promisify(execFile);
 
 /** Detected system capabilities for the render node. */
-export interface WorkerCapabilities {
-  /** GPU vendor name (e.g. "NVIDIA", "AMD", "Apple"). */
-  gpuVendor: string;
-  /** GPU model name. */
-  gpuName: string;
-  /** GPU VRAM in megabytes. */
-  vramMB: number;
-  /** Number of CPU cores. */
-  cpuCores: number;
-  /** System memory in gigabytes. */
-  memoryGB: number;
-  /** Available FFmpeg codecs/encoders. */
-  availableCodecs: string[];
-  /** FFmpeg version string. */
-  ffmpegVersion: string;
-  /** Maximum recommended concurrent jobs for this hardware. */
-  maxConcurrentJobs: number;
-  /** Available hardware acceleration methods. */
-  hwAccel: string[];
-}
+export type WorkerCapabilities = WorkerCapabilityReport;
 
 /**
  * Detect system capabilities for the render agent.
@@ -54,9 +36,13 @@ export async function detectCapabilities(): Promise<WorkerCapabilities> {
     cpuCores: cpu.cores,
     memoryGB: cpu.memoryGB,
     availableCodecs: ffmpeg.codecs,
+    supportedContainers: [],
     ffmpegVersion: ffmpeg.version,
     maxConcurrentJobs,
     hwAccel: ffmpeg.hwAccel,
+    workerKinds: [],
+    features: [],
+    artifactRoots: [],
   };
 }
 

@@ -2,6 +2,18 @@ name: Desktop Installers
 
 on:
   workflow_dispatch:
+    inputs:
+      targets:
+        description: Which installer set to rebuild
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - mac
+          - win
+  schedule:
+    - cron: '0 6 * * 1'
   push:
     branches: [master]
     paths:
@@ -12,10 +24,15 @@ on:
       - 'package.json'
       - 'package-lock.json'
 
+concurrency:
+  group: desktop-installers-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-installers:
     name: Build ${{ matrix.label }} Installer
     runs-on: ${{ matrix.os }}
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.targets == 'all' || inputs.targets == matrix.target }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -23,11 +40,13 @@ jobs:
         include:
           - os: macos-14
             label: macOS
-            script: npm run dist:desktop:mac
+            target: mac
+            script: npm run dist:desktop:refresh -- --targets=mac
             artifact_glob: apps/desktop/out/*
           - os: windows-2022
             label: Windows
-            script: npm run dist:desktop:win
+            target: win
+            script: npm run dist:desktop:refresh -- --targets=win
             artifact_glob: apps/desktop/out/*
 
     steps:

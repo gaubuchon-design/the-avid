@@ -11,7 +11,7 @@
   ],
   "scripts": {
     "preinstall": "node -e \"if (process.env.npm_execpath.indexOf('pnpm') !== -1) { console.error('Use npm, not pnpm'); process.exit(1); }\"",
-    "postinstall": "turbo run build --filter=@mcua/contracts --filter=@mcua/core",
+    "postinstall": "turbo run build --filter=@mcua/contracts --filter=@mcua/core --filter=@mcua/media-backend",
     "dev": "turbo run dev",
     "dev:web": "turbo run dev --filter=@mcua/web",
     "dev:desktop": "turbo run dev --filter=@mcua/desktop",
@@ -22,6 +22,9 @@
     "build:web": "turbo run build --filter=@mcua/web",
     "build:desktop": "turbo run build --filter=@mcua/desktop",
     "dist:desktop": "npm run dist --workspace=@mcua/desktop",
+    "dist:desktop:refresh": "npm run dist:refresh --workspace=@mcua/desktop",
+    "dist:desktop:refresh:mac": "npm run dist:refresh:mac --workspace=@mcua/desktop",
+    "dist:desktop:refresh:win": "npm run dist:refresh:win --workspace=@mcua/desktop",
     "dist:desktop:mac": "npm run dist:mac --workspace=@mcua/desktop",
     "dist:desktop:win": "npm run dist:win --workspace=@mcua/desktop",
     "dist:desktop:linux": "npm run dist:linux --workspace=@mcua/desktop",
