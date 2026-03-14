@@ -8,7 +8,7 @@ export function Toolbar() {
   const navigate = useNavigate();
   const {
     isPlaying, togglePlay, playheadTime, showInspector, toggleInspector,
-    toggleExportPanel, toggleSettingsPanel, toolbarTab, setToolbarTab, projectName,
+    toggleExportPanel, toggleSharePanel, toggleSettingsPanel, toolbarTab, setToolbarTab, projectName,
     selectedClipIds, splitClip, showAIPanel, toggleAIPanel, tokenBalance,
     showTranscriptPanel, toggleTranscriptPanel,
     tracks, projectSettings,
@@ -109,12 +109,28 @@ export function Toolbar() {
           </svg>
         </button>
 
-        {/* Export */}
+        {/* Share / Deliver */}
+        <button
+          className="toolbar-icon-btn"
+          onClick={toggleSharePanel}
+          title="Share & Deliver"
+          aria-label="Share and Deliver"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="18" cy="5" r="3" />
+            <circle cx="6" cy="12" r="3" />
+            <circle cx="18" cy="19" r="3" />
+            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+          </svg>
+        </button>
+
+        {/* Quick Export */}
         <button
           className="toolbar-icon-btn"
           onClick={toggleExportPanel}
-          title="Export"
-          aria-label="Export"
+          title="Quick Export"
+          aria-label="Quick Export"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />

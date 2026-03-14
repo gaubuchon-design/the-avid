@@ -172,10 +172,11 @@ function buildAvidDefaultBindings(): KeyBinding[] {
     // ═══════════════════════════════════════════════════════════════════════
     //  Trim
     // ═══════════════════════════════════════════════════════════════════════
-    createBinding('u', [], 'trim.enterMode', 'Enter Trim Mode', 'trim'),
-    createBinding('p', [], 'trim.selectASide', 'Select A-side Roller', 'trim'),
-    createBinding('[', [], 'trim.selectBoth', 'Select Both Sides (Dual Roller)', 'trim'),
-    createBinding(']', [], 'trim.selectBSide', 'Select B-side Roller', 'trim'),
+    createBinding('u', [], 'trim.cycleTrimMode', 'Enter/Cycle Trim Mode (Roll -> Ripple A -> Ripple B -> Roll)', 'trim'),
+    createBinding('Escape', [], 'trim.exitTrimMode', 'Exit Trim Mode', 'trim'),
+    createBinding('p', [], 'trim.selectASide', 'Select A-side Roller (Outgoing)', 'trim'),
+    createBinding('[', [], 'trim.selectBoth', 'Select Both Sides (Roll / Dual Roller)', 'trim'),
+    createBinding(']', [], 'trim.selectBSide', 'Select B-side Roller (Incoming)', 'trim'),
     createBinding('m', [], 'trim.left1', 'Trim 1 Frame Left', 'trim'),
     createBinding(',', [], 'trim.right1', 'Trim 1 Frame Right', 'trim'),
     createBinding('.', [], 'trim.right10', 'Trim 10 Frames Right', 'trim'),

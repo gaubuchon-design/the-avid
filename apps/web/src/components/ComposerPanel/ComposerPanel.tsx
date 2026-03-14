@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useEditorStore } from '../../store/editor.store';
 import { SourceMonitor } from '../SourceMonitor/SourceMonitor';
 import { RecordMonitor } from '../RecordMonitor/RecordMonitor';
@@ -47,6 +47,15 @@ function RecordIcon() {
   );
 }
 
+function FullscreenIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
+      <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+    </svg>
+  );
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /** Map the store's composerLayout value to our internal mode. */
@@ -59,6 +68,9 @@ function storeToMode(storeLayout: 'source-record' | 'full-frame'): ComposerLayou
 export function ComposerPanel() {
   const composerLayout = useEditorStore((s) => s.composerLayout);
   const setComposerLayout = useEditorStore((s) => s.setComposerLayout);
+  const fullscreenMonitor = useEditorStore((s) => s.fullscreenMonitor);
+  const poppedOutMonitor = useEditorStore((s) => s.poppedOutMonitor);
+  const toggleFullscreenMonitor = useEditorStore((s) => s.toggleFullscreenMonitor);
 
   // Local state for 'full-source' since the store only has 'source-record' | 'full-frame'
   const [sourceOnly, setSourceOnly] = useState(false);
@@ -69,6 +81,42 @@ export function ComposerPanel() {
   const isDual = mode === 'source-record';
   const isSingleSource = mode === 'full-source';
   const isSingleRecord = mode === 'full-record';
+
+  // ── Keyboard shortcut: Shift+F for fullscreen toggle ──────────────────
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.shiftKey && e.key === 'F' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        // Determine which monitor to fullscreen based on current layout
+        const activeMonitor = isDual ? 'record' : isSingleSource ? 'source' : 'record';
+        toggleFullscreenMonitor(activeMonitor);
+
+        // Use Fullscreen API
+        if (!document.fullscreenElement) {
+          const monitorSlots = document.querySelectorAll('.composer-panel-monitor-slot');
+          const target = isDual ? monitorSlots[1] : monitorSlots[0];
+          if (target) {
+            (target as HTMLElement).requestFullscreen?.().catch(() => {});
+          }
+        } else {
+          document.exitFullscreen?.().catch(() => {});
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isDual, isSingleSource, toggleFullscreenMonitor]);
+
+  // Listen for fullscreen exit events to sync state
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement && fullscreenMonitor) {
+        useEditorStore.getState().setFullscreenMonitor(null);
+      }
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, [fullscreenMonitor]);
 
   // ── Layout switching callbacks ──────────────────────────────────────────
 
@@ -88,6 +136,23 @@ export function ComposerPanel() {
     setSourceOnly(false);
     setComposerLayout('full-frame');
   }, [setComposerLayout]);
+
+  // ── Fullscreen toggle handler ──────────────────────────────────────────
+
+  const handleFullscreenToggle = useCallback(() => {
+    const activeMonitor = isDual ? 'record' : isSingleSource ? 'source' : 'record';
+    toggleFullscreenMonitor(activeMonitor);
+
+    if (!document.fullscreenElement) {
+      const monitorSlots = document.querySelectorAll('.composer-panel-monitor-slot');
+      const target = isDual ? monitorSlots[1] : monitorSlots[0];
+      if (target) {
+        (target as HTMLElement).requestFullscreen?.().catch(() => {});
+      }
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  }, [isDual, isSingleSource, toggleFullscreenMonitor]);
 
   // ── Active monitor label ────────────────────────────────────────────────
 
@@ -128,9 +193,39 @@ export function ComposerPanel() {
           >
             <RecordIcon />
           </button>
+
+          {/* Separator */}
+          <div style={{ width: 1, height: 16, background: 'var(--border-subtle)', margin: '0 4px' }} />
+
+          {/* Fullscreen toggle */}
+          <button
+            className={`composer-panel-layout-btn${fullscreenMonitor ? ' active' : ''}`}
+            onClick={handleFullscreenToggle}
+            title="Fullscreen Playback (Shift+F)"
+            aria-pressed={!!fullscreenMonitor}
+            aria-label="Toggle fullscreen playback"
+          >
+            <FullscreenIcon />
+          </button>
         </div>
 
-        <span className="composer-panel-active-label">{activeLabel}</span>
+        <span className="composer-panel-active-label">
+          {activeLabel}
+          {fullscreenMonitor && (
+            <span style={{
+              marginLeft: 6, fontSize: 9, fontWeight: 700, color: 'var(--brand-bright)',
+              background: 'var(--accent-muted)', padding: '1px 5px', borderRadius: 3,
+              letterSpacing: 0.5, verticalAlign: 'middle',
+            }}>FULLSCREEN</span>
+          )}
+          {poppedOutMonitor && (
+            <span style={{
+              marginLeft: 6, fontSize: 9, fontWeight: 600, color: 'var(--text-muted)',
+              background: 'var(--bg-void)', padding: '1px 5px', borderRadius: 3,
+              border: '1px solid var(--border-subtle)', letterSpacing: 0.3, verticalAlign: 'middle',
+            }}>{poppedOutMonitor === 'source' ? 'SRC' : 'REC'} POPPED</span>
+          )}
+        </span>
       </div>
 
       {/* Monitor area */}
@@ -139,12 +234,60 @@ export function ComposerPanel() {
       >
         {isDual && (
           <>
-            <div className="composer-panel-monitor-slot">
-              <SourceMonitor />
-            </div>
-            <div className="composer-panel-monitor-slot">
-              <RecordMonitor />
-            </div>
+            {poppedOutMonitor !== 'source' && (
+              <div className="composer-panel-monitor-slot">
+                <SourceMonitor />
+              </div>
+            )}
+            {poppedOutMonitor === 'source' && (
+              <div className="composer-panel-monitor-slot" style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'var(--bg-void)', borderRadius: 'var(--radius-md)',
+                border: '1px dashed var(--border-subtle)',
+              }}>
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.4, display: 'block', margin: '0 auto 6px' }}>
+                    <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+                    <path d="M21 14v5a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h5" />
+                  </svg>
+                  Source Monitor popped out
+                  <br />
+                  <button
+                    className="tl-btn"
+                    style={{ marginTop: 6, fontSize: 10 }}
+                    onClick={() => useEditorStore.getState().setPoppedOutMonitor(null)}
+                    aria-label="Restore source monitor"
+                  >Restore</button>
+                </div>
+              </div>
+            )}
+            {poppedOutMonitor !== 'record' && (
+              <div className="composer-panel-monitor-slot">
+                <RecordMonitor />
+              </div>
+            )}
+            {poppedOutMonitor === 'record' && (
+              <div className="composer-panel-monitor-slot" style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'var(--bg-void)', borderRadius: 'var(--radius-md)',
+                border: '1px dashed var(--border-subtle)',
+              }}>
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.4, display: 'block', margin: '0 auto 6px' }}>
+                    <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+                    <path d="M21 14v5a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h5" />
+                  </svg>
+                  Record Monitor popped out
+                  <br />
+                  <button
+                    className="tl-btn"
+                    style={{ marginTop: 6, fontSize: 10 }}
+                    onClick={() => useEditorStore.getState().setPoppedOutMonitor(null)}
+                    aria-label="Restore record monitor"
+                  >Restore</button>
+                </div>
+              </div>
+            )}
           </>
         )}
 

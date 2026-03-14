@@ -268,7 +268,7 @@ export interface SubtitleCue {
     fontSize?: number;
     fontFamily?: string;
     color?: string;
-    position?: 'top' | 'bottom' | 'custom';
+    position?: 'top' | 'bottom' | 'center' | 'custom';
     y?: number;
     bgOpacity?: number;
   };
@@ -392,6 +392,7 @@ interface EditorState {
   showTranscriptPanel: boolean;
   showCollabPanel: boolean;
   showExportPanel: boolean;
+  showSharePanel: boolean;
   showSettingsPanel: boolean;
   isFullscreen: boolean;
 
@@ -442,12 +443,18 @@ interface EditorState {
   // Trim Mode State
   trimMode: 'off' | 'roll' | 'ripple' | 'slip' | 'slide' | 'asymmetric';
   trimActive: boolean;
+  /** Tracks the U-key cycle position: Roll -> Ripple A-side -> Ripple B-side -> Roll */
+  trimCycleState: 'roll' | 'ripple-a' | 'ripple-b';
+  /** Per-track trim mode map for asymmetric trim (e.g., Roll on V1 + Ripple on A1) */
+  asymmetricTrimState: Record<string, 'roll' | 'ripple-a' | 'ripple-b'>;
 
   // Smart Tool State
   smartToolLiftOverwrite: boolean;
   smartToolExtractSplice: boolean;
   smartToolOverwriteTrim: boolean;
   smartToolRippleTrim: boolean;
+  /** The active Smart Tool quadrant determined by cursor position */
+  smartToolQuadrant: 'lift-overwrite' | 'extract-splice' | 'overwrite-trim' | 'ripple-trim' | 'none';
 
   // Multicam State
   multicamActive: boolean;
@@ -473,6 +480,43 @@ interface EditorState {
 
   // Workspace
   activeWorkspaceId: string;
+
+  // Multi-monitor (Task 1)
+  fullscreenMonitor: 'source' | 'record' | null;
+  poppedOutMonitor: 'source' | 'record' | null;
+
+  // Sequences (Task 3)
+  sequences: Sequence[];
+  activeSequenceId: string | null;
+
+  // Bin management (Task 2)
+  selectedAssetIds: string[];
+  binSortField: BinSortField;
+  binSortDirection: 'asc' | 'desc';
+  binContextMenu: { x: number; y: number; binId: string } | null;
+  assetContextMenu: { x: number; y: number; assetId: string } | null;
+  binDragOverId: string | null;
+  recentSearches: string[];
+  searchScope: 'current' | 'all';
+  searchFilterChips: SearchFilterChip[];
+}
+
+export type BinSortField = 'name' | 'date-modified' | 'date-created' | 'size' | 'type' | 'duration';
+
+export interface SearchFilterChip {
+  type: 'type' | 'favorite' | 'status';
+  value: string;
+  active: boolean;
+}
+
+export interface Sequence {
+  id: string;
+  name: string;
+  settings: SequenceSettings;
+  tracks: Track[];
+  duration: number;
+  createdAt: string;
+  modifiedAt: string;
 }
 
 interface EditorActions {
@@ -531,6 +575,7 @@ interface EditorActions {
   toggleTranscriptPanel: () => void;
   toggleCollabPanel: () => void;
   toggleExportPanel: () => void;
+  toggleSharePanel: () => void;
   toggleSettingsPanel: () => void;
   toggleCommandPalette: (open?: boolean) => void;
 
@@ -635,12 +680,24 @@ interface EditorActions {
   // Trim Mode
   setTrimMode: (mode: EditorState['trimMode']) => void;
   setTrimActive: (active: boolean) => void;
+  /** Cycle through trim modes via U key: Roll -> Ripple A -> Ripple B -> Roll */
+  cycleTrimMode: () => void;
+  /** Exit trim mode (Escape key) */
+  exitTrimMode: () => void;
+  /** Set the trim cycle state directly */
+  setTrimCycleState: (state: EditorState['trimCycleState']) => void;
+  /** Set a per-track asymmetric trim roller (Option/Alt+click) */
+  setAsymmetricTrimRoller: (trackId: string, mode: 'roll' | 'ripple-a' | 'ripple-b') => void;
+  /** Clear all asymmetric trim state */
+  clearAsymmetricTrimState: () => void;
 
   // Smart Tool
   toggleSmartToolLiftOverwrite: () => void;
   toggleSmartToolExtractSplice: () => void;
   toggleSmartToolOverwriteTrim: () => void;
   toggleSmartToolRippleTrim: () => void;
+  /** Set the active smart tool quadrant (from cursor position hit-testing) */
+  setSmartToolQuadrant: (quadrant: EditorState['smartToolQuadrant']) => void;
 
   // Multicam
   setMulticamActive: (active: boolean) => void;
@@ -677,6 +734,34 @@ interface EditorActions {
 
   // Init
   loadProject: (projectId: string) => void;
+
+  // Multi-monitor (Task 1)
+  setFullscreenMonitor: (monitor: 'source' | 'record' | null) => void;
+  setPoppedOutMonitor: (monitor: 'source' | 'record' | null) => void;
+  toggleFullscreenMonitor: (monitor: 'source' | 'record') => void;
+
+  // Sequences (Task 3)
+  createSequence: (settings: SequenceSettings) => string;
+  duplicateSequence: (id: string) => void;
+  deleteSequence: (id: string) => void;
+  switchSequence: (id: string) => void;
+  renameSequence: (id: string, name: string) => void;
+
+  // Bin management (Task 2)
+  renameBin: (binId: string, name: string) => void;
+  deleteBin: (binId: string) => void;
+  setBinColor: (binId: string, color: string) => void;
+  moveBinTo: (binId: string, targetParentId: string | null) => void;
+  setBinSortField: (field: BinSortField) => void;
+  toggleBinSortDirection: () => void;
+  selectAsset: (assetId: string, multi?: boolean, range?: boolean) => void;
+  clearAssetSelection: () => void;
+  setBinContextMenu: (menu: { x: number; y: number; binId: string } | null) => void;
+  setAssetContextMenu: (menu: { x: number; y: number; assetId: string } | null) => void;
+  setBinDragOverId: (binId: string | null) => void;
+  addRecentSearch: (search: string) => void;
+  setSearchScope: (scope: 'current' | 'all') => void;
+  toggleSearchFilterChip: (type: SearchFilterChip['type'], value: string) => void;
 }
 
 // Waveform generator (random for demo)
@@ -922,6 +1007,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     showTranscriptPanel: false,
     showCollabPanel: false,
     showExportPanel: false,
+    showSharePanel: false,
     showSettingsPanel: false,
     isFullscreen: false,
     collabUsers: [
@@ -959,12 +1045,15 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     // Trim Mode State
     trimMode: 'off' as EditorState['trimMode'],
     trimActive: false,
+    trimCycleState: 'roll' as EditorState['trimCycleState'],
+    asymmetricTrimState: {} as Record<string, 'roll' | 'ripple-a' | 'ripple-b'>,
 
     // Smart Tool State
     smartToolLiftOverwrite: true,
     smartToolExtractSplice: true,
     smartToolOverwriteTrim: true,
     smartToolRippleTrim: true,
+    smartToolQuadrant: 'none' as EditorState['smartToolQuadrant'],
 
     // Multicam State
     multicamActive: false,
@@ -990,6 +1079,30 @@ export const useEditorStore = create<EditorState & EditorActions>()(
 
     // Workspace
     activeWorkspaceId: 'source-record',
+
+    // Multi-monitor (Task 1)
+    fullscreenMonitor: null,
+    poppedOutMonitor: null,
+
+    // Sequences (Task 3)
+    sequences: [] as Sequence[],
+    activeSequenceId: null,
+
+    // Bin management (Task 2)
+    selectedAssetIds: [] as string[],
+    binSortField: 'name' as BinSortField,
+    binSortDirection: 'asc' as 'asc' | 'desc',
+    binContextMenu: null,
+    assetContextMenu: null,
+    binDragOverId: null,
+    recentSearches: [] as string[],
+    searchScope: 'current' as 'current' | 'all',
+    searchFilterChips: [
+      { type: 'type', value: 'VIDEO', active: false },
+      { type: 'type', value: 'AUDIO', active: false },
+      { type: 'type', value: 'IMAGE', active: false },
+      { type: 'favorite', value: 'true', active: false },
+    ] as SearchFilterChip[],
 
     // Actions
     setPlayhead: (t) => set((s) => { s.playheadTime = Math.max(0, Math.min(t, s.duration)); }),
@@ -1204,6 +1317,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     toggleTranscriptPanel: () => set((s) => { s.showTranscriptPanel = !s.showTranscriptPanel; }),
     toggleCollabPanel: () => set((s) => { s.showCollabPanel = !s.showCollabPanel; }),
     toggleExportPanel: () => set((s) => { s.showExportPanel = !s.showExportPanel; }),
+    toggleSharePanel: () => set((s) => { s.showSharePanel = !s.showSharePanel; }),
     toggleSettingsPanel: () => set((s) => { s.showSettingsPanel = !s.showSettingsPanel; }),
     toggleCommandPalette: (open) => set((s) => {
       s.isCommandPaletteOpen = typeof open === 'boolean' ? open : !s.isCommandPaletteOpen;
@@ -1813,12 +1927,55 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     // ─── Trim Mode ────────────────────────────────────────────────────────────
     setTrimMode: (mode) => set((s) => { s.trimMode = mode; }),
     setTrimActive: (active) => set((s) => { s.trimActive = active; }),
+    cycleTrimMode: () => set((s) => {
+      if (!s.trimActive) {
+        // First press of U: enter trim mode as Roll
+        s.trimActive = true;
+        s.trimMode = 'roll';
+        s.trimCycleState = 'roll';
+      } else {
+        // Subsequent presses: cycle Roll -> Ripple A-side -> Ripple B-side -> Roll
+        switch (s.trimCycleState) {
+          case 'roll':
+            s.trimCycleState = 'ripple-a';
+            s.trimMode = 'ripple';
+            break;
+          case 'ripple-a':
+            s.trimCycleState = 'ripple-b';
+            s.trimMode = 'ripple';
+            break;
+          case 'ripple-b':
+            s.trimCycleState = 'roll';
+            s.trimMode = 'roll';
+            break;
+        }
+      }
+      // Clear asymmetric state on mode cycle
+      s.asymmetricTrimState = {};
+    }),
+    exitTrimMode: () => set((s) => {
+      s.trimActive = false;
+      s.trimMode = 'off';
+      s.trimCycleState = 'roll';
+      s.asymmetricTrimState = {};
+    }),
+    setTrimCycleState: (state) => set((s) => { s.trimCycleState = state; }),
+    setAsymmetricTrimRoller: (trackId, mode) => set((s) => {
+      s.asymmetricTrimState[trackId] = mode;
+      // If any track differs from the others, we are in asymmetric mode
+      const modes = new Set(Object.values(s.asymmetricTrimState));
+      if (modes.size > 1) {
+        s.trimMode = 'asymmetric';
+      }
+    }),
+    clearAsymmetricTrimState: () => set((s) => { s.asymmetricTrimState = {}; }),
 
     // ─── Smart Tool ───────────────────────────────────────────────────────────
     toggleSmartToolLiftOverwrite: () => set((s) => { s.smartToolLiftOverwrite = !s.smartToolLiftOverwrite; }),
     toggleSmartToolExtractSplice: () => set((s) => { s.smartToolExtractSplice = !s.smartToolExtractSplice; }),
     toggleSmartToolOverwriteTrim: () => set((s) => { s.smartToolOverwriteTrim = !s.smartToolOverwriteTrim; }),
     toggleSmartToolRippleTrim: () => set((s) => { s.smartToolRippleTrim = !s.smartToolRippleTrim; }),
+    setSmartToolQuadrant: (quadrant) => set((s) => { s.smartToolQuadrant = quadrant; }),
 
     // ─── Multicam ─────────────────────────────────────────────────────────────
     setMulticamActive: (active) => set((s) => { s.multicamActive = active; }),
@@ -2153,6 +2310,194 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     updateTitleClip: (titleId, data) => set((s) => {
       const title = s.titleClips.find((t) => t.id === titleId);
       if (title) Object.assign(title, data);
+    }),
+
+    // ── Multi-monitor (Task 1) ────────────────────────────────────────────
+    setFullscreenMonitor: (monitor) => set((s) => { s.fullscreenMonitor = monitor; }),
+    setPoppedOutMonitor: (monitor) => set((s) => { s.poppedOutMonitor = monitor; }),
+    toggleFullscreenMonitor: (monitor) => set((s) => {
+      s.fullscreenMonitor = s.fullscreenMonitor === monitor ? null : monitor;
+    }),
+
+    // ── Sequences (Task 3) ────────────────────────────────────────────────
+    createSequence: (settings) => {
+      const id = createId('seq');
+      const now = new Date().toISOString();
+      set((s) => {
+        const seq: Sequence = {
+          id,
+          name: settings.name || 'Untitled Sequence',
+          settings: { ...settings },
+          tracks: [],
+          duration: 0,
+          createdAt: now,
+          modifiedAt: now,
+        };
+        s.sequences.push(seq);
+        s.activeSequenceId = id;
+      });
+      return id;
+    },
+    duplicateSequence: (id) => set((s) => {
+      const src = s.sequences.find((seq) => seq.id === id);
+      if (!src) return;
+      const newId = createId('seq');
+      const now = new Date().toISOString();
+      const dup: Sequence = {
+        id: newId,
+        name: src.name + ' Copy',
+        settings: { ...src.settings },
+        tracks: JSON.parse(JSON.stringify(src.tracks)),
+        duration: src.duration,
+        createdAt: now,
+        modifiedAt: now,
+      };
+      s.sequences.push(dup);
+    }),
+    deleteSequence: (id) => set((s) => {
+      s.sequences = s.sequences.filter((seq) => seq.id !== id);
+      if (s.activeSequenceId === id) {
+        s.activeSequenceId = s.sequences.length > 0 ? s.sequences[0]!.id : null;
+      }
+    }),
+    switchSequence: (id) => set((s) => {
+      const seq = s.sequences.find((seq) => seq.id === id);
+      if (seq) {
+        s.activeSequenceId = id;
+        s.sequenceSettings = { ...seq.settings };
+        s.tracks = JSON.parse(JSON.stringify(seq.tracks));
+        s.duration = seq.duration;
+      }
+    }),
+    renameSequence: (id, name) => set((s) => {
+      const seq = s.sequences.find((seq) => seq.id === id);
+      if (seq) {
+        seq.name = name;
+        seq.modifiedAt = new Date().toISOString();
+      }
+    }),
+
+    // ── Bin management (Task 2) ───────────────────────────────────────────
+    renameBin: (binId, name) => set((s) => {
+      const findAndRename = (bins: Bin[]): boolean => {
+        for (const bin of bins) {
+          if (bin.id === binId) { bin.name = name; return true; }
+          if (findAndRename(bin.children)) return true;
+        }
+        return false;
+      };
+      findAndRename(s.bins);
+    }),
+    deleteBin: (binId) => set((s) => {
+      const removeFromList = (bins: Bin[]): Bin[] => {
+        return bins.filter((b) => {
+          if (b.id === binId) return false;
+          b.children = removeFromList(b.children);
+          return true;
+        });
+      };
+      s.bins = removeFromList(s.bins);
+      if (s.selectedBinId === binId) {
+        s.selectedBinId = s.bins.length > 0 ? s.bins[0]!.id : null;
+        s.activeBinAssets = s.bins.length > 0 ? s.bins[0]!.assets : [];
+      }
+    }),
+    setBinColor: (binId, color) => set((s) => {
+      const findAndColor = (bins: Bin[]): boolean => {
+        for (const bin of bins) {
+          if (bin.id === binId) { bin.color = color; return true; }
+          if (findAndColor(bin.children)) return true;
+        }
+        return false;
+      };
+      findAndColor(s.bins);
+    }),
+    moveBinTo: (binId, targetParentId) => set((s) => {
+      // Find and remove the bin from its current location
+      let movedBin: Bin | null = null;
+      const removeFrom = (bins: Bin[]): Bin[] => {
+        return bins.filter((b) => {
+          if (b.id === binId) { movedBin = JSON.parse(JSON.stringify(b)); return false; }
+          b.children = removeFrom(b.children);
+          return true;
+        });
+      };
+      s.bins = removeFrom(s.bins);
+      if (!movedBin) return;
+
+      if (targetParentId === null) {
+        // Move to root level
+        s.bins.push(movedBin);
+      } else {
+        // Move into target bin
+        const findAndAdd = (bins: Bin[]): boolean => {
+          for (const bin of bins) {
+            if (bin.id === targetParentId) {
+              bin.children.push(movedBin!);
+              bin.isOpen = true;
+              return true;
+            }
+            if (findAndAdd(bin.children)) return true;
+          }
+          return false;
+        };
+        if (!findAndAdd(s.bins)) {
+          // Fallback: add to root if target not found
+          s.bins.push(movedBin);
+        }
+      }
+    }),
+    setBinSortField: (field) => set((s) => { s.binSortField = field; }),
+    toggleBinSortDirection: () => set((s) => {
+      s.binSortDirection = s.binSortDirection === 'asc' ? 'desc' : 'asc';
+    }),
+    selectAsset: (assetId, multi, range) => set((s) => {
+      if (multi) {
+        // Toggle individual selection
+        const idx = s.selectedAssetIds.indexOf(assetId);
+        if (idx >= 0) {
+          s.selectedAssetIds.splice(idx, 1);
+        } else {
+          s.selectedAssetIds.push(assetId);
+        }
+      } else if (range && s.selectedAssetIds.length > 0) {
+        // Range select: from last selected to this one
+        const allIds = s.activeBinAssets.map((a) => a.id);
+        const lastSelected = s.selectedAssetIds[s.selectedAssetIds.length - 1]!;
+        const startIdx = allIds.indexOf(lastSelected);
+        const endIdx = allIds.indexOf(assetId);
+        if (startIdx >= 0 && endIdx >= 0) {
+          const [from, to] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+          const rangeIds = allIds.slice(from, to + 1);
+          // Merge with existing
+          for (const id of rangeIds) {
+            if (!s.selectedAssetIds.includes(id)) {
+              s.selectedAssetIds.push(id);
+            }
+          }
+        }
+      } else {
+        s.selectedAssetIds = [assetId];
+      }
+    }),
+    clearAssetSelection: () => set((s) => { s.selectedAssetIds = []; }),
+    setBinContextMenu: (menu) => set((s) => { s.binContextMenu = menu as any; }),
+    setAssetContextMenu: (menu) => set((s) => { s.assetContextMenu = menu as any; }),
+    setBinDragOverId: (binId) => set((s) => { s.binDragOverId = binId; }),
+    addRecentSearch: (search) => set((s) => {
+      const existing = s.recentSearches.indexOf(search);
+      if (existing >= 0) s.recentSearches.splice(existing, 1);
+      s.recentSearches.unshift(search);
+      if (s.recentSearches.length > 10) s.recentSearches.pop();
+    }),
+    setSearchScope: (scope) => set((s) => { s.searchScope = scope; }),
+    toggleSearchFilterChip: (type, value) => set((s) => {
+      const chip = s.searchFilterChips.find((c) => c.type === type && c.value === value);
+      if (chip) {
+        chip.active = !chip.active;
+      } else {
+        s.searchFilterChips.push({ type, value, active: true });
+      }
     }),
   }))
 );

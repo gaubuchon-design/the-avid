@@ -18,16 +18,39 @@
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-/** Active smart tool mode determined by cursor position and toggle state. */
+/**
+ * Active smart tool mode determined by cursor position and toggle state.
+ *
+ * Avid Media Composer's Smart Tool has four quadrants:
+ *
+ *   1. **Lift/Overwrite Segment** (top half of clip body) - Shift+A
+ *   2. **Extract/Splice Segment** (bottom half of clip body) - Shift+S
+ *   3. **Overwrite Trim / Roll** (top half near edit point) - Shift+D
+ *   4. **Ripple Trim** (bottom half near edit point) - Shift+F
+ *
+ * Additional modes for fine-grained trim side selection:
+ */
 export type SmartToolMode =
   | 'lift-overwrite-segment'    // Red arrow  -- middle of clip, upper half
   | 'extract-splice-segment'    // Yellow arrow -- middle of clip, lower half
-  | 'overwrite-trim'            // Red roller -- near edit point, upper half
+  | 'overwrite-trim'            // Red roller -- near edit point, upper half (Roll)
   | 'ripple-trim'               // Yellow roller -- near edit point, lower half
-  | 'roll-trim'                 // Directly on edit point center
-  | 'a-side-trim'               // Near edit point, left (outgoing) side
-  | 'b-side-trim'               // Near edit point, right (incoming) side
+  | 'roll-trim'                 // Directly on edit point center (within ROLL_ZONE_PIXELS)
+  | 'a-side-trim'               // Near edit point, left of cut (outgoing clip)
+  | 'b-side-trim'               // Near edit point, right of cut (incoming clip)
+  | 'slip'                      // Top portion of clip body (above 0.25 relativeY)
   | 'none';                     // No smart tool active
+
+/**
+ * Identifies which of the four Avid Smart Tool quadrants is active.
+ * This is a higher-level abstraction used by the editor store.
+ */
+export type SmartToolQuadrant =
+  | 'lift-overwrite'            // Quadrant 1: Shift+A
+  | 'extract-splice'            // Quadrant 2: Shift+S
+  | 'overwrite-trim'            // Quadrant 3: Shift+D (Roll/Overwrite)
+  | 'ripple-trim'               // Quadrant 4: Shift+F
+  | 'none';
 
 /** Toggle state for each of the four smart tool buttons. */
 export interface SmartToolState {
@@ -101,6 +124,7 @@ const CURSOR_MAP: Record<SmartToolMode, CursorZone['cursorType']> = {
   'roll-trim': 'trim-roll',
   'a-side-trim': 'trim-a',
   'b-side-trim': 'trim-b',
+  'slip': 'segment-red',
   'none': 'default',
 };
 
@@ -112,6 +136,7 @@ const ICON_MAP: Record<SmartToolMode, string> = {
   'roll-trim': 'icon-trim-roll',
   'a-side-trim': 'icon-trim-a-side',
   'b-side-trim': 'icon-trim-b-side',
+  'slip': 'icon-trim-slip',
   'none': 'icon-cursor-default',
 };
 
@@ -123,6 +148,7 @@ const CSS_CURSOR_MAP: Record<SmartToolMode, string> = {
   'roll-trim': 'col-resize',
   'a-side-trim': 'w-resize',
   'b-side-trim': 'e-resize',
+  'slip': 'ew-resize',
   'none': 'default',
 };
 
@@ -158,6 +184,9 @@ export class SmartToolEngine {
 
   /** When true, Cmd+Shift constrains segment drags to vertical only. */
   private verticalDragOnly = false;
+
+  /** The currently active Smart Tool quadrant (updated on each hit test). */
+  private activeQuadrant: SmartToolQuadrant = 'none';
 
   /** Registered change listeners. */
   private listeners = new Set<() => void>();
@@ -311,6 +340,7 @@ export class SmartToolEngine {
       !this.state.rippleTrim;
 
     if (noToolsEnabled) {
+      this.activeQuadrant = 'none';
       return this.buildZone('none', clipAtPos, trackAtY, nearestEditPoint);
     }
 
@@ -344,12 +374,29 @@ export class SmartToolEngine {
     }
 
     // ── Empty space ───────────────────────────────────────────────────
+    this.activeQuadrant = 'none';
     return this.buildZone('none', null, trackAtY, nearestEditPoint);
   }
 
   // ── Hit-test helpers ────────────────────────────────────────────────────
 
-  /** Resolve the trim mode when cursor is near an edit point. */
+  /**
+   * Resolve the trim mode when cursor is near an edit point.
+   *
+   * Avid Smart Tool quadrant logic near edit points:
+   *
+   *   - Very close to cut line (within ROLL_ZONE_PIXELS): Roll trim
+   *   - Upper half + overwriteTrim enabled: Overwrite trim (Roll)
+   *     - Left of edit: A-side overwrite
+   *     - Right of edit: B-side overwrite
+   *   - Lower half + rippleTrim enabled: Ripple trim
+   *     - Left of edit: A-side ripple
+   *     - Right of edit: B-side ripple
+   *
+   * The A-side/B-side distinction is critical for Avid's trim behavior:
+   * - A-side (outgoing) = cursor is to the LEFT of the edit point
+   * - B-side (incoming) = cursor is to the RIGHT of the edit point
+   */
   private resolveTrimMode(
     params: HitTestParams,
     clipAtPos: string | null,
@@ -359,49 +406,85 @@ export class SmartToolEngine {
     distanceToEdit: number,
     relativeY: number,
   ): CursorZone {
-    // Very close to the cut line: roll trim.
+    // Very close to the cut line: roll trim (both sides engaged).
     if (distanceToEdit <= ROLL_ZONE_PIXELS) {
+      this.activeQuadrant = 'overwrite-trim';
       return this.buildZone('roll-trim', clipAtPos, trackAtY, nearestEditPoint);
     }
 
-    // Upper half: overwrite trim.
-    if (this.state.overwriteTrim && relativeY < 0.5) {
-      return this.buildZone('overwrite-trim', clipAtPos, trackAtY, nearestEditPoint);
+    // Determine which side of the edit point the cursor is on.
+    const isASide = nearestEditPoint !== null && timeAtX < nearestEditPoint;
+
+    // Both trim tools enabled: use vertical position to choose.
+    if (this.state.overwriteTrim && this.state.rippleTrim) {
+      if (relativeY < 0.5) {
+        // Upper half: Overwrite trim (Roll behavior).
+        // Show A-side or B-side indicator based on horizontal position.
+        this.activeQuadrant = 'overwrite-trim';
+        if (isASide) {
+          return this.buildZone('a-side-trim', clipAtPos, trackAtY, nearestEditPoint);
+        }
+        return this.buildZone('b-side-trim', clipAtPos, trackAtY, nearestEditPoint);
+      } else {
+        // Lower half: Ripple trim.
+        this.activeQuadrant = 'ripple-trim';
+        if (isASide) {
+          return this.buildZone('a-side-trim', clipAtPos, trackAtY, nearestEditPoint);
+        }
+        return this.buildZone('b-side-trim', clipAtPos, trackAtY, nearestEditPoint);
+      }
     }
 
-    // Lower half: ripple trim.
-    if (this.state.rippleTrim && relativeY >= 0.5) {
-      return this.buildZone('ripple-trim', clipAtPos, trackAtY, nearestEditPoint);
-    }
-
-    // Only one trim tool enabled: use whichever is on.
+    // Only overwrite trim enabled.
     if (this.state.overwriteTrim) {
-      return this.buildZone('overwrite-trim', clipAtPos, trackAtY, nearestEditPoint);
-    }
-    if (this.state.rippleTrim) {
-      return this.buildZone('ripple-trim', clipAtPos, trackAtY, nearestEditPoint);
-    }
-
-    // A-side / B-side based on cursor position relative to edit point.
-    if (nearestEditPoint !== null && timeAtX < nearestEditPoint) {
-      return this.buildZone('a-side-trim', clipAtPos, trackAtY, nearestEditPoint);
-    }
-    if (nearestEditPoint !== null && timeAtX >= nearestEditPoint) {
+      this.activeQuadrant = 'overwrite-trim';
+      if (isASide) {
+        return this.buildZone('a-side-trim', clipAtPos, trackAtY, nearestEditPoint);
+      }
       return this.buildZone('b-side-trim', clipAtPos, trackAtY, nearestEditPoint);
     }
 
+    // Only ripple trim enabled.
+    if (this.state.rippleTrim) {
+      this.activeQuadrant = 'ripple-trim';
+      if (isASide) {
+        return this.buildZone('a-side-trim', clipAtPos, trackAtY, nearestEditPoint);
+      }
+      return this.buildZone('b-side-trim', clipAtPos, trackAtY, nearestEditPoint);
+    }
+
+    this.activeQuadrant = 'none';
     return this.buildZone('none', clipAtPos, trackAtY, nearestEditPoint);
   }
 
-  /** Resolve the segment mode when cursor is over a clip body. */
+  /**
+   * Resolve the segment mode when cursor is over a clip body.
+   *
+   * Avid Smart Tool clip body quadrants:
+   *
+   *   - Top portion (relativeY < 0.25): Slip (changes source IN/OUT without
+   *     moving clip in timeline)
+   *   - Upper half (0.25 <= relativeY < 0.5): Lift/Overwrite Segment
+   *   - Lower half (relativeY >= 0.5): Extract/Splice-In Segment
+   *
+   * When only one segment tool is enabled, the entire clip body uses that tool.
+   */
   private resolveSegmentMode(
     relativeY: number,
     clipAtPos: string | null,
     trackAtY: string | null,
     nearestEditPoint: number | null,
   ): CursorZone {
+    // Top portion of clip: Slip mode (when overwrite trim is enabled).
+    // This matches Avid's behavior where the very top of a clip activates slip.
+    if (this.state.overwriteTrim && relativeY < 0.15) {
+      this.activeQuadrant = 'overwrite-trim';
+      return this.buildZone('slip', clipAtPos, trackAtY, nearestEditPoint);
+    }
+
     // Upper half: lift/overwrite segment.
     if (this.state.liftOverwriteSegment && relativeY < 0.5) {
+      this.activeQuadrant = 'lift-overwrite';
       return this.buildZone(
         'lift-overwrite-segment',
         clipAtPos,
@@ -412,6 +495,7 @@ export class SmartToolEngine {
 
     // Lower half: extract/splice segment.
     if (this.state.extractSpliceSegment && relativeY >= 0.5) {
+      this.activeQuadrant = 'extract-splice';
       return this.buildZone(
         'extract-splice-segment',
         clipAtPos,
@@ -422,6 +506,7 @@ export class SmartToolEngine {
 
     // Only one segment tool enabled: use whichever is on.
     if (this.state.liftOverwriteSegment) {
+      this.activeQuadrant = 'lift-overwrite';
       return this.buildZone(
         'lift-overwrite-segment',
         clipAtPos,
@@ -430,6 +515,7 @@ export class SmartToolEngine {
       );
     }
     if (this.state.extractSpliceSegment) {
+      this.activeQuadrant = 'extract-splice';
       return this.buildZone(
         'extract-splice-segment',
         clipAtPos,
@@ -438,6 +524,7 @@ export class SmartToolEngine {
       );
     }
 
+    this.activeQuadrant = 'none';
     return this.buildZone('none', clipAtPos, trackAtY, nearestEditPoint);
   }
 
@@ -612,6 +699,50 @@ export class SmartToolEngine {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  //  Quadrant Queries
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * Return the currently active Smart Tool quadrant.
+   *
+   * This is updated on every `hitTest()` call and represents which of
+   * the four Avid Smart Tool sections is engaged.
+   *
+   * @returns The active quadrant.
+   */
+  getActiveQuadrant(): SmartToolQuadrant {
+    return this.activeQuadrant;
+  }
+
+  /**
+   * Map a SmartToolMode to its corresponding SmartToolQuadrant.
+   *
+   * This is useful when converting fine-grained mode info (like a-side-trim
+   * or b-side-trim) into the broader quadrant category.
+   *
+   * @param mode The resolved smart tool mode.
+   * @returns The quadrant this mode belongs to.
+   */
+  getQuadrantForMode(mode: SmartToolMode): SmartToolQuadrant {
+    switch (mode) {
+      case 'lift-overwrite-segment':
+        return 'lift-overwrite';
+      case 'extract-splice-segment':
+        return 'extract-splice';
+      case 'overwrite-trim':
+      case 'roll-trim':
+      case 'slip':
+        return 'overwrite-trim';
+      case 'ripple-trim':
+      case 'a-side-trim':
+      case 'b-side-trim':
+        return 'ripple-trim';
+      default:
+        return 'none';
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   //  Reset / Dispose
   // ═══════════════════════════════════════════════════════════════════════
 
@@ -630,6 +761,7 @@ export class SmartToolEngine {
     this.editZonePixels = DEFAULT_EDIT_ZONE_PIXELS;
     this.onlyOneSegmentTool = false;
     this.verticalDragOnly = false;
+    this.activeQuadrant = 'none';
     this.notify();
   }
 
