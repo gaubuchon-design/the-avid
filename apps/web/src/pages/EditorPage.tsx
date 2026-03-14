@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState, useCallback, Suspense, lazy } from 'react';
+import React, { useEffect, useState, useCallback, Suspense, lazy } from 'react';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorBoundary, PanelErrorBoundary } from '../components/ErrorBoundary';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { Toolbar } from '../components/Toolbar/Toolbar';
 import { BinPanel } from '../components/Bins/BinPanel';
 import { ComposerPanel } from '../components/ComposerPanel/ComposerPanel';
@@ -24,7 +24,6 @@ import { editEngine } from '../engine/EditEngine';
 import { AlphaImportDialog } from '../components/AlphaImportDialog/AlphaImportDialog';
 import { TrackerPanel } from '../components/TrackerPanel/TrackerPanel';
 import { TrackingOverlay } from '../components/TrackerPanel/TrackingOverlay';
-import { type WorkspacePreset, workspacePresets } from '../App';
 import { PageNavigation, type EditorPage as PageId } from '../components/PageNavigation/PageNavigation';
 import { MediaPage } from './MediaPage';
 import { CutPage } from './CutPage';
@@ -33,109 +32,18 @@ import { ColorPage } from './ColorPage';
 // Lazy-load new pages and deliver components for share panel
 const VFXPage = lazy(() => import('./VFXPage').then(m => ({ default: m.VFXPage })));
 const ProToolsPage = lazy(() => import('./ProToolsPage').then(m => ({ default: m.ProToolsPage })));
+const RenderPanel = lazy(() => import('../components/RenderPanel/RenderPanel').then(m => ({ default: m.RenderPanel })));
 
 // Deliver components for Share panel
 const TemplatePanel = lazy(() => import('../components/Deliver/TemplatePanel').then(m => ({ default: m.TemplatePanel })));
 const FormatSettingsPanel = lazy(() => import('../components/Deliver/FormatSettingsPanel').then(m => ({ default: m.FormatSettingsPanel })));
 const RenderQueuePanel = lazy(() => import('../components/Deliver/RenderQueuePanel').then(m => ({ default: m.RenderQueuePanel })));
 
-const VALID_WORKSPACES: ReadonlySet<string> = new Set<WorkspacePreset>(['filmtv', 'news', 'sports', 'creator', 'marketing']);
-
-// Lazy-loaded vertical panels
-// NOTE: These lazy imports are intentionally separate from the ones in App.tsx.
-// App.tsx uses its lazy references for the route-level panel registry, while
-// EditorPage uses its own so each code-split boundary resolves independently.
-const RundownPanel = lazy(() => import('../components/RundownPanel/RundownPanel').then(m => ({ default: m.RundownPanel })));
-const StoryScriptPanel = lazy(() => import('../components/StoryScriptPanel/StoryScriptPanel').then(m => ({ default: m.StoryScriptPanel })));
-const SportsPanel = lazy(() => import('../components/SportsPanel/SportsPanel').then(m => ({ default: m.SportsPanel })));
-const CreatorPanel = lazy(() => import('../components/CreatorPanel/CreatorPanel').then(m => ({ default: m.CreatorPanel })));
-const BrandPanel = lazy(() => import('../components/BrandPanel/BrandPanel').then(m => ({ default: m.BrandPanel })));
+// Lazy-loaded utility panels
 const MultiCamPanel = lazy(() => import('../components/MultiCamPanel/MultiCamPanel').then(m => ({ default: m.MultiCamPanel })));
-const AccessibilityPanel = lazy(() => import('../components/AccessibilityPanel/AccessibilityPanel').then(m => ({ default: m.AccessibilityPanel })));
-const SportsWorkspace = lazy(() => import('../components/SportsWorkspace/SportsWorkspace').then(m => ({ default: m.SportsWorkspace })));
 
 // Playback is driven by PlaybackEngine (RAF-based) via editor.store.ts togglePlay().
 // Keyboard dispatch is centralized in useGlobalKeyboard() — called once from EditorPage.
-
-// ─── Workspace Preset Selector ──────────────────────────────────────────────
-
-function WorkspaceSelector({
-  workspace,
-  switchWorkspace,
-  presets,
-}: {
-  workspace: WorkspacePreset;
-  switchWorkspace: (key: WorkspacePreset) => void;
-  presets: Record<WorkspacePreset, { label: string; panels: string[] }>;
-}) {
-  if (!presets) return null;
-  return (
-    <div className="workspace-selector">
-      {(Object.entries(presets) as [WorkspacePreset, { label: string; panels: string[] }][]).map(([key, preset]) => (
-        <button
-          key={key}
-          className={`ws-tab ${workspace === key ? 'ws-tab-active' : ''}`}
-          onClick={() => switchWorkspace(key)}
-          title={preset.label}
-          aria-pressed={workspace === key}
-        >
-          {preset.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// ─── Vertical Side Panel ────────────────────────────────────────────────────
-
-function VerticalSidePanel({ workspace }: { workspace: WorkspacePreset }) {
-  switch (workspace) {
-    case 'news':
-      return (
-        <PanelErrorBoundary panelName="News Vertical Panel">
-          <Suspense fallback={<LoadingSpinner />}>
-            <PanelErrorBoundary panelName="RundownPanel">
-              <RundownPanel />
-            </PanelErrorBoundary>
-            <PanelErrorBoundary panelName="StoryScriptPanel">
-              <StoryScriptPanel />
-            </PanelErrorBoundary>
-          </Suspense>
-        </PanelErrorBoundary>
-      );
-    case 'sports':
-      return (
-        <PanelErrorBoundary panelName="Sports Panel">
-          <Suspense fallback={<LoadingSpinner />}>
-            <SportsPanel />
-          </Suspense>
-        </PanelErrorBoundary>
-      );
-    case 'creator':
-      return (
-        <PanelErrorBoundary panelName="Creator Vertical Panel">
-          <Suspense fallback={<LoadingSpinner />}>
-            <PanelErrorBoundary panelName="CreatorPanel">
-              <CreatorPanel />
-            </PanelErrorBoundary>
-            <PanelErrorBoundary panelName="AccessibilityPanel">
-              <AccessibilityPanel />
-            </PanelErrorBoundary>
-          </Suspense>
-        </PanelErrorBoundary>
-      );
-    case 'marketing':
-      return (
-        <PanelErrorBoundary panelName="Brand Panel">
-          <Suspense fallback={<LoadingSpinner />}>
-            <BrandPanel />
-          </Suspense>
-        </PanelErrorBoundary>
-      );
-    default:
-      return null;
-  }
-}
 
 // ─── Share / Deliver Panel ──────────────────────────────────────────────────
 
@@ -393,7 +301,6 @@ function PublishTab() {
 
 export function EditorPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const [searchParams] = useSearchParams();
   const showAIPanel = useEditorStore((s) => s.showAIPanel);
   const showExportPanel = useEditorStore((s) => s.showExportPanel);
   const showSharePanel = useEditorStore((s) => s.showSharePanel);
@@ -412,10 +319,6 @@ export function EditorPage() {
 
   const [showTracker, setShowTracker] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
-  const [workspace, setWorkspace] = useState<WorkspacePreset>(() => {
-    const param = searchParams.get('workspace');
-    return param && VALID_WORKSPACES.has(param) ? (param as WorkspacePreset) : 'filmtv';
-  });
   const [showMultiCam, setShowMultiCam] = useState(false);
   const [activePage, setActivePage] = useState<PageId>('edit');
   // Centralized keyboard dispatch — routes keys based on active monitor
@@ -478,8 +381,13 @@ export function EditorPage() {
         e.preventDefault();
         setShowMultiCam(prev => !prev);
       }
-      // Tracker toggle
-      if ((e.metaKey || e.ctrlKey) && e.key === 't') {
+      // Title Tool toggle (Ctrl/Cmd+T)
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 't') {
+        e.preventDefault();
+        useEditorStore.getState().toggleTitleTool();
+      }
+      // Tracker toggle (Ctrl/Cmd+Shift+T)
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'T') {
         e.preventDefault();
         setShowTracker(prev => !prev);
       }
@@ -502,15 +410,9 @@ export function EditorPage() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  const hasVerticalPanel = workspace !== 'filmtv' && workspace !== 'sports';
-  const isSportsWorkspace = workspace === 'sports';
-
   return (
     <div className="editor-shell" onContextMenu={e => e.preventDefault()}>
       <Toolbar />
-      {activePage === 'edit' && (
-        <WorkspaceSelector workspace={workspace} switchWorkspace={setWorkspace} presets={workspacePresets} />
-      )}
 
       {/* Page-specific content */}
       {activePage === 'media' && (
@@ -542,75 +444,57 @@ export function EditorPage() {
           </Suspense>
         </ErrorBoundary>
       )}
-
       {activePage === 'edit' && (
-        isSportsWorkspace ? (
-          <Suspense fallback={<LoadingSpinner />}>
-            <SportsWorkspace />
-          </Suspense>
-        ) : (
-          <>
-            <div className={`workspace${showInspector ? '' : ' no-inspector'}`}>
-              <div className="left-panels">
-                <PanelErrorBoundary panelName="BinPanel">
-                  <BinPanel />
-                </PanelErrorBoundary>
-                {showTranscriptPanel && (
-                  <PanelErrorBoundary panelName="TranscriptPanel">
-                    <TranscriptPanel />
-                  </PanelErrorBoundary>
-                )}
-              </div>
-              <div className="canvas-area" style={{ position: 'relative' }}>
-                <PanelErrorBoundary panelName="ComposerPanel">
-                  {showMultiCam ? (
-                    <Suspense fallback={<LoadingSpinner />}>
-                      <MultiCamPanel />
-                    </Suspense>
-                  ) : (
-                    <ComposerPanel />
-                  )}
-                </PanelErrorBoundary>
-                {/* Tracking ROI overlay on top of monitor canvas */}
-                {showTracker && (
-                  <PanelErrorBoundary panelName="TrackingOverlay">
-                    <TrackingOverlay width={1920} height={1080} />
-                  </PanelErrorBoundary>
-                )}
-                {showAIPanel && (
-                  <PanelErrorBoundary panelName="AIPanel">
-                    <AIPanel />
-                  </PanelErrorBoundary>
-                )}
-              </div>
-              {/* Planar tracker side panel */}
-              {showTracker && (
-                <PanelErrorBoundary panelName="TrackerPanel">
-                  <TrackerPanel />
-                </PanelErrorBoundary>
-              )}
-              {hasVerticalPanel && (
-                <div className="vertical-panel" style={{
-                  width: 340,
-                  overflowY: 'auto',
-                  borderLeft: '1px solid var(--border-subtle)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                }}>
-                  <VerticalSidePanel workspace={workspace} />
-                </div>
-              )}
-              {showInspector && (
-                <PanelErrorBoundary panelName="InspectorPanel">
-                  <InspectorPanel />
+        <>
+          <div className={`workspace${showInspector ? '' : ' no-inspector'}`}>
+            <div className="left-panels">
+              <PanelErrorBoundary panelName="BinPanel">
+                <BinPanel />
+              </PanelErrorBoundary>
+              {showTranscriptPanel && (
+                <PanelErrorBoundary panelName="TranscriptPanel">
+                  <TranscriptPanel />
                 </PanelErrorBoundary>
               )}
             </div>
-            <PanelErrorBoundary panelName="TimelinePanel">
-              <TimelinePanel />
-            </PanelErrorBoundary>
-          </>
-        )
+            <div className="canvas-area" style={{ position: 'relative' }}>
+              <PanelErrorBoundary panelName="ComposerPanel">
+                {showMultiCam ? (
+                  <Suspense fallback={<LoadingSpinner />}>
+                    <MultiCamPanel />
+                  </Suspense>
+                ) : (
+                  <ComposerPanel />
+                )}
+              </PanelErrorBoundary>
+              {/* Tracking ROI overlay on top of monitor canvas */}
+              {showTracker && (
+                <PanelErrorBoundary panelName="TrackingOverlay">
+                  <TrackingOverlay width={1920} height={1080} />
+                </PanelErrorBoundary>
+              )}
+              {showAIPanel && (
+                <PanelErrorBoundary panelName="AIPanel">
+                  <AIPanel />
+                </PanelErrorBoundary>
+              )}
+            </div>
+            {/* Planar tracker side panel */}
+            {showTracker && (
+              <PanelErrorBoundary panelName="TrackerPanel">
+                <TrackerPanel />
+              </PanelErrorBoundary>
+            )}
+            {showInspector && (
+              <PanelErrorBoundary panelName="InspectorPanel">
+                <InspectorPanel />
+              </PanelErrorBoundary>
+            )}
+          </div>
+          <PanelErrorBoundary panelName="TimelinePanel">
+            <TimelinePanel />
+          </PanelErrorBoundary>
+        </>
       )}
 
       <PageNavigation activePage={activePage} onPageChange={setActivePage} />

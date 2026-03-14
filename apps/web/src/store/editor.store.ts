@@ -6,6 +6,8 @@ import { videoSourceManager } from '../engine/VideoSourceManager';
 import { playbackEngine } from '../engine/PlaybackEngine';
 import { trackPatchingEngine } from '../engine/TrackPatchingEngine';
 import { usePlayerStore } from './player.store';
+import { saveProjectToRepository, getProjectFromRepository } from '../lib/projectRepository';
+import type { EditorProject } from '@mcua/core';
 import type { ProjectMediaSettings } from '../engine/MediaDatabaseEngine';
 export type { ProjectMediaSettings } from '../engine/MediaDatabaseEngine';
 
@@ -156,6 +158,7 @@ export interface Bin {
   parentId?: string;
   children: Bin[];
   assets: MediaAsset[];
+  sequences: Sequence[];
   isOpen: boolean;
 }
 
@@ -324,7 +327,23 @@ export interface WatchFolder {
   lastScannedAt?: string;
 }
 
-type SaveStatus = 'idle' | 'saved' | 'saving' | 'error';
+type SaveStatus = 'idle' | 'saved' | 'saving' | 'error' | 'unsaved';
+
+export type RenderJobStatus = 'queued' | 'rendering' | 'complete' | 'error';
+
+export interface RenderJob {
+  id: string;
+  name: string;
+  status: RenderJobStatus;
+  progress: number;
+  format: string;
+  resolution: string;
+  frameRate: string;
+  audioCodec: string;
+  outputPath: string;
+  createdAt: string;
+  error?: string;
+}
 
 // ─── Store ─────────────────────────────────────────────────────────────────────
 
@@ -337,6 +356,7 @@ interface EditorState {
   lastSavedAt: string | null;
   saveStatus: SaveStatus;
   ingestProgress: Record<string, number>; // assetId → 0-1 progress
+  renderQueue: RenderJob[];
 
   // Timeline
   timelineId: string | null;
@@ -378,6 +398,7 @@ interface EditorState {
   // Dialog visibility
   showNewProjectDialog: boolean;
   showSequenceDialog: boolean;
+  sequenceDialogTargetBinId: string | null;
   showTitleTool: boolean;
   showSubtitleEditor: boolean;
   showAlphaImportDialog: boolean;
@@ -462,7 +483,10 @@ interface EditorState {
   multicamDisplayMode: 'quad' | 'nine' | 'sixteen';
 
   // Clip Colors (Avid-style)
-  clipLocalColors: Record<string, string>;
+  projectClipColor: string;
+
+  // Track Patching (source → record mapping)
+  trackPatchMap: Record<string, string>;
   dupeDetectionEnabled: boolean;
 
   // Timeline Display
@@ -634,6 +658,7 @@ interface EditorActions {
   // Dialogs
   toggleNewProjectDialog: () => void;
   toggleSequenceDialog: () => void;
+  openSequenceDialogForBin: (binId: string) => void;
   toggleTitleTool: () => void;
   toggleSubtitleEditor: () => void;
   openAlphaImportDialog: (assetId: string) => Promise<AlphaMode>;
@@ -705,8 +730,13 @@ interface EditorActions {
   setMulticamDisplayMode: (mode: 'quad' | 'nine' | 'sixteen') => void;
 
   // Clip Display
-  setClipLocalColor: (clipId: string, color: string) => void;
-  clearClipLocalColor: (clipId: string) => void;
+  setProjectClipColor: (color: string) => void;
+
+  // Track Patching (store integration)
+  patchSourceToRecord: (sourceId: string, recordId: string) => void;
+  unpatchSource: (sourceId: string) => void;
+  unpatchRecord: (recordId: string) => void;
+  autoMatchPatch: () => void;
   toggleDupeDetection: () => void;
   setClipTextDisplay: (mode: EditorState['clipTextDisplay']) => void;
 
@@ -735,17 +765,30 @@ interface EditorActions {
   // Init
   loadProject: (projectId: string) => void;
 
+  // Render Queue
+  addToRenderQueue: (job: Omit<RenderJob, 'id' | 'createdAt' | 'status' | 'progress'>) => string;
+  removeFromRenderQueue: (jobId: string) => void;
+  updateRenderJobProgress: (jobId: string, progress: number) => void;
+  updateRenderJobStatus: (jobId: string, status: RenderJobStatus, error?: string) => void;
+  clearCompletedRenderJobs: () => void;
+  startRenderJob: (jobId: string) => void;
+
+  // Save/Load
+  saveProject: () => Promise<void>;
+  markUnsaved: () => void;
+
   // Multi-monitor (Task 1)
   setFullscreenMonitor: (monitor: 'source' | 'record' | null) => void;
   setPoppedOutMonitor: (monitor: 'source' | 'record' | null) => void;
   toggleFullscreenMonitor: (monitor: 'source' | 'record') => void;
 
   // Sequences (Task 3)
-  createSequence: (settings: SequenceSettings) => string;
+  createSequence: (settings: SequenceSettings, targetBinId?: string) => string;
   duplicateSequence: (id: string) => void;
   deleteSequence: (id: string) => void;
   switchSequence: (id: string) => void;
   renameSequence: (id: string, name: string) => void;
+  moveSequenceToBin: (sequenceId: string, targetBinId: string) => void;
 
   // Bin management (Task 2)
   renameBin: (binId: string, name: string) => void;
@@ -782,22 +825,11 @@ export function makeClip(base: Omit<Clip, 'intrinsicVideo' | 'intrinsicAudio' | 
   };
 }
 
-const INITIAL_TRACKS: Track[] = [
-  { id: 't-v1', name: 'V1', type: 'VIDEO', sortOrder: 0, muted: false, locked: false, solo: false, volume: 1, color: '#5b6af5', clips: [] },
-  { id: 't-v2', name: 'V2', type: 'VIDEO', sortOrder: 1, muted: false, locked: false, solo: false, volume: 1, color: '#818cf8', clips: [] },
-  { id: 't-a1', name: 'A1', type: 'AUDIO', sortOrder: 2, muted: false, locked: false, solo: false, volume: 0.85, color: '#e05b8e', clips: [] },
-  { id: 't-a2', name: 'A2', type: 'AUDIO', sortOrder: 3, muted: false, locked: false, solo: false, volume: 0.6, color: '#4ade80', clips: [] },
-];
+const INITIAL_TRACKS: Track[] = [];
 
-const INITIAL_BINS: Bin[] = [
-  { id: 'b-master', name: 'Master', color: '#5b6af5', isOpen: true, children: [], assets: [] },
-  { id: 'b-selects', name: 'Selects', color: '#e05b8e', isOpen: false, children: [], assets: [] },
-];
+const INITIAL_BINS: Bin[] = [];
 
-const INITIAL_SMART_BINS: SmartBin[] = [
-  { id: 'sb-favs', name: 'Favorites', color: '#f59e0b', rules: [{ field: 'favorite', operator: 'is', value: 'true' }], matchAll: true },
-  { id: 'sb-video', name: 'All Video', color: '#5bbfc7', rules: [{ field: 'type', operator: 'equals', value: 'VIDEO' }], matchAll: true },
-];
+const INITIAL_SMART_BINS: SmartBin[] = [];
 
 const INITIAL_TRANSCRIPT: TranscriptCue[] = [];
 const INITIAL_APPROVALS: Approval[] = [];
@@ -880,68 +912,9 @@ function getPreferredTrack(state: Pick<EditorState, 'tracks' | 'selectedTrackId'
 // the resolve callback outside of the store state.
 let _alphaDialogResolve: ((mode: AlphaMode) => void) | null = null;
 
-// ─── Demo data ────────────────────────────────────────────────────────────────
-const DEMO_BINS: Bin[] = [
-  {
-    id: 'b1', name: 'Rushes', color: '#5b6af5', isOpen: true, children: [
-      { id: 'b1a', name: 'Day 1', color: '#818cf8', isOpen: false, children: [], assets: [
-        { id: 'a1', name: 'Scene 01 - Take 01', type: 'VIDEO', duration: 45.2, status: 'READY', tags: ['dialogue'], isFavorite: true },
-        { id: 'a2', name: 'Scene 01 - Take 02', type: 'VIDEO', duration: 48.7, status: 'READY', tags: ['dialogue'], isFavorite: false },
-        { id: 'a3', name: 'Scene 02 - Take 01', type: 'VIDEO', duration: 22.1, status: 'READY', tags: ['action'], isFavorite: false },
-      ]},
-      { id: 'b1b', name: 'Day 2', color: '#818cf8', isOpen: false, children: [], assets: [
-        { id: 'a4', name: 'Scene 03 - Wide', type: 'VIDEO', duration: 67.5, status: 'READY', tags: ['wide-shot'], isFavorite: false },
-        { id: 'a5', name: 'Scene 03 - Close', type: 'VIDEO', duration: 31.2, status: 'READY', tags: ['close-up'], isFavorite: false },
-      ]},
-      { id: 'b1c', name: 'B-Roll', color: '#818cf8', isOpen: false, children: [], assets: [
-        { id: 'a6', name: 'City Timelapse', type: 'VIDEO', duration: 12.0, status: 'READY', tags: ['broll', 'city'], isFavorite: true },
-        { id: 'a7', name: 'Sky Clouds', type: 'VIDEO', duration: 8.5, status: 'READY', tags: ['broll'], isFavorite: false },
-      ]},
-    ],
-    assets: [],
-  },
-  {
-    id: 'b2', name: 'Music', color: '#2bb672', isOpen: false, children: [], assets: [
-      { id: 'a8', name: 'Main Theme', type: 'AUDIO', duration: 180.0, status: 'READY', tags: ['music'], isFavorite: true },
-      { id: 'a9', name: 'Tension Underscore', type: 'AUDIO', duration: 90.0, status: 'READY', tags: ['music', 'tension'], isFavorite: false },
-    ],
-  },
-  {
-    id: 'b3', name: 'Graphics', color: '#e8943a', isOpen: false, children: [], assets: [
-      { id: 'a10', name: 'Title Card', type: 'IMAGE', status: 'READY', tags: ['graphics'], isFavorite: false },
-      { id: 'a11', name: 'Lower Third', type: 'IMAGE', status: 'READY', tags: ['graphics'], isFavorite: false },
-    ],
-  },
-  { id: 'b4', name: 'Selects', color: '#e05b8e', isOpen: false, children: [], assets: [] },
-];
+const DEMO_BINS: Bin[] = [];
 
-const DEMO_SMART_BINS: SmartBin[] = [
-  {
-    id: 'sb1', name: 'All Video', color: '#5bbfc7',
-    rules: [{ field: 'type', operator: 'equals', value: 'VIDEO' }],
-    matchAll: true,
-  },
-  {
-    id: 'sb2', name: 'Favorites', color: '#f59e0b',
-    rules: [{ field: 'favorite', operator: 'is', value: 'true' }],
-    matchAll: true,
-  },
-  {
-    id: 'sb3', name: 'Long Takes (>30s)', color: '#e05b8e',
-    rules: [{ field: 'duration', operator: 'greaterThan', value: '30' }],
-    matchAll: true,
-  },
-  {
-    id: 'sb4', name: 'Dialogue Clips', color: '#818cf8',
-    rules: [{ field: 'tag', operator: 'contains', value: 'dialogue' }],
-    matchAll: true,
-  },
-  {
-    id: 'sb5', name: 'Music & Audio', color: '#2bb672',
-    rules: [{ field: 'type', operator: 'equals', value: 'AUDIO' }],
-    matchAll: true,
-  },
-];
+const DEMO_SMART_BINS: SmartBin[] = [];
 
 // ─── Playback ────────────────────────────────────────────────────────────────
 // Timeline playback is driven by PlaybackEngine (RAF-based).
@@ -958,6 +931,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     lastSavedAt: null,
     saveStatus: 'idle' as SaveStatus,
     ingestProgress: {},
+    renderQueue: [] as RenderJob[],
     timelineId: null,
     tracks: INITIAL_TRACKS,
     markers: [],
@@ -969,9 +943,9 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     selectedClipIds: [],
     selectedTrackId: null,
     inspectedClipId: null,
-    bins: DEMO_BINS,
-    selectedBinId: 'b1a',
-    activeBinAssets: DEMO_BINS[0]!.children[0]!.assets,
+    bins: [],
+    selectedBinId: null,
+    activeBinAssets: [],
     smartBins: DEMO_SMART_BINS,
     selectedSmartBinId: null,
     sequenceSettings: {
@@ -995,6 +969,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     snapToGrid: true,
     showNewProjectDialog: false,
     showSequenceDialog: false,
+    sequenceDialogTargetBinId: null,
     showTitleTool: false,
     showSubtitleEditor: false,
     showAlphaImportDialog: false,
@@ -1010,10 +985,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     showSharePanel: false,
     showSettingsPanel: false,
     isFullscreen: false,
-    collabUsers: [
-      { id: 'u1', displayName: 'Sarah K.', color: '#7c5cfc' },
-      { id: 'u2', displayName: 'Marcus T.', color: '#2bb672' },
-    ],
+    collabUsers: [],
     aiJobs: [],
     transcript: INITIAL_TRANSCRIPT,
     reviewComments: INITIAL_REVIEW_COMMENTS,
@@ -1061,7 +1033,10 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     multicamDisplayMode: 'quad' as EditorState['multicamDisplayMode'],
 
     // Clip Colors (Avid-style)
-    clipLocalColors: {} as Record<string, string>,
+    projectClipColor: '#5b6af5',
+
+    // Track Patching (source → record mapping)
+    trackPatchMap: {} as Record<string, string>,
     dupeDetectionEnabled: false,
 
     // Timeline Display
@@ -1692,6 +1667,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         isOpen: false,
         children: [],
         assets: [],
+        sequences: [],
       };
       if (parentId) {
         const findAndAdd = (bins: Bin[]) => {
@@ -1983,8 +1959,38 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     setMulticamDisplayMode: (mode) => set((s) => { s.multicamDisplayMode = mode; }),
 
     // ─── Clip Display ─────────────────────────────────────────────────────────
-    setClipLocalColor: (clipId, color) => set((s) => { s.clipLocalColors[clipId] = color; }),
-    clearClipLocalColor: (clipId) => set((s) => { delete s.clipLocalColors[clipId]; }),
+    setProjectClipColor: (color) => set((s) => { s.projectClipColor = color; }),
+
+    // ─── Track Patching (store integration) ──────────────────────────────────
+    patchSourceToRecord: (sourceId, recordId) => {
+      trackPatchingEngine.patchSourceToRecord(sourceId, recordId);
+      const patches = trackPatchingEngine.getPatches();
+      const map: Record<string, string> = {};
+      for (const p of patches) { map[p.sourceTrackId] = p.recordTrackId; }
+      set((s) => { s.trackPatchMap = map; });
+    },
+    unpatchSource: (sourceId) => {
+      trackPatchingEngine.unpatchSource(sourceId);
+      const patches = trackPatchingEngine.getPatches();
+      const map: Record<string, string> = {};
+      for (const p of patches) { map[p.sourceTrackId] = p.recordTrackId; }
+      set((s) => { s.trackPatchMap = map; });
+    },
+    unpatchRecord: (recordId) => {
+      trackPatchingEngine.unpatchRecord(recordId);
+      const patches = trackPatchingEngine.getPatches();
+      const map: Record<string, string> = {};
+      for (const p of patches) { map[p.sourceTrackId] = p.recordTrackId; }
+      set((s) => { s.trackPatchMap = map; });
+    },
+    autoMatchPatch: () => {
+      const tracks = get().tracks;
+      trackPatchingEngine.autoMatchPatch(tracks);
+      const patches = trackPatchingEngine.getPatches();
+      const map: Record<string, string> = {};
+      for (const p of patches) { map[p.sourceTrackId] = p.recordTrackId; }
+      set((s) => { s.trackPatchMap = map; });
+    },
     toggleDupeDetection: () => set((s) => { s.dupeDetectionEnabled = !s.dupeDetectionEnabled; }),
     setClipTextDisplay: (mode) => set((s) => { s.clipTextDisplay = mode; }),
 
@@ -2052,7 +2058,112 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     goToStart: () => set((s) => { s.playheadTime = 0; }),
     goToEnd: () => set((s) => { s.playheadTime = s.duration; }),
 
-    loadProject: (id) => set((s) => { s.projectId = id; }),
+    loadProject: (id) => {
+      set((s) => { s.projectId = id; });
+      getProjectFromRepository(id).then((project) => {
+        if (!project) return;
+        set((s) => {
+          const pAny = project as any;
+          s.projectName = pAny.name ?? 'Untitled Project';
+          s.lastSavedAt = pAny.updatedAt ?? null;
+          s.saveStatus = 'saved';
+          if (pAny.bins && pAny.bins.length > 0) {
+            s.bins = pAny.bins.map((b: any) => ({
+              id: b.id, name: b.name, color: b.color ?? '#818cf8',
+              parentId: b.parentId, children: [] as Bin[], sequences: [] as Sequence[], isOpen: false,
+              assets: (b.assets ?? []).map((a: any) => ({
+                id: a.id, name: a.name ?? 'Untitled', type: a.type ?? 'VIDEO',
+                duration: a.duration ?? 0, status: 'READY' as const,
+                tags: a.tags ?? [], isFavorite: false,
+                width: a.width, height: a.height, fps: a.fps,
+                codec: a.codec, fileSize: a.fileSize,
+              })),
+            }));
+          }
+          if (pAny.sequences && pAny.sequences.length > 0) {
+            const seq = pAny.sequences[0];
+            if (seq && seq.tracks && seq.tracks.length > 0) {
+              s.tracks = seq.tracks;
+            }
+          }
+        });
+      }).catch((err: unknown) => {
+        console.warn('[loadProject] Failed to hydrate:', err);
+      });
+    },
+
+    addToRenderQueue: (job) => {
+      const id = createId('render');
+      set((s) => {
+        s.renderQueue.push({ ...job, id, status: 'queued', progress: 0, createdAt: new Date().toISOString() });
+      });
+      return id;
+    },
+    removeFromRenderQueue: (jobId) => set((s) => {
+      s.renderQueue = s.renderQueue.filter((j) => j.id !== jobId);
+    }),
+    updateRenderJobProgress: (jobId, progress) => set((s) => {
+      const job = s.renderQueue.find((j) => j.id === jobId);
+      if (job) job.progress = Math.min(100, Math.max(0, progress));
+    }),
+    updateRenderJobStatus: (jobId, status, error) => set((s) => {
+      const job = s.renderQueue.find((j) => j.id === jobId);
+      if (job) {
+        job.status = status;
+        if (error) job.error = error;
+        if (status === 'complete') job.progress = 100;
+      }
+    }),
+    clearCompletedRenderJobs: () => set((s) => {
+      s.renderQueue = s.renderQueue.filter((j) => j.status !== 'complete');
+    }),
+    startRenderJob: (jobId) => {
+      set((s) => {
+        const job = s.renderQueue.find((j) => j.id === jobId);
+        if (job && job.status === 'queued') { job.status = 'rendering'; job.progress = 0; }
+      });
+      const interval = setInterval(() => {
+        const state = get();
+        const renderJob = state.renderQueue.find((j: RenderJob) => j.id === jobId);
+        if (!renderJob || renderJob.status !== 'rendering') { clearInterval(interval); return; }
+        const nextProgress = renderJob.progress + 2;
+        if (nextProgress >= 100) {
+          clearInterval(interval);
+          set((s) => { const rj = s.renderQueue.find((x) => x.id === jobId); if (rj) { rj.progress = 100; rj.status = 'complete'; } });
+        } else {
+          set((s) => { const rj = s.renderQueue.find((x) => x.id === jobId); if (rj) rj.progress = nextProgress; });
+        }
+      }, 100);
+    },
+
+    saveProject: async () => {
+      const state = get();
+      if (!state.projectId) return;
+      set((s) => { s.saveStatus = 'saving'; });
+      try {
+        const project = {
+          id: state.projectId, schemaVersion: 2,
+          name: state.projectName,
+          createdAt: state.lastSavedAt ?? new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          bins: state.bins.map((b) => ({
+            id: b.id, name: b.name, color: b.color, parentId: b.parentId,
+            assets: b.assets.map((a) => ({
+              id: a.id, name: a.name, type: a.type, duration: a.duration,
+              width: a.width, height: a.height, fps: a.fps, codec: a.codec,
+              fileSize: a.fileSize, tags: a.tags,
+            })),
+          })),
+          media: [], settings: state.projectSettings,
+        } as unknown as EditorProject;
+        await saveProjectToRepository(project);
+        set((s) => { s.saveStatus = 'saved'; s.lastSavedAt = new Date().toISOString(); });
+      } catch (err) {
+        console.error('[saveProject] Failed:', err);
+        set((s) => { s.saveStatus = 'error'; });
+      }
+    },
+    markUnsaved: () => set((s) => { s.saveStatus = 'unsaved'; }),
 
     // Sequence settings
     updateSequenceSettings: (settings) => set((s) => {
@@ -2238,7 +2349,14 @@ export const useEditorStore = create<EditorState & EditorActions>()(
 
     // Dialogs
     toggleNewProjectDialog: () => set((s) => { s.showNewProjectDialog = !s.showNewProjectDialog; }),
-    toggleSequenceDialog: () => set((s) => { s.showSequenceDialog = !s.showSequenceDialog; }),
+    toggleSequenceDialog: () => set((s) => {
+      s.showSequenceDialog = !s.showSequenceDialog;
+      if (!s.showSequenceDialog) s.sequenceDialogTargetBinId = null;
+    }),
+    openSequenceDialogForBin: (binId) => set((s) => {
+      s.sequenceDialogTargetBinId = binId;
+      s.showSequenceDialog = true;
+    }),
     toggleTitleTool: () => set((s) => { s.showTitleTool = !s.showTitleTool; }),
     toggleSubtitleEditor: () => set((s) => { s.showSubtitleEditor = !s.showSubtitleEditor; }),
     openAlphaImportDialog: (assetId: string) => {
@@ -2320,7 +2438,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     }),
 
     // ── Sequences (Task 3) ────────────────────────────────────────────────
-    createSequence: (settings) => {
+    createSequence: (settings, targetBinId) => {
       const id = createId('seq');
       const now = new Date().toISOString();
       set((s) => {
@@ -2335,6 +2453,27 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         };
         s.sequences.push(seq);
         s.activeSequenceId = id;
+
+        // Add sequence to the target bin (or selected bin, or first bin)
+        const binId = targetBinId ?? s.selectedBinId;
+        if (binId) {
+          const findBin = (bins: Bin[]): Bin | null => {
+            for (const b of bins) {
+              if (b.id === binId) return b;
+              const child = findBin(b.children);
+              if (child) return child;
+            }
+            return null;
+          };
+          const bin = findBin(s.bins);
+          if (bin) {
+            if (!bin.sequences) bin.sequences = [];
+            bin.sequences.push(seq);
+          }
+        } else if (s.bins.length > 0) {
+          if (!s.bins[0]!.sequences) s.bins[0]!.sequences = [];
+          s.bins[0]!.sequences.push(seq);
+        }
       });
       return id;
     },
@@ -2359,6 +2498,13 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       if (s.activeSequenceId === id) {
         s.activeSequenceId = s.sequences.length > 0 ? s.sequences[0]!.id : null;
       }
+      const removeFromBins = (bins: Bin[]) => {
+        for (const bin of bins) {
+          if (bin.sequences) bin.sequences = bin.sequences.filter((sq) => sq.id !== id);
+          removeFromBins(bin.children);
+        }
+      };
+      removeFromBins(s.bins);
     }),
     switchSequence: (id) => set((s) => {
       const seq = s.sequences.find((seq) => seq.id === id);
@@ -2374,6 +2520,53 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       if (seq) {
         seq.name = name;
         seq.modifiedAt = new Date().toISOString();
+      }
+      // Also rename in bin tree
+      const renameInBins = (bins: Bin[]) => {
+        for (const bin of bins) {
+          const binSeq = bin.sequences?.find((sq) => sq.id === id);
+          if (binSeq) { binSeq.name = name; binSeq.modifiedAt = new Date().toISOString(); return; }
+          renameInBins(bin.children);
+        }
+      };
+      renameInBins(s.bins);
+    }),
+    moveSequenceToBin: (sequenceId, targetBinId) => set((s) => {
+      // Find and remove the sequence from its current bin
+      let movedSeq: Sequence | null = null;
+      const removeFromBins = (bins: Bin[]) => {
+        for (const bin of bins) {
+          if (bin.sequences) {
+            const idx = bin.sequences.findIndex((sq) => sq.id === sequenceId);
+            if (idx >= 0) {
+              movedSeq = JSON.parse(JSON.stringify(bin.sequences[idx]));
+              bin.sequences.splice(idx, 1);
+              return;
+            }
+          }
+          removeFromBins(bin.children);
+        }
+      };
+      removeFromBins(s.bins);
+
+      if (!movedSeq) {
+        const globalSeq = s.sequences.find((sq) => sq.id === sequenceId);
+        if (globalSeq) movedSeq = JSON.parse(JSON.stringify(globalSeq));
+      }
+      if (!movedSeq) return;
+
+      const findBin = (bins: Bin[]): Bin | null => {
+        for (const b of bins) {
+          if (b.id === targetBinId) return b;
+          const child = findBin(b.children);
+          if (child) return child;
+        }
+        return null;
+      };
+      const targetBin = findBin(s.bins);
+      if (targetBin) {
+        if (!targetBin.sequences) targetBin.sequences = [];
+        targetBin.sequences.push(movedSeq);
       }
     }),
 

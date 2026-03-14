@@ -33,17 +33,7 @@ const ExportPanel = lazy(() => import('./components/ExportPanel/ExportPanel').th
 const MarketplacePanel = lazy(() => import('./components/MarketplacePanel/MarketplacePanel').then(m => ({ default: m.MarketplacePanel })));
 const AdminDashboard = lazy(() => import('./components/AdminDashboard/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
 
-// ─── Lazy-loaded Vertical Panels ─────────────────────────────────────────────
-const RundownPanel = lazy(() => import('./components/RundownPanel/RundownPanel').then(m => ({ default: m.RundownPanel })));
-const StoryScriptPanel = lazy(() => import('./components/StoryScriptPanel/StoryScriptPanel').then(m => ({ default: m.StoryScriptPanel })));
-const SportsPanel = lazy(() => import('./components/SportsPanel/SportsPanel').then(m => ({ default: m.SportsPanel })));
-const EVSBrowserPanel = lazy(() => import('./components/EVSBrowser/EVSBrowser').then(m => ({ default: m.EVSBrowser })));
-const SportsHighlightsPanel = lazy(() => import('./components/SportsHighlights/SportsHighlights').then(m => ({ default: m.SportsHighlights })));
-const SportsCamViewerPanel = lazy(() => import('./components/SportsCamViewer/SportsCamViewer').then(m => ({ default: m.SportsCamViewer })));
-const PackageBuilderPanel = lazy(() => import('./components/PackageBuilder/PackageBuilderPanel').then(m => ({ default: m.PackageBuilderPanel })));
-const StatsOverlayPanel = lazy(() => import('./components/StatsOverlay/StatsOverlay').then(m => ({ default: m.StatsOverlay })));
-const CreatorPanel = lazy(() => import('./components/CreatorPanel/CreatorPanel').then(m => ({ default: m.CreatorPanel })));
-const BrandPanel = lazy(() => import('./components/BrandPanel/BrandPanel').then(m => ({ default: m.BrandPanel })));
+// ─── Lazy-loaded Panels ─────────────────────────────────────────────────────
 const MultiCamPanel = lazy(() => import('./components/MultiCamPanel/MultiCamPanel').then(m => ({ default: m.MultiCamPanel })));
 const AccessibilityPanel = lazy(() => import('./components/AccessibilityPanel/AccessibilityPanel').then(m => ({ default: m.AccessibilityPanel })));
 
@@ -81,48 +71,20 @@ export const panelRegistry: Record<string, React.ComponentType> = {
   marketplace: MarketplacePanel,
   admin: AdminDashboard,
 
-  // Vertical workflow panels
-  rundown: LazyPanel(RundownPanel, 'RundownPanel'),
-  storyScript: LazyPanel(StoryScriptPanel, 'StoryScriptPanel'),
-  sports: LazyPanel(SportsPanel, 'SportsPanel'),
-  creator: LazyPanel(CreatorPanel, 'CreatorPanel'),
-  brand: LazyPanel(BrandPanel, 'BrandPanel'),
+  // Utility panels
   multicam: LazyPanel(MultiCamPanel, 'MultiCamPanel'),
   accessibility: LazyPanel(AccessibilityPanel, 'AccessibilityPanel'),
-
-  // Sports production sub-panels (SP-11)
-  evsBrowser: LazyPanel(EVSBrowserPanel, 'EVSBrowserPanel'),
-  sportsHighlights: LazyPanel(SportsHighlightsPanel, 'SportsHighlightsPanel'),
-  sportsCamViewer: LazyPanel(SportsCamViewerPanel, 'SportsCamViewerPanel'),
-  packageBuilder: LazyPanel(PackageBuilderPanel, 'PackageBuilderPanel'),
-  statsOverlay: LazyPanel(StatsOverlayPanel, 'StatsOverlayPanel'),
 };
 
-// ─── Workspace Presets ───────────────────────────────────────────────────────
-// Defines which panels are active for each vertical workflow.
+// ─── Default Workspace ───────────────────────────────────────────────────────
+// A single default workspace that includes all core editing panels.
 
-export type WorkspacePreset = 'filmtv' | 'news' | 'sports' | 'creator' | 'marketing';
+export type WorkspacePreset = 'default';
 
 export const workspacePresets: Record<WorkspacePreset, { label: string; panels: string[] }> = {
-  filmtv: {
-    label: 'Film / TV',
-    panels: ['timeline', 'source', 'record', 'color', 'audio', 'effects', 'script', 'collab', 'multicam'],
-  },
-  news: {
-    label: 'Broadcast News',
-    panels: ['timeline', 'rundown', 'storyScript', 'source', 'record', 'audio', 'collab'],
-  },
-  sports: {
-    label: 'Sports',
-    panels: ['timeline', 'sports', 'evsBrowser', 'sportsHighlights', 'sportsCamViewer', 'packageBuilder', 'statsOverlay', 'source', 'record', 'multicam', 'audio', 'collab'],
-  },
-  creator: {
-    label: 'Creator',
-    panels: ['timeline', 'creator', 'source', 'record', 'audio', 'effects', 'accessibility'],
-  },
-  marketing: {
-    label: 'Brand & Marketing',
-    panels: ['timeline', 'brand', 'source', 'record', 'color', 'effects', 'collab'],
+  default: {
+    label: 'Edit',
+    panels: ['timeline', 'source', 'record', 'color', 'audio', 'effects'],
   },
 };
 

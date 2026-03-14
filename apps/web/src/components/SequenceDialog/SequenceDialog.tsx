@@ -338,6 +338,7 @@ export const SequenceDialog: React.FC = () => {
   );
   const showSequenceDialog = useEditorStore((s) => s.showSequenceDialog);
   const toggleSequenceDialog = useEditorStore((s) => s.toggleSequenceDialog);
+  const sequenceDialogTargetBinId = useEditorStore((s) => s.sequenceDialogTargetBinId);
 
   // -- Local draft state (mirrors store, committed on save) ------------------
 
@@ -488,7 +489,7 @@ export const SequenceDialog: React.FC = () => {
       ...patch,
     };
     if (!isEditing) {
-      store.createSequence(fullSettings);
+      store.createSequence(fullSettings, sequenceDialogTargetBinId ?? undefined);
     }
 
     toggleSequenceDialog();
@@ -504,6 +505,7 @@ export const SequenceDialog: React.FC = () => {
     isEditing,
     updateSequenceSettings,
     toggleSequenceDialog,
+    sequenceDialogTargetBinId,
   ]);
 
   // "Create from Clip" — auto-match sequence settings to the selected clip

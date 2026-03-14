@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useEditorStore } from '../../store/editor.store';
 import { createProjectInRepository } from '../../lib/projectRepository';
@@ -7,80 +7,16 @@ import {
   RESOLUTION_PRESETS,
   supportsDropFrame,
 } from '../../lib/timecode';
-import type { ProjectTemplate } from '@mcua/core';
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
-
-type WorkspacePersona = 'filmtv' | 'news' | 'sports' | 'creator' | 'marketing';
-
-interface PersonaConfig {
-  icon: string;
-  name: string;
-  desc: string;
-  fps: number;
-  dropFrame?: boolean;
-  template: ProjectTemplate;
-  resolution: { width: number; height: number };
-}
 
 interface SequenceSettings {
   fps: number;
   resolutionIndex: number;
   dropFrame: boolean;
+  sampleRate: number;
+  bitDepth: number;
 }
-
-type DialogStep = 0 | 1 | 2;
-
-// ─── Persona Definitions ────────────────────────────────────────────────────────
-
-const PERSONA_MAP: Record<WorkspacePersona, PersonaConfig> = {
-  filmtv: {
-    icon: '\uD83C\uDFAC',
-    name: 'Film & TV',
-    desc: 'Full timeline, color grading, audio mixing',
-    fps: 23.976,
-    template: 'film',
-    resolution: { width: 1920, height: 1080 },
-  },
-  news: {
-    icon: '\uD83D\uDCE1',
-    name: 'News',
-    desc: 'Rundown, script panel, fast turnaround',
-    fps: 29.97,
-    dropFrame: true,
-    template: 'news',
-    resolution: { width: 1920, height: 1080 },
-  },
-  sports: {
-    icon: '\u26A1',
-    name: 'Sports',
-    desc: 'Multi-cam, slow-mo, instant replay',
-    fps: 59.94,
-    dropFrame: true,
-    template: 'sports',
-    resolution: { width: 3840, height: 2160 },
-  },
-  creator: {
-    icon: '\uD83D\uDCF1',
-    name: 'Creator',
-    desc: 'Social formats, templates, quick export',
-    fps: 30,
-    template: 'social',
-    resolution: { width: 1080, height: 1920 },
-  },
-  marketing: {
-    icon: '\uD83C\uDFF7',
-    name: 'Marketing',
-    desc: 'Multi-variant, A/B testing, brand assets',
-    fps: 30,
-    template: 'commercial',
-    resolution: { width: 1920, height: 1080 },
-  },
-};
-
-const PERSONA_KEYS: WorkspacePersona[] = ['filmtv', 'news', 'sports', 'creator', 'marketing'];
-
-const STEP_LABELS = ['Workspace', 'Details', 'Sequence'] as const;
 
 // ─── Inline Styles ──────────────────────────────────────────────────────────────
 
@@ -98,7 +34,7 @@ const S = {
   },
 
   dialog: {
-    width: 560,
+    width: 520,
     maxHeight: 'calc(100vh - 80px)',
     background: 'var(--bg-surface)',
     border: '1px solid var(--border-default)',
@@ -137,99 +73,21 @@ const S = {
     transition: 'color 150ms, background 150ms',
   },
 
-  stepBar: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    padding: '12px 20px',
-    borderBottom: '1px solid var(--border-subtle)',
-  },
-
-  stepDot: (active: boolean, completed: boolean) => ({
-    width: 8,
-    height: 8,
-    borderRadius: '50%',
-    background: active
-      ? 'var(--brand)'
-      : completed
-        ? 'var(--brand-bright)'
-        : 'var(--bg-overlay)',
-    transition: 'background 200ms, transform 200ms',
-    transform: active ? 'scale(1.25)' : 'scale(1)',
-  }),
-
-  stepLabel: (active: boolean) => ({
-    fontSize: 10,
-    fontWeight: 600,
-    letterSpacing: '0.06em',
-    textTransform: 'uppercase' as const,
-    color: active ? 'var(--text-primary)' : 'var(--text-muted)',
-    transition: 'color 200ms',
-  }),
-
-  stepConnector: {
-    width: 24,
-    height: 1,
-    background: 'var(--border-default)',
-    flexShrink: 0,
-  },
-
   body: {
     flex: 1,
     overflow: 'auto',
     padding: '20px',
-    minHeight: 280,
   },
 
   footer: {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
+    gap: 8,
     padding: '12px 20px 16px',
     borderTop: '1px solid var(--border-subtle)',
   },
 
-  // Step 1 — Persona cards
-  personaGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(3, 1fr)',
-    gap: 10,
-  },
-
-  personaCard: (selected: boolean) => ({
-    display: 'flex',
-    flexDirection: 'column' as const,
-    alignItems: 'center',
-    gap: 6,
-    padding: '16px 10px 14px',
-    borderRadius: 'var(--radius-md)',
-    border: `1.5px solid ${selected ? 'var(--brand)' : 'var(--border-default)'}`,
-    background: selected ? 'var(--accent-muted)' : 'var(--bg-raised)',
-    cursor: 'pointer',
-    transition: 'all 150ms',
-    textAlign: 'center' as const,
-  }),
-
-  personaIcon: {
-    fontSize: 28,
-    lineHeight: 1,
-  },
-
-  personaName: {
-    fontSize: 12,
-    fontWeight: 600,
-    color: 'var(--text-primary)',
-    lineHeight: 1.2,
-  },
-
-  personaDesc: {
-    fontSize: 10,
-    color: 'var(--text-secondary)',
-    lineHeight: 1.3,
-  },
-
-  // Step 2 — Project details
   fieldGroup: {
     marginBottom: 16,
   },
@@ -257,52 +115,6 @@ const S = {
     transition: 'border-color 100ms',
   },
 
-  textarea: {
-    width: '100%',
-    background: 'var(--bg-void)',
-    border: '1px solid var(--border-default)',
-    borderRadius: 'var(--radius-md)',
-    color: 'var(--text-primary)',
-    fontSize: 13,
-    padding: '8px 10px',
-    outline: 'none',
-    fontFamily: 'inherit',
-    resize: 'vertical' as const,
-    minHeight: 64,
-    transition: 'border-color 100ms',
-  },
-
-  tagContainer: {
-    display: 'flex',
-    flexWrap: 'wrap' as const,
-    gap: 6,
-    marginTop: 6,
-  },
-
-  tag: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 4,
-    padding: '2px 8px',
-    borderRadius: 'var(--radius-md)',
-    background: 'var(--accent-muted)',
-    color: 'var(--brand-bright)',
-    fontSize: 11,
-    fontWeight: 500,
-  },
-
-  tagRemove: {
-    background: 'none',
-    border: 'none',
-    color: 'var(--brand-bright)',
-    cursor: 'pointer',
-    fontSize: 12,
-    lineHeight: 1,
-    padding: 0,
-    opacity: 0.7,
-  },
-
-  // Step 3 — Sequence settings
   settingsRow: {
     display: 'flex',
     gap: 12,
@@ -342,6 +154,7 @@ const S = {
     background: 'var(--bg-raised)',
     borderRadius: 'var(--radius-md)',
     border: '1px solid var(--border-subtle)',
+    marginBottom: 16,
   },
 
   toggleLabel: {
@@ -382,31 +195,16 @@ const S = {
     boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
   }),
 
-  previewBox: {
-    marginTop: 16,
-    padding: '12px 14px',
-    background: 'var(--bg-raised)',
-    borderRadius: 'var(--radius-md)',
-    border: '1px solid var(--border-subtle)',
-  },
-
-  previewTitle: {
+  sectionLabel: {
     fontSize: 10,
-    fontWeight: 600,
+    fontWeight: 700,
     letterSpacing: '0.06em',
     textTransform: 'uppercase' as const,
     color: 'var(--text-muted)',
-    marginBottom: 8,
+    marginBottom: 12,
+    marginTop: 8,
   },
 
-  previewValue: {
-    fontFamily: 'var(--font-mono)',
-    fontSize: 12,
-    color: 'var(--text-secondary)',
-    lineHeight: 1.7,
-  },
-
-  // Buttons
   btnPrimary: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -428,22 +226,6 @@ const S = {
     cursor: 'not-allowed',
   },
 
-  btnSecondary: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '8px 14px',
-    borderRadius: 'var(--radius-md)',
-    fontSize: 12,
-    fontWeight: 500,
-    border: '1px solid var(--border-default)',
-    background: 'var(--bg-elevated)',
-    color: 'var(--text-secondary)',
-    cursor: 'pointer',
-    transition: 'background 150ms, color 150ms',
-    whiteSpace: 'nowrap' as const,
-  },
-
   btnGhost: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -461,6 +243,18 @@ const S = {
   },
 } as const;
 
+// ─── Audio Options ──────────────────────────────────────────────────────────────
+
+const SAMPLE_RATE_OPTIONS = [
+  { value: 48000, label: '48,000 Hz' },
+  { value: 96000, label: '96,000 Hz' },
+];
+
+const BIT_DEPTH_OPTIONS = [
+  { value: 16, label: '16-bit' },
+  { value: 24, label: '24-bit' },
+];
+
 // ─── Component ──────────────────────────────────────────────────────────────────
 
 export function NewProjectDialog() {
@@ -470,86 +264,22 @@ export function NewProjectDialog() {
 
   // ── Local State ─────────────────────────────────────────────────────────────
 
-  const [step, setStep] = useState<DialogStep>(0);
-  const [persona, setPersona] = useState<WorkspacePersona | null>(null);
-
-  // Step 2 fields
   const [projectName, setProjectName] = useState('');
-  const [projectDescription, setProjectDescription] = useState('');
-  const [tags, setTags] = useState<string[]>([]);
-  const [tagInput, setTagInput] = useState('');
-
-  // Step 3 fields
   const [sequence, setSequence] = useState<SequenceSettings>({
     fps: 23.976,
     resolutionIndex: 0,
     dropFrame: false,
+    sampleRate: 48000,
+    bitDepth: 24,
   });
-
   const [isCreating, setIsCreating] = useState(false);
 
   // ── Derived Values ──────────────────────────────────────────────────────────
 
-  const selectedResolution = RESOLUTION_PRESETS[sequence.resolutionIndex];
   const dropFrameAvailable = supportsDropFrame(sequence.fps);
-
-  const canProceed = useMemo(() => {
-    switch (step) {
-      case 0:
-        return persona !== null;
-      case 1:
-        return projectName.trim().length > 0;
-      case 2:
-        return true;
-      default:
-        return false;
-    }
-  }, [step, persona, projectName]);
+  const canCreate = projectName.trim().length > 0;
 
   // ── Handlers ────────────────────────────────────────────────────────────────
-
-  const handleSelectPersona = useCallback((key: WorkspacePersona) => {
-    setPersona(key);
-    const config = PERSONA_MAP[key];
-    const resIdx = RESOLUTION_PRESETS.findIndex(
-      (r) => r.width === config.resolution.width && r.height === config.resolution.height
-    );
-    setSequence({
-      fps: config.fps,
-      resolutionIndex: resIdx >= 0 ? resIdx : 0,
-      dropFrame: config.dropFrame ?? false,
-    });
-  }, []);
-
-  const handleNext = useCallback(() => {
-    if (step < 2) {
-      setStep((step + 1) as DialogStep);
-    }
-  }, [step]);
-
-  const handleBack = useCallback(() => {
-    if (step > 0) {
-      setStep((step - 1) as DialogStep);
-    }
-  }, [step]);
-
-  const handleAddTag = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter' || e.key === ',') {
-        e.preventDefault();
-        const value = tagInput.trim().replace(/,/g, '');
-        if (value && !tags.includes(value) && tags.length < 10) {
-          setTags((prev) => [...prev, value]);
-        }
-        setTagInput('');
-      }
-    },
-    [tagInput, tags]
-  );
-
-  const handleRemoveTag = useCallback((tag: string) => {
-    setTags((prev) => prev.filter((t) => t !== tag));
-  }, []);
 
   const handleFpsChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const fps = parseFloat(e.target.value);
@@ -572,39 +302,37 @@ export function NewProjectDialog() {
     setSequence((prev) => ({ ...prev, dropFrame: !prev.dropFrame }));
   }, [dropFrameAvailable]);
 
+  const handleSampleRateChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSequence((prev) => ({ ...prev, sampleRate: parseInt(e.target.value, 10) }));
+  }, []);
+
+  const handleBitDepthChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSequence((prev) => ({ ...prev, bitDepth: parseInt(e.target.value, 10) }));
+  }, []);
+
   const handleClose = useCallback(() => {
     toggleDialog();
-    // Reset on close
-    setStep(0);
-    setPersona(null);
     setProjectName('');
-    setProjectDescription('');
-    setTags([]);
-    setTagInput('');
-    setSequence({ fps: 23.976, resolutionIndex: 0, dropFrame: false });
+    setSequence({ fps: 23.976, resolutionIndex: 0, dropFrame: false, sampleRate: 48000, bitDepth: 24 });
     setIsCreating(false);
   }, [toggleDialog]);
 
   const handleCreate = useCallback(async () => {
-    if (!persona || !projectName.trim() || isCreating) return;
+    if (!projectName.trim() || isCreating) return;
 
     setIsCreating(true);
     try {
-      const config = PERSONA_MAP[persona];
       const project = await createProjectInRepository({
         name: projectName.trim(),
-        description: projectDescription.trim() || undefined,
-        template: config.template,
-        tags: tags.length > 0 ? tags : undefined,
       });
 
       handleClose();
-      navigate(`/editor/${project.id}?workspace=${persona}`);
+      navigate(`/editor/${project.id}`);
     } catch (err) {
       console.error('[NewProjectDialog] Failed to create project:', err);
       setIsCreating(false);
     }
-  }, [persona, projectName, projectDescription, tags, isCreating, handleClose, navigate]);
+  }, [projectName, isCreating, handleClose, navigate]);
 
   const handleOverlayClick = useCallback(
     (e: React.MouseEvent) => {
@@ -627,256 +355,6 @@ export function NewProjectDialog() {
   // ── Render Guards ───────────────────────────────────────────────────────────
 
   if (!showDialog) return null;
-
-  // ── Sub-Renders ─────────────────────────────────────────────────────────────
-
-  const renderStepIndicator = () => (
-    <div style={S.stepBar}>
-      {STEP_LABELS.map((label, i) => (
-        <React.Fragment key={label}>
-          {i > 0 && <div style={S.stepConnector} />}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
-            <div style={S.stepDot(i === step, i < step)} />
-            <span style={S.stepLabel(i === step)}>{label}</span>
-          </div>
-        </React.Fragment>
-      ))}
-    </div>
-  );
-
-  const renderPersonaStep = () => (
-    <div>
-      <p
-        style={{
-          fontSize: 12,
-          color: 'var(--text-secondary)',
-          marginBottom: 16,
-          lineHeight: 1.5,
-        }}
-      >
-        Choose a workspace that matches your production workflow.
-        Each persona pre-configures panels, tools, and sequence defaults.
-      </p>
-      <div style={S.personaGrid}>
-        {PERSONA_KEYS.map((key) => {
-          const cfg = PERSONA_MAP[key];
-          const selected = persona === key;
-          return (
-            <button
-              key={key}
-              type="button"
-              style={S.personaCard(selected)}
-              onClick={() => handleSelectPersona(key)}
-              onMouseEnter={(e) => {
-                if (!selected) {
-                  (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-strong)';
-                  (e.currentTarget as HTMLElement).style.background = 'var(--bg-elevated)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!selected) {
-                  (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-default)';
-                  (e.currentTarget as HTMLElement).style.background = 'var(--bg-raised)';
-                }
-              }}
-            >
-              <span style={S.personaIcon}>{cfg.icon}</span>
-              <span style={S.personaName}>{cfg.name}</span>
-              <span style={S.personaDesc}>{cfg.desc}</span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-
-  const renderDetailsStep = () => (
-    <div>
-      <div style={S.fieldGroup}>
-        <label style={S.label} htmlFor="npd-name">
-          Project Name
-        </label>
-        <input
-          id="npd-name"
-          type="text"
-          style={S.input}
-          placeholder="Untitled Project"
-          value={projectName}
-          onChange={(e) => setProjectName(e.target.value)}
-          onFocus={(e) => {
-            (e.target as HTMLInputElement).style.borderColor = 'var(--brand)';
-          }}
-          onBlur={(e) => {
-            (e.target as HTMLInputElement).style.borderColor = 'var(--border-default)';
-          }}
-          autoFocus
-          maxLength={120}
-        />
-      </div>
-
-      <div style={S.fieldGroup}>
-        <label style={S.label} htmlFor="npd-desc">
-          Description
-        </label>
-        <textarea
-          id="npd-desc"
-          style={S.textarea}
-          placeholder="Optional project description..."
-          value={projectDescription}
-          onChange={(e) => setProjectDescription(e.target.value)}
-          onFocus={(e) => {
-            (e.target as HTMLTextAreaElement).style.borderColor = 'var(--brand)';
-          }}
-          onBlur={(e) => {
-            (e.target as HTMLTextAreaElement).style.borderColor = 'var(--border-default)';
-          }}
-          rows={3}
-          maxLength={500}
-        />
-      </div>
-
-      <div style={S.fieldGroup}>
-        <label style={S.label} htmlFor="npd-tags">
-          Tags
-        </label>
-        <input
-          id="npd-tags"
-          type="text"
-          style={S.input}
-          placeholder="Type a tag and press Enter..."
-          value={tagInput}
-          onChange={(e) => setTagInput(e.target.value)}
-          onKeyDown={handleAddTag}
-          onFocus={(e) => {
-            (e.target as HTMLInputElement).style.borderColor = 'var(--brand)';
-          }}
-          onBlur={(e) => {
-            (e.target as HTMLInputElement).style.borderColor = 'var(--border-default)';
-          }}
-          maxLength={40}
-        />
-        {tags.length > 0 && (
-          <div style={S.tagContainer}>
-            {tags.map((tag) => (
-              <span key={tag} style={S.tag}>
-                {tag}
-                <button
-                  type="button"
-                  style={S.tagRemove}
-                  onClick={() => handleRemoveTag(tag)}
-                  aria-label={`Remove tag ${tag}`}
-                >
-                  \u00D7
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const renderSequenceStep = () => (
-    <div>
-      <div style={S.settingsRow}>
-        <div style={S.settingsField}>
-          <label style={S.label} htmlFor="npd-fps">
-            Frame Rate
-          </label>
-          <select
-            id="npd-fps"
-            style={S.select}
-            value={sequence.fps}
-            onChange={handleFpsChange}
-          >
-            {FRAME_RATE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div style={S.settingsField}>
-          <label style={S.label} htmlFor="npd-res">
-            Resolution
-          </label>
-          <select
-            id="npd-res"
-            style={S.select}
-            value={sequence.resolutionIndex}
-            onChange={handleResolutionChange}
-          >
-            {RESOLUTION_PRESETS.map((preset, i) => (
-              <option key={`${preset.width}x${preset.height}`} value={i}>
-                {preset.label} ({preset.width}\u00D7{preset.height})
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      <div style={S.toggleRow}>
-        <div>
-          <div style={S.toggleLabel}>Drop-Frame Timecode</div>
-          <div style={S.toggleDesc}>
-            {dropFrameAvailable
-              ? 'Available for NTSC frame rates (29.97, 59.94)'
-              : 'Not available for the selected frame rate'}
-          </div>
-        </div>
-        <button
-          type="button"
-          style={S.toggleTrack(sequence.dropFrame, !dropFrameAvailable)}
-          onClick={handleToggleDropFrame}
-          role="switch"
-          aria-checked={sequence.dropFrame}
-          aria-label="Toggle drop-frame timecode"
-        >
-          <div style={S.toggleThumb(sequence.dropFrame)} />
-        </button>
-      </div>
-
-      <div style={S.previewBox}>
-        <div style={S.previewTitle}>Sequence Summary</div>
-        <div style={S.previewValue}>
-          {selectedResolution
-            ? `${selectedResolution.width} \u00D7 ${selectedResolution.height}`
-            : 'Custom'}{' '}
-          &middot;{' '}
-          {FRAME_RATE_OPTIONS.find((o) => o.value === sequence.fps)?.label ?? `${sequence.fps}`}
-          {sequence.dropFrame ? ' DF' : ' NDF'}
-          <br />
-          Workspace: {persona ? PERSONA_MAP[persona].name : '\u2014'}
-          {projectName.trim() ? (
-            <>
-              <br />
-              Project: {projectName.trim()}
-            </>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderStepContent = () => {
-    switch (step) {
-      case 0:
-        return renderPersonaStep();
-      case 1:
-        return renderDetailsStep();
-      case 2:
-        return renderSequenceStep();
-      default:
-        return null;
-    }
-  };
 
   // ── Main Render ─────────────────────────────────────────────────────────────
 
@@ -907,96 +385,175 @@ export function NewProjectDialog() {
             }}
             aria-label="Close dialog"
           >
-            \u2715
+            {'\u2715'}
           </button>
         </div>
 
-        {/* Step Indicator */}
-        {renderStepIndicator()}
-
         {/* Body */}
-        <div style={S.body}>{renderStepContent()}</div>
+        <div style={S.body}>
+          {/* Project Name */}
+          <div style={S.fieldGroup}>
+            <label style={S.label} htmlFor="npd-name">
+              Project Name
+            </label>
+            <input
+              id="npd-name"
+              type="text"
+              style={S.input}
+              placeholder="Untitled Project"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              onFocus={(e) => {
+                (e.target as HTMLInputElement).style.borderColor = 'var(--brand)';
+              }}
+              onBlur={(e) => {
+                (e.target as HTMLInputElement).style.borderColor = 'var(--border-default)';
+              }}
+              autoFocus
+              maxLength={120}
+            />
+          </div>
+
+          {/* Video Settings */}
+          <div style={S.sectionLabel}>Video</div>
+
+          <div style={S.settingsRow}>
+            <div style={S.settingsField}>
+              <label style={S.label} htmlFor="npd-fps">
+                Frame Rate
+              </label>
+              <select
+                id="npd-fps"
+                style={S.select}
+                value={sequence.fps}
+                onChange={handleFpsChange}
+              >
+                {FRAME_RATE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={S.settingsField}>
+              <label style={S.label} htmlFor="npd-res">
+                Resolution
+              </label>
+              <select
+                id="npd-res"
+                style={S.select}
+                value={sequence.resolutionIndex}
+                onChange={handleResolutionChange}
+              >
+                {RESOLUTION_PRESETS.map((preset, i) => (
+                  <option key={`${preset.width}x${preset.height}`} value={i}>
+                    {preset.label} ({preset.width}{'\u00D7'}{preset.height})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div style={S.toggleRow}>
+            <div>
+              <div style={S.toggleLabel}>Drop-Frame Timecode</div>
+              <div style={S.toggleDesc}>
+                {dropFrameAvailable
+                  ? 'Available for NTSC frame rates (29.97, 59.94)'
+                  : 'Not available for the selected frame rate'}
+              </div>
+            </div>
+            <button
+              type="button"
+              style={S.toggleTrack(sequence.dropFrame, !dropFrameAvailable)}
+              onClick={handleToggleDropFrame}
+              role="switch"
+              aria-checked={sequence.dropFrame}
+              aria-label="Toggle drop-frame timecode"
+            >
+              <div style={S.toggleThumb(sequence.dropFrame)} />
+            </button>
+          </div>
+
+          {/* Audio Settings */}
+          <div style={S.sectionLabel}>Audio</div>
+
+          <div style={S.settingsRow}>
+            <div style={S.settingsField}>
+              <label style={S.label} htmlFor="npd-sr">
+                Sample Rate
+              </label>
+              <select
+                id="npd-sr"
+                style={S.select}
+                value={sequence.sampleRate}
+                onChange={handleSampleRateChange}
+              >
+                {SAMPLE_RATE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={S.settingsField}>
+              <label style={S.label} htmlFor="npd-bd">
+                Bit Depth
+              </label>
+              <select
+                id="npd-bd"
+                style={S.select}
+                value={sequence.bitDepth}
+                onChange={handleBitDepthChange}
+              >
+                {BIT_DEPTH_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
 
         {/* Footer */}
         <div style={S.footer}>
-          <div>
-            {step > 0 ? (
-              <button
-                type="button"
-                style={S.btnGhost}
-                onClick={handleBack}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)';
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.color = 'var(--text-muted)';
-                }}
-              >
-                Back
-              </button>
-            ) : (
-              <button
-                type="button"
-                style={S.btnGhost}
-                onClick={handleClose}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)';
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.color = 'var(--text-muted)';
-                }}
-              >
-                Cancel
-              </button>
-            )}
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {step < 2 ? (
-              <button
-                type="button"
-                style={{
-                  ...S.btnPrimary,
-                  ...(canProceed ? {} : S.btnPrimaryDisabled),
-                }}
-                disabled={!canProceed}
-                onClick={handleNext}
-                onMouseEnter={(e) => {
-                  if (canProceed) {
-                    (e.currentTarget as HTMLElement).style.background = 'var(--brand-bright)';
-                    (e.currentTarget as HTMLElement).style.boxShadow = '0 0 16px rgba(109,76,250,0.3)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.background = 'var(--brand)';
-                  (e.currentTarget as HTMLElement).style.boxShadow = 'none';
-                }}
-              >
-                Next
-              </button>
-            ) : (
-              <button
-                type="button"
-                style={{
-                  ...S.btnPrimary,
-                  ...(isCreating ? S.btnPrimaryDisabled : {}),
-                }}
-                disabled={isCreating}
-                onClick={handleCreate}
-                onMouseEnter={(e) => {
-                  if (!isCreating) {
-                    (e.currentTarget as HTMLElement).style.background = 'var(--brand-bright)';
-                    (e.currentTarget as HTMLElement).style.boxShadow = '0 0 16px rgba(109,76,250,0.3)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.background = 'var(--brand)';
-                  (e.currentTarget as HTMLElement).style.boxShadow = 'none';
-                }}
-              >
-                {isCreating ? 'Creating...' : 'Create Project'}
-              </button>
-            )}
-          </div>
+          <button
+            type="button"
+            style={S.btnGhost}
+            onClick={handleClose}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)';
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLElement).style.color = 'var(--text-muted)';
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            style={{
+              ...S.btnPrimary,
+              ...(!canCreate || isCreating ? S.btnPrimaryDisabled : {}),
+            }}
+            disabled={!canCreate || isCreating}
+            onClick={handleCreate}
+            onMouseEnter={(e) => {
+              if (canCreate && !isCreating) {
+                (e.currentTarget as HTMLElement).style.background = 'var(--brand-bright)';
+                (e.currentTarget as HTMLElement).style.boxShadow = '0 0 16px rgba(109,76,250,0.3)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLElement).style.background = 'var(--brand)';
+              (e.currentTarget as HTMLElement).style.boxShadow = 'none';
+            }}
+          >
+            {isCreating ? 'Creating...' : 'Create Project'}
+          </button>
         </div>
       </div>
     </div>

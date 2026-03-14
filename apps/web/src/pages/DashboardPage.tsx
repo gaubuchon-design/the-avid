@@ -8,13 +8,8 @@ import {
 import { NewProjectDialog } from '../components/NewProjectDialog/NewProjectDialog';
 import { useEditorStore } from '../store/editor.store';
 
-const TEMPLATE_OPTIONS: Array<{ template: ProjectTemplate; label: string; desc: string; icon: string; workspace?: string }> = [
-  { template: 'film', label: 'Blank Timeline', desc: '1920x1080 · 24fps', icon: '🎬', workspace: 'filmtv' },
-  { template: 'social', label: 'Social Vertical', desc: '1080x1920 · 30fps', icon: '📱', workspace: 'creator' },
-  { template: 'podcast', label: 'Podcast Edit', desc: 'Audio-first layout', icon: '🎙', workspace: 'creator' },
-  { template: 'sports', label: 'Sports Reel', desc: 'Action-optimized', icon: '⚡', workspace: 'sports' },
-  { template: 'film', label: 'News Package', desc: 'Rundown-ready', icon: '📡', workspace: 'news' },
-  { template: 'social', label: 'Brand Campaign', desc: 'Multi-variant', icon: '🏷', workspace: 'marketing' },
+const TEMPLATE_OPTIONS: Array<{ template: ProjectTemplate; label: string; desc: string; icon: string }> = [
+  { template: 'film', label: 'Blank Project', desc: '1920x1080 · 24fps', icon: '🎬' },
 ];
 
 function iconForProject(icon: string): string {
@@ -155,7 +150,7 @@ export function DashboardPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const createAndOpenProject = async (template: ProjectTemplate, workspace?: string) => {
+  const createAndOpenProject = async (template: ProjectTemplate) => {
     // Prevent duplicate creation when rapidly clicking
     if (isCreating) return;
     setIsCreating(true);
@@ -163,8 +158,7 @@ export function DashboardPage() {
     try {
       const project = await createProjectInRepository({ template });
       await refreshProjects();
-      const ws = workspace ? `?workspace=${workspace}` : '';
-      navigate(`/editor/${project.id}${ws}`);
+      navigate(`/editor/${project.id}`);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'Failed to create project');
     } finally {
@@ -462,8 +456,8 @@ export function DashboardPage() {
                   <div key={option.label}
                     role="button"
                     tabIndex={0}
-                    onClick={() => { void createAndOpenProject(option.template, option.workspace); }}
-                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void createAndOpenProject(option.template, option.workspace); } }}
+                    onClick={() => { void createAndOpenProject(option.template); }}
+                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void createAndOpenProject(option.template); } }}
                     style={{ display: 'flex', gap: 10, padding: '8px 12px', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', cursor: 'pointer', transition: 'all 150ms' }}
                     onMouseEnter={(event) => (event.currentTarget.style.borderColor = 'var(--border-strong)')}
                     onMouseLeave={(event) => (event.currentTarget.style.borderColor = 'var(--border-default)')}

@@ -1,16 +1,88 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useEditorStore } from '../../store/editor.store';
 import { Timecode } from '../../lib/timecode';
 
+// Save status indicator component
+function SaveStatusIndicator() {
+  const saveStatus = useEditorStore((s) => s.saveStatus);
+  const lastSavedAt = useEditorStore((s) => s.lastSavedAt);
+
+  const dotColor = (() => {
+    switch (saveStatus) {
+      case 'saved': return 'var(--success)';
+      case 'saving': return 'var(--brand)';
+      case 'unsaved': return 'var(--warning)';
+      case 'error': return 'var(--error)';
+      default: return 'var(--text-muted)';
+    }
+  })();
+
+  const label = (() => {
+    switch (saveStatus) {
+      case 'saved': return lastSavedAt ? `Saved` : 'Saved';
+      case 'saving': return 'Saving...';
+      case 'unsaved': return 'Unsaved changes';
+      case 'error': return 'Save error';
+      default: return 'Not saved';
+    }
+  })();
+
+  return (
+    <div className="status-item">
+      <div className="status-dot" style={{
+        background: dotColor,
+        animation: saveStatus === 'saving' ? 'pulse 1s infinite' : 'none',
+      }} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
 export function StatusBar() {
-  const { tracks, duration, zoom, playheadTime, isPlaying, projectName, activePanel, projectSettings, sequenceSettings } = useEditorStore();
+  const tracks = useEditorStore((s) => s.tracks);
+  const duration = useEditorStore((s) => s.duration);
+  const zoom = useEditorStore((s) => s.zoom);
+  const playheadTime = useEditorStore((s) => s.playheadTime);
+  const isPlaying = useEditorStore((s) => s.isPlaying);
+  const projectName = useEditorStore((s) => s.projectName);
+  const activePanel = useEditorStore((s) => s.activePanel);
+  const projectSettings = useEditorStore((s) => s.projectSettings);
+  const sequenceSettings = useEditorStore((s) => s.sequenceSettings);
+  const projectId = useEditorStore((s) => s.projectId);
+  const saveProject = useEditorStore((s) => s.saveProject);
+  const markUnsaved = useEditorStore((s) => s.markUnsaved);
+
   const tc = new Timecode({ fps: sequenceSettings?.fps || projectSettings?.frameRate || 24, dropFrame: sequenceSettings?.dropFrame });
   const clipCount = tracks.reduce((n, t) => n + t.clips.length, 0);
   const isDesktop = Boolean(window.electronAPI);
-  const saveLabel = isDesktop ? 'Local project package' : 'Connected';
   const projectFormatLabel = projectSettings
-    ? `${projectSettings.width}x${projectSettings.height} · ${projectSettings.frameRate}fps · ${projectSettings.exportFormat.toUpperCase()}`
+    ? `${projectSettings.width}x${projectSettings.height} \u00B7 ${projectSettings.frameRate}fps \u00B7 ${projectSettings.exportFormat.toUpperCase()}`
     : '';
+
+  // Auto-save: debounced 30-second save on state changes
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevTracksLenRef = useRef(tracks.length);
+  const prevClipCountRef = useRef(clipCount);
+
+  useEffect(() => {
+    // Detect meaningful state changes
+    const tracksChanged = tracks.length !== prevTracksLenRef.current;
+    const clipCountChanged = clipCount !== prevClipCountRef.current;
+    prevTracksLenRef.current = tracks.length;
+    prevClipCountRef.current = clipCount;
+
+    if ((tracksChanged || clipCountChanged) && projectId) {
+      markUnsaved();
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = setTimeout(() => {
+        saveProject();
+      }, 30000);
+    }
+
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [tracks.length, clipCount, projectId, saveProject, markUnsaved]);
 
   return (
     <div className="status-bar">
@@ -46,9 +118,7 @@ export function StatusBar() {
         )}
       </div>
       <div className="divider" />
-      <div className="status-item">
-        <span>{saveLabel}</span>
-      </div>
+      <SaveStatusIndicator />
       {isDesktop && (
         <>
           <div className="status-item">

@@ -32,11 +32,11 @@ export interface WaveformCache {
   rms: Float32Array;
 }
 
-/** Resolved clip color considering source, local, and offline status. */
+/** Resolved clip color considering offline status and project-level color. */
 export interface ResolvedClipColor {
   clipId: string;
   color: string;
-  source: 'local' | 'source' | 'track' | 'offline' | 'default';
+  source: 'offline' | 'default';
 }
 
 /** Clip text to display based on current mode. */
@@ -480,7 +480,7 @@ export class TimelineDisplayEngine {
    */
   resolveClipColor(clipId: string): ResolvedClipColor {
     const state = snap();
-    const { clipLocalColors, bins } = state;
+    const { projectClipColor, bins } = state;
 
     // Find the clip and its track.
     let clip: Clip | null = null;
@@ -496,16 +496,10 @@ export class TimelineDisplayEngine {
     }
 
     if (!clip || !track) {
-      return { clipId, color: DEFAULT_CLIP_COLOR, source: 'default' };
+      return { clipId, color: projectClipColor || DEFAULT_CLIP_COLOR, source: 'default' };
     }
 
-    // 1. Local color (user-assigned override).
-    const localColor = clipLocalColors[clipId];
-    if (localColor) {
-      return { clipId, color: localColor, source: 'local' };
-    }
-
-    // 2. Check if clip is offline (asset not found in bins).
+    // 1. Check if clip is offline (asset not found in bins).
     if (clip.assetId) {
       const assetInBins = findAssetInBins(bins, clip.assetId);
       if (!assetInBins) {
@@ -513,18 +507,8 @@ export class TimelineDisplayEngine {
       }
     }
 
-    // 3. Source color (clip's own color property).
-    if (clip.color) {
-      return { clipId, color: clip.color, source: 'source' };
-    }
-
-    // 4. Track color.
-    if (track.color) {
-      return { clipId, color: track.color, source: 'track' };
-    }
-
-    // 5. Default.
-    return { clipId, color: DEFAULT_CLIP_COLOR, source: 'default' };
+    // 2. Project-level clip color (applies uniformly to all clips).
+    return { clipId, color: projectClipColor || DEFAULT_CLIP_COLOR, source: 'default' };
   }
 
   /**

@@ -32,14 +32,32 @@ function formatFileSize(bytes?: number): string {
   return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
 }
 
-/** Recursively count assets in a bin tree. */
+/** Recursively count assets and sequences in a bin tree. */
 function countAssets(bin: Bin): number {
-  return bin.assets.length + bin.children.reduce((n, c) => n + countAssets(c), 0);
+  return bin.assets.length + (bin.sequences?.length ?? 0) + bin.children.reduce((n, c) => n + countAssets(c), 0);
 }
 
 /** Compute total duration across assets. */
 function totalDuration(assets: MediaAsset[]): number {
   return assets.reduce((sum, a) => sum + (a.duration ?? 0), 0);
+}
+
+/** Collect all sequences from a bin and its children recursively. */
+function collectBinSequences(bin: Bin): Sequence[] {
+  const seqs: Sequence[] = [...(bin.sequences ?? [])];
+  for (const child of bin.children) {
+    seqs.push(...collectBinSequences(child));
+  }
+  return seqs;
+}
+
+/** Collect all sequences from all bins. */
+function collectAllBinSequences(bins: Bin[]): Sequence[] {
+  const seqs: Sequence[] = [];
+  for (const bin of bins) {
+    seqs.push(...collectBinSequences(bin));
+  }
+  return seqs;
 }
 
 /** Build breadcrumb path for a bin. */
@@ -146,6 +164,20 @@ function BinContextMenu({ x, y, binId, onClose }: BinContextMenuProps) {
           <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
         </svg>
         New Sub-Bin
+      </div>
+
+      {/* New Sequence Here */}
+      <div style={itemStyle} role="menuitem" onClick={() => {
+        useEditorStore.getState().openSequenceDialogForBin(binId);
+        onClose();
+      }} onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--accent-muted, rgba(91,110,244,0.12))')}
+         onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
+          <line x1="7" y1="2" x2="7" y2="22" /><line x1="17" y1="2" x2="17" y2="22" />
+          <line x1="2" y1="12" x2="22" y2="12" />
+        </svg>
+        New Sequence Here...
       </div>
 
       {/* Rename */}
@@ -315,7 +347,7 @@ interface BinItemProps {
 const BinItem = memo(function BinItem({ bin, depth = 0 }: BinItemProps) {
   const { selectedBinId, selectBin, toggleBin, binDragOverId, setBinDragOverId, setBinContextMenu } = useEditorStore();
   const isSelected = selectedBinId === bin.id;
-  const hasChildren = bin.children.length > 0;
+  const hasChildren = bin.children.length > 0 || (bin.sequences?.length ?? 0) > 0;
   const assetCount = countAssets(bin);
   const isDragOver = binDragOverId === bin.id;
 
@@ -332,7 +364,7 @@ const BinItem = memo(function BinItem({ bin, depth = 0 }: BinItemProps) {
   }, [bin.id]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes('application/x-bin-id')) {
+    if (e.dataTransfer.types.includes('application/x-bin-id') || e.dataTransfer.types.includes('application/x-sequence-id')) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
       setBinDragOverId(bin.id);
@@ -348,6 +380,10 @@ const BinItem = memo(function BinItem({ bin, depth = 0 }: BinItemProps) {
     const draggedBinId = e.dataTransfer.getData('application/x-bin-id');
     if (draggedBinId && draggedBinId !== bin.id) {
       useEditorStore.getState().moveBinTo(draggedBinId, bin.id);
+    }
+    const draggedSeqId = e.dataTransfer.getData('application/x-sequence-id');
+    if (draggedSeqId) {
+      useEditorStore.getState().moveSequenceToBin(draggedSeqId, bin.id);
     }
     setBinDragOverId(null);
   }, [bin.id, setBinDragOverId]);
@@ -393,10 +429,69 @@ const BinItem = memo(function BinItem({ bin, depth = 0 }: BinItemProps) {
         <span className="bin-name">{bin.name}</span>
         <span className="bin-count">{assetCount}</span>
       </div>
-      {bin.isOpen && bin.children.map(child => (
-        <BinItem key={child.id} bin={child} depth={depth + 1} />
-      ))}
+      {bin.isOpen && (
+        <>
+          {bin.children.map(child => (
+            <BinItem key={child.id} bin={child} depth={depth + 1} />
+          ))}
+          {(bin.sequences ?? []).map(seq => (
+            <BinSequenceItem key={seq.id} sequence={seq} depth={depth + 1} />
+          ))}
+        </>
+      )}
     </>
+  );
+});
+
+// ─── Asset Card with multi-select ───────────────────────────────────────────
+
+// ─── Bin Sequence Item (sequence inside a bin tree) ──────────────────────────
+
+interface BinSequenceItemProps {
+  sequence: Sequence;
+  depth: number;
+}
+
+const BinSequenceItem = memo(function BinSequenceItem({ sequence, depth }: BinSequenceItemProps) {
+  const activeSequenceId = useEditorStore((s) => s.activeSequenceId);
+  const isActive = activeSequenceId === sequence.id;
+
+  const handleDragStart = useCallback((e: React.DragEvent) => {
+    e.dataTransfer.setData('application/x-sequence-id', sequence.id);
+    e.dataTransfer.effectAllowed = 'move';
+  }, [sequence.id]);
+
+  return (
+    <div
+      className={`bin-item${isActive ? ' selected' : ''}`}
+      style={{
+        paddingLeft: 8 + depth * 14,
+      }}
+      onClick={() => useEditorStore.getState().switchSequence(sequence.id)}
+      onDoubleClick={() => useEditorStore.getState().switchSequence(sequence.id)}
+      draggable
+      onDragStart={handleDragStart}
+      role="treeitem"
+      aria-label={`Sequence: ${sequence.name}`}
+      aria-selected={isActive}
+      tabIndex={0}
+    >
+      <div className="bin-indent">
+        <div style={{ width: 14 }} />
+      </div>
+      {/* Filmstrip icon for sequences */}
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--brand-bright, #7b8cff)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: 4 }}>
+        <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
+        <line x1="7" y1="2" x2="7" y2="22" /><line x1="17" y1="2" x2="17" y2="22" />
+        <line x1="2" y1="12" x2="22" y2="12" />
+        <line x1="2" y1="7" x2="7" y2="7" /><line x1="2" y1="17" x2="7" y2="17" />
+        <line x1="17" y1="7" x2="22" y2="7" /><line x1="17" y1="17" x2="22" y2="17" />
+      </svg>
+      <span className="bin-name" style={{ color: 'var(--brand-bright, #7b8cff)' }}>{sequence.name}</span>
+      <span className="bin-count" style={{ fontSize: 9, color: 'var(--text-muted)' }}>
+        {formatDuration(sequence.duration)}
+      </span>
+    </div>
   );
 });
 
@@ -730,6 +825,11 @@ const SequenceItem = memo(function SequenceItem({ sequence }: SequenceItemProps)
     padding: '6px 12px', cursor: 'pointer', fontSize: 11,
   };
 
+  const handleDragStart = useCallback((e: React.DragEvent) => {
+    e.dataTransfer.setData('application/x-sequence-id', sequence.id);
+    e.dataTransfer.effectAllowed = 'move';
+  }, [sequence.id]);
+
   return (
     <>
       <div
@@ -738,6 +838,8 @@ const SequenceItem = memo(function SequenceItem({ sequence }: SequenceItemProps)
         onClick={() => useEditorStore.getState().switchSequence(sequence.id)}
         onDoubleClick={() => useEditorStore.getState().switchSequence(sequence.id)}
         onContextMenu={handleContextMenu}
+        draggable
+        onDragStart={handleDragStart}
         role="option"
         aria-selected={isActive}
         aria-label={`Sequence: ${sequence.name}`}
@@ -745,7 +847,7 @@ const SequenceItem = memo(function SequenceItem({ sequence }: SequenceItemProps)
       >
         <div className="bin-indent">
           {/* Filmstrip icon */}
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--brand-bright, #7b8cff)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.8 }}>
             <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
             <line x1="7" y1="2" x2="7" y2="22" /><line x1="17" y1="2" x2="17" y2="22" />
             <line x1="2" y1="12" x2="22" y2="12" />
@@ -773,7 +875,7 @@ const SequenceItem = memo(function SequenceItem({ sequence }: SequenceItemProps)
             }}
           />
         ) : (
-          <span className="bin-name">{sequence.name}</span>
+          <span className="bin-name" style={{ color: 'var(--brand-bright, #7b8cff)' }}>{sequence.name}</span>
         )}
         <span className="bin-count" style={{ fontSize: 9, color: 'var(--text-muted)' }}>
           {formatDuration(sequence.duration)} | {sequence.tracks.length}T
@@ -867,6 +969,21 @@ export function BinPanel() {
 
     return result;
   }, [activeBinAssets, search, activeFilterTypes, favFilter]);
+
+  // Sequences scoped to the current bin and children
+  const binSequences = useMemo(() => {
+    if (!selectedBinId) return collectAllBinSequences(bins);
+    const findBin = (list: Bin[]): Bin | null => {
+      for (const b of list) {
+        if (b.id === selectedBinId) return b;
+        const child = findBin(b.children);
+        if (child) return child;
+      }
+      return null;
+    };
+    const bin = findBin(bins);
+    return bin ? collectBinSequences(bin) : collectAllBinSequences(bins);
+  }, [bins, selectedBinId]);
 
   // Handle search submission
   const handleSearchSubmit = useCallback(() => {
@@ -1040,8 +1157,8 @@ export function BinPanel() {
             return (
               <button key={t} className={`panel-tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
                 {t === 'smart' ? `${String.fromCharCode(10022)} ${label}` : label}
-                {t === 'sequences' && sequences.length > 0 && (
-                  <span style={{ marginLeft: 3, fontSize: 9, color: 'var(--text-muted)' }}>({sequences.length})</span>
+                {t === 'sequences' && binSequences.length > 0 && (
+                  <span style={{ marginLeft: 3, fontSize: 9, color: 'var(--text-muted)' }}>({binSequences.length})</span>
                 )}
               </button>
             );
@@ -1161,11 +1278,11 @@ export function BinPanel() {
             onDrop={handleRootDrop}
           >
             {tab === 'sequences' ? (
-              sequences.length > 0 ? (
-                sequences.map((seq) => <SequenceItem key={seq.id} sequence={seq} />)
+              binSequences.length > 0 ? (
+                binSequences.map((seq) => <SequenceItem key={seq.id} sequence={seq} />)
               ) : (
                 <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
-                  No sequences yet.<br />
+                  No sequences in this bin.<br />
                   <button
                     className="tl-btn"
                     style={{ marginTop: 8, fontSize: 11 }}
@@ -1215,7 +1332,7 @@ export function BinPanel() {
         {isEffectsMode ? (
           <span>{EFFECTS_LIBRARY.reduce((n, c) => n + c.effects.length, 0)} effects available</span>
         ) : tab === 'sequences' ? (
-          <span>{sequences.length} sequence{sequences.length !== 1 ? 's' : ''}</span>
+          <span>{binSequences.length} sequence{binSequences.length !== 1 ? 's' : ''}</span>
         ) : (
           <>
             <span>{filtered.length} items</span>

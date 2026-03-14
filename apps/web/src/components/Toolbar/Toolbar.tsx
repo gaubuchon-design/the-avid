@@ -11,6 +11,7 @@ export function Toolbar() {
     toggleExportPanel, toggleSharePanel, toggleSettingsPanel, toolbarTab, setToolbarTab, projectName,
     selectedClipIds, splitClip, showAIPanel, toggleAIPanel, tokenBalance,
     showTranscriptPanel, toggleTranscriptPanel,
+    showTitleTool, toggleTitleTool,
     tracks, projectSettings,
   } = useEditorStore();
 
@@ -106,6 +107,20 @@ export function Toolbar() {
             <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
             <polyline points="14 2 14 8 20 8" />
             <line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><line x1="10" y1="9" x2="8" y2="9" />
+          </svg>
+        </button>
+
+        {/* Title Tool toggle */}
+        <button
+          className={`toolbar-icon-btn${showTitleTool ? ' active' : ''}`}
+          onClick={toggleTitleTool}
+          title="Title Tool (Ctrl+T)"
+          aria-label={showTitleTool ? 'Hide Title Tool' : 'Show Title Tool'}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="4 7 4 4 20 4 20 7" />
+            <line x1="9" y1="20" x2="15" y2="20" />
+            <line x1="12" y1="4" x2="12" y2="20" />
           </svg>
         </button>
 

@@ -1,9 +1,10 @@
 // =============================================================================
 //  THE AVID -- Media Page (Resolve-Style)
 //  Full-width bin browser with metadata columns, source preview, and inspector.
+//  Includes media import, sortable grid/list, and info panel.
 // =============================================================================
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useEditorStore, type MediaAsset, type Bin } from '../store/editor.store';
 import { usePlayerStore } from '../store/player.store';
 import { useDebounce } from '../hooks/useDebounce';
@@ -26,6 +27,16 @@ function formatFileSize(bytes?: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+function formatDate(dateStr?: string): string {
+  if (!dateStr) return '--';
+  try {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return '--';
+  }
+}
+
 type SortKey = 'name' | 'duration' | 'fps' | 'width' | 'codec' | 'fileSize' | 'type';
 
 function collectAllMediaAssets(bins: Bin[]): MediaAsset[] {
@@ -38,11 +49,55 @@ function collectAllMediaAssets(bins: Bin[]): MediaAsset[] {
   return result;
 }
 
+function findBinForAsset(bins: Bin[], assetId: string): string | null {
+  for (const bin of bins) {
+    if (bin.assets.some((a) => a.id === assetId)) return bin.name;
+    const childResult = findBinForAsset(bin.children, assetId);
+    if (childResult) return childResult;
+  }
+  return null;
+}
+
+// Thumbnail placeholder based on type
+function TypeThumbnail({ type }: { type: MediaAsset['type'] }) {
+  const colorMap: Record<string, string> = {
+    VIDEO: '#3b82f6',
+    AUDIO: '#22c55e',
+    IMAGE: '#f97316',
+    GRAPHIC: '#a855f7',
+    DOCUMENT: '#6b7280',
+  };
+  const bg = colorMap[type] ?? '#6b7280';
+  const labelMap: Record<string, string> = {
+    VIDEO: 'VID',
+    AUDIO: 'AUD',
+    IMAGE: 'IMG',
+    GRAPHIC: 'GFX',
+    DOCUMENT: 'DOC',
+  };
+  return (
+    <div
+      style={{
+        width: 32, height: 18, borderRadius: 2, background: bg,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 7, fontWeight: 700, color: '#fff', letterSpacing: '0.05em',
+        flexShrink: 0,
+      }}
+      aria-hidden="true"
+    >
+      {labelMap[type] ?? '?'}
+    </div>
+  );
+}
+
 export function MediaPage() {
   const bins = useEditorStore((s) => s.bins);
   const activeBin = useEditorStore((s) => s.selectedBinId);
   const selectBin = useEditorStore((s) => s.selectBin);
   const activeBinAssets = useEditorStore((s) => s.activeBinAssets);
+  const importMediaFiles = useEditorStore((s) => s.importMediaFiles);
+  const addBin = useEditorStore((s) => s.addBin);
+  const ingestProgress = useEditorStore((s) => s.ingestProgress);
   const { setSourceClip } = usePlayerStore();
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('name');
@@ -50,12 +105,20 @@ export function MediaPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const debouncedSearch = useDebounce(searchQuery, 250);
   const [isLoading, setIsLoading] = useState(true);
+  const [isImporting, setIsImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Simulate initial data load
   useEffect(() => {
     const timer = setTimeout(() => setIsLoading(false), 300);
     return () => clearTimeout(timer);
   }, []);
+
+  // Track import progress
+  useEffect(() => {
+    const progressKeys = Object.keys(ingestProgress);
+    setIsImporting(progressKeys.length > 0);
+  }, [ingestProgress]);
 
   const allAssets = useMemo(() => collectAllMediaAssets(bins), [bins]);
 
@@ -92,6 +155,29 @@ export function MediaPage() {
   const sortIndicator = (key: SortKey) =>
     sortKey === key ? (sortAsc ? ' \u25B2' : ' \u25BC') : '';
 
+  // Handle file import
+  const handleImportClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFilesSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    // Ensure there's at least one bin to import into
+    if (bins.length === 0) {
+      addBin('Master');
+    }
+
+    const targetBin = activeBin ?? (bins.length > 0 ? bins[0]!.id : undefined);
+    importMediaFiles(files, targetBin ?? undefined);
+
+    // Reset the file input so re-selecting the same file works
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, [bins, activeBin, addBin, importMediaFiles]);
+
   // Keyboard navigation for asset list
   const handleAssetKeyDown = useCallback((e: React.KeyboardEvent, assetId: string, index: number) => {
     if (e.key === 'ArrowDown') {
@@ -108,15 +194,48 @@ export function MediaPage() {
     }
   }, [filteredAssets, setSourceClip]);
 
+  // Import progress aggregation
+  const importProgressEntries = Object.entries(ingestProgress);
+  const overallImportProgress = importProgressEntries.length > 0
+    ? Math.round(importProgressEntries.reduce((sum, [, p]) => sum + p, 0) / importProgressEntries.length * 100)
+    : 0;
+
   return (
     <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }} role="region" aria-label="Media Browser">
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="video/*,audio/*,image/*,.mov,.mxf,.avi,.mkv,.exr,.dpx,.tga,.psd"
+        style={{ display: 'none' }}
+        onChange={handleFilesSelected}
+        aria-hidden="true"
+      />
+
       {/* Bin sidebar */}
       <nav style={{
         width: 200, flexShrink: 0, borderRight: '1px solid var(--border-default)',
         background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
       }} aria-label="Media bins">
-        <div style={{ padding: '8px 10px', fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--text-tertiary)', borderBottom: '1px solid var(--border-default)' }}>
-          Bins
+        <div style={{
+          padding: '8px 10px', fontSize: 10, fontWeight: 700, letterSpacing: 1,
+          textTransform: 'uppercase', color: 'var(--text-tertiary)',
+          borderBottom: '1px solid var(--border-default)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <span>Bins</span>
+          <button
+            onClick={() => addBin(`Bin ${bins.length + 1}`)}
+            style={{
+              background: 'transparent', border: 'none', color: 'var(--text-muted)',
+              cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '0 2px',
+            }}
+            title="New Bin"
+            aria-label="Create new bin"
+          >
+            +
+          </button>
         </div>
         <div style={{ flex: 1, overflowY: 'auto' }} role="listbox" aria-label="Bin list">
           <div
@@ -131,7 +250,7 @@ export function MediaPage() {
             onClick={() => selectBin(null as any)}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectBin(null as any); } }}
           >
-            All Media
+            All Media ({allAssets.length})
           </div>
           {bins.map((bin) => (
             <div
@@ -143,11 +262,13 @@ export function MediaPage() {
                 padding: '6px 10px', fontSize: 11, cursor: 'pointer',
                 color: activeBin === bin.id ? 'var(--text-primary)' : 'var(--text-secondary)',
                 background: activeBin === bin.id ? 'var(--bg-active)' : 'transparent',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
               }}
               onClick={() => selectBin(bin.id)}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectBin(bin.id); } }}
             >
-              {bin.name}
+              <span>{bin.name}</span>
+              <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{bin.assets.length}</span>
             </div>
           ))}
         </div>
@@ -155,8 +276,24 @@ export function MediaPage() {
 
       {/* Main media table */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {/* Search bar */}
-        <div style={{ padding: '6px 10px', borderBottom: '1px solid var(--border-default)', display: 'flex', alignItems: 'center', gap: 8 }}>
+        {/* Toolbar: Search + Import */}
+        <div style={{
+          padding: '6px 10px', borderBottom: '1px solid var(--border-default)',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <button
+            onClick={handleImportClick}
+            disabled={isImporting}
+            style={{
+              padding: '4px 12px', fontSize: 11, fontWeight: 600,
+              background: 'var(--brand)', color: '#fff', border: 'none',
+              borderRadius: 'var(--radius-sm)', cursor: isImporting ? 'wait' : 'pointer',
+              opacity: isImporting ? 0.6 : 1, transition: 'opacity 100ms',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {isImporting ? 'Importing...' : 'Import Media'}
+          </button>
           <input
             type="search"
             value={searchQuery}
@@ -170,10 +307,32 @@ export function MediaPage() {
               outline: 'none',
             }}
           />
-          <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
+          <span style={{ fontSize: 10, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>
             {filteredAssets.length} items
           </span>
         </div>
+
+        {/* Import progress indicator */}
+        {isImporting && (
+          <div style={{ padding: '4px 10px', borderBottom: '1px solid var(--border-default)', background: 'var(--bg-raised)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+              <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
+                Importing {importProgressEntries.length} file{importProgressEntries.length !== 1 ? 's' : ''}...
+              </span>
+              <span style={{ fontSize: 10, color: 'var(--brand)', fontWeight: 600 }}>
+                {overallImportProgress}%
+              </span>
+            </div>
+            <div style={{
+              height: 3, borderRadius: 2, background: 'var(--bg-elevated)', overflow: 'hidden',
+            }}>
+              <div style={{
+                height: '100%', width: `${overallImportProgress}%`,
+                background: 'var(--brand)', borderRadius: 2, transition: 'width 200ms linear',
+              }} />
+            </div>
+          </div>
+        )}
 
         {/* Table header */}
         <div
@@ -223,43 +382,52 @@ export function MediaPage() {
             </>
           )}
 
-          {filteredAssets.map((asset, index) => (
-            <div
-              key={asset.id}
-              role="row"
-              aria-selected={selectedAssetId === asset.id}
-              aria-label={`${asset.name}, ${asset.type}, ${formatDuration(asset.duration ?? 0)}`}
-              tabIndex={selectedAssetId === asset.id ? 0 : -1}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '2fr 100px 60px 120px 100px 80px 90px',
-                padding: '5px 10px', fontSize: 11, cursor: 'pointer',
-                color: 'var(--text-secondary)',
-                background: selectedAssetId === asset.id ? 'var(--bg-active)' : 'transparent',
-                borderBottom: '1px solid var(--border-subtle)',
-                outline: 'none',
-              }}
-              onClick={() => { setSelectedAssetId(asset.id); setSourceClip(asset.id); }}
-              onDoubleClick={() => setSourceClip(asset.id)}
-              onKeyDown={(e) => handleAssetKeyDown(e, asset.id, index)}
-            >
-              <div role="gridcell" style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
-                {asset.thumbnailUrl && (
-                  <img src={asset.thumbnailUrl} alt="" style={{ width: 32, height: 18, objectFit: 'cover', borderRadius: 2, flexShrink: 0 }} />
-                )}
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>
-                  {asset.name}
-                </span>
-                {asset.hasAlpha && <span style={{ fontSize: 8, color: 'var(--success)', fontWeight: 700, flexShrink: 0 }} aria-label="Has alpha channel">A</span>}
+          {filteredAssets.map((asset, index) => {
+            const assetProgress = ingestProgress[asset.id];
+            const isIngesting = assetProgress !== undefined;
+
+            return (
+              <div
+                key={asset.id}
+                role="row"
+                aria-selected={selectedAssetId === asset.id}
+                aria-label={`${asset.name}, ${asset.type}, ${formatDuration(asset.duration ?? 0)}`}
+                tabIndex={selectedAssetId === asset.id ? 0 : -1}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '2fr 100px 60px 120px 100px 80px 90px',
+                  padding: '5px 10px', fontSize: 11, cursor: 'pointer',
+                  color: 'var(--text-secondary)',
+                  background: selectedAssetId === asset.id ? 'var(--bg-active)' : 'transparent',
+                  borderBottom: '1px solid var(--border-subtle)',
+                  outline: 'none',
+                  opacity: isIngesting ? 0.6 : 1,
+                }}
+                onClick={() => { setSelectedAssetId(asset.id); setSourceClip(asset.id); }}
+                onDoubleClick={() => setSourceClip(asset.id)}
+                onKeyDown={(e) => handleAssetKeyDown(e, asset.id, index)}
+              >
+                <div role="gridcell" style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
+                  {asset.thumbnailUrl ? (
+                    <img src={asset.thumbnailUrl} alt="" style={{ width: 32, height: 18, objectFit: 'cover', borderRadius: 2, flexShrink: 0 }} />
+                  ) : (
+                    <TypeThumbnail type={asset.type} />
+                  )}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>
+                    {asset.name}
+                  </span>
+                  {asset.hasAlpha && <span style={{ fontSize: 8, color: 'var(--success)', fontWeight: 700, flexShrink: 0 }} aria-label="Has alpha channel">A</span>}
+                  {isIngesting && <span style={{ fontSize: 8, color: 'var(--brand)', fontWeight: 600, flexShrink: 0 }}>{Math.round(assetProgress * 100)}%</span>}
+                </div>
+                <div role="gridcell" style={{ fontFamily: 'var(--font-mono)', fontSize: 10 }}>{formatDuration(asset.duration ?? 0)}</div>
+                <div role="gridcell">{asset.fps?.toFixed(2) ?? '--'}</div>
+                <div role="gridcell">{asset.width && asset.height ? `${asset.width}x${asset.height}` : '--'}</div>
+                <div role="gridcell">{asset.codec ?? '--'}</div>
+                <div role="gridcell" style={{ fontSize: 10, fontWeight: 500 }}>{asset.type}</div>
+                <div role="gridcell">{formatFileSize(asset.fileSize)}</div>
               </div>
-              <div role="gridcell" style={{ fontFamily: 'var(--font-mono)', fontSize: 10 }}>{formatDuration(asset.duration ?? 0)}</div>
-              <div role="gridcell">{asset.fps?.toFixed(2) ?? '--'}</div>
-              <div role="gridcell">{asset.width && asset.height ? `${asset.width}x${asset.height}` : '--'}</div>
-              <div role="gridcell">{asset.codec ?? '--'}</div>
-              <div role="gridcell" style={{ fontSize: 10, fontWeight: 500 }}>{asset.type}</div>
-              <div role="gridcell">{formatFileSize(asset.fileSize)}</div>
-            </div>
-          ))}
+            );
+          })}
 
           {/* Empty state */}
           {!isLoading && filteredAssets.length === 0 && (
@@ -271,9 +439,21 @@ export function MediaPage() {
               <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 4 }}>
                 {debouncedSearch ? 'No matching media found' : 'No media imported yet'}
               </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12 }}>
                 {debouncedSearch ? 'Try adjusting your search query' : 'Import files to get started with your project'}
               </div>
+              {!debouncedSearch && (
+                <button
+                  onClick={handleImportClick}
+                  style={{
+                    padding: '6px 16px', fontSize: 11, fontWeight: 600,
+                    background: 'var(--brand)', color: '#fff', border: 'none',
+                    borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                  }}
+                >
+                  Import Media
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -289,20 +469,33 @@ export function MediaPage() {
         </div>
         {selectedAsset ? (
           <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {selectedAsset.thumbnailUrl && (
+            {/* Thumbnail or type placeholder */}
+            {selectedAsset.thumbnailUrl ? (
               <img src={selectedAsset.thumbnailUrl} alt="" style={{ width: '100%', borderRadius: 4, marginBottom: 4 }} />
+            ) : (
+              <div style={{
+                width: '100%', height: 120, borderRadius: 4, marginBottom: 4,
+                background: selectedAsset.type === 'VIDEO' ? '#3b82f622' : selectedAsset.type === 'AUDIO' ? '#22c55e22' : '#f9731622',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 24, fontWeight: 700,
+                color: selectedAsset.type === 'VIDEO' ? '#3b82f6' : selectedAsset.type === 'AUDIO' ? '#22c55e' : '#f97316',
+              }}>
+                {selectedAsset.type === 'VIDEO' ? 'VID' : selectedAsset.type === 'AUDIO' ? 'AUD' : 'IMG'}
+              </div>
             )}
             <MetaRow label="Name" value={selectedAsset.name} />
             <MetaRow label="Type" value={selectedAsset.type} />
             <MetaRow label="Duration" value={formatDuration(selectedAsset.duration ?? 0)} mono />
+            <MetaRow label="FPS" value={selectedAsset.fps ? `${selectedAsset.fps.toFixed(3)} fps` : '--'} />
             <MetaRow label="Resolution" value={selectedAsset.width && selectedAsset.height ? `${selectedAsset.width} x ${selectedAsset.height}` : '--'} />
-            <MetaRow label="Frame Rate" value={selectedAsset.fps ? `${selectedAsset.fps.toFixed(3)} fps` : '--'} />
             <MetaRow label="Codec" value={selectedAsset.codec ?? '--'} />
             <MetaRow label="Color Space" value={selectedAsset.colorSpace ?? '--'} />
             <MetaRow label="Audio" value={selectedAsset.audioChannels ? `${selectedAsset.audioChannels}ch / ${(selectedAsset.sampleRate ?? 0) / 1000}kHz` : '--'} />
             <MetaRow label="Bit Depth" value={selectedAsset.bitDepth ? `${selectedAsset.bitDepth}-bit` : '--'} />
             <MetaRow label="File Size" value={formatFileSize(selectedAsset.fileSize)} />
+            <MetaRow label="File Path" value={selectedAsset.name} />
             <MetaRow label="Alpha" value={selectedAsset.hasAlpha ? 'Yes' : 'No'} />
+            <MetaRow label="Bin" value={findBinForAsset(bins, selectedAsset.id) ?? 'Unknown'} />
             <MetaRow label="Start TC" value={selectedAsset.startTimecode ?? '00:00:00:00'} mono />
           </div>
         ) : (
@@ -318,8 +511,15 @@ export function MediaPage() {
 function MetaRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
-      <span style={{ color: 'var(--text-tertiary)' }}>{label}</span>
-      <span style={{ color: 'var(--text-primary)', fontFamily: mono ? 'var(--font-mono)' : undefined, fontSize: mono ? 10 : undefined }}>{value}</span>
+      <span style={{ color: 'var(--text-tertiary)', flexShrink: 0 }}>{label}</span>
+      <span style={{
+        color: 'var(--text-primary)',
+        fontFamily: mono ? 'var(--font-mono)' : undefined,
+        fontSize: mono ? 10 : undefined,
+        textAlign: 'right',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        maxWidth: '60%',
+      }}>{value}</span>
     </div>
   );
 }
