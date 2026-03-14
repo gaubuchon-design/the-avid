@@ -116,24 +116,26 @@ Important behavior:
 
 ## Versioning expectations
 
-Desktop auto-updates require a strictly newer app version than the currently
-published installer feed.
+Desktop auto-updates still require a strictly newer app version than the
+currently published installer feed, but the workflows now handle that
+automatically.
 
-That means:
+The release workflows resolve the desktop version with:
 
-- web deployments can safely happen on every successful `master` merge
-- mobile OTA updates can safely happen on every successful `master` merge
-- desktop updater releases should still move the desktop version forward before
-  merge if you want installed desktop clients to auto-upgrade
+- the repo version, if it is already newer than the published updater feed
+- otherwise the next semantic version after the currently published updater feed
 
-Use:
+Manual override is still available:
 
 ```bash
 npm run version:desktop -- --set=0.2.0
 ```
 
-before merging a desktop release when you want updater clients to receive it
-automatically.
+And manual auto-bump is available too:
+
+```bash
+npm run version:desktop:auto -- --feed-base-url=https://the-avid-desktop-updates.vercel.app/desktop-updates --channel=stable
+```
 
 ## Practical rollout order
 
@@ -144,7 +146,7 @@ Recommended production order:
 3. configure the API deploy hook for your container host
 4. configure Expo EAS project values and `EXPO_TOKEN`
 5. add the GitHub secrets and variables above
-6. merge a versioned release PR to `master`
+6. merge a release PR to `master`
 
 ## Related docs
 

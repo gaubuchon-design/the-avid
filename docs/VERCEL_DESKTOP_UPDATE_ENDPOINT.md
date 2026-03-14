@@ -101,9 +101,14 @@ https://your-updater-project.vercel.app/desktop-updates/stable
 After running the desktop packaging build:
 
 ```bash
+npm run version:desktop:auto -- --feed-base-url=https://your-updater-project.vercel.app/desktop-updates --channel=stable
 npm run dist:desktop:refresh -- --targets=mac,win --allow-cross
 npm run publish:desktop:updates -- --channel=stable
 ```
+
+The GitHub Actions desktop release workflows now perform that auto-bump step
+for you before building installers, using the currently published feed version
+as the baseline.
 
 The publish script uploads:
 

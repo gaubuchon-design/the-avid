@@ -23,6 +23,7 @@
     "build:desktop": "turbo run build --filter=@mcua/desktop",
     "build:mobile": "turbo run build --filter=@mcua/mobile",
     "version:desktop": "node apps/desktop/scripts/sync-version.js",
+    "version:desktop:auto": "node apps/desktop/scripts/sync-version.js --auto",
     "dist:desktop": "npm run dist --workspace=@mcua/desktop",
     "dist:desktop:refresh": "npm run dist:refresh --workspace=@mcua/desktop",
     "dist:desktop:refresh:mac": "npm run dist:refresh:mac --workspace=@mcua/desktop",
