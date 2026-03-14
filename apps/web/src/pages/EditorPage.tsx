@@ -6,6 +6,8 @@ import { keyboardEngine } from '../engine/KeyboardEngine';
 import { multicamEngine } from '../engine/MulticamEngine';
 import { trackPatchingEngine } from '../engine/TrackPatchingEngine';
 import { Toolbar } from '../components/Toolbar/Toolbar';
+import { AIAssistantPanel } from '../components/AIAssistant/AIAssistantPanel';
+import { AdminDashboard } from '../components/AdminDashboard/AdminDashboard';
 import { BinPanel } from '../components/Bins/BinPanel';
 import { ComposerPanel } from '../components/ComposerPanel/ComposerPanel';
 import { TimelinePanel } from '../components/TimelinePanel/TimelinePanel';
@@ -27,6 +29,7 @@ import { editEngine } from '../engine/EditEngine';
 import { AlphaImportDialog } from '../components/AlphaImportDialog/AlphaImportDialog';
 import { TrackerPanel } from '../components/TrackerPanel/TrackerPanel';
 import { TrackingOverlay } from '../components/TrackerPanel/TrackingOverlay';
+import { VFXWorkspace } from '../components/VFXWorkspace/VFXWorkspace';
 import { type EditorPage as PageId } from '../components/PageNavigation/PageNavigation';
 import {
   activateRecordMonitor,
@@ -471,9 +474,15 @@ export function EditorPage() {
         e.preventDefault();
         setShowTracker(prev => !prev);
       }
-      // Shift+1-2 to switch between media and edit
+      // Shift+1-5 to switch between editor work pages
       if (e.shiftKey && !e.metaKey && !e.ctrlKey) {
-        const pageMap: Record<string, PageId> = { '!': 'media', '@': 'edit' };
+        const pageMap: Record<string, PageId> = {
+          '!': 'media',
+          '@': 'edit',
+          '#': 'ai',
+          '$': 'admin',
+          '%': 'vfx',
+        };
         const page = pageMap[e.key];
         if (page) { e.preventDefault(); handlePageChange(page); }
       }
@@ -713,6 +722,33 @@ export function EditorPage() {
             </PanelErrorBoundary>
           </div>
         </>
+      )}
+      {activePage === 'ai' && (
+        <div className="workspace workspace-stacked" style={{ gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'minmax(0, 1fr)' }}>
+          <div className="canvas-area workspace-panel" style={{ padding: 18, overflow: 'hidden' }}>
+            <PanelErrorBoundary panelName="AIAssistantPanel">
+              <AIAssistantPanel />
+            </PanelErrorBoundary>
+          </div>
+        </div>
+      )}
+      {activePage === 'admin' && (
+        <div className="workspace workspace-stacked" style={{ gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'minmax(0, 1fr)' }}>
+          <div className="canvas-area workspace-panel" style={{ padding: 18, overflow: 'hidden' }}>
+            <PanelErrorBoundary panelName="AdminDashboard">
+              <AdminDashboard />
+            </PanelErrorBoundary>
+          </div>
+        </div>
+      )}
+      {activePage === 'vfx' && (
+        <div className="workspace workspace-stacked" style={{ gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'minmax(0, 1fr)' }}>
+          <div className="canvas-area workspace-panel" style={{ padding: 18, overflow: 'hidden' }}>
+            <PanelErrorBoundary panelName="VFXWorkspace">
+              <VFXWorkspace />
+            </PanelErrorBoundary>
+          </div>
+        </div>
       )}
 
       <StatusBar />

@@ -406,7 +406,11 @@ function Toggle({
 //  TitleTool Component
 // =============================================================================
 
-export function TitleTool() {
+interface TitleToolProps {
+  embedded?: boolean;
+}
+
+export function TitleTool({ embedded = false }: TitleToolProps) {
   // --- Stores ---------------------------------------------------------------
 
   const {
@@ -614,7 +618,7 @@ export function TitleTool() {
 
   // --- Guard: don't render if hidden ----------------------------------------
 
-  if (!showTitleTool) return null;
+  if (!embedded && !showTitleTool) return null;
 
   // --- Render ---------------------------------------------------------------
 
@@ -624,9 +628,11 @@ export function TitleTool() {
       <div style={S.header}>
         <span style={S.headerTitle}>Title Tool</span>
         <div style={S.headerSpacer} />
-        <button style={S.closeBtn} onClick={toggleTitleTool} title="Close">
-          &#x2715;
-        </button>
+        {!embedded ? (
+          <button style={S.closeBtn} onClick={toggleTitleTool} title="Close">
+            &#x2715;
+          </button>
+        ) : null}
       </div>
 
       {/* ── Scrollable body ─────────────────────────────────────── */}

@@ -333,10 +333,16 @@ export class AgentEngine {
     // Simulate planning delay
     await new Promise(r => setTimeout(r, 100));
 
-    // Try to match a template
+    const vfxSteps = vfxAgent.matchIntent(message);
     const template = PLAN_TEMPLATES.find(t => t.match(message));
 
-    if (template) {
+    if (vfxSteps) {
+      plan.steps = vfxSteps.map(s => ({
+        ...s,
+        id: uid('step'),
+        status: 'pending' as const,
+      }));
+    } else if (template) {
       const rawSteps = template.plan(message);
       plan.steps = rawSteps.map(s => ({
         ...s,

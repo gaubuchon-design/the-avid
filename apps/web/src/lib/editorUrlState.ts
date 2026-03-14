@@ -1,7 +1,7 @@
 import type { WorkspacePreset } from '../App';
 import type { EditorPage } from '../components/PageNavigation/PageNavigation';
 
-const VALID_EDITOR_PAGES: ReadonlySet<EditorPage> = new Set<EditorPage>(['media', 'edit']);
+const VALID_EDITOR_PAGES: ReadonlySet<EditorPage> = new Set<EditorPage>(['media', 'edit', 'ai', 'admin', 'vfx']);
 const VALID_WORKSPACES: ReadonlySet<WorkspacePreset> = new Set<WorkspacePreset>(['filmtv']);
 
 export function isLegacyExportPageParam(param: string | null): boolean {
