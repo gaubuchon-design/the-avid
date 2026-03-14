@@ -1,6 +1,6 @@
 # Desktop Packaging Notes
 
-This repo now has a repeatable desktop installer flow for macOS and Windows
+This repo has a repeatable desktop packaging flow for macOS, Windows, and Linux
 through the Electron app in
 [apps/desktop](/Users/guillaumeaubuchon/GitHub/the-avid/apps/desktop).
 
@@ -11,6 +11,7 @@ From the repo root:
 ```bash
 npm run dist:desktop:refresh:mac
 npm run dist:desktop:refresh:win
+npm run dist:desktop:linux
 npm run dist:desktop:mac
 npm run dist:desktop:win
 ```
@@ -20,6 +21,7 @@ From the desktop workspace directly:
 ```bash
 npm run dist:refresh -- --targets=mac
 npm run dist:refresh -- --targets=win
+npm run dist:linux
 npm run dist:mac
 npm run dist:win
 ```
@@ -65,6 +67,7 @@ Current targets:
 
 - macOS: DMG and ZIP
 - Windows: NSIS installer and portable build
+- Linux: AppImage and deb
 
 ## Important behavior
 

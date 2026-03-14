@@ -119,12 +119,17 @@ Notes:
 The main-process updater service is:
 
 - [DesktopAutoUpdateService.ts](/Users/guillaumeaubuchon/GitHub/the-avid/apps/desktop/src/main/DesktopAutoUpdateService.ts)
+- [DesktopUpdateSupport.ts](/Users/guillaumeaubuchon/GitHub/the-avid/apps/desktop/src/main/DesktopUpdateSupport.ts)
 
 Current behavior:
 
 - startup check begins after the app finishes booting
 - available updates download automatically
+- updater request headers are rehydrated from packaged updater config so
+  authenticated feeds keep working in packaged builds
 - renderer receives live status through IPC
+- renderer-facing errors are normalized into shorter user-readable update
+  messages instead of dumping raw transport metadata
 - downloaded updates restart automatically only if there are no dirty projects
   and no active background jobs
 - otherwise the app installs on quit or when the user chooses restart

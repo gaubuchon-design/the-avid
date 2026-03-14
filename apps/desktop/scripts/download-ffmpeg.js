@@ -27,6 +27,8 @@ const DOWNLOADS = {
     source: {
       type: 'github-release',
       repo: 'jellyfin/jellyfin-ffmpeg',
+      tag: 'v7.1.3-3',
+      assetName: 'jellyfin-ffmpeg_7.1.3-3_portable_macarm64-gpl.tar.xz',
       assetPattern: /^jellyfin-ffmpeg_.*_portable_macarm64-gpl\.tar\.xz$/,
       extract: 'tar',
     },
@@ -37,6 +39,8 @@ const DOWNLOADS = {
     source: {
       type: 'github-release',
       repo: 'jellyfin/jellyfin-ffmpeg',
+      tag: 'v7.1.3-3',
+      assetName: 'jellyfin-ffmpeg_7.1.3-3_portable_mac64-gpl.tar.xz',
       assetPattern: /^jellyfin-ffmpeg_.*_portable_mac64-gpl\.tar\.xz$/,
       extract: 'tar',
     },
@@ -47,6 +51,8 @@ const DOWNLOADS = {
     source: {
       type: 'github-release',
       repo: 'jellyfin/jellyfin-ffmpeg',
+      tag: 'v7.1.3-3',
+      assetName: 'jellyfin-ffmpeg_7.1.3-3_portable_win64-clang-gpl.zip',
       assetPattern: /^jellyfin-ffmpeg_.*_portable_win64-clang-gpl\.zip$/,
       extract: 'zip',
     },
@@ -107,6 +113,10 @@ function downloadFile(url, destination) {
   execSync(`curl -fL --retry 3 --retry-delay 2 "${url}" -o "${destination}"`, { stdio: 'inherit' });
 }
 
+function buildGitHubReleaseAssetUrl(repo, tag, assetName) {
+  return `https://github.com/${repo}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(assetName)}`;
+}
+
 async function fetchLatestReleaseAsset(source) {
   const headers = {
     Accept: 'application/vnd.github+json',
@@ -134,6 +144,20 @@ async function fetchLatestReleaseAsset(source) {
     assetName: asset.name,
     assetUrl: asset.browser_download_url,
   };
+}
+
+async function resolveReleaseAsset(source) {
+  // Packaged builds use pinned GitHub release assets so CI remains reproducible
+  // and doesn't depend on the anonymous "latest release" API rate limit.
+  if (source.tag && source.assetName) {
+    return {
+      tag: source.tag,
+      assetName: source.assetName,
+      assetUrl: buildGitHubReleaseAssetUrl(source.repo, source.tag, source.assetName),
+    };
+  }
+
+  return fetchLatestReleaseAsset(source);
 }
 
 function writeManifest(manifestPath, config, asset) {
@@ -194,7 +218,7 @@ async function main() {
   const manifestPath = path.join(outDir, 'ffmpeg-manifest.json');
   ensureDir(outDir);
 
-  const asset = await fetchLatestReleaseAsset(config.source);
+  const asset = await resolveReleaseAsset(config.source);
   const manifest = readManifest(manifestPath);
   const existingBinaries = config.bins.every((bin) => fs.existsSync(path.join(outDir, bin)));
 

@@ -642,6 +642,7 @@ interface EditorActions {
   toggleLock: (trackId: string) => void;
   setTrackVolume: (trackId: string, v: number) => void;
   selectTrack: (id: string | null) => void;
+  updateTrackColor: (trackId: string, color: string) => void;
 
   // Tracks (add / remove)
   addTrack: (track: Track) => void;
@@ -731,6 +732,7 @@ interface EditorActions {
 
   // Bin operations
   addBin: (name: string, parentId?: string) => void;
+  updateBinColor: (binId: string, color: string) => void;
 
   // Smart Bin operations
   addSmartBin: (name: string, rules: SmartBinRule[], matchAll?: boolean) => void;
@@ -895,13 +897,32 @@ export function makeClip(base: Omit<Clip, 'intrinsicVideo' | 'intrinsicAudio' | 
   };
 }
 
-const DEFAULT_TRACK_COLORS: Record<TrackType, string> = {
+export const DEFAULT_TRACK_COLORS: Record<TrackType, string> = {
   VIDEO: '#7f8ca3',
   AUDIO: '#6f9a86',
   EFFECT: '#8f87a8',
   SUBTITLE: '#7a8ea7',
   GRAPHIC: '#9a8f7a',
 };
+
+export const TRACK_COLOR_PRESETS: Record<TrackType, string[]> = {
+  VIDEO: ['#7f8ca3', '#818cf8', '#5b6af5', '#5bbfc7', '#4f63f5'],
+  AUDIO: ['#6f9a86', '#2bb672', '#4ade80', '#22c896', '#7fa28f'],
+  EFFECT: ['#8f87a8', '#a78bfa', '#c084fc', '#e8943a', '#f59e0b'],
+  SUBTITLE: ['#7a8ea7', '#6bc5e3', '#38bdf8', '#60a5fa', '#93c5fd'],
+  GRAPHIC: ['#9a8f7a', '#fb7185', '#f97316', '#f59e0b', '#e05b8e'],
+};
+
+export const BIN_COLOR_PRESETS = [
+  '#5b6af5',
+  '#818cf8',
+  '#e05b8e',
+  '#f59e0b',
+  '#2bb672',
+  '#5bbfc7',
+  '#e8943a',
+  '#9a8f7a',
+];
 
 const INITIAL_TRACKS: Track[] = [
   { id: 't-v1', name: 'V1', type: 'VIDEO', sortOrder: 0, muted: false, locked: false, solo: false, volume: 1, color: DEFAULT_TRACK_COLORS.VIDEO, clips: [] },
@@ -1116,6 +1137,27 @@ function cloneTrackForSnapshot(track: Track): Track {
 
 function findAssetById(bins: Bin[], assetId: string): MediaAsset | null {
   return collectAllAssets(bins).find((asset) => asset.id === assetId) ?? null;
+}
+
+function findBinByIdMutable(bins: Bin[], binId: string): Bin | null {
+  for (const bin of bins) {
+    if (bin.id === binId) {
+      return bin;
+    }
+    const nested = findBinByIdMutable(bin.children, binId);
+    if (nested) {
+      return nested;
+    }
+  }
+  return null;
+}
+
+function getAssetWaveformData(asset: MediaAsset | null | undefined): number[] | undefined {
+  if (!asset) {
+    return undefined;
+  }
+
+  return asset.waveformData ?? asset.waveformMetadata?.peaks;
 }
 
 function getClipTypeForAsset(asset: MediaAsset): Clip['type'] {
@@ -1629,7 +1671,25 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     setTrackVolume: (id, v) => set((s) => {
       const t = s.tracks.find(t => t.id === id); if (t) t.volume = v;
     }),
-    selectTrack: (id) => set((s) => { s.selectedTrackId = id; }),
+    selectTrack: (id) => set((s) => {
+      s.selectedTrackId = id;
+      s.selectedClipIds = [];
+      s.inspectedClipId = null;
+    }),
+    updateTrackColor: (trackId, color) => set((s) => {
+      const track = s.tracks.find((candidate) => candidate.id === trackId);
+      if (!track) {
+        return;
+      }
+
+      const previousColor = track.color;
+      track.color = color;
+      for (const clip of track.clips) {
+        if (!clip.color || clip.color === previousColor) {
+          clip.color = color;
+        }
+      }
+    }),
 
     addTrack: (track) => set((s) => {
       s.tracks.push(track);
@@ -1785,6 +1845,10 @@ export const useEditorStore = create<EditorState & EditorActions>()(
 
     selectBin: (id) => set((s) => {
       s.selectedBinId = id;
+      s.selectedTrackId = null;
+      s.selectedClipIds = [];
+      s.selectedTrimEditPoints = [];
+      s.inspectedClipId = null;
       const findAssets = (bins: Bin[]): MediaAsset[] => {
         for (const b of bins) {
           if (b.id === id) return b.assets;
@@ -1996,7 +2060,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         type: getClipTypeForAsset(asset),
         assetId: asset.id,
         color: targetTrack.color,
-        waveformData: asset.waveformData,
+        waveformData: getAssetWaveformData(asset),
       });
       targetTrack.clips.push(clip);
       s.selectedClipIds = [clip.id];
@@ -2106,7 +2170,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
           type: getClipTypeForAsset(asset),
           assetId: asset.id,
           color: targetTrack.color,
-          waveformData: asset.waveformData,
+          waveformData: getAssetWaveformData(asset),
         });
         targetTrack.clips.push(newClip);
         targetTrack.clips.sort((a, b) => a.startTime - b.startTime);
@@ -2190,7 +2254,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
           type: getClipTypeForAsset(asset),
           assetId: asset.id,
           color: targetTrack.color,
-          waveformData: asset.waveformData,
+          waveformData: getAssetWaveformData(asset),
         });
         targetTrack.clips.push(newClip);
         targetTrack.clips.sort((a, b) => a.startTime - b.startTime);
@@ -2337,7 +2401,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       const newBin: Bin = {
         id: `b_${Date.now()}`,
         name,
-        color: '#818cf8',
+        color: BIN_COLOR_PRESETS[0]!,
         isOpen: false,
         children: [],
         assets: [],
@@ -2353,6 +2417,12 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         findAndAdd(s.bins);
       } else {
         s.bins.push(newBin);
+      }
+    }),
+    updateBinColor: (binId, color) => set((s) => {
+      const bin = findBinByIdMutable(s.bins, binId);
+      if (bin) {
+        bin.color = color;
       }
     }),
 

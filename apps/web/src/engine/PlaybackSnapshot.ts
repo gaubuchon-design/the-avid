@@ -8,7 +8,7 @@ import type {
 } from '../store/editor.store';
 import type { ScopeType } from '../store/player.store';
 import { getClipSourceTime } from './clipTiming';
-import { effectsEngine } from './EffectsEngine';
+import { getClipEffectsRenderRevision, getEffectsRenderRevision } from './effectsEngineInterop';
 
 export type PlaybackConsumer = 'record-monitor' | 'program-monitor' | 'scope' | 'export';
 
@@ -104,21 +104,25 @@ function buildVideoLayers(source: PlaybackSnapshotSource): PlaybackVideoLayer[] 
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .flatMap((track) => {
       const clip = track.clips.find((candidate) => {
-        return source.playheadTime >= candidate.startTime && source.playheadTime < candidate.endTime;
+        return (
+          source.playheadTime >= candidate.startTime && source.playheadTime < candidate.endTime
+        );
       });
       if (!clip) {
         return [];
       }
 
-      return [{
-        trackId: track.id,
-        trackType: track.type,
-        sortOrder: track.sortOrder,
-        trackBlendMode: track.blendMode,
-        clip,
-        assetId: clip.assetId ?? null,
-        sourceTime: mapTimelineTimeToSourceTime(clip, source.playheadTime),
-      }];
+      return [
+        {
+          trackId: track.id,
+          trackType: track.type,
+          sortOrder: track.sortOrder,
+          trackBlendMode: track.blendMode,
+          clip,
+          assetId: clip.assetId ?? null,
+          sourceTime: mapTimelineTimeToSourceTime(clip, source.playheadTime),
+        },
+      ];
     });
 }
 
@@ -137,13 +141,15 @@ function buildTitleLayers(source: PlaybackSnapshotSource, fps: number): Playback
           return [];
         }
 
-        return [{
-          trackId: track.id,
-          clipId: clip.id,
-          titleId: titleClip.id,
-          frameOffset: Math.floor((source.playheadTime - clip.startTime) * fps),
-          titleClip,
-        }];
+        return [
+          {
+            trackId: track.id,
+            clipId: clip.id,
+            titleId: titleClip.id,
+            frameOffset: Math.floor((source.playheadTime - clip.startTime) * fps),
+            titleClip,
+          },
+        ];
       });
     });
 }
@@ -158,11 +164,13 @@ function buildEffectLayers(source: PlaybackSnapshotSource): PlaybackEffectLayer[
           return [];
         }
 
-        return [{
-          trackId: track.id,
-          sortOrder: track.sortOrder,
-          clip,
-        }];
+        return [
+          {
+            trackId: track.id,
+            sortOrder: track.sortOrder,
+            clip,
+          },
+        ];
       });
     });
 }
@@ -224,23 +232,29 @@ export function buildPlaybackFrameSignature(source: PlaybackFrameSignatureSource
 
 export function buildPlaybackSnapshot(
   source: PlaybackSnapshotSource,
-  consumer: PlaybackConsumer,
+  consumer: PlaybackConsumer
 ): PlaybackSnapshot {
   const fps = resolveFps(source);
   const frameNumber = Math.round(source.playheadTime * fps);
   const sequenceRevision = buildPlaybackSequenceRevision(source);
   const videoLayers = buildVideoLayers(source);
   const effectLayers = buildEffectLayers(source);
-  const activeEffectClipIds = [...new Set([
-    ...videoLayers.map((layer) => layer.clip.id),
-    ...effectLayers.map((layer) => layer.clip.id),
-  ])];
-  const effectsRevision = activeEffectClipIds.length > 0
-    ? activeEffectClipIds.map((clipId) => `${clipId}:${effectsEngine.getClipRenderRevision(clipId)}`).join('|')
-    : `global:${effectsEngine.getRenderRevision()}`;
-  const primaryVideoLayer = [...videoLayers].reverse().find((layer) => layer.trackType === 'VIDEO')
-    ?? videoLayers[videoLayers.length - 1]
-    ?? null;
+  const activeEffectClipIds = [
+    ...new Set([
+      ...videoLayers.map((layer) => layer.clip.id),
+      ...effectLayers.map((layer) => layer.clip.id),
+    ]),
+  ];
+  const effectsRevision =
+    activeEffectClipIds.length > 0
+      ? activeEffectClipIds
+          .map((clipId) => `${clipId}:${getClipEffectsRenderRevision(clipId)}`)
+          .join('|')
+      : `global:${getEffectsRenderRevision()}`;
+  const primaryVideoLayer =
+    [...videoLayers].reverse().find((layer) => layer.trackType === 'VIDEO') ??
+    videoLayers[videoLayers.length - 1] ??
+    null;
 
   return {
     consumer,

@@ -45,7 +45,7 @@ const TrackHeader = memo(function TrackHeader({ track }: TrackHeaderProps) {
   const isSelected = selectedTrackId === track.id;
   const isVideoTrack = track.type === 'VIDEO' || track.type === 'GRAPHIC';
   const isMonitored = videoMonitorTrackId === track.id;
-  const color = TRACK_TYPE_COLOR[track.type] ?? 'var(--text-muted)';
+  const color = track.color || TRACK_TYPE_COLOR[track.type] || 'var(--text-muted)';
 
   return (
     <div

@@ -1,5 +1,9 @@
 import { app, type BrowserWindow } from 'electron';
 import { autoUpdater } from 'electron-updater';
+import {
+  resolveDesktopUpdateFeedConfig,
+  summarizeDesktopUpdateError,
+} from './DesktopUpdateSupport';
 
 export type DesktopUpdateStatus =
   | 'disabled'
@@ -50,13 +54,6 @@ function detectReleaseChannel(version: string): string {
   return channel || 'stable';
 }
 
-function normalizeErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
-}
-
 export class DesktopAutoUpdateService {
   private readonly channel = detectReleaseChannel(app.getVersion());
   private readonly state: DesktopUpdateState = {
@@ -96,6 +93,33 @@ export class DesktopAutoUpdateService {
 
     if (!app.isPackaged) {
       autoUpdater.forceDevUpdateConfig = true;
+    }
+
+    // electron-updater reads app-update.yml, but it does not re-apply requestHeaders
+    // from disk onto the runtime updater instance for generic feeds.
+    const feedConfig = resolveDesktopUpdateFeedConfig({
+      appPath: app.getAppPath(),
+      channel: this.channel,
+      env: process.env,
+      forceDevUpdateConfig: autoUpdater.forceDevUpdateConfig,
+      resourcesPath: process.resourcesPath,
+    });
+
+    if (feedConfig) {
+      autoUpdater.setFeedURL({
+        provider: 'generic',
+        url: feedConfig.url,
+        channel: feedConfig.channel,
+        ...(Object.keys(feedConfig.requestHeaders).length > 0
+          ? { requestHeaders: feedConfig.requestHeaders }
+          : {}),
+      });
+
+      this.options.log('info', UPDATE_TAG, 'Configured desktop update feed.', {
+        channel: feedConfig.channel,
+        requestHeaderCount: Object.keys(feedConfig.requestHeaders).length,
+        url: feedConfig.url,
+      });
     }
 
     autoUpdater.autoDownload = true;
@@ -304,12 +328,15 @@ export class DesktopAutoUpdateService {
   }
 
   private handleError(error: unknown): void {
-    const message = normalizeErrorMessage(error);
-    this.options.log('error', UPDATE_TAG, message);
+    const summary = summarizeDesktopUpdateError(error);
+    this.options.log('error', UPDATE_TAG, summary.detail, {
+      kind: summary.kind,
+      statusCode: summary.statusCode ?? undefined,
+    });
     this.setState({
       status: 'error',
-      error: message,
-      message: 'Automatic update check failed.',
+      error: summary.userMessage,
+      message: summary.userMessage,
       restartScheduled: false,
     });
   }

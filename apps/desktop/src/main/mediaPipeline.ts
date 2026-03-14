@@ -26,6 +26,7 @@ import type {
   EditorMediaFingerprint,
   EditorMediaProxyMetadata,
   EditorMediaTechnicalMetadata,
+  EditorMediaThumbnailFrame,
   EditorMediaWaveformMetadata,
   EditorProject,
   EditorTrack,
@@ -41,6 +42,8 @@ const execFileAsync = promisify(execFile);
 const HASH_SAMPLE_BYTES = 1024 * 1024;
 const WAVEFORM_BUCKET_SIZE = 2048;
 const WAVEFORM_TARGET_POINTS = 128;
+const VIDEO_THUMBNAIL_INTERVAL_SECONDS = 10;
+const VIDEO_THUMBNAIL_WIDTH = 480;
 
 export interface ProjectMediaPaths {
   packagePath: string;
@@ -48,6 +51,7 @@ export interface ProjectMediaPaths {
   managedPath: string;
   proxyPath: string;
   waveformPath: string;
+  thumbnailsPath: string;
   indexPath: string;
   exportsPath: string;
 }
@@ -197,6 +201,7 @@ export function createProjectMediaPaths(projectPackagePath: string): ProjectMedi
     managedPath: path.join(mediaPath, 'managed'),
     proxyPath: path.join(mediaPath, 'proxies'),
     waveformPath: path.join(mediaPath, 'waveforms'),
+    thumbnailsPath: path.join(mediaPath, 'thumbnails'),
     indexPath: path.join(mediaPath, 'indexes'),
     exportsPath: path.join(projectPackagePath, 'exports'),
   };
@@ -208,6 +213,7 @@ export async function ensureProjectMediaPaths(paths: ProjectMediaPaths): Promise
   await mkdir(paths.managedPath, { recursive: true });
   await mkdir(paths.proxyPath, { recursive: true });
   await mkdir(paths.waveformPath, { recursive: true });
+  await mkdir(paths.thumbnailsPath, { recursive: true });
   await mkdir(paths.indexPath, { recursive: true });
   await mkdir(paths.exportsPath, { recursive: true });
 }
@@ -929,6 +935,119 @@ function downsamplePeaks(peaks: number[], target: number): number[] {
   });
 }
 
+function collectVideoThumbnailTimes(durationSeconds?: number): number[] {
+  if (!durationSeconds || durationSeconds <= 0) {
+    return [0];
+  }
+
+  const times: number[] = [];
+  for (let timeSeconds = 0; timeSeconds < durationSeconds; timeSeconds += VIDEO_THUMBNAIL_INTERVAL_SECONDS) {
+    times.push(Number(timeSeconds.toFixed(3)));
+  }
+
+  if (times.length === 0) {
+    times.push(0);
+  }
+
+  return times;
+}
+
+function getPosterFrameTime(durationSeconds?: number): number {
+  if (!durationSeconds || durationSeconds <= 0) {
+    return 0;
+  }
+
+  if (durationSeconds <= 1) {
+    return Number((durationSeconds / 2).toFixed(3));
+  }
+
+  return Number(Math.min(1, durationSeconds / 2).toFixed(3));
+}
+
+async function extractVideoThumbnailFrame(
+  ffmpegPath: string,
+  filePath: string,
+  timeSeconds: number,
+  outputPath: string,
+): Promise<void> {
+  await execFileAsync(ffmpegPath, [
+    '-y',
+    '-ss',
+    Math.max(0, timeSeconds).toFixed(3),
+    '-i',
+    filePath,
+    '-frames:v',
+    '1',
+    '-an',
+    '-vf',
+    `scale=${VIDEO_THUMBNAIL_WIDTH}:-2:flags=lanczos`,
+    '-q:v',
+    '4',
+    outputPath,
+  ]);
+}
+
+async function generateVideoThumbnails(
+  filePath: string,
+  assetId: string,
+  mediaType: EditorMediaAsset['type'],
+  durationSeconds: number | undefined,
+  paths: ProjectMediaPaths,
+): Promise<{ thumbnailUrl?: string; thumbnailFrames: EditorMediaThumbnailFrame[] }> {
+  if (mediaType !== 'VIDEO') {
+    return { thumbnailFrames: [] };
+  }
+
+  const availability = await getToolAvailability();
+  const toolPaths = await getMediaToolPaths();
+  if (!availability.ffmpeg || !toolPaths.ffmpeg) {
+    return { thumbnailFrames: [] };
+  }
+
+  const outputDirectory = path.join(paths.thumbnailsPath, assetId);
+  await mkdir(outputDirectory, { recursive: true });
+
+  const thumbnailTimes = collectVideoThumbnailTimes(durationSeconds);
+  const posterFrameTime = getPosterFrameTime(durationSeconds);
+  const posterPath = path.join(outputDirectory, 'poster.jpg');
+  let thumbnailUrl: string | undefined;
+
+  try {
+    await extractVideoThumbnailFrame(toolPaths.ffmpeg, filePath, posterFrameTime, posterPath);
+    thumbnailUrl = pathToFileURL(posterPath).toString();
+  } catch {
+    thumbnailUrl = undefined;
+  }
+
+  const thumbnailFrames: EditorMediaThumbnailFrame[] = [];
+  for (const timeSeconds of thumbnailTimes) {
+    const framePath = path.join(
+      outputDirectory,
+      `frame-${Math.round(timeSeconds * 1000).toString().padStart(8, '0')}.jpg`,
+    );
+
+    try {
+      await extractVideoThumbnailFrame(toolPaths.ffmpeg, filePath, timeSeconds, framePath);
+      thumbnailFrames.push({
+        timeSeconds,
+        imageUrl: pathToFileURL(framePath).toString(),
+        relativePath: path.relative(paths.packagePath, framePath),
+      });
+    } catch {
+      // Skip individual thumbnails so ingest can still complete with partial previews.
+    }
+  }
+
+  if (!thumbnailUrl && thumbnailFrames[0]) {
+    thumbnailUrl = thumbnailFrames[0].imageUrl;
+  }
+
+  return {
+    thumbnailUrl,
+    thumbnailFrames,
+  };
+}
+
 async function extractWaveform(filePath: string, mediaType: EditorMediaAsset['type'], fallbackFingerprint: EditorMediaFingerprint): Promise<EditorMediaWaveformMetadata> {
   const now = new Date().toISOString();
   if (mediaType !== 'AUDIO' && mediaType !== 'VIDEO') {
@@ -1439,6 +1558,13 @@ export async function ingestMediaFile(
         updatedAt: new Date().toISOString(),
       }
     : await extractWaveform(playableFilePath, mediaType, fingerprint);
+  const thumbnailArtifacts = await generateVideoThumbnails(
+    playableFilePath,
+    assetId,
+    mediaType,
+    technicalMetadata.durationSeconds,
+    paths,
+  );
   const semanticTags = buildSemanticTags(sourcePath, path.basename(fileName, path.extname(fileName)), mediaType);
   const playbackUrl = proxyMetadata.status === 'READY' && proxyMetadata.playbackUrl
     ? proxyMetadata.playbackUrl
@@ -1461,6 +1587,8 @@ export async function ingestMediaFile(
     type: mediaType,
     status: 'READY',
     duration: technicalMetadata.durationSeconds,
+    thumbnailUrl: thumbnailArtifacts.thumbnailUrl,
+    thumbnailFrames: thumbnailArtifacts.thumbnailFrames,
     playbackUrl,
     waveformData: waveformMetadata.peaks,
     fileExtension: path.extname(fileName).replace(/^\./, '').toLowerCase(),

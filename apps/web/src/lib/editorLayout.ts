@@ -6,6 +6,17 @@ export interface EditorLayoutState {
   dualMonitorSplit: number;
 }
 
+export interface EditorLayoutViewportBounds {
+  minBinWidth: number;
+  maxBinWidth: number;
+  minTrackerWidth: number;
+  maxTrackerWidth: number;
+  minInspectorWidth: number;
+  maxInspectorWidth: number;
+  minTimelineHeight: number;
+  maxTimelineHeight: number;
+}
+
 export const EDITOR_LAYOUT_STORAGE_KEY = 'the-avid.editor-layout.v1';
 
 export const DEFAULT_EDITOR_LAYOUT: EditorLayoutState = {
@@ -54,24 +65,44 @@ export function readStoredEditorLayout(storage: Storage | null | undefined): Edi
   }
 }
 
+export function getEditorLayoutViewportBounds(
+  viewportWidth: number,
+  viewportHeight: number,
+): EditorLayoutViewportBounds {
+  const safeWidth = Math.max(640, viewportWidth);
+  const safeHeight = Math.max(560, viewportHeight);
+  const compactWidth = safeWidth < 1100;
+  const compactHeight = safeHeight < 820;
+  const minBinWidth = compactWidth ? 180 : 220;
+  const minTrackerWidth = compactWidth ? 220 : 260;
+  const minInspectorWidth = compactWidth ? 240 : 280;
+  const minTimelineHeight = compactHeight ? 160 : 180;
+
+  return {
+    minBinWidth,
+    maxBinWidth: Math.min(420, Math.max(minBinWidth, Math.floor(safeWidth * (compactWidth ? 0.28 : 0.34)))),
+    minTrackerWidth,
+    maxTrackerWidth: Math.min(420, Math.max(minTrackerWidth, Math.floor(safeWidth * (compactWidth ? 0.26 : 0.28)))),
+    minInspectorWidth,
+    maxInspectorWidth: Math.min(440, Math.max(minInspectorWidth, Math.floor(safeWidth * (compactWidth ? 0.3 : 0.32)))),
+    minTimelineHeight,
+    maxTimelineHeight: Math.min(460, Math.max(minTimelineHeight, Math.floor(safeHeight * (compactHeight ? 0.38 : 0.46)))),
+  };
+}
+
 export function clampEditorLayoutForViewport(
   layout: EditorLayoutState,
   viewportWidth: number,
   viewportHeight: number,
 ): EditorLayoutState {
-  const safeWidth = Math.max(960, viewportWidth);
-  const safeHeight = Math.max(720, viewportHeight);
-  const maxBinWidth = Math.min(420, Math.max(260, Math.floor(safeWidth * 0.34)));
-  const maxTrackerWidth = Math.min(420, Math.max(280, Math.floor(safeWidth * 0.28)));
-  const maxInspectorWidth = Math.min(440, Math.max(300, Math.floor(safeWidth * 0.32)));
-  const maxTimelineHeight = Math.min(460, Math.max(220, Math.floor(safeHeight * 0.46)));
+  const bounds = getEditorLayoutViewportBounds(viewportWidth, viewportHeight);
 
   return {
     ...layout,
-    binWidth: clamp(layout.binWidth, 220, maxBinWidth),
-    trackerWidth: clamp(layout.trackerWidth, 260, maxTrackerWidth),
-    inspectorWidth: clamp(layout.inspectorWidth, 280, maxInspectorWidth),
-    timelineHeight: clamp(layout.timelineHeight, 180, maxTimelineHeight),
+    binWidth: clamp(layout.binWidth, bounds.minBinWidth, bounds.maxBinWidth),
+    trackerWidth: clamp(layout.trackerWidth, bounds.minTrackerWidth, bounds.maxTrackerWidth),
+    inspectorWidth: clamp(layout.inspectorWidth, bounds.minInspectorWidth, bounds.maxInspectorWidth),
+    timelineHeight: clamp(layout.timelineHeight, bounds.minTimelineHeight, bounds.maxTimelineHeight),
     dualMonitorSplit: clamp(layout.dualMonitorSplit, 30, 70),
   };
 }
