@@ -8,6 +8,7 @@ auto-updates:
 It is designed to work with the desktop updater wiring already added in:
 
 - [apps/desktop/src/main/DesktopAutoUpdateService.ts](/Users/guillaumeaubuchon/GitHub/the-avid/apps/desktop/src/main/DesktopAutoUpdateService.ts)
+- [apps/desktop/src/main/DesktopUpdateSupport.ts](/Users/guillaumeaubuchon/GitHub/the-avid/apps/desktop/src/main/DesktopUpdateSupport.ts)
 - [apps/desktop/electron-builder.config.cjs](/Users/guillaumeaubuchon/GitHub/the-avid/apps/desktop/electron-builder.config.cjs)
 
 ## Architecture
@@ -73,6 +74,10 @@ For desktop packaging:
   - example: `stable` or `beta`
 - `DESKTOP_UPDATE_SHARED_KEY`
   - if set, Electron Builder embeds the shared header into `app-update.yml`
+
+At runtime the packaged desktop app now reloads those embedded request headers
+from updater config before checking the feed, which avoids the unauthorized-feed
+failure mode where packaged builds forget their authenticated updater headers.
 
 For local or CI publishing:
 
