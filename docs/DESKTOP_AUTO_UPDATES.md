@@ -36,6 +36,7 @@ Usage:
 ```bash
 npm run version:desktop
 npm run version:desktop -- --set=0.2.0
+npm run version:desktop:auto -- --feed-base-url=https://the-avid-desktop-updates.vercel.app/desktop-updates --channel=stable
 ```
 
 That script keeps:
@@ -50,6 +51,17 @@ on the same semantic version so:
 - the app reports the same version at runtime
 - installers use the same version in their filenames
 - Electron Builder emits matching update metadata
+
+Automatic mode now compares the repo version to the currently published updater
+feed version and chooses the next valid semantic version automatically:
+
+- if the repo version is already newer than the published feed, it keeps the
+  repo version
+- if the feed version is equal to or newer than the repo version, it increments
+  the published feed version before packaging
+
+That logic is what the desktop release workflows now use, so desktop auto-update
+publishes no longer depend on a manual version bump before every `master` merge.
 
 ## CDN Configuration
 
@@ -127,6 +139,8 @@ The desktop packaging scripts now use the CDN-aware Electron Builder config:
 - `npm run dist:desktop:refresh -- --targets=win`
 
 All packaging entry points also sync versions before generating artifacts.
+The GitHub release workflows now resolve and apply the next desktop version
+automatically before building macOS and Windows installers.
 
 ## CI/CD
 
@@ -149,8 +163,9 @@ Before relying on production auto-updates:
 - `latest*.yml` should be served with low cache TTLs or explicit cache
   invalidation
 - versioned binaries should be immutable
-- the desktop app version must be incremented before merging a release if you
-  want installed clients to upgrade automatically
+- if you are publishing manually, the desktop app version must still move
+  forward, either through `npm run version:desktop -- --set=...` or
+  `npm run version:desktop:auto ...`
 
 Without signing, the update flow may still work for internal testing, but
 production upgrade UX will be unreliable.
