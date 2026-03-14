@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { effectsEngine } from '../../engine/EffectsEngine';
 import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
 import { makeClip } from '../../store/editor.store';

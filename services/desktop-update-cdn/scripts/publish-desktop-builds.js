@@ -290,6 +290,23 @@ function requireBlobReadWriteToken({ dryRun }) {
   return token ?? null;
 }
 
+function runVercelCli(args) {
+  try {
+    return execFileSync('vercel', args, {
+      cwd: serviceRoot,
+      stdio: 'pipe',
+      encoding: 'utf8',
+    });
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      throw new Error(
+        'The Vercel CLI is required to publish desktop updates. Install it first with `npm install --global vercel@latest` or make sure `vercel` is available on PATH.'
+      );
+    }
+    throw error;
+  }
+}
+
 async function uploadFile(blobPathname, filePath, dryRun) {
   if (dryRun) {
     console.log(`[dry-run] ${filePath} -> ${blobPathname}`);
@@ -299,31 +316,23 @@ async function uploadFile(blobPathname, filePath, dryRun) {
   const isMetadata = isMetadataFileName(filePath);
   const rwToken = requireBlobReadWriteToken({ dryRun });
 
-  execFileSync(
-    'vercel',
-    [
-      'blob',
-      'put',
-      filePath,
-      '--access',
-      'private',
-      '--pathname',
-      blobPathname,
-      '--allow-overwrite',
-      'true',
-      '--cache-control-max-age',
-      String(isMetadata ? 60 : 31536000),
-      '--content-type',
-      contentTypeForFileName(filePath),
-      '--rw-token',
-      rwToken,
-    ],
-    {
-      cwd: serviceRoot,
-      stdio: 'pipe',
-      encoding: 'utf8',
-    }
-  );
+  runVercelCli([
+    'blob',
+    'put',
+    filePath,
+    '--access',
+    'private',
+    '--pathname',
+    blobPathname,
+    '--allow-overwrite',
+    'true',
+    '--cache-control-max-age',
+    String(isMetadata ? 60 : 31536000),
+    '--content-type',
+    contentTypeForFileName(filePath),
+    '--rw-token',
+    rwToken,
+  ]);
   console.log(`Uploaded ${path.basename(filePath)} -> ${blobPathname}`);
 }
 

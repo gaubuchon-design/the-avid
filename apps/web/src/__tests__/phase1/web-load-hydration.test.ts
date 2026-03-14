@@ -1,8 +1,10 @@
-import { buildProject, type EditorProject } from '@mcua/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { buildProject, type EditorProject } from '@mcua/core';
+
 import { CollabEngine, collabEngine } from '../../collab/CollabEngine';
 import { useCollabStore } from '../../store/collab.store';
-import type { Track } from '../../store/editor.store';
+import { type Track , useEditorStore } from '../../store/editor.store';
 
 const repositoryMocks = vi.hoisted(() => ({
   getProjectFromRepository: vi.fn(),
@@ -14,7 +16,6 @@ vi.mock('../../lib/projectRepository', () => ({
   saveProjectToRepository: repositoryMocks.saveProjectToRepository,
 }));
 
-import { useEditorStore } from '../../store/editor.store';
 
 const initialEditorState = useEditorStore.getState();
 const initialCollabState = useCollabStore.getState();

@@ -1,6 +1,7 @@
 import React, { act } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { SourceMonitor } from '../../components/SourceMonitor/SourceMonitor';
 import { useEditorStore } from '../../store/editor.store';
 import { usePlayerStore } from '../../store/player.store';
@@ -23,7 +24,14 @@ async function flushAnimationFrames() {
 }
 
 function dispatchScrubEvent(target: EventTarget, type: 'down' | 'move' | 'up', clientX: number) {
-  const eventType = type === 'down' ? 'mousedown' : type === 'move' ? 'mousemove' : 'mouseup';
+  let eventType: 'mousedown' | 'mousemove' | 'mouseup';
+  if (type === 'down') {
+    eventType = 'mousedown';
+  } else if (type === 'move') {
+    eventType = 'mousemove';
+  } else {
+    eventType = 'mouseup';
+  }
   target.dispatchEvent(new MouseEvent(eventType, { bubbles: true, clientX }));
 }
 

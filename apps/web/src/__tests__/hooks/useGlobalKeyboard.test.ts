@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { handleEditorKeyboardEvent } from '../../hooks/useGlobalKeyboard';
+
 import { TrimSide, trimEngine } from '../../engine/TrimEngine';
+import { handleEditorKeyboardEvent } from '../../hooks/useGlobalKeyboard';
 import { makeClip, useEditorStore } from '../../store/editor.store';
 import { usePlayerStore } from '../../store/player.store';
 

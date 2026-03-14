@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+
 import { trackPatchingEngine } from '../../engine/TrackPatchingEngine';
 import { subscribeTrackPatchingStateToStore, syncTrackPatchingStateToStore } from '../../lib/trackPatchingStateBridge';
 import { useEditorStore } from '../../store/editor.store';

@@ -1,6 +1,7 @@
 import React, { act } from 'react';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createRoot } from 'react-dom/client';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
 import { BinPanel } from '../../components/Bins/BinPanel';
 import { useEditorStore } from '../../store/editor.store';
 

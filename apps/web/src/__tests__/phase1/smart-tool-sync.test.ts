@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+
 import { smartToolEngine } from '../../engine/SmartToolEngine';
 import { subscribeSmartToolStateToStore, syncSmartToolStateToStore } from '../../lib/smartToolStateBridge';
 import { useEditorStore } from '../../store/editor.store';

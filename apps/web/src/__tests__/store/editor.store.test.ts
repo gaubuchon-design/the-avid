@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+
+import { editEngine } from '../../engine/EditEngine';
 import {
   useEditorStore,
   DEFAULT_INTRINSIC_VIDEO,
@@ -6,7 +8,6 @@ import {
   DEFAULT_TIME_REMAP,
   makeClip,
 } from '../../store/editor.store';
-import { editEngine } from '../../engine/EditEngine';
 import { usePlayerStore } from '../../store/player.store';
 
 // Capture the initial state once at module load (before any test mutates it).

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import {
   buildScriptDocumentFromText,
   buildScriptDocumentFromTranscript,
@@ -6,6 +7,7 @@ import {
   phraseFindTranscriptWorkbench,
   syncScriptDocumentToTranscript,
 } from '../../lib/transcriptWorkbench';
+
 import type { TranscriptCue } from '../../store/editor.store';
 
 const transcript: TranscriptCue[] = [

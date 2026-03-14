@@ -1,8 +1,9 @@
 import React, { act } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot } from 'react-dom/client';
-import { TrimMode, TrimSide, trimEngine } from '../../engine/TrimEngine';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { TrimStatusOverlay } from '../../components/Editor/TrimStatusOverlay';
+import { TrimMode, TrimSide, trimEngine } from '../../engine/TrimEngine';
 import { makeClip, useEditorStore } from '../../store/editor.store';
 
 const initialEditorState = useEditorStore.getState();

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+
 import { TrimSide, trimEngine } from '../../engine/TrimEngine';
 import { getTrimStateSnapshot, subscribeTrimStateToStore, syncTrimStateToStore } from '../../lib/trimStateBridge';
 import { makeClip, useEditorStore } from '../../store/editor.store';

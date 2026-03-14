@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import { editEngine } from '../../engine/EditEngine';
 import { TrimSide, trimEngine } from '../../engine/TrimEngine';
 import { subscribeTrimHistoryToEditEngine } from '../../lib/trimHistoryBridge';

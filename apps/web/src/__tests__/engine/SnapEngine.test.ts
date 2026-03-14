@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+
 import { SnapEngine } from '../../engine/SnapEngine';
 import {
   DEFAULT_INTRINSIC_VIDEO,

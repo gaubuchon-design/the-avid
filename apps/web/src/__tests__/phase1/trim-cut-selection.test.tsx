@@ -1,6 +1,7 @@
 import React, { act } from 'react';
-import { beforeEach, describe, expect, it } from 'vitest';
 import { createRoot } from 'react-dom/client';
+import { beforeEach, describe, expect, it } from 'vitest';
+
 import { ClipView } from '../../components/TimelinePanel/ClipView';
 import { TrimSide, trimEngine } from '../../engine/TrimEngine';
 import { enterTrimModeFromContext } from '../../lib/trimEntry';

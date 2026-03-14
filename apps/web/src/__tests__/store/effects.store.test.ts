@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useEffectsStore } from '../../store/effects.store';
+
 import { effectsEngine } from '../../engine/EffectsEngine';
+import { useEffectsStore } from '../../store/effects.store';
 
 describe('useEffectsStore', () => {
   beforeEach(() => {

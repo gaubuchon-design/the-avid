@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+
 import { TrimSide, trimEngine } from '../../engine/TrimEngine';
 import { makeClip, useEditorStore } from '../../store/editor.store';
 

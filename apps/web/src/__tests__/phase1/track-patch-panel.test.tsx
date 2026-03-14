@@ -1,6 +1,7 @@
 import React, { act } from 'react';
-import { beforeEach, describe, expect, it } from 'vitest';
 import { createRoot } from 'react-dom/client';
+import { beforeEach, describe, expect, it } from 'vitest';
+
 import { TrackPatchPanel } from '../../components/TimelinePanel/TrackPatchPanel';
 import { trackPatchingEngine } from '../../engine/TrackPatchingEngine';
 import { useEditorStore } from '../../store/editor.store';

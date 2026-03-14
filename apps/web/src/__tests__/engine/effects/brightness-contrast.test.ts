@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+
 import { applyBrightnessContrast } from '../../../engine/effects/brightness-contrast';
 
 /** Helper: create a Uint8ClampedArray of RGBA pixels with a uniform color. */

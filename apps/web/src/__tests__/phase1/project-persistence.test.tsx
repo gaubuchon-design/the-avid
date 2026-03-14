@@ -1,23 +1,32 @@
 import React, { act } from 'react';
-import { buildProject, type EditorProject } from '@mcua/core';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot } from 'react-dom/client';
+import { MemoryRouter } from 'react-router-dom';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { buildProject, type EditorProject } from '@mcua/core';
+
+
 import { EditorWorkbenchBar } from '../../components/Editor/EditorWorkbenchBar';
 import { StatusBar } from '../../components/Editor/StatusBar';
 import { TrimStatusOverlay } from '../../components/Editor/TrimStatusOverlay';
+import { RecordMonitor } from '../../components/RecordMonitor/RecordMonitor';
+import { SourceMonitor } from '../../components/SourceMonitor/SourceMonitor';
 import { TrackHeaders } from '../../components/TimelinePanel/TrackHeaders';
 import { TrackPatchPanel } from '../../components/TimelinePanel/TrackPatchPanel';
 import { Toolbar } from '../../components/Toolbar/Toolbar';
-import { SourceMonitor } from '../../components/SourceMonitor/SourceMonitor';
-import { RecordMonitor } from '../../components/RecordMonitor/RecordMonitor';
 import { VersionHistoryPanel } from '../../components/VersionHistory/VersionHistoryPanel';
 import { trackPatchingEngine } from '../../engine/TrackPatchingEngine';
 import { useGlobalKeyboard } from '../../hooks/useGlobalKeyboard';
 import { useKeyboardAction } from '../../hooks/useKeyboardAction';
 import { useCollabStore } from '../../store/collab.store';
-import { makeClip } from '../../store/editor.store';
+import { makeClip , useEditorStore } from '../../store/editor.store';
 import { usePlayerStore } from '../../store/player.store';
-import { MemoryRouter } from 'react-router-dom';
+
+
+const routerFuture = {
+  v7_startTransition: true,
+  v7_relativeSplatPath: true,
+} as const;
 
 const repositoryMocks = vi.hoisted(() => ({
   getProjectFromRepository: vi.fn(),
@@ -29,7 +38,6 @@ vi.mock('../../lib/projectRepository', () => ({
   saveProjectToRepository: repositoryMocks.saveProjectToRepository,
 }));
 
-import { useEditorStore } from '../../store/editor.store';
 
 const initialEditorState = useEditorStore.getState();
 const initialPlayerState = usePlayerStore.getState();
@@ -831,7 +839,7 @@ describe('phase 1 project persistence', () => {
 
     await act(async () => {
       root.render(
-        <MemoryRouter>
+        <MemoryRouter future={routerFuture}>
           <Toolbar />
         </MemoryRouter>,
       );

@@ -158,6 +158,10 @@ jobs:
           path: apps/desktop/out
           merge-multiple: true
 
+      - name: Install Vercel CLI
+        if: ${{ steps.publish.outputs.should_publish == 'true' }}
+        run: npm install --global vercel@latest
+
       - name: Publish updater artifacts to Vercel Blob
         if: ${{ steps.publish.outputs.should_publish == 'true' }}
         run: npm run publish:desktop:updates -- --artifacts-dir=apps/desktop/out --channel=${{ vars.DESKTOP_UPDATE_CHANNEL || 'stable' }}

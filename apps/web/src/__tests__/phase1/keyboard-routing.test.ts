@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { keyboardEngine } from '../../engine/KeyboardEngine';
-import { matchFrameAtPlayhead, toggleMonitorFocus } from '../../lib/editorMonitorActions';
 import { handleEditorKeyboardEvent } from '../../hooks/useGlobalKeyboard';
+import { matchFrameAtPlayhead, toggleMonitorFocus } from '../../lib/editorMonitorActions';
 import { makeClip, useEditorStore } from '../../store/editor.store';
 import { usePlayerStore } from '../../store/player.store';
 

@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { smartToolEngine } from '../../engine/SmartToolEngine';
-import { editEngine } from '../../engine/EditEngine';
+
 import { SegmentMoveCommand } from '../../engine/commands';
+import { editEngine } from '../../engine/EditEngine';
+import { smartToolEngine } from '../../engine/SmartToolEngine';
 import { makeClip, useEditorStore } from '../../store/editor.store';
 
 const initialState = useEditorStore.getState();
