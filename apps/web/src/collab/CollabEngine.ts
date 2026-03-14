@@ -108,7 +108,7 @@ const DEMO_USERS: CollabUser[] = [
   {
     id: 'u1',
     name: 'Sarah K.',
-    color: '#7c5cfc',
+    color: '#00d4aa',
     cursorFrame: 120,
     cursorTrackId: 't1',
     playheadTime: 5.005,

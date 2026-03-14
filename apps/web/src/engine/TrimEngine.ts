@@ -1751,6 +1751,60 @@ export class TrimEngine {
     return true;
   }
 
+  // ── Convenience API (Avid-style entry / apply / exit) ────────────────────
+
+  /**
+   * Enter trim mode on a specific clip by its ID and side.
+   *
+   * This is a higher-level convenience wrapper around `enterTrimMode()`
+   * that resolves the clip's track and edit point automatically. Useful
+   * for keyboard-driven workflows where the user simply selects a clip
+   * and presses a trim key.
+   *
+   * @param clipId  The clip to engage trim on.
+   * @param side    Which side to trim: `'head'` trims the start (B-side
+   *                ripple), `'tail'` trims the end (A-side ripple).
+   * @returns The resulting TrimState, or null if the clip was not found.
+   */
+  enterTrimModeOnClip(
+    clipId: string,
+    side: 'head' | 'tail',
+  ): TrimState | null {
+    const found = this.findClipById(clipId);
+    if (!found) return null;
+
+    const { clip, track } = found;
+    const editPointTime = side === 'head' ? clip.startTime : clip.endTime;
+    const trimSide = side === 'head' ? TrimSide.B_SIDE : TrimSide.A_SIDE;
+
+    return this.enterTrimMode([track.id], editPointTime, trimSide);
+  }
+
+  /**
+   * Apply an incremental trim delta expressed in frames.
+   *
+   * Reads the project frame rate from the editor store and converts the
+   * frame count to a time delta before delegating to `trimByDelta`.
+   *
+   * @param frames  Number of frames to trim (positive = right, negative = left).
+   * @returns The TrimResult from the underlying operation.
+   */
+  applyTrimDelta(frames: number): TrimResult {
+    const { sequenceSettings, projectSettings } = this.getStore();
+    const frameRate = sequenceSettings?.fps ?? projectSettings?.frameRate ?? 24;
+    return this.trimByFrames(frames, frameRate);
+  }
+
+  /**
+   * Commit and exit trim mode.
+   *
+   * This is an alias for `exitTrimMode()` provided for API symmetry
+   * with `enterTrimModeOnClip` and `applyTrimDelta`.
+   */
+  commitTrim(): void {
+    this.exitTrimMode();
+  }
+
   // ── Event System ────────────────────────────────────────────────────────────
 
   /**

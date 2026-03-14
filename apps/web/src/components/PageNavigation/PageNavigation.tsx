@@ -1,11 +1,12 @@
 // =============================================================================
-//  THE AVID -- Page Navigation
-//  Work page tabs used by the editor workbench
+//  THE AVID -- Page Navigation (DaVinci Resolve-Style)
+//  Bottom navigation bar with 7 page tabs matching Resolve's full page set:
+//  Media | Cut | Edit | Fusion | Color | Fairlight | Deliver
 // =============================================================================
 
 import React from 'react';
 
-export type EditorPage = 'media' | 'edit';
+export type EditorPage = 'media' | 'cut' | 'edit' | 'fusion' | 'color' | 'fairlight' | 'deliver';
 
 interface PageNavProps {
   activePage: EditorPage;
@@ -14,7 +15,12 @@ interface PageNavProps {
 
 const PAGES: { id: EditorPage; label: string; shortcut: string }[] = [
   { id: 'media', label: 'Media', shortcut: 'Shift+1' },
-  { id: 'edit', label: 'Edit', shortcut: 'Shift+2' },
+  { id: 'cut', label: 'Cut', shortcut: 'Shift+2' },
+  { id: 'edit', label: 'Edit', shortcut: 'Shift+3' },
+  { id: 'fusion', label: 'Fusion', shortcut: 'Shift+4' },
+  { id: 'color', label: 'Color', shortcut: 'Shift+5' },
+  { id: 'fairlight', label: 'Fairlight', shortcut: 'Shift+6' },
+  { id: 'deliver', label: 'Deliver', shortcut: 'Shift+7' },
 ];
 
 export function PageNavigation({ activePage, onPageChange }: PageNavProps) {

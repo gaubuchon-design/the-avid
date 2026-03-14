@@ -76,7 +76,7 @@ export const settingStyles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
   },
   radio: {
-    accentColor: 'var(--brand, #6d4cfa)',
+    accentColor: 'var(--brand, #00c896)',
   },
   toggleLabel: {
     display: 'flex',
@@ -87,13 +87,13 @@ export const settingStyles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
   },
   checkbox: {
-    accentColor: 'var(--brand, #6d4cfa)',
+    accentColor: 'var(--brand, #00c896)',
     width: 14,
     height: 14,
   },
   range: {
     width: '100%',
-    accentColor: 'var(--brand, #6d4cfa)',
+    accentColor: 'var(--brand, #00c896)',
     cursor: 'pointer',
   },
   rangeLabels: {

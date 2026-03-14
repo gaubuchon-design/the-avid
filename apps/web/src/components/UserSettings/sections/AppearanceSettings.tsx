@@ -9,7 +9,7 @@ const THEMES: { value: ThemeMode; label: string }[] = [
 ];
 
 const ACCENT_COLORS = [
-  '#d7d7de', '#b9b9c2', '#9d9da7', '#81818d', '#676772', '#50505a',
+  '#00c896', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#06b6d4',
 ];
 
 export function AppearanceSettings() {
@@ -42,7 +42,7 @@ export function AppearanceSettings() {
       </div>
 
       <div style={ss['field']}>
-        <label style={ss['label']}>Neutral Accent</label>
+        <label style={ss['label']}>Accent Color</label>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {ACCENT_COLORS.map((c) => (
             <button

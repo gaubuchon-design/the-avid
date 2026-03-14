@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { lazy, Suspense, useEffect, useState, useCallback } from 'react';
 import { ErrorBoundary, PanelErrorBoundary } from '../components/ErrorBoundary';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { trimEngine } from '../engine/TrimEngine';
@@ -57,6 +57,7 @@ import { subscribeTrimStateToStore } from '../lib/trimStateBridge';
 import { subscribeTrackPatchingStateToStore } from '../lib/trackPatchingStateBridge';
 import { requestTrimWorkspace } from '../lib/trimWorkspace';
 import { MediaPage } from './MediaPage';
+import { CutPage } from './CutPage';
 import { PanelResizeHandle } from '../components/Layout/PanelResizeHandle';
 import {
   clampEditorLayoutForViewport,
@@ -64,6 +65,17 @@ import {
   readStoredEditorLayout,
   type EditorLayoutState,
 } from '../lib/editorLayout';
+
+// DaVinci Resolve parity pages (lazy-loaded)
+const FusionPage = lazy(() => import('./FusionPage').then(m => ({ default: m.FusionPage })));
+const FairlightPage = lazy(() => import('./FairlightPage').then(m => ({ default: m.FairlightPage })));
+
+// Lazy-loaded vertical panels
+const MarkersPanel = lazy(() => import('../components/MarkersPanel/MarkersPanel').then(m => ({ default: m.MarkersPanel })));
+const TransitionsPanel = lazy(() => import('../components/TransitionsPanel/TransitionsPanel').then(m => ({ default: m.TransitionsPanel })));
+const KeyframeEditor = lazy(() => import('../components/KeyframeEditor/KeyframeEditor').then(m => ({ default: m.KeyframeEditor })));
+const SequenceBin = lazy(() => import('../components/SequenceBin/SequenceBin').then(m => ({ default: m.SequenceBin })));
+const TimelineSearch = lazy(() => import('../components/TimelineSearch/TimelineSearch').then(m => ({ default: m.TimelineSearch })));
 
 function areViewportDimensionsEqual(
   left: { width: number; height: number },
@@ -86,13 +98,20 @@ export function EditorPage() {
   const showTitleTool = useEditorStore((s) => s.showTitleTool);
   const showSubtitleEditor = useEditorStore((s) => s.showSubtitleEditor);
   const showAlphaImportDialog = useEditorStore((s) => s.showAlphaImportDialog);
+  const showSequenceBin = useEditorStore((s) => s.showSequenceBin);
   const toggleExportPanel = useEditorStore((s) => s.toggleExportPanel);
   const toggleSettingsPanel = useEditorStore((s) => s.toggleSettingsPanel);
+  const toggleSequenceBin = useEditorStore((s) => s.toggleSequenceBin);
   const loadProject = useEditorStore((s) => s.loadProject);
   const saveProject = useEditorStore((s) => s.saveProject);
   const tracks = useEditorStore((s) => s.tracks);
 
+  const selectedClipIds = useEditorStore((s) => s.selectedClipIds);
+
   const [showTracker, setShowTracker] = useState(false);
+  const [showMarkersPanel, setShowMarkersPanel] = useState(false);
+  const [showTransitionsPanel, setShowTransitionsPanel] = useState(false);
+  const [showTimelineSearch, setShowTimelineSearch] = useState(false);
   const [activePage, setActivePage] = useState<PageId>(() => resolveEditorPageParam(searchParams.get('page')));
   const [viewport, setViewport] = useState(() => ({
     width: typeof window === 'undefined' ? 1440 : window.innerWidth,
@@ -471,9 +490,19 @@ export function EditorPage() {
         e.preventDefault();
         setShowTracker(prev => !prev);
       }
-      // Shift+1-2 to switch between media and edit
+      // ⌘Shift+B / Ctrl+Shift+B to toggle Sequence Bin
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'B') {
+        e.preventDefault();
+        toggleSequenceBin();
+      }
+      // ⌘F / Ctrl+F to toggle Find in Timeline
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'f') {
+        e.preventDefault();
+        setShowTimelineSearch(prev => !prev);
+      }
+      // Shift+1-7 to switch pages (Resolve-style)
       if (e.shiftKey && !e.metaKey && !e.ctrlKey) {
-        const pageMap: Record<string, PageId> = { '!': 'media', '@': 'edit' };
+        const pageMap: Record<string, PageId> = { '!': 'media', '@': 'cut', '#': 'edit', '$': 'fusion', '%': 'color', '^': 'fairlight', '&': 'deliver' };
         const page = pageMap[e.key];
         if (page) { e.preventDefault(); handlePageChange(page); }
       }
@@ -557,6 +586,27 @@ export function EditorPage() {
       {activePage === 'media' && (
         <ErrorBoundary resetKeys={[activePage]}>
           <MediaPage />
+        </ErrorBoundary>
+      )}
+      {activePage === 'cut' && (
+        <ErrorBoundary resetKeys={[activePage]}>
+          <Suspense fallback={<div style={{ flex: 1 }} />}>
+            <CutPage />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+      {activePage === 'fusion' && (
+        <ErrorBoundary resetKeys={[activePage]}>
+          <Suspense fallback={<div style={{ flex: 1 }} />}>
+            <FusionPage />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+      {activePage === 'fairlight' && (
+        <ErrorBoundary resetKeys={[activePage]}>
+          <Suspense fallback={<div style={{ flex: 1 }} />}>
+            <FairlightPage />
+          </Suspense>
         </ErrorBoundary>
       )}
       {activePage === 'edit' && (

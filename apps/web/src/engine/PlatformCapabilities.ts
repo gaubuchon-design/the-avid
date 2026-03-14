@@ -1,6 +1,42 @@
 // =============================================================================
 //  THE AVID -- Platform Capabilities Detection & OPFS Cache
+//  Detects GPU (NVIDIA CUDA, AMD OpenCL, Apple Metal, Intel),
+//  CPU (x86_64, ARM64, Apple Silicon), and browser API support.
 // =============================================================================
+
+/** GPU vendor/architecture info. */
+export interface GPUInfo {
+  vendor: 'nvidia' | 'amd' | 'intel' | 'apple' | 'qualcomm' | 'arm' | 'unknown';
+  renderer: string;
+  computeBackend: 'webgpu' | 'webgl2' | 'none';
+  vramMB: number;
+  supportsCompute: boolean;
+  accelerationPaths: {
+    /** NVIDIA CUDA-equivalent via WebGPU compute shaders. */
+    nvidiaCuda: boolean;
+    /** AMD OpenCL-equivalent via WebGPU compute shaders. */
+    amdOpenCL: boolean;
+    /** Apple Metal via WebGPU (Safari/Chrome on macOS/iOS). */
+    appleMetal: boolean;
+    /** Intel integrated GPU via WebGPU. */
+    intelGPU: boolean;
+    /** Generic WebGPU compute (any vendor). */
+    webgpuCompute: boolean;
+    /** WebGL2 fallback (framebuffer ops, no compute). */
+    webgl2Fallback: boolean;
+  };
+}
+
+/** CPU architecture info. */
+export interface CPUInfo {
+  architecture: 'x86_64' | 'arm64' | 'x86' | 'arm' | 'unknown';
+  vendor: 'intel' | 'amd' | 'apple' | 'qualcomm' | 'unknown';
+  cores: number;
+  hasSIMD: boolean;
+  hasSharedMemory: boolean;
+  optimalWorkerCount: number;
+  platform: 'macos' | 'windows' | 'linux' | 'ios' | 'android' | 'chromeos' | 'unknown';
+}
 
 /** Detected platform capabilities. */
 export interface Capabilities {
@@ -21,20 +57,122 @@ export interface Capabilities {
   storageQuotaMB: number;
   renderMode: 'webgpu' | 'canvas2d' | 'software';
   breakpoint: 'mobile' | 'tablet' | 'desktop-compact' | 'desktop-full';
-  /** Features that are not available on this platform. */
   degradedFeatures: string[];
-  /** Overall performance classification based on hardware. */
   performanceTier: 'high' | 'medium' | 'low';
+  gpu: GPUInfo;
+  cpu: CPUInfo;
 }
 
-/**
- * Platform capabilities detector and OPFS cache manager.
- *
- * Probes the runtime environment for GPU support, codec availability,
- * device form factor, and storage quota.  Provides OPFS-backed file caching
- * for offline media preview and a subscribe/unsubscribe pattern for
- * capability changes (e.g. viewport resize).
- */
+// -- GPU Vendor Detection Helpers -------------------------------------------
+
+function detectGPUVendorFromRenderer(renderer: string): GPUInfo['vendor'] {
+  const r = renderer.toLowerCase();
+  if (r.includes('nvidia') || r.includes('geforce') || r.includes('quadro') || r.includes('rtx') || r.includes('gtx')) return 'nvidia';
+  if (r.includes('amd') || r.includes('radeon') || r.includes('rx ')) return 'amd';
+  if (r.includes('apple') || r.includes('m1') || r.includes('m2') || r.includes('m3') || r.includes('m4')) return 'apple';
+  if (r.includes('intel') || r.includes('iris') || r.includes('uhd') || r.includes('hd graphics')) return 'intel';
+  if (r.includes('qualcomm') || r.includes('adreno')) return 'qualcomm';
+  if (r.includes('mali') || r.includes('arm')) return 'arm';
+  return 'unknown';
+}
+
+function detectGPUFromWebGL(): { vendor: GPUInfo['vendor']; renderer: string } {
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl2') as WebGL2RenderingContext | null
+      ?? canvas.getContext('webgl') as WebGLRenderingContext | null;
+    if (gl) {
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      if (ext) {
+        const renderer = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) as string;
+        return { vendor: detectGPUVendorFromRenderer(renderer), renderer };
+      }
+      const fallbackRenderer = gl.getParameter(gl.RENDERER) as string;
+      return { vendor: detectGPUVendorFromRenderer(fallbackRenderer), renderer: fallbackRenderer };
+    }
+  } catch { /* ignore */ }
+  return { vendor: 'unknown', renderer: 'unknown' };
+}
+
+// -- CPU Detection Helpers --------------------------------------------------
+
+function detectCPUArchitecture(): CPUInfo['architecture'] {
+  const ua = navigator?.userAgent ?? '';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const uaData = (navigator as any).userAgentData;
+
+  // NavigatorUAData (Chrome 90+) has architecture info
+  if (uaData?.platform) {
+    const arch = uaData.architecture?.toLowerCase?.() ?? '';
+    if (arch === 'arm' || arch === 'arm64') return 'arm64';
+    if (arch === 'x86' && uaData.bitness === '64') return 'x86_64';
+    if (arch === 'x86') return 'x86';
+  }
+
+  // Fallback: parse User-Agent
+  if (/aarch64|arm64/i.test(ua)) return 'arm64';
+  if (/x86_64|x64|amd64|win64/i.test(ua)) return 'x86_64';
+  if (/armv|arm/i.test(ua)) return 'arm';
+  if (/i[3-6]86|x86/i.test(ua)) return 'x86';
+
+  // macOS with Apple Silicon detection
+  if (/Macintosh/i.test(ua)) {
+    // If WebGPU adapter reports Apple GPU, it's Apple Silicon
+    return 'arm64'; // Modern Macs are predominantly Apple Silicon
+  }
+
+  return 'unknown';
+}
+
+function detectCPUVendor(arch: CPUInfo['architecture'], gpuVendor: GPUInfo['vendor']): CPUInfo['vendor'] {
+  const ua = navigator?.userAgent ?? '';
+
+  // Apple Silicon: ARM64 on macOS with Apple GPU
+  if (arch === 'arm64' && /Macintosh|iPhone|iPad/i.test(ua)) return 'apple';
+
+  // Qualcomm: ARM on Windows (Windows on ARM) or Android with Adreno
+  if ((arch === 'arm64' || arch === 'arm') && /Windows/i.test(ua)) return 'qualcomm';
+  if ((arch === 'arm64' || arch === 'arm') && /Android/i.test(ua) && gpuVendor === 'qualcomm') return 'qualcomm';
+
+  // x86_64 with AMD GPU likely AMD CPU (heuristic)
+  if ((arch === 'x86_64' || arch === 'x86') && gpuVendor === 'amd') return 'amd';
+
+  // Default x86 to Intel (most common)
+  if (arch === 'x86_64' || arch === 'x86') return 'intel';
+
+  return 'unknown';
+}
+
+function detectPlatform(): CPUInfo['platform'] {
+  const ua = navigator?.userAgent ?? '';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const platform = (navigator as any).userAgentData?.platform?.toLowerCase?.() ?? navigator?.platform?.toLowerCase?.() ?? '';
+
+  if (/iphone|ipad|ipod/i.test(ua)) return 'ios';
+  if (/android/i.test(ua)) return 'android';
+  if (/CrOS/i.test(ua)) return 'chromeos';
+  if (platform.includes('mac') || /Macintosh/i.test(ua)) return 'macos';
+  if (platform.includes('win') || /Windows/i.test(ua)) return 'windows';
+  if (platform.includes('linux') || /Linux/i.test(ua)) return 'linux';
+  return 'unknown';
+}
+
+function detectSIMDSupport(): boolean {
+  try {
+    // Check WebAssembly SIMD support
+    // This is a minimal SIMD module that validates if the engine supports v128
+    const simdBytes = new Uint8Array([
+      0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0,
+      10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11,
+    ]);
+    return WebAssembly.validate(simdBytes);
+  } catch {
+    return false;
+  }
+}
+
+// ─── PlatformCapabilities Class ───────────────────────────────────────────
+
 class PlatformCapabilities {
   private caps: Capabilities | null = null;
   private opfsRoot: FileSystemDirectoryHandle | null = null;
@@ -42,10 +180,6 @@ class PlatformCapabilities {
 
   // -- Detection --------------------------------------------------------------
 
-  /**
-   * Run full asynchronous capability detection.
-   * @returns A snapshot of all detected capabilities.
-   */
   async detect(): Promise<Capabilities> {
     const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
     const isMobile = /Android|iPhone|iPod/i.test(ua) && !/iPad/i.test(ua);
@@ -54,38 +188,97 @@ class PlatformCapabilities {
     const isTouchDevice =
       typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
 
-    // WebGPU
+    // WebGPU detection with adapter info
     let hasWebGPU = false;
     let maxTextureSize = 4096;
+    let webgpuAdapterInfo: { vendor: string; architecture: string; description: string } | null = null;
     if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- WebGPU types not in all TS lib targets
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const adapter = await (navigator as any).gpu.requestAdapter();
         if (adapter) {
           hasWebGPU = true;
           maxTextureSize = adapter.limits?.maxTextureDimension2D ?? 8192;
+          // Extract adapter info (Chrome 113+)
+          try {
+            const info = adapter.info ?? (await adapter.requestAdapterInfo?.());
+            if (info) {
+              webgpuAdapterInfo = {
+                vendor: info.vendor ?? '',
+                architecture: info.architecture ?? '',
+                description: info.description ?? '',
+              };
+            }
+          } catch { /* adapter info not available */ }
         }
       } catch {
         // WebGPU not available
       }
     }
 
+    // GPU info from WebGL (always available as fallback)
+    const webglInfo = detectGPUFromWebGL();
+    const gpuRenderer = webgpuAdapterInfo?.description || webglInfo.renderer;
+    const gpuVendor = webgpuAdapterInfo
+      ? detectGPUVendorFromRenderer(webgpuAdapterInfo.vendor + ' ' + webgpuAdapterInfo.description)
+      : webglInfo.vendor;
+
+    // WebGL2 check
+    let hasWebGL2 = false;
+    try {
+      const c = document.createElement('canvas');
+      hasWebGL2 = !!c.getContext('webgl2');
+    } catch { /* no WebGL2 */ }
+
+    const gpuInfo: GPUInfo = {
+      vendor: gpuVendor,
+      renderer: gpuRenderer,
+      computeBackend: hasWebGPU ? 'webgpu' : hasWebGL2 ? 'webgl2' : 'none',
+      vramMB: 0, // Cannot be reliably detected in browsers
+      supportsCompute: hasWebGPU,
+      accelerationPaths: {
+        nvidiaCuda: hasWebGPU && gpuVendor === 'nvidia',
+        amdOpenCL: hasWebGPU && gpuVendor === 'amd',
+        appleMetal: hasWebGPU && gpuVendor === 'apple',
+        intelGPU: hasWebGPU && gpuVendor === 'intel',
+        webgpuCompute: hasWebGPU,
+        webgl2Fallback: hasWebGL2 && !hasWebGPU,
+      },
+    };
+
+    // CPU info
+    const cpuArch = detectCPUArchitecture();
+    const cpuVendor = detectCPUVendor(cpuArch, gpuVendor);
+    const cores = navigator.hardwareConcurrency ?? 4;
+    const hasSharedMemory = typeof SharedArrayBuffer !== 'undefined';
+
+    const cpuInfo: CPUInfo = {
+      architecture: cpuArch,
+      vendor: cpuVendor,
+      cores,
+      hasSIMD: detectSIMDSupport(),
+      hasSharedMemory,
+      // Leave 2 cores for main thread + GC, minimum 1 worker
+      optimalWorkerCount: Math.max(1, Math.min(cores - 2, 16)),
+      platform: detectPlatform(),
+    };
+
     // OffscreenCanvas
     const hasOffscreenCanvas = typeof OffscreenCanvas !== 'undefined';
 
     // WebCodecs
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- WebCodecs API not in all TS lib targets
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const hasWebCodecs = typeof (globalThis as any).VideoDecoder !== 'undefined';
 
     // PWA
     const hasPWA =
       typeof window !== 'undefined' &&
       (window.matchMedia?.('(display-mode: standalone)').matches ||
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Safari-specific PWA detection
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (window.navigator as any).standalone === true);
 
     // Hardware
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Navigator.deviceMemory not in all TS lib targets
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const deviceMemoryGB = (navigator as any).deviceMemory ?? 4;
     const hardwareConcurrency = navigator.hardwareConcurrency ?? 4;
 
@@ -100,9 +293,7 @@ class PlatformCapabilities {
       try {
         const estimate = await navigator.storage.estimate();
         storageQuotaMB = Math.round((estimate.quota ?? 0) / (1024 * 1024));
-      } catch {
-        // Estimation not available
-      }
+      } catch { /* not available */ }
     }
 
     // Render mode selection
@@ -116,186 +307,151 @@ class PlatformCapabilities {
     // Breakpoint
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : screenWidth;
     let breakpoint: Capabilities['breakpoint'];
-    if (viewportWidth < 640) {
-      breakpoint = 'mobile';
-    } else if (viewportWidth < 1024) {
-      breakpoint = 'tablet';
-    } else if (viewportWidth < 1440) {
-      breakpoint = 'desktop-compact';
-    } else {
-      breakpoint = 'desktop-full';
-    }
+    if (viewportWidth < 640) breakpoint = 'mobile';
+    else if (viewportWidth < 1024) breakpoint = 'tablet';
+    else if (viewportWidth < 1440) breakpoint = 'desktop-compact';
+    else breakpoint = 'desktop-full';
 
-    // Degraded features — list features that are NOT available
+    // Degraded features
     const degradedFeatures: string[] = [];
     if (!hasWebGPU) degradedFeatures.push('webgpu');
     if (!hasOffscreenCanvas) degradedFeatures.push('offscreenCanvas');
     if (!hasWebCodecs) degradedFeatures.push('webCodecs');
-    if (typeof SharedArrayBuffer === 'undefined') degradedFeatures.push('sharedArrayBuffer');
+    if (!hasSharedMemory) degradedFeatures.push('sharedArrayBuffer');
+    if (!cpuInfo.hasSIMD) degradedFeatures.push('wasmSimd');
 
-    // Performance tier
-    const performanceTier = this.computePerformanceTier(
-      hasWebGPU,
-      deviceMemoryGB,
-      hardwareConcurrency,
-    );
+    const performanceTier = this.computePerformanceTier(hasWebGPU, deviceMemoryGB, hardwareConcurrency);
 
     this.caps = {
-      hasWebGPU,
-      hasOffscreenCanvas,
-      hasWebCodecs,
-      isElectron,
-      isMobile,
-      isTablet,
-      isTouchDevice,
-      hasPWA,
-      maxTextureSize,
-      deviceMemoryGB,
-      hardwareConcurrency,
-      screenWidth,
-      screenHeight,
-      pixelRatio,
-      storageQuotaMB,
-      renderMode,
-      breakpoint,
-      degradedFeatures,
-      performanceTier,
+      hasWebGPU, hasOffscreenCanvas, hasWebCodecs, isElectron, isMobile, isTablet,
+      isTouchDevice, hasPWA, maxTextureSize, deviceMemoryGB, hardwareConcurrency,
+      screenWidth, screenHeight, pixelRatio, storageQuotaMB, renderMode, breakpoint,
+      degradedFeatures, performanceTier, gpu: gpuInfo, cpu: cpuInfo,
     };
 
     this.notify();
     return { ...this.caps };
   }
 
-  /**
-   * Get current capabilities synchronously.
-   * If `detect()` has not been called yet, returns sensible defaults and
-   * triggers an async detection in the background.
-   * @returns A snapshot of capabilities.
-   */
   get(): Capabilities {
     if (!this.caps) {
       const hasOffscreenCanvas = typeof OffscreenCanvas !== 'undefined';
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- WebCodecs/deviceMemory not in all TS lib targets
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const hasWebCodecs = typeof (globalThis as any).VideoDecoder !== 'undefined';
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const deviceMemoryGB = (navigator as any)?.deviceMemory ?? 4;
       const hardwareConcurrency = navigator?.hardwareConcurrency ?? 4;
 
-      // Compute degraded features for the synchronous default
-      const degradedFeatures: string[] = [];
-      // WebGPU defaults to false until async detect runs
-      degradedFeatures.push('webgpu');
+      const degradedFeatures: string[] = ['webgpu'];
       if (!hasOffscreenCanvas) degradedFeatures.push('offscreenCanvas');
       if (!hasWebCodecs) degradedFeatures.push('webCodecs');
       if (typeof SharedArrayBuffer === 'undefined') degradedFeatures.push('sharedArrayBuffer');
 
+      const webglInfo = detectGPUFromWebGL();
+      const cpuArch = detectCPUArchitecture();
+
+      const defaultGpu: GPUInfo = {
+        vendor: webglInfo.vendor, renderer: webglInfo.renderer,
+        computeBackend: 'none', vramMB: 0, supportsCompute: false,
+        accelerationPaths: { nvidiaCuda: false, amdOpenCL: false, appleMetal: false, intelGPU: false, webgpuCompute: false, webgl2Fallback: false },
+      };
+      const defaultCpu: CPUInfo = {
+        architecture: cpuArch, vendor: detectCPUVendor(cpuArch, webglInfo.vendor),
+        cores: hardwareConcurrency, hasSIMD: false, hasSharedMemory: typeof SharedArrayBuffer !== 'undefined',
+        optimalWorkerCount: Math.max(1, hardwareConcurrency - 2), platform: detectPlatform(),
+      };
+
       this.caps = {
-        hasWebGPU: false,
-        hasOffscreenCanvas,
-        hasWebCodecs,
+        hasWebGPU: false, hasOffscreenCanvas, hasWebCodecs,
         isElectron: /Electron/i.test(navigator?.userAgent ?? ''),
         isMobile: /Android|iPhone|iPod/i.test(navigator?.userAgent ?? ''),
         isTablet: /iPad/i.test(navigator?.userAgent ?? ''),
-        isTouchDevice:
-          typeof window !== 'undefined' &&
-          ('ontouchstart' in window || navigator.maxTouchPoints > 0),
-        hasPWA: false,
-        maxTextureSize: 4096,
-        deviceMemoryGB,
-        hardwareConcurrency,
+        isTouchDevice: typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0),
+        hasPWA: false, maxTextureSize: 4096, deviceMemoryGB, hardwareConcurrency,
         screenWidth: typeof screen !== 'undefined' ? screen.width : 1920,
         screenHeight: typeof screen !== 'undefined' ? screen.height : 1080,
         pixelRatio: typeof window !== 'undefined' ? window.devicePixelRatio ?? 1 : 1,
-        storageQuotaMB: 0,
-        renderMode: 'canvas2d',
-        breakpoint: this.computeBreakpoint(),
-        degradedFeatures,
-        performanceTier: this.computePerformanceTier(false, deviceMemoryGB, hardwareConcurrency),
+        storageQuotaMB: 0, renderMode: 'canvas2d', breakpoint: this.computeBreakpoint(),
+        degradedFeatures, performanceTier: this.computePerformanceTier(false, deviceMemoryGB, hardwareConcurrency),
+        gpu: defaultGpu, cpu: defaultCpu,
       };
-      // Fire-and-forget async detect
       this.detect().catch(() => {});
     }
     return { ...this.caps };
   }
 
+  // -- GPU acceleration helpers -----------------------------------------------
+
+  /** Get the best available acceleration strategy for compute workloads. */
+  getAccelerationStrategy(): string {
+    const caps = this.get();
+    const g = caps.gpu;
+    if (g.accelerationPaths.nvidiaCuda) return 'NVIDIA CUDA via WebGPU';
+    if (g.accelerationPaths.appleMetal) return 'Apple Metal via WebGPU';
+    if (g.accelerationPaths.amdOpenCL) return 'AMD OpenCL via WebGPU';
+    if (g.accelerationPaths.intelGPU) return 'Intel GPU via WebGPU';
+    if (g.accelerationPaths.webgpuCompute) return 'Generic WebGPU Compute';
+    if (g.accelerationPaths.webgl2Fallback) return 'WebGL2 Framebuffer Fallback';
+    return `Software (${caps.cpu.cores} threads)`;
+  }
+
+  /** Get a human-readable hardware summary string. */
+  getHardwareSummary(): string {
+    const caps = this.get();
+    const gpu = caps.gpu;
+    const cpu = caps.cpu;
+    const parts: string[] = [];
+    parts.push(`GPU: ${gpu.renderer} (${gpu.vendor})`);
+    parts.push(`CPU: ${cpu.vendor} ${cpu.architecture} (${cpu.cores} cores)`);
+    parts.push(`Platform: ${cpu.platform}`);
+    parts.push(`Acceleration: ${this.getAccelerationStrategy()}`);
+    parts.push(`Memory: ${caps.deviceMemoryGB}GB`);
+    parts.push(`Tier: ${caps.performanceTier}`);
+    if (cpu.hasSIMD) parts.push('WASM SIMD: Yes');
+    if (cpu.hasSharedMemory) parts.push(`Workers: ${cpu.optimalWorkerCount}`);
+    return parts.join(' | ');
+  }
+
   // -- Responsive helpers -----------------------------------------------------
 
-  /**
-   * Get the current responsive breakpoint.
-   * @returns The breakpoint string.
-   */
   getBreakpoint(): Capabilities['breakpoint'] {
     return this.get().breakpoint;
   }
 
-  /**
-   * Whether the UI should degrade to a simplified layout.
-   * @returns `true` on mobile or low-memory devices.
-   */
   shouldUseSimplifiedUI(): boolean {
     const caps = this.get();
     return caps.isMobile || caps.breakpoint === 'mobile' || caps.deviceMemoryGB < 2;
   }
 
-  /**
-   * Check whether a specific platform feature is available.
-   * @param feature The feature to probe.
-   * @returns `true` if the feature is supported.
-   */
-  supportsFeature(
-    feature: 'webgpu' | 'offscreenCanvas' | 'webCodecs' | 'sharedArrayBuffer',
-  ): boolean {
+  supportsFeature(feature: 'webgpu' | 'offscreenCanvas' | 'webCodecs' | 'sharedArrayBuffer'): boolean {
     switch (feature) {
-      case 'webgpu':
-        return this.get().hasWebGPU;
-      case 'offscreenCanvas':
-        return this.get().hasOffscreenCanvas;
-      case 'webCodecs':
-        return this.get().hasWebCodecs;
-      case 'sharedArrayBuffer':
-        return typeof SharedArrayBuffer !== 'undefined';
-      default:
-        return false;
+      case 'webgpu': return this.get().hasWebGPU;
+      case 'offscreenCanvas': return this.get().hasOffscreenCanvas;
+      case 'webCodecs': return this.get().hasWebCodecs;
+      case 'sharedArrayBuffer': return typeof SharedArrayBuffer !== 'undefined';
+      default: return false;
     }
   }
 
-  /**
-   * Get the overall performance tier based on detected hardware.
-   * @returns `'high'`, `'medium'`, or `'low'`.
-   */
   getPerformanceTier(): 'high' | 'medium' | 'low' {
     const caps = this.get();
-    return this.computePerformanceTier(
-      caps.hasWebGPU,
-      caps.deviceMemoryGB,
-      caps.hardwareConcurrency,
-    );
+    return this.computePerformanceTier(caps.hasWebGPU, caps.deviceMemoryGB, caps.hardwareConcurrency);
   }
 
   // -- Storage ----------------------------------------------------------------
 
-  /**
-   * Get the current storage usage and quota.
-   * @returns Object with `usage` and `quota` in bytes.
-   */
   async getStorageEstimate(): Promise<{ usage: number; quota: number }> {
     if (navigator.storage?.estimate) {
       try {
         const est = await navigator.storage.estimate();
         return { usage: est.usage ?? 0, quota: est.quota ?? 0 };
-      } catch {
-        // fall through
-      }
+      } catch { /* fall through */ }
     }
     return { usage: 0, quota: 0 };
   }
 
   // -- OPFS helpers -----------------------------------------------------------
 
-  /**
-   * Initialise the Origin Private File System root handle.
-   * @returns The OPFS root directory handle, or `null` if unavailable.
-   */
   async initOPFS(): Promise<FileSystemDirectoryHandle | null> {
     if (this.opfsRoot) return this.opfsRoot;
     try {
@@ -303,23 +459,16 @@ class PlatformCapabilities {
         this.opfsRoot = await navigator.storage.getDirectory();
         return this.opfsRoot;
       }
-    } catch {
-      // OPFS not available
-    }
+    } catch { /* OPFS not available */ }
     return null;
   }
 
-  /**
-   * Cache a file to OPFS.
-   * @param name File name.
-   * @param data File contents as an ArrayBuffer.
-   */
   async cacheFile(name: string, data: ArrayBuffer): Promise<void> {
     const root = await this.initOPFS();
     if (!root) return;
     try {
       const fileHandle = await root.getFileHandle(name, { create: true });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- FileSystemWritable API not in all TS lib targets
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const writable = await (fileHandle as any).createWritable();
       await writable.write(data);
       await writable.close();
@@ -328,11 +477,6 @@ class PlatformCapabilities {
     }
   }
 
-  /**
-   * Retrieve a cached file from OPFS.
-   * @param name File name.
-   * @returns The file contents, or `null` if not found.
-   */
   async getCachedFile(name: string): Promise<ArrayBuffer | null> {
     const root = await this.initOPFS();
     if (!root) return null;
@@ -340,19 +484,14 @@ class PlatformCapabilities {
       const fileHandle = await root.getFileHandle(name);
       const file = await fileHandle.getFile();
       return await file.arrayBuffer();
-    } catch {
-      return null;
-    }
+    } catch { return null; }
   }
 
-  /**
-   * Clear all files from the OPFS cache.
-   */
   async clearCache(): Promise<void> {
     const root = await this.initOPFS();
     if (!root) return;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- OPFS entries() not in all TS lib targets
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       for await (const [name] of (root as any).entries()) {
         await root.removeEntry(name);
       }
@@ -363,19 +502,11 @@ class PlatformCapabilities {
 
   // -- Subscribe --------------------------------------------------------------
 
-  /**
-   * Subscribe to capability changes.
-   * @param cb Callback invoked on change.
-   * @returns An unsubscribe function.
-   */
   subscribe(cb: () => void): () => void {
     this.listeners.add(cb);
-    return () => {
-      this.listeners.delete(cb);
-    };
+    return () => { this.listeners.delete(cb); };
   }
 
-  /** Notify all subscribers that capabilities have changed. */
   private notify(): void {
     this.listeners.forEach((fn) => {
       try { fn(); } catch (err) {
@@ -386,10 +517,6 @@ class PlatformCapabilities {
 
   // -- Internal ---------------------------------------------------------------
 
-  /**
-   * Compute the responsive breakpoint from the current viewport width.
-   * @returns The breakpoint string.
-   */
   private computeBreakpoint(): Capabilities['breakpoint'] {
     const w = typeof window !== 'undefined' ? window.innerWidth : 1920;
     if (w < 640) return 'mobile';
@@ -398,14 +525,7 @@ class PlatformCapabilities {
     return 'desktop-full';
   }
 
-  /**
-   * Classify the device into a performance tier.
-   */
-  private computePerformanceTier(
-    hasWebGPU: boolean,
-    deviceMemoryGB: number,
-    hardwareConcurrency: number,
-  ): 'high' | 'medium' | 'low' {
+  private computePerformanceTier(hasWebGPU: boolean, deviceMemoryGB: number, hardwareConcurrency: number): 'high' | 'medium' | 'low' {
     if (hasWebGPU && deviceMemoryGB >= 8 && hardwareConcurrency >= 8) return 'high';
     if (deviceMemoryGB >= 4 && hardwareConcurrency >= 4) return 'medium';
     return 'low';
