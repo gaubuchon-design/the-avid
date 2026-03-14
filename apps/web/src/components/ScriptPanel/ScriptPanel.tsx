@@ -66,6 +66,7 @@ export function ScriptPanel() {
     updateScriptDocumentText,
     syncScriptDocumentToTranscript,
     updateTranscriptionSettings,
+    buildTranscriptTitleEffects,
   } = useEditorStore();
   const aiSettings = useUserSettingsStore((state) => ({
     transcriptionProvider: state.settings.transcriptionProvider,
@@ -369,6 +370,25 @@ export function ScriptPanel() {
             onClick={() => syncScriptDocumentToTranscript()}
           >
             Auto-sync Script
+          </button>
+          <button
+            type="button"
+            className="tl-btn"
+            onClick={() => {
+              const created = buildTranscriptTitleEffects({
+                useTranslations: true,
+                includeSpeakerLabels: false,
+              });
+              if (created === 0) {
+                setJobState('failed');
+                setJobMessage('No transcript cues are available to build title overlays.');
+                return;
+              }
+              setJobState('completed');
+              setJobMessage(`Built ${created} editable title subtitle${created === 1 ? '' : 's'} from the transcript.`);
+            }}
+          >
+            Build Title Captions
           </button>
         </div>
       </div>

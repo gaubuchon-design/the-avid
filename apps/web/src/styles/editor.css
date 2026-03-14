@@ -2601,7 +2601,7 @@
 }
 
 .track-patch-panel {
-  width: 244px;
+  width: 320px;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border-subtle);
@@ -2740,7 +2740,7 @@
 
 .track-patch-panel-grid-head {
   display: grid;
-  grid-template-columns: minmax(0, 60px) minmax(0, 1fr) 34px 38px;
+  grid-template-columns: minmax(0, 60px) minmax(0, 1fr) 36px 34px 38px 42px;
   gap: 8px;
   align-items: center;
   padding: 5px var(--space-2);
@@ -2753,7 +2753,7 @@
 
 .track-patch-row {
   display: grid;
-  grid-template-columns: minmax(0, 60px) minmax(0, 1fr) 34px 38px;
+  grid-template-columns: minmax(0, 60px) minmax(0, 1fr) 36px 34px 38px 42px;
   gap: 8px;
   align-items: center;
   min-height: var(--track-h);
@@ -2933,10 +2933,22 @@
   color: #dbe4ff;
 }
 
+.track-patch-route-btn.monitor.is-active {
+  border-color: rgba(148, 163, 184, 0.5);
+  background: rgba(148, 163, 184, 0.18);
+  color: #f8fafc;
+}
+
 .track-patch-route-btn.sync.is-active {
   border-color: rgba(245, 158, 11, 0.46);
   background: rgba(245, 158, 11, 0.16);
   color: #fde68a;
+}
+
+.track-patch-route-btn.lock.is-active {
+  border-color: rgba(239, 68, 68, 0.42);
+  background: rgba(239, 68, 68, 0.16);
+  color: #fecaca;
 }
 
 .track-patch-route-btn:disabled {
@@ -2966,6 +2978,325 @@
   border-color: rgba(34, 197, 94, 0.42);
   background: rgba(34, 197, 94, 0.18);
   color: #dcfce7;
+}
+
+.multicam-source {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: linear-gradient(180deg, rgba(10, 14, 20, 0.96), rgba(13, 18, 25, 0.94));
+}
+
+.multicam-source-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.multicam-source-header-copy,
+.multicam-source-footer-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.multicam-source-title,
+.multicam-source-footer-title,
+.multicam-source-library-title,
+.multicam-source-empty-title {
+  font-size: 11px;
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+
+.multicam-source-subtitle,
+.multicam-source-footer-note,
+.multicam-source-caption,
+.multicam-source-empty-note {
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.multicam-source-toolbar,
+.multicam-source-toolbar-group,
+.multicam-source-sync-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.multicam-pill,
+.multicam-primary-action,
+.multicam-library-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
+}
+
+.multicam-pill.active,
+.multicam-primary-action {
+  border-color: rgba(148, 163, 184, 0.34);
+  background: rgba(148, 163, 184, 0.18);
+  color: var(--text-primary);
+}
+
+.multicam-record-pill.active {
+  border-color: rgba(239, 68, 68, 0.42);
+  background: rgba(239, 68, 68, 0.18);
+  color: #fecaca;
+}
+
+.multicam-pill:disabled,
+.multicam-primary-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.multicam-source-status,
+.multicam-source-footer {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px var(--space-3);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.multicam-source-footer {
+  margin-top: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 0;
+}
+
+.multicam-angle-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 8px;
+  padding: var(--space-3);
+  overflow: auto;
+}
+
+.multicam-source-workspace {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(260px, 0.72fr);
+  gap: 0;
+}
+
+.multicam-angle-grid-quad {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.multicam-angle-grid-nine {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.multicam-angle-grid-sixteen {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.multicam-angle-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 6px;
+  min-height: 110px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background:
+    linear-gradient(145deg, rgba(47, 55, 69, 0.75), rgba(18, 24, 33, 0.92)),
+    radial-gradient(circle at top right, rgba(148, 163, 184, 0.18), transparent 48%);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.multicam-angle-card.is-active {
+  border-color: rgba(226, 232, 240, 0.42);
+  box-shadow: inset 0 0 0 1px rgba(226, 232, 240, 0.28);
+}
+
+.multicam-angle-card.is-preview {
+  border-color: rgba(148, 163, 184, 0.34);
+  transform: translateY(-1px);
+}
+
+.multicam-angle-card-index,
+.multicam-angle-card-key,
+.multicam-bank-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.multicam-angle-card-name {
+  font-size: 13px;
+  font-weight: var(--weight-bold);
+  color: var(--text-primary);
+}
+
+.multicam-angle-card-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.multicam-angle-card-key {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.56);
+}
+
+.multicam-source-empty {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.9fr);
+  gap: var(--space-3);
+  padding: var(--space-3);
+  min-height: 0;
+  flex: 1;
+}
+
+.multicam-refine-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: var(--space-3);
+  border-left: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.025);
+  overflow: auto;
+}
+
+.multicam-refine-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(15, 23, 42, 0.28);
+}
+
+.multicam-refine-title {
+  font-size: 10px;
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.multicam-refine-row,
+.multicam-refine-actions,
+.multicam-cut-list {
+  display: flex;
+  gap: 8px;
+}
+
+.multicam-refine-row {
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.multicam-refine-actions {
+  flex-wrap: wrap;
+}
+
+.multicam-cut-list {
+  flex-direction: column;
+}
+
+.multicam-cut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.multicam-cut-row.active {
+  border-color: rgba(226, 232, 240, 0.34);
+  background: rgba(226, 232, 240, 0.12);
+  color: var(--text-primary);
+}
+
+.multicam-source-empty-card,
+.multicam-source-library {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.multicam-source-library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.multicam-library-item {
+  justify-content: space-between;
+}
+
+@media (max-width: 1180px) {
+  .multicam-source-status,
+  .multicam-source-footer,
+  .multicam-source-empty {
+    grid-template-columns: 1fr;
+  }
+
+  .multicam-source-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .multicam-refine-panel {
+    border-left: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+  }
+
+  .multicam-angle-grid-sixteen {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -4037,10 +4368,10 @@
 .clip:active { cursor: grabbing; }
 
 /* Clip type gradients */
-.clip-video    { background: linear-gradient(180deg, rgba(79, 99, 245, 0.70) 0%, rgba(79, 99, 245, 0.40) 100%); }
-.clip-audio    { background: linear-gradient(180deg, rgba(37, 168, 101, 0.60) 0%, rgba(37, 168, 101, 0.30) 100%); }
-.clip-effect   { background: linear-gradient(180deg, rgba(212, 135, 58, 0.60) 0%, rgba(212, 135, 58, 0.30) 100%); }
-.clip-subtitle { background: linear-gradient(180deg, rgba(90, 184, 217, 0.50) 0%, rgba(90, 184, 217, 0.25) 100%); }
+.clip-video    { background: linear-gradient(180deg, rgba(127, 140, 163, 0.72) 0%, rgba(127, 140, 163, 0.36) 100%); }
+.clip-audio    { background: linear-gradient(180deg, rgba(111, 154, 134, 0.68) 0%, rgba(111, 154, 134, 0.32) 100%); }
+.clip-effect   { background: linear-gradient(180deg, rgba(143, 135, 168, 0.66) 0%, rgba(143, 135, 168, 0.30) 100%); }
+.clip-subtitle { background: linear-gradient(180deg, rgba(122, 142, 167, 0.60) 0%, rgba(122, 142, 167, 0.26) 100%); }
 
 .clip-label {
   font-size: var(--text-2xs);

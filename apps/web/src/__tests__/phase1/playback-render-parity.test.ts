@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { colorEngine } from '../../engine/ColorEngine';
+import { effectsEngine } from '../../engine/EffectsEngine';
 import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
 import { compositePlaybackSnapshot } from '../../engine/compositeRecordFrame';
 import {
@@ -12,6 +13,7 @@ import {
   resetPlaybackRealtimeFallbackStats,
   resetPlaybackSnapshotFrameCache,
 } from '../../engine/playbackSnapshotFrame';
+import { makeClip } from '../../store/editor.store';
 
 vi.mock('../../engine/compositeRecordFrame', () => ({
   compositePlaybackSnapshot: vi.fn(),
@@ -232,6 +234,86 @@ describe('phase 1 playback render parity', () => {
     expect(Array.from(after.imageData?.data.slice(0, 24) ?? [])).not.toEqual(
       Array.from(before.imageData?.data.slice(0, 24) ?? []),
     );
+  });
+
+  it('invalidates the render revision when active clip effects change', () => {
+    const clipId = `clip-effects-${Date.now()}`;
+    const effect = effectsEngine.createInstance('brightness-contrast');
+    if (!effect) {
+      throw new Error('Failed to create test effect instance.');
+    }
+
+    effectsEngine.addEffectToClip(clipId, effect.id);
+
+    const source = {
+      tracks: [
+        {
+          id: 't-v1',
+          name: 'V1',
+          type: 'VIDEO' as const,
+          sortOrder: 0,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#7f8ca3',
+          clips: [
+            makeClip({
+              id: clipId,
+              trackId: 't-v1',
+              name: 'Program',
+              startTime: 0,
+              endTime: 4,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'video',
+              assetId: 'asset-v1',
+            }),
+          ],
+        },
+      ],
+      subtitleTracks: [],
+      titleClips: [],
+      playheadTime: 1,
+      duration: 4,
+      isPlaying: false,
+      showSafeZones: false,
+      activeMonitor: 'record' as const,
+      activeScope: null,
+      sequenceSettings: {
+        fps: 24,
+        width: 1920,
+        height: 1080,
+      },
+      projectSettings: {
+        frameRate: 24,
+        width: 1920,
+        height: 1080,
+      },
+    };
+
+    const beforeSnapshot = buildPlaybackSnapshot(source, 'record-monitor');
+    const beforeRevision = buildPlaybackSnapshotRenderRevision({
+      snapshot: beforeSnapshot,
+      width: 640,
+      height: 360,
+      colorProcessing: 'post',
+    });
+
+    effectsEngine.updateParam(effect.id, 'brightness', 18);
+
+    const afterSnapshot = buildPlaybackSnapshot(source, 'record-monitor');
+    const afterRevision = buildPlaybackSnapshotRenderRevision({
+      snapshot: afterSnapshot,
+      width: 640,
+      height: 360,
+      colorProcessing: 'post',
+    });
+
+    expect(afterSnapshot.effectsRevision).not.toBe(beforeSnapshot.effectsRevision);
+    expect(afterRevision).not.toBe(beforeRevision);
+
+    effectsEngine.removeInstance(effect.id);
   });
 
   it('falls back to pre-color composite when realtime graded readback fails during transport', () => {

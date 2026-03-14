@@ -395,6 +395,7 @@ export function RecordMonitor() {
         currentTitle: titleState.currentTitle,
         isTitleEditing: titleState.isEditing,
         colorProcessing: 'post',
+        effectQuality: 'preview',
         useCache: true,
       });
       requestedFrameRevisionRef.current = fullQualityFrameRevision;
@@ -425,6 +426,7 @@ export function RecordMonitor() {
         currentTitle: titleState.currentTitle,
         isTitleEditing: titleState.isEditing,
         colorProcessing: monitorTransport.colorProcessing,
+        effectQuality: monitorTransport.effectQuality,
         useCache: monitorTransport.useCache,
       });
 
@@ -441,6 +443,7 @@ export function RecordMonitor() {
           currentTitle: titleState.currentTitle,
           isTitleEditing: titleState.isEditing,
           colorProcessing: 'post',
+          effectQuality: 'preview',
           useCache: true,
         }).then((result) => {
           if (inFlightFrameRevisionRef.current === result.frameRevision) {

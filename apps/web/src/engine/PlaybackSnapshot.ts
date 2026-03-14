@@ -8,6 +8,7 @@ import type {
 } from '../store/editor.store';
 import type { ScopeType } from '../store/player.store';
 import { getClipSourceTime } from './clipTiming';
+import { effectsEngine } from './EffectsEngine';
 
 export type PlaybackConsumer = 'record-monitor' | 'program-monitor' | 'scope' | 'export';
 
@@ -27,6 +28,12 @@ export interface PlaybackTitleLayer {
   titleId: string;
   frameOffset: number;
   titleClip: TitleClipData;
+}
+
+export interface PlaybackEffectLayer {
+  trackId: string;
+  sortOrder: number;
+  clip: Clip;
 }
 
 export interface PlaybackSubtitleCue {
@@ -51,6 +58,8 @@ export interface PlaybackSnapshot {
   activeScope: ScopeType | null;
   primaryVideoLayer: PlaybackVideoLayer | null;
   videoLayers: PlaybackVideoLayer[];
+  effectLayers: PlaybackEffectLayer[];
+  effectsRevision: string;
   titleLayers: PlaybackTitleLayer[];
   subtitleCues: PlaybackSubtitleCue[];
 }
@@ -139,6 +148,25 @@ function buildTitleLayers(source: PlaybackSnapshotSource, fps: number): Playback
     });
 }
 
+function buildEffectLayers(source: PlaybackSnapshotSource): PlaybackEffectLayer[] {
+  return source.tracks
+    .filter((track) => track.type === 'EFFECT' && !track.muted)
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .flatMap((track) => {
+      return track.clips.flatMap((clip) => {
+        if (source.playheadTime < clip.startTime || source.playheadTime >= clip.endTime) {
+          return [];
+        }
+
+        return [{
+          trackId: track.id,
+          sortOrder: track.sortOrder,
+          clip,
+        }];
+      });
+    });
+}
+
 function buildSubtitleCues(source: PlaybackSnapshotSource): PlaybackSubtitleCue[] {
   return source.tracks
     .filter((track) => track.type === 'SUBTITLE' && !track.muted)
@@ -202,6 +230,14 @@ export function buildPlaybackSnapshot(
   const frameNumber = Math.round(source.playheadTime * fps);
   const sequenceRevision = buildPlaybackSequenceRevision(source);
   const videoLayers = buildVideoLayers(source);
+  const effectLayers = buildEffectLayers(source);
+  const activeEffectClipIds = [...new Set([
+    ...videoLayers.map((layer) => layer.clip.id),
+    ...effectLayers.map((layer) => layer.clip.id),
+  ])];
+  const effectsRevision = activeEffectClipIds.length > 0
+    ? activeEffectClipIds.map((clipId) => `${clipId}:${effectsEngine.getClipRenderRevision(clipId)}`).join('|')
+    : `global:${effectsEngine.getRenderRevision()}`;
   const primaryVideoLayer = [...videoLayers].reverse().find((layer) => layer.trackType === 'VIDEO')
     ?? videoLayers[videoLayers.length - 1]
     ?? null;
@@ -221,6 +257,8 @@ export function buildPlaybackSnapshot(
     activeScope: source.activeScope,
     primaryVideoLayer,
     videoLayers,
+    effectLayers,
+    effectsRevision,
     titleLayers: buildTitleLayers(source, fps),
     subtitleCues: buildSubtitleCues(source),
   };

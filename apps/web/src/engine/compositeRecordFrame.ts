@@ -12,6 +12,7 @@ import { renderTitle } from './TitleRenderer';
 import type { Track, Clip, IntrinsicVideoProps, SubtitleTrack, TitleClipData } from '../store/editor.store';
 import type { ScopeType } from '../store/player.store';
 import { getClipSourceTime } from './clipTiming';
+import type { EffectRenderQuality } from './EffectsEngine';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -40,6 +41,7 @@ export interface PlaybackCompositingContext {
   currentTitle: any | null;
   isTitleEditing: boolean;
   overlayProcessing?: 'pre' | 'post';
+  effectQuality?: EffectRenderQuality;
 }
 
 export interface PlaybackVideoLayerAvailability {
@@ -159,6 +161,7 @@ function applyClipEffectsToLayer(
   height: number,
   clipId: string,
   frameNumber: number,
+  quality: EffectRenderQuality,
 ): void {
   const clipEffects = effectsEngine.getClipEffects(clipId);
   if (clipEffects.length === 0) {
@@ -166,7 +169,25 @@ function applyClipEffectsToLayer(
   }
 
   const imageData = ctx.getImageData(0, 0, width, height);
-  effectsEngine.processFrame(imageData, clipEffects, frameNumber);
+  effectsEngine.processFrame(imageData, clipEffects, frameNumber, quality);
+  ctx.putImageData(imageData, 0, 0);
+}
+
+function applyEffectLayerToComposite(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  clipId: string,
+  frameNumber: number,
+  quality: EffectRenderQuality,
+): void {
+  const effectStack = effectsEngine.getClipEffects(clipId);
+  if (effectStack.length === 0) {
+    return;
+  }
+
+  const imageData = ctx.getImageData(0, 0, width, height);
+  effectsEngine.processFrame(imageData, effectStack, frameNumber, quality);
   ctx.putImageData(imageData, 0, 0);
 }
 
@@ -330,6 +351,7 @@ export function compositeRecordFrame(cx: CompositingContext): void {
 export function compositePlaybackSnapshot(cx: PlaybackCompositingContext): void {
   const { ctx, canvasW, canvasH, snapshot } = cx;
   const overlayProcessing = cx.overlayProcessing ?? 'post';
+  const effectQuality = cx.effectQuality ?? 'preview';
   const compositorOwnsSeeking = !snapshot.isPlaying && (
     snapshot.consumer === 'export' || snapshot.consumer === 'scope'
   );
@@ -375,7 +397,14 @@ export function compositePlaybackSnapshot(cx: PlaybackCompositingContext): void 
       layerRender.ctx.drawImage(vid, drawX, drawY, drawW, drawH);
       layerRender.ctx.restore();
 
-      applyClipEffectsToLayer(layerRender.ctx, canvasW, canvasH, clip.id, snapshot.frameNumber);
+      applyClipEffectsToLayer(
+        layerRender.ctx,
+        canvasW,
+        canvasH,
+        clip.id,
+        snapshot.frameNumber,
+        effectQuality,
+      );
 
       ctx.save();
       ctx.globalCompositeOperation = blendMode;
@@ -390,6 +419,17 @@ export function compositePlaybackSnapshot(cx: PlaybackCompositingContext): void 
     }
 
     drewVideo = true;
+  }
+
+  for (const effectLayer of snapshot.effectLayers) {
+    applyEffectLayerToComposite(
+      ctx,
+      canvasW,
+      canvasH,
+      effectLayer.clip.id,
+      snapshot.frameNumber,
+      effectQuality,
+    );
   }
 
   if (overlayProcessing === 'post') {

@@ -96,7 +96,9 @@ export const useEffectsStore = create<EffectsState & EffectsActions>()(
       if (!effects) return;
       const effect = effects.find((e) => e.id === effectId);
       if (effect) {
-        effect.enabled = !effect.enabled;
+        const nextEnabled = !effect.enabled;
+        effect.enabled = nextEnabled;
+        effectsEngine.setEnabled(effectId, nextEnabled);
       }
     }),
 

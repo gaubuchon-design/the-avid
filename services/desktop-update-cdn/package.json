@@ -1,0 +1,17 @@
+{
+  "name": "@mcua/desktop-update-cdn",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node -e \"console.log('Vercel functions are built at deploy time.')\"",
+    "type-check": "node -e \"console.log('No standalone type-check configured for the Vercel updater service.')\"",
+    "publish": "node scripts/publish-desktop-builds.js"
+  },
+  "dependencies": {
+    "@vercel/blob": "^1.1.1"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

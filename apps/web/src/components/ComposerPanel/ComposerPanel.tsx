@@ -4,6 +4,7 @@ import { usePlayerStore } from '../../store/player.store';
 import { SourceMonitor } from '../SourceMonitor/SourceMonitor';
 import { RecordMonitor } from '../RecordMonitor/RecordMonitor';
 import { MonitorArea } from '../Monitor/MonitorArea';
+import { MultiCamSourceView } from './MultiCamSourceView';
 import { trimEngine } from '../../engine/TrimEngine';
 import { PanelResizeHandle } from '../Layout/PanelResizeHandle';
 
@@ -73,6 +74,8 @@ export function ComposerPanel({
   const trimActive = useEditorStore((s) => s.trimActive);
   const trimViewMode = useEditorStore((s) => s.trimViewMode);
   const setTrimViewMode = useEditorStore((s) => s.setTrimViewMode);
+  const multicamActive = useEditorStore((s) => s.multicamActive);
+  const multicamDisplayMode = useEditorStore((s) => s.multicamDisplayMode);
   const activeMonitor = usePlayerStore((s) => s.activeMonitor);
 
   // Local state for 'full-source' since the store only has 'source-record' | 'full-frame'
@@ -81,6 +84,8 @@ export function ComposerPanel({
   // Derive the effective layout mode
   const mode: ComposerLayoutMode = trimActive
     ? 'source-record'
+    : multicamActive
+      ? 'source-record'
     : (sourceOnly ? 'full-source' : storeToMode(composerLayout));
   const hasPreviousTrimConfiguration = trimEngine.hasPreviousConfiguration();
 
@@ -137,6 +142,8 @@ export function ComposerPanel({
 
   const activeLabel = trimActive
     ? `Trim ${trimViewMode === 'big' ? 'Big' : 'Small'} View`
+    : multicamActive
+      ? `MultiCam ${multicamDisplayMode === 'quad' ? '2x2' : multicamDisplayMode === 'nine' ? '3x3' : '4x4'}`
     : isDual
       ? 'Source | Record'
       : isSingleSource
@@ -228,7 +235,7 @@ export function ComposerPanel({
         {isDual && (
           <>
             <div className="composer-panel-monitor-slot">
-              <SourceMonitor />
+              {multicamActive ? <MultiCamSourceView /> : <SourceMonitor />}
             </div>
             <PanelResizeHandle
               axis="horizontal"
@@ -247,7 +254,7 @@ export function ComposerPanel({
 
         {isSingleSource && (
           <div className="composer-panel-monitor-slot">
-            <SourceMonitor />
+            {multicamActive ? <MultiCamSourceView /> : <SourceMonitor />}
           </div>
         )}
 

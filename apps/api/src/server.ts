@@ -355,6 +355,7 @@ const shutdown = async (signal: string) => {
       clearTimeout(forceTimer);
       // Close WebSocket connections
       ws.io.close();
+      ws.agentWss.close();
       // Stop memory monitoring
       stopMemoryMonitoring();
       // Disconnect database

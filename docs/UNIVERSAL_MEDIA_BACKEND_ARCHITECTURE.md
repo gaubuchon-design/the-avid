@@ -170,6 +170,34 @@ Playback, paused monitoring, scopes, export preview, and final render must consu
 
 The graph may evaluate at different quality levels, but not through unrelated code paths.
 
+### 3a. Layered effects and quality policy
+
+The repo should treat clip effects, adjustment layers, title overlays, subtitle overlays, and export evaluation as one layered graph:
+
+- clip-local effects execute on the clip image before it is composited into the record frame
+- effect-track clips act as adjustment layers that evaluate against the already-composited picture below them
+- title and subtitle overlays evaluate after picture/effect compositing so editorial text is not unintentionally baked into picture-level effects
+- the record monitor, paused preview, and export pipeline all carry an explicit effect-quality mode instead of silently forking behavior
+
+The current implementation direction is:
+
+- `draft`: used during transport and scrubbing for immediate feedback, lowering the cost of blur/glow/noise-class effects
+- `preview`: used for paused monitoring and high-quality monitor upgrades
+- `final`: used for export/flatten paths and upgrades any effect with a discrete quality control to its highest setting
+- multicam should reuse the same evaluator: the source-side angle bank is a multiview over the same frame graph while the record monitor remains the program output
+
+### 3b. Effect invalidation contract
+
+Realtime monitor stability depends on effect edits invalidating the same frame caches used for paused and upgraded monitor renders.
+
+That means the render contract must include:
+
+- the active effect-stack revision for every visible clip
+- the active effect-track clip revision for every visible adjustment layer
+- color-processing revision
+- title-editing revision
+- render-quality revision
+
 ### 4. Export and render from manifests, not ad hoc state
 
 Every export/render job should capture:
@@ -182,6 +210,23 @@ Every export/render job should capture:
 - captions, burn-ins, and sidecar outputs
 
 That gives the repo restartable and auditable render jobs instead of opaque one-off invocations.
+
+### 4a. Desktop background scheduler
+
+Local workstation media tasks should not each invent their own async loop. The desktop app needs one background scheduler that:
+
+- tracks ingest, indexing, export, transcode, transcription, render, and effects jobs through one contract
+- admits or delays work based on free memory and system load
+- exposes dispatch mode as `local`, `distributed`, or `hybrid`
+- keeps a hook for remote dispatch so the same job definition can move to `packages/render-agent` and `apps/api` when remote workers are available
+
+The current implementation direction is:
+
+- watch-folder scans are scheduled as background indexing jobs
+- ingest and export work use the shared scheduler instead of bespoke timers
+- export-handoff transcoding is queued through the same scheduler
+- the API now exposes a raw render-agent coordinator socket so remote workers can register, heartbeat, receive assignments, and complete jobs over the shared media-backend protocol
+- the renderer receives structured desktop-job updates so the UI can present real background activity instead of simulated progress
 
 ## Color Management Policy
 

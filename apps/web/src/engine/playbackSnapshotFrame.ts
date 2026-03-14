@@ -3,6 +3,7 @@ import { buildPlaybackFrameSignature } from './PlaybackSnapshot';
 import { colorEngine } from './ColorEngine';
 import type { TitleData } from './TitleRenderer';
 import { compositePlaybackSnapshot } from './compositeRecordFrame';
+import type { EffectRenderQuality } from './EffectsEngine';
 
 export type PlaybackColorProcessing = 'pre' | 'post';
 export type PlaybackOverlayProcessing = 'pre' | 'post';
@@ -16,6 +17,7 @@ export interface PlaybackSnapshotFrameOptions {
   canvas?: HTMLCanvasElement | null;
   colorProcessing?: PlaybackColorProcessing;
   overlayProcessing?: PlaybackOverlayProcessing;
+  effectQuality?: EffectRenderQuality;
   useCache?: boolean;
 }
 
@@ -167,6 +169,8 @@ export function buildPlaybackSnapshotRenderRevision(options: PlaybackSnapshotFra
     options.snapshot.showSafeZones ? 'safezones' : 'clean',
     options.colorProcessing ?? 'pre',
     options.overlayProcessing ?? 'post',
+    options.effectQuality ?? 'preview',
+    options.snapshot.effectsRevision,
     colorRevision,
     titleRevision,
   ].join(':');
@@ -270,6 +274,7 @@ function compositeSnapshotToCanvas(
     currentTitle: options.currentTitle ?? null,
     isTitleEditing: options.isTitleEditing ?? false,
     overlayProcessing: options.overlayProcessing ?? 'post',
+    effectQuality: options.effectQuality ?? 'preview',
   });
 
   return ctx;

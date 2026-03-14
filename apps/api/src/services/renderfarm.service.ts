@@ -134,7 +134,7 @@ class RenderFarmService {
   private workers = new Map<string, WorkerNode>();
   private jobs = new Map<string, RenderJob>();
   private completedJobs: RenderJob[] = [];
-  private agentSockets = new Map<string, any>(); // nodeId -> socket
+  private agentSockets = new Map<string, unknown>(); // nodeId -> socket/channel
 
   /** Set by WebSocket layer to relay events to frontend clients */
   public onBroadcast: ((event: string, payload: any) => void) | null = null;
@@ -149,7 +149,7 @@ class RenderFarmService {
 
   registerWorker(
     nodeInfo: WorkerRegistration,
-    socket?: any,
+    socket?: unknown,
   ): WorkerNode {
     if (!nodeInfo.hostname) {
       throw new BadRequestError('hostname is required');
@@ -445,7 +445,7 @@ class RenderFarmService {
     // Send job to the agent via its socket if available
     const socket = this.agentSockets.get(workerId);
     if (socket) {
-      socket.emit('render:agent:assign', {
+      this.sendAgentMessage(socket, {
         type: 'job:assign',
         job: job.workerJob,
       });
@@ -741,6 +741,21 @@ echo "Done."
 
   private broadcastStats(): void {
     this.broadcast('render:farm:stats', this.getFarmStats());
+  }
+
+  private sendAgentMessage(socket: unknown, payload: unknown): void {
+    if (!socket || typeof socket !== 'object') {
+      return;
+    }
+
+    if ('send' in socket && typeof socket.send === 'function') {
+      socket.send(JSON.stringify(payload));
+      return;
+    }
+
+    if ('emit' in socket && typeof socket.emit === 'function') {
+      socket.emit('render:agent:assign', payload);
+    }
   }
 
   private checkStaleWorkers(): void {

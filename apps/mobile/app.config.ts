@@ -1,10 +1,15 @@
 import { ExpoConfig, ConfigContext } from 'expo/config';
 
+function optionalEnv(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+  return value && value.length > 0 ? value : undefined;
+}
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'The Avid',
   slug: 'the-avid',
-  version: '0.1.0',
+  version: optionalEnv('EXPO_APP_VERSION') ?? '0.1.0',
   scheme: 'theavid',
   orientation: 'landscape',
   icon: './assets/icon.png',
@@ -55,26 +60,39 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     'expo-router',
-    ['expo-av', { microphonePermission: 'Allow $(PRODUCT_NAME) to access your microphone for audio recording.' }],
+    [
+      'expo-av',
+      {
+        microphonePermission:
+          'Allow $(PRODUCT_NAME) to access your microphone for audio recording.',
+      },
+    ],
     'expo-document-picker',
     'expo-file-system',
-    ['expo-media-library', { photosPermission: 'Allow $(PRODUCT_NAME) to access your photos for media import.' }],
+    [
+      'expo-media-library',
+      { photosPermission: 'Allow $(PRODUCT_NAME) to access your photos for media import.' },
+    ],
     'expo-splash-screen',
   ],
   experiments: {
     typedRoutes: true,
   },
   updates: {
-    url: 'https://u.expo.dev/YOUR_EAS_PROJECT_ID',
+    ...(optionalEnv('EXPO_UPDATES_URL') ? { url: optionalEnv('EXPO_UPDATES_URL') } : {}),
     fallbackToCacheTimeout: 30000,
     checkAutomatically: 'ON_LOAD',
   },
   runtimeVersion: {
-    policy: 'sdkVersion',
+    policy: 'appVersion',
   },
   extra: {
-    eas: {
-      projectId: 'YOUR_EAS_PROJECT_ID', // replace after `eas init`
-    },
+    ...(optionalEnv('EXPO_EAS_PROJECT_ID')
+      ? {
+          eas: {
+            projectId: optionalEnv('EXPO_EAS_PROJECT_ID'),
+          },
+        }
+      : {}),
   },
 });

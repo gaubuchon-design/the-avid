@@ -16,7 +16,6 @@ import {
   systemPreferences,
   nativeImage,
 } from 'electron';
-import { autoUpdater } from 'electron-updater';
 import { watch as watchFs } from 'node:fs';
 import { mkdir, readdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import os from 'os';
@@ -45,6 +44,13 @@ import {
   writeConformExportPackage,
   writeMediaIndexManifest,
 } from './mediaPipeline';
+import {
+  BackgroundMediaService,
+  type BackgroundMediaJob,
+  type BackgroundMediaJobResult,
+  type BackgroundMediaResourceSnapshot,
+} from './BackgroundMediaService';
+import { DesktopAutoUpdateService } from './DesktopAutoUpdateService';
 
 // ─── GPU Acceleration Command-Line Flags ──────────────────────────────────────
 
@@ -423,6 +429,11 @@ const HW_ACCEL_SETTINGS_FILE = 'hw-accel-settings.json';
 const desktopJobs = new Map<string, DesktopJob>();
 const projectWatchers = new Map<string, Map<string, ReturnType<typeof watchFs>>>();
 const watchFolderScansInFlight = new Set<string>();
+const autoUpdateService = new DesktopAutoUpdateService({
+  getWindow: () => mainWindow,
+  canAutoRestart: () => dirtyProjectIds.size === 0 && !hasActiveDesktopJobs(),
+  log,
+});
 
 // ─── Hardware Acceleration Settings ──────────────────────────────────────────
 
@@ -610,18 +621,7 @@ function createSystemTray(): void {
   });
 }
 
-interface DesktopJob {
-  id: string;
-  kind: 'INGEST' | 'EXPORT';
-  projectId: string;
-  label: string;
-  status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
-  progress: number;
-  startedAt: string;
-  updatedAt: string;
-  outputPath?: string;
-  error?: string;
-}
+type DesktopJob = BackgroundMediaJob;
 
 // ─── Taskbar Progress ─────────────────────────────────────────────────────────
 
@@ -646,6 +646,26 @@ function updateTaskbarProgress(): void {
   const totalProgress = activeJobs.reduce((sum, j) => sum + j.progress, 0);
   const averageProgress = totalProgress / (activeJobs.length * 100);
   mainWindow.setProgressBar(Math.min(1, Math.max(0, averageProgress)));
+}
+
+function hasActiveDesktopJobs(): boolean {
+  return Array.from(desktopJobs.values()).some(
+    (job) => job.status === 'RUNNING' || job.status === 'QUEUED',
+  );
+}
+
+function collectBackgroundMediaResources(): BackgroundMediaResourceSnapshot {
+  const cpuCount = Math.max(1, os.cpus().length);
+  const totalMemoryMB = Math.round(os.totalmem() / (1024 * 1024));
+  const freeMemoryMB = Math.round(os.freemem() / (1024 * 1024));
+  const loadAverage = os.loadavg()[0] ?? 0;
+
+  return {
+    cpuCount,
+    totalMemoryMB,
+    freeMemoryMB,
+    loadAverage,
+  };
 }
 
 // ─── Touch Bar (macOS) ───────────────────────────────────────────────────────
@@ -861,6 +881,12 @@ function upsertDesktopJob(job: DesktopJob): DesktopJob {
   return nextJob;
 }
 
+const backgroundMediaService = new BackgroundMediaService({
+  collectResources: collectBackgroundMediaResources,
+  upsertJob: (job) => upsertDesktopJob(job as DesktopJob),
+  maxConcurrentJobs: 3,
+});
+
 function disposeProjectWatchers(projectId: string): void {
   const watchers = projectWatchers.get(projectId);
   if (!watchers) {
@@ -887,34 +913,33 @@ async function runWatchFolderScan(projectId: string, watchFolderId: string, reas
   }
 
   const jobId = createId('job');
-  upsertDesktopJob({
-    id: jobId,
-    kind: 'INGEST',
-    projectId,
-    label: `${reason === 'manual' ? 'Rescanning' : 'Watching'} ${watchFolder.name}`,
-    status: 'RUNNING',
-    progress: 10,
-    startedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-
   try {
-    const mediaPaths = createProjectMediaPaths(getProjectPackagePath(projectId));
-    const { project: updatedProject, summary } = await scanWatchFolderIntoProject(project, watchFolder, mediaPaths);
-    await savePersistedProject(updatedProject);
-    upsertDesktopJob({
-      ...desktopJobs.get(jobId)!,
-      status: 'COMPLETED',
-      progress: 100,
-      outputPath: watchFolder.path,
-      error: summary.importedCount > 0 ? `Imported ${summary.importedCount} new asset(s)` : undefined,
-    });
+    await backgroundMediaService.enqueue({
+      id: jobId,
+      kind: 'INDEX',
+      projectId,
+      label: `${reason === 'manual' ? 'Rescanning' : 'Watching'} ${watchFolder.name}`,
+      detail: `Scanning ${watchFolder.path}`,
+      minimumFreeMemoryMB: 1024,
+      runLocal: async (context): Promise<BackgroundMediaJobResult> => {
+        context.reportProgress(12, 'Collecting watch-folder delta');
+        const mediaPaths = createProjectMediaPaths(getProjectPackagePath(projectId));
+        const { project: updatedProject, summary } = await scanWatchFolderIntoProject(project, watchFolder, mediaPaths);
+        context.reportProgress(72, 'Persisting updated media index');
+        await savePersistedProject(updatedProject);
+        return {
+          outputPath: watchFolder.path,
+          detail: summary.importedCount > 0
+            ? `Imported ${summary.importedCount} new asset(s)`
+            : 'Media index is already current',
+        };
+      },
+    }).completion;
   } catch (error) {
-    upsertDesktopJob({
-      ...desktopJobs.get(jobId)!,
-      status: 'FAILED',
-      progress: desktopJobs.get(jobId)?.progress ?? 0,
-      error: error instanceof Error ? error.message : 'Watch folder scan failed',
+    log('warn', 'WatchFolderScan', 'Background watch-folder scan failed', {
+      projectId,
+      watchFolderId,
+      error: error instanceof Error ? error.message : String(error),
     });
   } finally {
     watchFolderScansInFlight.delete(scanKey);
@@ -975,57 +1000,64 @@ async function importMediaIntoProject(
   const targetBin = ensureDesktopImportBin(project, binId);
 
   const jobId = createId('job');
-  upsertDesktopJob({
+  const { completion } = backgroundMediaService.enqueue<{
+    assets: EditorMediaAsset[];
+    outputPath?: string;
+    detail?: string;
+  }>({
     id: jobId,
     kind: 'INGEST',
     projectId,
     label: `Ingesting, indexing, and organizing ${resolvedPaths.length} file${resolvedPaths.length === 1 ? '' : 's'}`,
-    status: 'QUEUED',
-    progress: 0,
-    startedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    detail: `Preparing ${resolvedPaths.length} source file${resolvedPaths.length === 1 ? '' : 's'}`,
+    minimumFreeMemoryMB: 1536,
+    runLocal: async (context) => {
+      const assets: EditorMediaAsset[] = [];
+      const errors: string[] = [];
+
+      for (let index = 0; index < resolvedPaths.length; index += 1) {
+        const sourcePath = resolvedPaths[index]!;
+        context.reportProgress(
+          Math.round((index / Math.max(resolvedPaths.length, 1)) * 100),
+          `Ingesting ${path.basename(sourcePath)}`,
+        );
+
+        try {
+          const asset = await ingestMediaFile(sourcePath, mediaPaths, {
+            storageMode: 'COPY',
+            generateProxies: true,
+            extractWaveforms: true,
+          });
+          assets.push(asset);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Ingest failed';
+          errors.push(`${path.basename(sourcePath)}: ${message}`);
+          logger.write({ level: 'error', event: 'ingest-file-error', sourcePath, error: message });
+        }
+      }
+
+      if (assets.length > 0) {
+        appendImportedAssetsToBin(targetBin, assets);
+        context.reportProgress(86, 'Saving project media index');
+        await savePersistedProject(project);
+      }
+
+      if (assets.length === 0 && errors.length > 0) {
+        throw new Error(`${errors.length} file(s) failed: ${errors.join('; ')}`);
+      }
+
+      return {
+        assets,
+        outputPath: mediaPaths.mediaPath,
+        detail: errors.length > 0
+          ? `${errors.length} file(s) failed: ${errors.join('; ')}`
+          : `Imported ${assets.length} asset(s)`,
+      };
+    },
   });
 
-  const assets: EditorMediaAsset[] = [];
-
-  const errors: string[] = [];
-  for (let index = 0; index < resolvedPaths.length; index += 1) {
-    const sourcePath = resolvedPaths[index]!;
-
-    upsertDesktopJob({
-      ...desktopJobs.get(jobId)!,
-      status: 'RUNNING',
-      progress: Math.round((index / Math.max(resolvedPaths.length, 1)) * 100),
-    });
-
-    try {
-      const asset = await ingestMediaFile(sourcePath, mediaPaths, {
-        storageMode: 'COPY',
-        generateProxies: true,
-        extractWaveforms: true,
-      });
-      assets.push(asset);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Ingest failed';
-      errors.push(`${path.basename(sourcePath)}: ${message}`);
-      logger.write({ level: 'error', event: 'ingest-file-error', sourcePath, error: message });
-    }
-  }
-
-  if (assets.length > 0) {
-    appendImportedAssetsToBin(targetBin, assets);
-    await savePersistedProject(project);
-  }
-
-  upsertDesktopJob({
-    ...desktopJobs.get(jobId)!,
-    status: errors.length > 0 && assets.length === 0 ? 'FAILED' : 'COMPLETED',
-    progress: 100,
-    outputPath: mediaPaths.mediaPath,
-    error: errors.length > 0 ? `${errors.length} file(s) failed: ${errors.join('; ')}` : undefined,
-  });
-
-  return assets;
+  const result = await completion;
+  return result.assets;
 }
 
 async function startExportJob(project: EditorProject): Promise<DesktopJob> {
@@ -1033,65 +1065,49 @@ async function startExportJob(project: EditorProject): Promise<DesktopJob> {
   const mediaPaths = createProjectMediaPaths(getProjectPackagePath(project.id));
 
   const jobId = createId('job');
-  const initialJob = upsertDesktopJob({
+  const queued = backgroundMediaService.enqueue({
     id: jobId,
     kind: 'EXPORT',
     projectId: project.id,
     label: `Exporting ${project.name}`,
-    status: 'QUEUED',
-    progress: 0,
-    startedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-
-  void (async () => {
-    try {
+    detail: 'Preparing conform package',
+    minimumFreeMemoryMB: 2048,
+    runLocal: async (context): Promise<BackgroundMediaJobResult> => {
+      context.reportProgress(12, 'Writing media index manifest');
       await writeMediaIndexManifest(project.id, flattenAssets(project.bins), mediaPaths);
 
-      for (const progress of [20, 55, 85]) {
-        await new Promise((resolve) => setTimeout(resolve, 180));
-        upsertDesktopJob({
-          ...desktopJobs.get(jobId)!,
-          status: 'RUNNING',
-          progress,
-        });
-      }
+      context.reportProgress(40, 'Packaging sequence metadata');
+      await new Promise((resolve) => setTimeout(resolve, 120));
 
+      context.reportProgress(68, 'Conforming editorial package');
       const exportPath = await writeConformExportPackage(
         project,
         mediaPaths,
         sanitizeFileName(project.name.toLowerCase()),
       );
 
-      upsertDesktopJob({
-        ...desktopJobs.get(jobId)!,
-        status: 'COMPLETED',
-        progress: 100,
+      context.reportProgress(96, 'Finalizing export package');
+      return {
         outputPath: exportPath,
-      });
+        detail: `Export package written for ${project.name}`,
+      };
+    },
+  });
 
-      // Notify user that export completed (useful when app is in background)
-      showNativeNotification(
-        'Export Complete',
-        `"${project.name}" has been exported successfully.`,
-      );
-    } catch (error) {
-      upsertDesktopJob({
-        ...desktopJobs.get(jobId)!,
-        status: 'FAILED',
-        progress: desktopJobs.get(jobId)?.progress ?? 0,
-        error: error instanceof Error ? error.message : 'Export failed',
-      });
+  void queued.completion.then(() => {
+    showNativeNotification(
+      'Export Complete',
+      `"${project.name}" has been exported successfully.`,
+    );
+  }).catch((error) => {
+    showNativeNotification(
+      'Export Failed',
+      `Failed to export "${project.name}": ${error instanceof Error ? error.message : 'Unknown error'}`,
+      { urgency: 'critical' },
+    );
+  });
 
-      showNativeNotification(
-        'Export Failed',
-        `Failed to export "${project.name}": ${error instanceof Error ? error.message : 'Unknown error'}`,
-        { urgency: 'critical' },
-      );
-    }
-  })();
-
-  return initialJob;
+  return queued.job as DesktopJob;
 }
 
 async function scanPersistedProjectMedia(projectId: string): Promise<EditorProject | null> {
@@ -1480,6 +1496,7 @@ if (!gotTheLock) {
         mainWindow?.webContents.send('menu:open-project', pendingFileOpen);
         pendingFileOpen = null;
       }
+      autoUpdateService.emitState();
     });
 
     // Create system tray
@@ -1537,45 +1554,8 @@ if (!gotTheLock) {
       }
     });
 
-    // Auto-updater (production only)
-    if (app.isPackaged) {
-      // Do not auto-download — wait for user confirmation via renderer
-      autoUpdater.autoDownload = false;
-      autoUpdater.autoInstallOnAppQuit = true;
-
-      autoUpdater.logger = {
-        info: (msg: string) => log('info', 'AutoUpdater', msg),
-        warn: (msg: string) => log('warn', 'AutoUpdater', msg),
-        error: (msg: string) => log('error', 'AutoUpdater', msg),
-        debug: (msg: string) => log('info', 'AutoUpdater:debug', msg),
-      } as unknown as typeof autoUpdater.logger;
-
-      autoUpdater.on('checking-for-update', () => {
-        log('info', 'AutoUpdater', 'Checking for updates...');
-      });
-      autoUpdater.on('update-available', (info) => {
-        log('info', 'AutoUpdater', `Update available: ${info.version}`);
-        mainWindow?.webContents.send('app:update-available', { version: info.version });
-      });
-      autoUpdater.on('update-not-available', () => {
-        log('info', 'AutoUpdater', 'Application is up to date.');
-      });
-      autoUpdater.on('download-progress', (progress) => {
-        log('info', 'AutoUpdater', `Download progress: ${Math.round(progress.percent)}%`);
-        mainWindow?.webContents.send('app:update-progress', { percent: progress.percent });
-      });
-      autoUpdater.on('update-downloaded', (info) => {
-        log('info', 'AutoUpdater', `Update downloaded: ${info.version}`);
-        mainWindow?.webContents.send('app:update-downloaded', { version: info.version });
-      });
-      autoUpdater.on('error', (err) => {
-        log('error', 'AutoUpdater', err.message);
-      });
-
-      autoUpdater.checkForUpdates().catch((err) => {
-        log('error', 'AutoUpdater', `Failed to check for updates: ${err}`);
-      });
-    }
+    autoUpdateService.start();
+    autoUpdateService.scheduleStartupCheck();
   });
 }
 
@@ -1729,7 +1709,7 @@ function createAppMenu() {
         label: 'Check for Updates',
         click: async () => {
           if (app.isPackaged) {
-            await autoUpdater.checkForUpdatesAndNotify();
+            await autoUpdateService.checkForUpdates('manual');
             return;
           }
           await dialog.showMessageBox({
@@ -1911,17 +1891,34 @@ ipcMain.handle('jobs:transcode-export-artifact', async (_event, payload: unknown
   }
 
   const outputDirectory = path.join(app.getPath('documents'), 'The Avid', 'exports', 'handoff');
-  return transcodeExportArtifact({
-    jobId,
-    sourceArtifact,
-    sourceContainer,
-    targetContainer,
-    targetVideoCodec,
-    targetAudioCodec,
-    fps,
-    width,
-    height,
-  }, outputDirectory);
+  return backgroundMediaService.enqueue({
+    id: `${jobId}-transcode`,
+    kind: 'TRANSCODE',
+    projectId: 'export-handoff',
+    label: `Transcoding export handoff ${jobId}`,
+    detail: `${sourceContainer.toUpperCase()} -> ${targetContainer.toUpperCase()}`,
+    minimumFreeMemoryMB: 2048,
+    runLocal: async (context) => {
+      context.reportProgress(10, 'Preparing transcoder handoff');
+      const result = await transcodeExportArtifact({
+        jobId,
+        sourceArtifact,
+        sourceContainer,
+        targetContainer,
+        targetVideoCodec,
+        targetAudioCodec,
+        fps,
+        width,
+        height,
+      }, outputDirectory);
+      context.reportProgress(96, 'Writing output artifact');
+      return {
+        ...result,
+        outputPath: result.outputPath,
+        detail: `${result.outputContainer.toUpperCase()} handoff ready`,
+      };
+    },
+  }).completion;
 });
 
 // ─── File System Handlers (path sanitization) ─────────────────────────────────
@@ -1958,15 +1955,16 @@ ipcMain.handle('app:reveal-in-finder', async (_event, filePath: unknown) => {
   return true;
 });
 ipcMain.handle('app:download-update', async () => {
-  await autoUpdater.downloadUpdate();
-  return true;
+  return autoUpdateService.downloadUpdate();
 });
 ipcMain.handle('app:check-for-updates', async () => {
-  if (!app.isPackaged) return null;
-  return autoUpdater.checkForUpdates();
+  return autoUpdateService.checkForUpdates('manual');
+});
+ipcMain.handle('app:get-update-state', () => {
+  return autoUpdateService.getState();
 });
 ipcMain.handle('app:install-update', () => {
-  autoUpdater.quitAndInstall(false, true);
+  autoUpdateService.installUpdate();
 });
 
 ipcMain.handle('gpu:info', async () => detectGPU());

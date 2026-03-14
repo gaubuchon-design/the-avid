@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": null,
+  "outputDirectory": null,
+  "rewrites": [
+    {
+      "source": "/desktop-updates",
+      "destination": "/api/desktop-updates"
+    },
+    {
+      "source": "/desktop-updates/(.*)",
+      "destination": "/api/desktop-updates?artifact=$1"
+    }
+  ]
+}

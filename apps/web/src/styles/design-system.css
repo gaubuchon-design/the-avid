@@ -54,11 +54,11 @@
   --accent-muted: rgba(181, 181, 191, 0.12);
 
   /* ── Track Colors ──────────────────────────────────────────────────── */
-  --track-video:    #b8b8c0;
-  --track-audio:    #96969f;
-  --track-effect:   #7b7b84;
-  --track-subtitle: #a5a5ae;
-  --track-gfx:      #5f5f68;
+  --track-video:    #7f8ca3;
+  --track-audio:    #6f9a86;
+  --track-effect:   #8f87a8;
+  --track-subtitle: #7a8ea7;
+  --track-gfx:      #9a8f7a;
   --track-data:     #cfcfd6;
 
   /* ── Playhead ──────────────────────────────────────────────────────── */

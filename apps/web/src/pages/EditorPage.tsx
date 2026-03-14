@@ -3,6 +3,7 @@ import { ErrorBoundary, PanelErrorBoundary } from '../components/ErrorBoundary';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { trimEngine } from '../engine/TrimEngine';
 import { keyboardEngine } from '../engine/KeyboardEngine';
+import { multicamEngine } from '../engine/MulticamEngine';
 import { trackPatchingEngine } from '../engine/TrackPatchingEngine';
 import { Toolbar } from '../components/Toolbar/Toolbar';
 import { BinPanel } from '../components/Bins/BinPanel';
@@ -232,6 +233,40 @@ export function EditorPage() {
       useEditorStore.getState().selectTrack(nextState.rollers[0]!.trackId);
     }
   }, []);
+  const toggleMulticamMode = useCallback(() => {
+    if (multicamEngine.isActive()) {
+      multicamEngine.exitMulticamMode();
+      return;
+    }
+
+    const state = useEditorStore.getState();
+    const candidateAssets = state.activeBinAssets.filter((asset) => asset.type === 'VIDEO' || asset.type === 'AUDIO');
+    if (candidateAssets.length < 2) {
+      return;
+    }
+
+    const group = multicamEngine.createGroup(
+      `${state.projectName || 'Current Bin'} MultiCam`,
+      candidateAssets.map((asset) => asset.id),
+      'timecode',
+    );
+    multicamEngine.enterMulticamMode(group.id);
+    activateSourceMonitor();
+  }, []);
+  const cutToMulticamAngle = useCallback((angleIndex: number) => {
+    if (!multicamEngine.isActive()) {
+      return;
+    }
+
+    const isLiveSwitching = useEditorStore.getState().isPlaying || multicamEngine.getState().isRecording;
+    if (isLiveSwitching) {
+      multicamEngine.cutToAngle(angleIndex);
+    } else {
+      multicamEngine.setActiveAngle(angleIndex);
+    }
+
+    activateSourceMonitor();
+  }, []);
 
   useKeyboardAction('transport.playForward', playTrimForward, [playTrimForward]);
   useKeyboardAction('transport.playReverse', playTrimReverse, [playTrimReverse]);
@@ -283,6 +318,15 @@ export function EditorPage() {
   useKeyboardAction('trim.toggleViewMode', toggleTrimViewMode, [toggleTrimViewMode]);
   useKeyboardAction('nav.prevEdit', goToPrevEditPoint, [goToPrevEditPoint]);
   useKeyboardAction('nav.nextEdit', goToNextEditPoint, [goToNextEditPoint]);
+  useKeyboardAction('file.multicameraMode', toggleMulticamMode, [toggleMulticamMode]);
+  useKeyboardAction('multicam.cut1', () => cutToMulticamAngle(0), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut2', () => cutToMulticamAngle(1), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut3', () => cutToMulticamAngle(2), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut4', () => cutToMulticamAngle(3), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut5', () => cutToMulticamAngle(4), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut6', () => cutToMulticamAngle(5), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut7', () => cutToMulticamAngle(6), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut8', () => cutToMulticamAngle(7), [cutToMulticamAngle]);
   useKeyboardAction('smartTool.toggleLiftOverwrite', toggleSmartToolLiftOverwrite, [toggleSmartToolLiftOverwrite]);
   useKeyboardAction('smartTool.toggleExtractSplice', toggleSmartToolExtractSplice, [toggleSmartToolExtractSplice]);
   useKeyboardAction('smartTool.toggleOverwriteTrim', toggleSmartToolOverwriteTrim, [toggleSmartToolOverwriteTrim]);
@@ -293,6 +337,10 @@ export function EditorPage() {
   }, []);
 
   useEffect(() => {
+    multicamEngine.reset();
+    useEditorStore.getState().setMulticamActive(false);
+    useEditorStore.getState().setMulticamGroupId(null);
+
     if (projectId && projectId !== 'new') {
       void loadProject(projectId);
     }

@@ -43,6 +43,8 @@ export interface EffectInstance {
   keyframes: Keyframe[];
 }
 
+export type EffectRenderQuality = 'draft' | 'preview' | 'final';
+
 // ─── Built-in Effect Definitions ───────────────────────────────────────────
 
 const BUILT_IN_EFFECTS: EffectDefinition[] = [
@@ -773,6 +775,9 @@ class EffectsEngine {
   private definitions: Map<string, EffectDefinition> = new Map();
   private instances: Map<string, EffectInstance> = new Map();
   private clipEffectsMap: Map<string, string[]> = new Map();
+  private instanceClipMap: Map<string, string> = new Map();
+  private clipRenderRevisions: Map<string, number> = new Map();
+  private renderRevision = 0;
   private nextInstanceId = 1;
   private gpuPipeline: WebGPUPipeline | null = null;
   private particleIllusion: ParticleIllusion = new ParticleIllusion();
@@ -804,11 +809,33 @@ class EffectsEngine {
   /** Register a custom effect definition (e.g. from an OpenFX plugin). */
   registerDefinition(def: EffectDefinition): void {
     this.definitions.set(def.id, def);
+    this.bumpRenderRevision();
   }
 
   /** Unregister an effect definition. */
   unregisterDefinition(id: string): void {
     this.definitions.delete(id);
+    this.bumpRenderRevision();
+  }
+
+  private bumpRenderRevision(clipId?: string | null): void {
+    this.renderRevision += 1;
+    if (clipId) {
+      this.clipRenderRevisions.set(clipId, (this.clipRenderRevisions.get(clipId) ?? 0) + 1);
+    }
+  }
+
+  private bumpRenderRevisionForInstance(instanceId: string): void {
+    this.bumpRenderRevision(this.instanceClipMap.get(instanceId) ?? null);
+  }
+
+  getRenderRevision(): number {
+    return this.renderRevision;
+  }
+
+  getClipRenderRevision(clipId: string): string {
+    const clipRevision = this.clipRenderRevisions.get(clipId) ?? 0;
+    return `${clipRevision}`;
   }
 
   // ── Instance management ────────────────────────────────────────────────
@@ -834,11 +861,14 @@ class EffectsEngine {
     };
 
     this.instances.set(instance.id, instance);
+    this.bumpRenderRevision();
     return instance;
   }
 
   removeInstance(instanceId: string): void {
+    const clipId = this.instanceClipMap.get(instanceId) ?? null;
     this.instances.delete(instanceId);
+    this.instanceClipMap.delete(instanceId);
     for (const [, ids] of this.clipEffectsMap) {
       const idx = ids.indexOf(instanceId);
       if (idx >= 0) {
@@ -846,6 +876,7 @@ class EffectsEngine {
         break;
       }
     }
+    this.bumpRenderRevision(clipId);
   }
 
   getInstance(instanceId: string): EffectInstance | undefined {
@@ -866,7 +897,18 @@ class EffectsEngine {
     const inst = this.instances.get(instanceId);
     if (inst) {
       inst.params[paramName] = value;
+      this.bumpRenderRevisionForInstance(instanceId);
     }
+  }
+
+  setEnabled(instanceId: string, enabled: boolean): void {
+    const inst = this.instances.get(instanceId);
+    if (!inst || inst.enabled === enabled) {
+      return;
+    }
+
+    inst.enabled = enabled;
+    this.bumpRenderRevisionForInstance(instanceId);
   }
 
   // ── Keyframes ──────────────────────────────────────────────────────────
@@ -880,6 +922,7 @@ class EffectsEngine {
     );
     inst.keyframes.push(keyframe);
     inst.keyframes.sort((a, b) => a.frame - b.frame);
+    this.bumpRenderRevisionForInstance(instanceId);
   }
 
   removeKeyframe(instanceId: string, frame: number, paramName: string): void {
@@ -888,6 +931,7 @@ class EffectsEngine {
     inst.keyframes = inst.keyframes.filter(
       (kf) => !(kf.frame === frame && kf.paramName === paramName)
     );
+    this.bumpRenderRevisionForInstance(instanceId);
   }
 
   /**
@@ -945,6 +989,7 @@ class EffectsEngine {
 
   reorderEffects(clipId: string, newOrder: string[]): void {
     this.clipEffectsMap.set(clipId, [...newOrder]);
+    this.bumpRenderRevision(clipId);
   }
 
   getClipEffects(clipId: string): EffectInstance[] {
@@ -958,6 +1003,8 @@ class EffectsEngine {
     const ids = this.clipEffectsMap.get(clipId) || [];
     ids.push(instanceId);
     this.clipEffectsMap.set(clipId, ids);
+    this.instanceClipMap.set(instanceId, clipId);
+    this.bumpRenderRevision(clipId);
   }
 
   // ── WebGPU Integration ───────────────────────────────────────────────
@@ -1010,6 +1057,7 @@ class EffectsEngine {
   private resolveEffectParams(
     effect: EffectInstance,
     frame: number,
+    quality: EffectRenderQuality = 'preview',
   ): Record<string, number | string | boolean> {
     const def = this.definitions.get(effect.definitionId);
     if (!def) return { ...effect.params };
@@ -1018,7 +1066,76 @@ class EffectsEngine {
     for (const p of def.params) {
       resolved[p.name] = this.getInterpolatedValue(effect, p.name, frame);
     }
-    return resolved;
+    return this.applyQualityProfile(effect.definitionId, resolved, quality);
+  }
+
+  private applyQualityProfile(
+    definitionId: string,
+    params: Record<string, number | string | boolean>,
+    quality: EffectRenderQuality,
+  ): Record<string, number | string | boolean> {
+    const adjusted = { ...params };
+    const currentQuality = adjusted['quality'];
+
+    if (typeof currentQuality === 'string') {
+      adjusted['quality'] = quality === 'draft'
+        ? 'draft'
+        : quality === 'final'
+          ? 'high'
+          : currentQuality;
+    }
+
+    const scaleNumeric = (name: string, factor: number, min = 0) => {
+      const value = adjusted[name];
+      if (typeof value !== 'number') {
+        return;
+      }
+      adjusted[name] = Math.max(min, value * factor);
+    };
+
+    if (quality === 'draft') {
+      switch (definitionId) {
+        case 'blur-gaussian':
+          scaleNumeric('radius', 0.45);
+          scaleNumeric('iterations', 0.5, 1);
+          break;
+        case 'directional-blur':
+        case 'radial-blur':
+        case 'glow':
+        case 'lens-flare':
+        case 'bokeh-blur':
+        case 'light-rays':
+        case 'turbulent-displace':
+          scaleNumeric('radius', 0.55);
+          scaleNumeric('length', 0.55);
+          scaleNumeric('amount', 0.6);
+          scaleNumeric('intensity', 0.7);
+          scaleNumeric('blurRadius', 0.55);
+          break;
+        case 'film-grain':
+        case 'noise':
+          scaleNumeric('amount', 0.7);
+          scaleNumeric('size', 0.75);
+          break;
+        default:
+          break;
+      }
+    } else if (quality === 'final') {
+      switch (definitionId) {
+        case 'blur-gaussian':
+          scaleNumeric('iterations', 1.25, 1);
+          break;
+        case 'glow':
+        case 'lens-flare':
+        case 'light-rays':
+          scaleNumeric('intensity', 1.15);
+          break;
+        default:
+          break;
+      }
+    }
+
+    return adjusted;
   }
 
   // ── CSS Filter (lightweight preview) ────────────────────────────────
@@ -1096,6 +1213,7 @@ class EffectsEngine {
     imageData: ImageData,
     effects: EffectInstance[],
     frame = 0,
+    quality: EffectRenderQuality = 'preview',
   ): Promise<ImageData> {
     // Try GPU pipeline first
     if (this.gpuPipeline?.isReady) {
@@ -1104,7 +1222,7 @@ class EffectsEngine {
           imageData,
           effects,
           frame,
-          (effect, f) => this.resolveEffectParams(effect, f),
+          (effect, f) => this.resolveEffectParams(effect, f, quality),
         );
       } catch (err) {
         console.warn('[EffectsEngine] GPU processFrame failed, falling back to Canvas 2D:', err);
@@ -1113,7 +1231,7 @@ class EffectsEngine {
     }
 
     // Canvas 2D fallback (synchronous)
-    return this.processFrame(imageData, effects, frame);
+    return this.processFrame(imageData, effects, frame, quality);
   }
 
   /**
@@ -1126,7 +1244,12 @@ class EffectsEngine {
    * @param frame     Current frame number (for animated effects / keyframes).
    * @returns The processed ImageData.
    */
-  processFrame(imageData: ImageData, effects: EffectInstance[], frame = 0): ImageData {
+  processFrame(
+    imageData: ImageData,
+    effects: EffectInstance[],
+    frame = 0,
+    quality: EffectRenderQuality = 'preview',
+  ): ImageData {
     try {
       for (const effect of effects) {
         if (!effect.enabled) continue;
@@ -1135,12 +1258,10 @@ class EffectsEngine {
         if (!def) continue;
 
         // Get current parameter values (with keyframe interpolation)
-        const getNum = (name: string): number =>
-          this.getInterpolatedValue(effect, name, frame) as number;
-        const getStr = (name: string): string =>
-          this.getInterpolatedValue(effect, name, frame) as string;
-        const getBool = (name: string): boolean =>
-          this.getInterpolatedValue(effect, name, frame) as boolean;
+        const resolvedParams = this.resolveEffectParams(effect, frame, quality);
+        const getNum = (name: string): number => resolvedParams[name] as number;
+        const getStr = (name: string): string => resolvedParams[name] as string;
+        const getBool = (name: string): boolean => resolvedParams[name] as boolean;
 
         switch (effect.definitionId) {
           case 'brightness-contrast':

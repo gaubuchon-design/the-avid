@@ -4,6 +4,7 @@ import { hydrateProject } from '@mcua/core';
 import { DashboardPage } from '../../../web/src/pages/DashboardPage';
 import { EditorPage } from '../../../web/src/pages/EditorPage';
 import { saveProjectToRepository } from '../../../web/src/lib/projectRepository';
+import { useEditorStore } from '../../../web/src/store/editor.store';
 
 // ─── Error Boundary ─────────────────────────────────────────────────────────────
 
@@ -67,43 +68,74 @@ class ErrorBoundary extends React.Component<{ children: ReactNode }, ErrorBounda
 
 // ─── Update Banner ──────────────────────────────────────────────────────────────
 
+interface DesktopUpdateBannerState {
+  currentVersion: string;
+  channel: string;
+  status: 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error';
+  availableVersion: string | null;
+  downloadPercent: number | null;
+  message: string | null;
+  error: string | null;
+  checkedAt: string | null;
+  restartScheduled: boolean;
+  autoInstallOnQuit: boolean;
+}
+
 function UpdateBanner() {
-  const [updateInfo, setUpdateInfo] = useState<{
-    version: string;
-    state: 'available' | 'downloading' | 'downloaded';
-  } | null>(null);
-  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
-  const [dismissed, setDismissed] = useState(false);
+  const [updateState, setUpdateState] = useState<DesktopUpdateBannerState | null>(null);
+  const [dismissedToken, setDismissedToken] = useState<string | null>(null);
 
   useEffect(() => {
     if (!window.electronAPI) return;
 
-    const disposeAvailable = window.electronAPI.onUpdateAvailable((info) => {
-      setUpdateInfo({ version: info.version, state: 'available' });
-      setDismissed(false);
+    void window.electronAPI.app.getUpdateState().then((info) => {
+      setUpdateState(info);
     });
-    const disposeProgress = window.electronAPI.onUpdateProgress((info) => {
-      setDownloadProgress(info.percent);
-    });
-    const disposeDownloaded = window.electronAPI.onUpdateDownloaded((info) => {
-      setUpdateInfo({ version: info.version, state: 'downloaded' });
-      setDownloadProgress(null);
-      setDismissed(false);
+
+    const disposeState = window.electronAPI.onUpdateState((info) => {
+      setUpdateState(info);
+      if (info.status !== 'error' && info.status !== 'downloaded') {
+        setDismissedToken(null);
+      }
     });
 
     return () => {
-      disposeAvailable();
-      disposeProgress();
-      disposeDownloaded();
+      disposeState();
     };
   }, []);
 
-  if (!updateInfo || dismissed) return null;
+  if (!updateState) return null;
 
-  const handleDownload = () => {
-    setUpdateInfo((prev) => prev ? { ...prev, state: 'downloading' } : prev);
-    window.electronAPI?.app.downloadUpdate();
-  };
+  if (updateState.status === 'disabled' || updateState.status === 'idle' || updateState.status === 'up-to-date') {
+    return null;
+  }
+
+  const dismissToken = updateState.status === 'error'
+    ? updateState.error
+    : updateState.status === 'downloaded' && !updateState.restartScheduled
+      ? updateState.availableVersion
+      : null;
+  if (dismissToken && dismissToken === dismissedToken) {
+    return null;
+  }
+
+  const targetVersion = updateState.availableVersion ?? updateState.currentVersion;
+  let label = updateState.message ?? `Version ${targetVersion}`;
+
+  if (updateState.status === 'checking') {
+    label = 'Checking for updates...';
+  }
+  if (updateState.status === 'available' || updateState.status === 'downloading') {
+    label = `Downloading update ${targetVersion}${updateState.downloadPercent !== null ? ` (${Math.round(updateState.downloadPercent)}%)` : '...'}`;
+  }
+  if (updateState.status === 'downloaded') {
+    label = updateState.restartScheduled
+      ? `Installing update ${targetVersion} and restarting...`
+      : `Update ${targetVersion} ready to install`;
+  }
+  if (updateState.status === 'error') {
+    label = updateState.error ?? 'Automatic update check failed.';
+  }
 
   return (
     <div style={{
@@ -122,11 +154,50 @@ function UpdateBanner() {
       alignItems: 'center',
       gap: 12,
     }}>
-      {updateInfo.state === 'downloaded' ? (
+      {updateState.status === 'downloaded' ? (
         <>
-          <span>Update {updateInfo.version} ready</span>
+          <span>{label}</span>
+          {!updateState.restartScheduled ? (
+            <>
+              <button
+                onClick={() => window.electronAPI?.app.installUpdate()}
+                style={{
+                  backgroundColor: '#81818d',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: 6,
+                  padding: '6px 12px',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Restart Now
+              </button>
+              <button
+                onClick={() => setDismissedToken(updateState.availableVersion ?? 'downloaded')}
+                style={{
+                  backgroundColor: 'transparent',
+                  color: '#9d9da7',
+                  border: 'none',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Later
+              </button>
+            </>
+          ) : null}
+        </>
+      ) : updateState.status === 'error' ? (
+        <>
+          <span>{label}</span>
           <button
-            onClick={() => window.electronAPI?.app.installUpdate()}
+            onClick={() => {
+              setDismissedToken(null);
+              void window.electronAPI?.app.checkForUpdates();
+            }}
             style={{
               backgroundColor: '#81818d',
               color: '#ffffff',
@@ -138,10 +209,10 @@ function UpdateBanner() {
               whiteSpace: 'nowrap',
             }}
           >
-            Restart to Update
+            Retry
           </button>
           <button
-            onClick={() => setDismissed(true)}
+            onClick={() => setDismissedToken(updateState.error ?? 'error')}
             style={{
               backgroundColor: 'transparent',
               color: '#9d9da7',
@@ -151,45 +222,27 @@ function UpdateBanner() {
               whiteSpace: 'nowrap',
             }}
           >
-            Later
+            Dismiss
           </button>
         </>
-      ) : updateInfo.state === 'downloading' ? (
-        <span>
-          Downloading update {updateInfo.version}
-          {downloadProgress !== null ? ` (${Math.round(downloadProgress)}%)` : '...'}
-        </span>
       ) : (
         <>
-          <span>Update {updateInfo.version} available</span>
-          <button
-            onClick={handleDownload}
-            style={{
-              backgroundColor: '#81818d',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: 6,
-              padding: '6px 12px',
-              fontSize: 12,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            Download
-          </button>
-          <button
-            onClick={() => setDismissed(true)}
-            style={{
-              backgroundColor: 'transparent',
-              color: '#9d9da7',
-              border: 'none',
-              fontSize: 12,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            Later
-          </button>
+          <span>{label}</span>
+          {updateState.status === 'checking' ? null : (
+            <button
+              onClick={() => void window.electronAPI?.app.checkForUpdates()}
+              style={{
+                backgroundColor: 'transparent',
+                color: '#9d9da7',
+                border: 'none',
+                fontSize: 12,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Check Again
+            </button>
+          )}
         </>
       )}
     </div>
@@ -200,6 +253,8 @@ function UpdateBanner() {
 
 export default function App() {
   const navigate = useNavigate();
+  const setDesktopJobs = useEditorStore((state) => state.setDesktopJobs);
+  const upsertDesktopJob = useEditorStore((state) => state.upsertDesktopJob);
 
   const handleOpenProject = useCallback(async (filePath: string) => {
     try {
@@ -253,6 +308,22 @@ export default function App() {
       disposeDeepLink();
     };
   }, [navigate, handleOpenProject, handleDeepLink]);
+
+  useEffect(() => {
+    if (!window.electronAPI) {
+      return;
+    }
+
+    void window.electronAPI.listDesktopJobs().then((jobs) => {
+      setDesktopJobs(jobs);
+    }).catch((error) => {
+      console.warn('[DesktopJobs] Failed to list desktop jobs:', error);
+    });
+
+    return window.electronAPI.onDesktopJobUpdate((job) => {
+      upsertDesktopJob(job);
+    });
+  }, [setDesktopJobs, upsertDesktopJob]);
 
   return (
     <ErrorBoundary>

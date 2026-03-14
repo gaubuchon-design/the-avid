@@ -61,7 +61,7 @@ export interface SaveDialogResult {
   filePath?: string;
 }
 
-export type DesktopJobKind = 'INGEST' | 'EXPORT';
+export type DesktopJobKind = 'INGEST' | 'INDEX' | 'EXPORT' | 'TRANSCODE' | 'TRANSCRIPTION' | 'RENDER' | 'EFFECTS';
 export type DesktopJobStatus = 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
 
 export interface DesktopJob {
@@ -76,6 +76,8 @@ export interface DesktopJob {
   updatedAt: string;
   outputPath?: string;
   error?: string;
+  detail?: string;
+  dispatchMode?: 'LOCAL' | 'DISTRIBUTED' | 'HYBRID';
 }
 
 export interface RelinkResult {
