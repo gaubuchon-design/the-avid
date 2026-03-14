@@ -352,7 +352,7 @@ export function BinPanel() {
       {isDragOver && (
         <div style={{
           position: 'absolute', inset: 0, zIndex: 100,
-          background: 'rgba(109,76,250,0.15)', border: '2px dashed var(--brand)',
+          background: 'var(--brand-dim)', border: '2px dashed var(--brand)',
           borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center',
           pointerEvents: 'none',
         }}>

@@ -547,7 +547,7 @@ const EQCurveCanvas = memo(function EQCurveCanvas({ track }: { track: AudioTrack
     ctx.stroke();
 
     // Frequency response curve
-    ctx.strokeStyle = '#9b7dff';
+    ctx.strokeStyle = '#4dd9b4';
     ctx.lineWidth = 2;
     ctx.beginPath();
 
@@ -580,7 +580,7 @@ const EQCurveCanvas = memo(function EQCurveCanvas({ track }: { track: AudioTrack
       const freqRatio = Math.log(band!.frequency! / 20) / Math.log(1000);
       const x = freqRatio * w;
       const y = h / 2 - (band!.gain! / 18) * (h / 2);
-      ctx.fillStyle = band!.gain! !== 0 ? '#9b7dff' : 'rgba(155,125,255,0.4)';
+      ctx.fillStyle = band!.gain! !== 0 ? '#4dd9b4' : 'rgba(77,217,180,0.4)';
       ctx.beginPath();
       ctx.arc(Math.max(4, Math.min(w - 4, x)), Math.max(4, Math.min(h - 4, y)), 4, 0, Math.PI * 2);
       ctx.fill();
@@ -747,7 +747,7 @@ const TransferCurveCanvas = memo(function TransferCurveCanvas({
     ctx.setLineDash([]);
 
     // Transfer curve
-    ctx.strokeStyle = '#9b7dff';
+    ctx.strokeStyle = '#4dd9b4';
     ctx.lineWidth = 2;
     ctx.beginPath();
 

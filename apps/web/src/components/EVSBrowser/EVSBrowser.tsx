@@ -30,7 +30,7 @@ function getAngleColor(angle: CameraAngle): string {
     ISO_3: '#818cf8',
     ISO_4: '#ec4899',
     REVERSE: '#25a865',
-    BEAUTY: '#7c5cfc',
+    BEAUTY: '#00d4aa',
     SUPER_SLO_MO: '#ef4444',
     SKYCAM: '#0ea5e9',
     GOAL_CAM: '#c94f84',

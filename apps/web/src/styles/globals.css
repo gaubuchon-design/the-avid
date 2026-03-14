@@ -4,12 +4,9 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Font Loading ─────────────────────────────────────────────────────────
-   DM Sans (UI), Syne (Display/Headers), DM Mono (Timecodes & Data)
+   Inter (UI & Display), JetBrains Mono (Timecodes & Data)
    ─────────────────────────────────────────────────────────────────────────── */
-@import url("https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap");
-
-/* Fallback fonts: Inter (UI fallback), JetBrains Mono (mono fallback) */
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300..700&family=JetBrains+Mono:wght@400..700&display=swap");
 
 /* ═══════════════════════════════════════════════════════════════════════════
    1. TYPOGRAPHY HIERARCHY
@@ -172,12 +169,12 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 ::selection {
-  background: rgba(109, 76, 250, 0.35);
+  background: rgba(0, 200, 150, 0.35);
   color: var(--text-primary);
 }
 
 ::-moz-selection {
-  background: rgba(109, 76, 250, 0.35);
+  background: rgba(0, 200, 150, 0.35);
   color: var(--text-primary);
 }
 

@@ -28,7 +28,7 @@ export function ReviewPanel() {
             {approvals.map((approval) => (
               <div key={approval.id} className="review-approval-card">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div className="comment-avatar" style={{ background: approval.status === 'APPROVED' ? '#25a865' : approval.status === 'CHANGES_REQUESTED' ? '#ef4444' : '#7c5cfc' }}>
+                  <div className="comment-avatar" style={{ background: approval.status === 'APPROVED' ? '#25a865' : approval.status === 'CHANGES_REQUESTED' ? '#ef4444' : '#00d4aa' }}>
                     {approval.reviewer[0]}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>

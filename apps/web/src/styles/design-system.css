@@ -19,13 +19,13 @@
      interactive surface references exactly one of these levels.
      ─────────────────────────────────────────────────────────────────────── */
   --bg-void:      #000000;
-  --bg-canvas:    #0a0a0f;
-  --bg-base:      #0e0e16;
-  --bg-surface:   #13131e;
-  --bg-raised:    #181826;
-  --bg-elevated:  #1e1e30;
-  --bg-overlay:   #26263e;
-  --bg-popover:   #2a2a44;
+  --bg-canvas:    #0d0d0d;
+  --bg-base:      #111111;
+  --bg-surface:   #161616;
+  --bg-raised:    #1c1c1c;
+  --bg-elevated:  #222222;
+  --bg-overlay:   #2a2a2a;
+  --bg-popover:   #303030;
 
   /* Interactive surface states */
   --bg-hover:     rgba(255, 255, 255, 0.04);
@@ -33,25 +33,25 @@
   --bg-selected:  rgba(255, 255, 255, 0.10);
 
   /* ── Brand / Accent ────────────────────────────────────────────────── */
-  --brand-50:     #f0edff;
-  --brand-100:    #dbd4ff;
-  --brand-200:    #bfb0ff;
-  --brand-300:    #9b7dff;
-  --brand-400:    #8464ff;
-  --brand-500:    #6d4cfa;
-  --brand-600:    #5a3dd6;
-  --brand-700:    #4930b0;
-  --brand-800:    #3a268c;
-  --brand-900:    #2a1c66;
+  --brand-50:     #e0faf5;
+  --brand-100:    #b3f0e0;
+  --brand-200:    #80e5ca;
+  --brand-300:    #4dd9b4;
+  --brand-400:    #26d0a3;
+  --brand-500:    #00c896;
+  --brand-600:    #00a67d;
+  --brand-700:    #008464;
+  --brand-800:    #00634b;
+  --brand-900:    #004233;
 
   /* Primary brand aliases */
   --brand:        var(--brand-500);
   --brand-bright: var(--brand-300);
-  --brand-dim:    rgba(109, 76, 250, 0.16);
-  --accent:       #7c5cfc;
-  --accent-dim:   #5a3fd4;
-  --accent-glow:  rgba(124, 92, 252, 0.28);
-  --accent-muted: rgba(124, 92, 252, 0.12);
+  --brand-dim:    rgba(0, 200, 150, 0.16);
+  --accent:       #00d4aa;
+  --accent-dim:   #00a688;
+  --accent-glow:  rgba(0, 212, 170, 0.28);
+  --accent-muted: rgba(0, 212, 170, 0.12);
 
   /* ── Track Colors ──────────────────────────────────────────────────── */
   --track-video:    #4f63f5;
@@ -87,21 +87,21 @@
   --info-text:    #60a5fa;
 
   /* ── Text Hierarchy ────────────────────────────────────────────────── */
-  --text-primary:   #e2e8f0;
-  --text-secondary: #8a9cb5;
-  --text-tertiary:  #556880;
-  --text-muted:     #3d4f64;
-  --text-disabled:  #283544;
+  --text-primary:   #e0e0e0;
+  --text-secondary: #999999;
+  --text-tertiary:  #666666;
+  --text-muted:     #444444;
+  --text-disabled:  #333333;
   --text-accent:    var(--brand-300);
   --text-on-brand:  #ffffff;
   --text-inverse:   #0a0a0f;
 
   /* ── Borders ───────────────────────────────────────────────────────── */
-  --border-subtle:  rgba(255, 255, 255, 0.04);
-  --border:         rgba(255, 255, 255, 0.06);
-  --border-default: rgba(255, 255, 255, 0.08);
-  --border-strong:  rgba(255, 255, 255, 0.14);
-  --border-accent:  rgba(109, 76, 250, 0.40);
+  --border-subtle:  rgba(255, 255, 255, 0.05);
+  --border:         rgba(255, 255, 255, 0.08);
+  --border-default: rgba(255, 255, 255, 0.10);
+  --border-strong:  rgba(255, 255, 255, 0.16);
+  --border-accent:  rgba(0, 200, 150, 0.40);
   --border-focus:   var(--brand);
 
   /* ── Shadows ───────────────────────────────────────────────────────── */
@@ -110,9 +110,9 @@
   --shadow-md:    0 4px 12px rgba(0, 0, 0, 0.50);
   --shadow-lg:    0 8px 24px rgba(0, 0, 0, 0.60);
   --shadow-xl:    0 16px 48px rgba(0, 0, 0, 0.70);
-  --shadow-brand: 0 0 16px rgba(109, 76, 250, 0.25);
-  --shadow-glow:  0 0 24px rgba(109, 76, 250, 0.35);
-  --shadow-accent: 0 0 0 1px rgba(124, 92, 252, 0.4);
+  --shadow-brand: 0 0 16px rgba(0, 200, 150, 0.25);
+  --shadow-glow:  0 0 24px rgba(0, 200, 150, 0.35);
+  --shadow-accent: 0 0 0 1px rgba(0, 212, 170, 0.4);
   --shadow-inset: inset 0 1px 2px rgba(0, 0, 0, 0.35);
 
   /* ── AI Accent ─────────────────────────────────────────────────────── */
@@ -121,20 +121,20 @@
   --ai-accent-glow: rgba(0, 212, 170, 0.25);
 
   /* ── Radii ──────────────────────────────────────────────────────────── */
-  --radius-xs: 3px;
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
 
 /* ═══════════════════════════════════════════════════════════════════════════
    2. TYPOGRAPHY TOKENS
    ═══════════════════════════════════════════════════════════════════════════ */
 
   /* ── Font Families ─────────────────────────────────────────────────── */
-  --font-ui:      'DM Sans', 'Inter', system-ui, -apple-system, sans-serif;
-  --font-display: 'Syne', 'Inter', sans-serif;
-  --font-mono:    'DM Mono', 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  --font-ui:      'Inter', system-ui, -apple-system, sans-serif;
+  --font-display: 'Inter', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
 
   /* ── Font Sizes — Compact NLE Scale ────────────────────────────────── */
   --text-2xs:   9px;
@@ -199,9 +199,9 @@
   --radius-none: 0;
   --radius-xs:   2px;
   --radius-sm:   3px;
-  --radius-md:   5px;
-  --radius-lg:   8px;
-  --radius-xl:   12px;
+  --radius-md:   4px;
+  --radius-lg:   6px;
+  --radius-xl:   8px;
   --radius-2xl:  16px;
   --radius-full: 9999px;
 
@@ -324,15 +324,15 @@
   --border:         rgba(0, 0, 0, 0.06);
   --border-default: rgba(0, 0, 0, 0.10);
   --border-strong:  rgba(0, 0, 0, 0.16);
-  --border-accent:  rgba(109, 76, 250, 0.30);
+  --border-accent:  rgba(0, 200, 150, 0.30);
 
   --shadow-xs:    0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-sm:    0 1px 3px rgba(0, 0, 0, 0.06);
   --shadow-md:    0 4px 12px rgba(0, 0, 0, 0.10);
   --shadow-lg:    0 8px 24px rgba(0, 0, 0, 0.14);
   --shadow-xl:    0 16px 48px rgba(0, 0, 0, 0.18);
-  --shadow-brand: 0 0 16px rgba(109, 76, 250, 0.15);
-  --shadow-accent: 0 0 0 1px rgba(124, 92, 252, 0.25);
+  --shadow-brand: 0 0 16px rgba(0, 200, 150, 0.15);
+  --shadow-accent: 0 0 0 1px rgba(0, 212, 170, 0.25);
 
   --bg-input:        #ffffff;
   --bg-track-header: #f0f0f6;
@@ -340,8 +340,8 @@
   --text-on-brand:   #ffffff;
 
   /* Brand-dim needs to be visible on light */
-  --brand-dim:     rgba(109, 76, 250, 0.10);
-  --accent-muted:  rgba(124, 92, 252, 0.10);
+  --brand-dim:     rgba(0, 200, 150, 0.10);
+  --accent-muted:  rgba(0, 212, 170, 0.10);
 
   /* AI accent — darker for light BG readability */
   --ai-accent:     #00a886;
@@ -501,7 +501,7 @@ input:focus:not(:focus-visible) {
 
 /* Selection */
 ::selection {
-  background: rgba(109, 76, 250, 0.35);
+  background: rgba(0, 200, 150, 0.35);
   color: var(--text-primary);
 }
 
@@ -766,7 +766,7 @@ input:focus:not(:focus-visible) {
   background: var(--brand);
   border-radius: var(--radius-full);
   transition: transform var(--dur-fast);
-  box-shadow: 0 0 4px rgba(109, 76, 250, 0.4);
+  box-shadow: 0 0 4px rgba(0, 200, 150, 0.4);
 }
 
 .range-slider::-webkit-slider-thumb:hover {
@@ -971,7 +971,7 @@ input:focus:not(:focus-visible) {
   transition: border-color var(--dur-normal) var(--ease-default);
 }
 .monitor.monitor-active {
-  border-color: rgba(124, 92, 252, 0.5);
+  border-color: rgba(0, 212, 170, 0.5);
 }
 
 .monitor-header {
@@ -1118,7 +1118,7 @@ input:focus:not(:focus-visible) {
   transform: translateX(-50%);
   width: 800px;
   height: 600px;
-  background: radial-gradient(ellipse, rgba(109, 76, 250, 0.08) 0%, transparent 70%);
+  background: radial-gradient(ellipse, rgba(0, 200, 150, 0.08) 0%, transparent 70%);
   filter: blur(60px);
 }
 
@@ -1397,7 +1397,7 @@ input:focus:not(:focus-visible) {
 }
 
 [data-theme="light"] .auth-layout-gradient {
-  background: radial-gradient(ellipse, rgba(109, 76, 250, 0.06) 0%, transparent 70%);
+  background: radial-gradient(ellipse, rgba(0, 200, 150, 0.06) 0%, transparent 70%);
 }
 
 [data-theme="light"] .auth-layout-grid {

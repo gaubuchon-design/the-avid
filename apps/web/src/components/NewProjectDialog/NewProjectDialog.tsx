@@ -963,7 +963,7 @@ export function NewProjectDialog() {
                 onMouseEnter={(e) => {
                   if (canProceed) {
                     (e.currentTarget as HTMLElement).style.background = 'var(--brand-bright)';
-                    (e.currentTarget as HTMLElement).style.boxShadow = '0 0 16px rgba(109,76,250,0.3)';
+                    (e.currentTarget as HTMLElement).style.boxShadow = '0 0 16px rgba(0,200,150,0.3)';
                   }
                 }}
                 onMouseLeave={(e) => {
@@ -985,7 +985,7 @@ export function NewProjectDialog() {
                 onMouseEnter={(e) => {
                   if (!isCreating) {
                     (e.currentTarget as HTMLElement).style.background = 'var(--brand-bright)';
-                    (e.currentTarget as HTMLElement).style.boxShadow = '0 0 16px rgba(109,76,250,0.3)';
+                    (e.currentTarget as HTMLElement).style.boxShadow = '0 0 16px rgba(0,200,150,0.3)';
                   }
                 }}
                 onMouseLeave={(e) => {

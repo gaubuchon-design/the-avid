@@ -31,6 +31,10 @@ import { CutPage } from './CutPage';
 import { ColorPage } from './ColorPage';
 import { DeliverPage } from './DeliverPage';
 
+// DaVinci Resolve parity pages (lazy-loaded)
+const FusionPage = lazy(() => import('./FusionPage').then(m => ({ default: m.FusionPage })));
+const FairlightPage = lazy(() => import('./FairlightPage').then(m => ({ default: m.FairlightPage })));
+
 const VALID_WORKSPACES: ReadonlySet<string> = new Set<WorkspacePreset>(['filmtv', 'news', 'sports', 'creator', 'marketing']);
 
 // Lazy-loaded vertical panels
@@ -45,6 +49,11 @@ const BrandPanel = lazy(() => import('../components/BrandPanel/BrandPanel').then
 const MultiCamPanel = lazy(() => import('../components/MultiCamPanel/MultiCamPanel').then(m => ({ default: m.MultiCamPanel })));
 const AccessibilityPanel = lazy(() => import('../components/AccessibilityPanel/AccessibilityPanel').then(m => ({ default: m.AccessibilityPanel })));
 const SportsWorkspace = lazy(() => import('../components/SportsWorkspace/SportsWorkspace').then(m => ({ default: m.SportsWorkspace })));
+const MarkersPanel = lazy(() => import('../components/MarkersPanel/MarkersPanel').then(m => ({ default: m.MarkersPanel })));
+const TransitionsPanel = lazy(() => import('../components/TransitionsPanel/TransitionsPanel').then(m => ({ default: m.TransitionsPanel })));
+const KeyframeEditor = lazy(() => import('../components/KeyframeEditor/KeyframeEditor').then(m => ({ default: m.KeyframeEditor })));
+const SequenceBin = lazy(() => import('../components/SequenceBin/SequenceBin').then(m => ({ default: m.SequenceBin })));
+const TimelineSearch = lazy(() => import('../components/TimelineSearch/TimelineSearch').then(m => ({ default: m.TimelineSearch })));
 
 // Playback is driven by PlaybackEngine (RAF-based) via editor.store.ts togglePlay().
 // Keyboard dispatch is centralized in useGlobalKeyboard() — called once from EditorPage.
@@ -142,9 +151,13 @@ export function EditorPage() {
   const showTitleTool = useEditorStore((s) => s.showTitleTool);
   const showSubtitleEditor = useEditorStore((s) => s.showSubtitleEditor);
   const showAlphaImportDialog = useEditorStore((s) => s.showAlphaImportDialog);
+  const showSequenceBin = useEditorStore((s) => s.showSequenceBin);
   const toggleExportPanel = useEditorStore((s) => s.toggleExportPanel);
   const toggleSettingsPanel = useEditorStore((s) => s.toggleSettingsPanel);
+  const toggleSequenceBin = useEditorStore((s) => s.toggleSequenceBin);
   const loadProject = useEditorStore((s) => s.loadProject);
+
+  const selectedClipIds = useEditorStore((s) => s.selectedClipIds);
 
   const [showTracker, setShowTracker] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
@@ -153,6 +166,9 @@ export function EditorPage() {
     return param && VALID_WORKSPACES.has(param) ? (param as WorkspacePreset) : 'filmtv';
   });
   const [showMultiCam, setShowMultiCam] = useState(false);
+  const [showMarkersPanel, setShowMarkersPanel] = useState(false);
+  const [showTransitionsPanel, setShowTransitionsPanel] = useState(false);
+  const [showTimelineSearch, setShowTimelineSearch] = useState(false);
   const [activePage, setActivePage] = useState<PageId>('edit');
   // Centralized keyboard dispatch — routes keys based on active monitor
   useGlobalKeyboard();
@@ -219,9 +235,19 @@ export function EditorPage() {
         e.preventDefault();
         setShowTracker(prev => !prev);
       }
-      // Shift+1-5 to switch pages (Resolve-style)
+      // ⌘Shift+B / Ctrl+Shift+B to toggle Sequence Bin
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'B') {
+        e.preventDefault();
+        toggleSequenceBin();
+      }
+      // ⌘F / Ctrl+F to toggle Find in Timeline
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'f') {
+        e.preventDefault();
+        setShowTimelineSearch(prev => !prev);
+      }
+      // Shift+1-7 to switch pages (Resolve-style)
       if (e.shiftKey && !e.metaKey && !e.ctrlKey) {
-        const pageMap: Record<string, PageId> = { '!': 'media', '@': 'cut', '#': 'edit', '$': 'color', '%': 'deliver' };
+        const pageMap: Record<string, PageId> = { '!': 'media', '@': 'cut', '#': 'edit', '$': 'fusion', '%': 'color', '^': 'fairlight', '&': 'deliver' };
         const page = pageMap[e.key];
         if (page) { e.preventDefault(); setActivePage(page); }
       }
@@ -251,9 +277,23 @@ export function EditorPage() {
           <CutPage />
         </ErrorBoundary>
       )}
+      {activePage === 'fusion' && (
+        <ErrorBoundary resetKeys={[activePage]}>
+          <Suspense fallback={<LoadingSpinner />}>
+            <FusionPage />
+          </Suspense>
+        </ErrorBoundary>
+      )}
       {activePage === 'color' && (
         <ErrorBoundary resetKeys={[activePage]}>
           <div style={{ gridRow: '2 / 5', overflow: 'hidden' }}><ColorPage /></div>
+        </ErrorBoundary>
+      )}
+      {activePage === 'fairlight' && (
+        <ErrorBoundary resetKeys={[activePage]}>
+          <Suspense fallback={<LoadingSpinner />}>
+            <FairlightPage />
+          </Suspense>
         </ErrorBoundary>
       )}
       {activePage === 'deliver' && (
@@ -269,8 +309,95 @@ export function EditorPage() {
           </Suspense>
         ) : (
           <>
+            {/* Panel toggle bar for Markers and Transitions */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '2px 12px',
+              backgroundColor: 'var(--bg-raised)',
+              borderBottom: '1px solid var(--border-default)',
+              fontSize: 11,
+              flexShrink: 0,
+            }}>
+              <button
+                style={{
+                  padding: '3px 10px',
+                  borderRadius: 4,
+                  border: showMarkersPanel ? '1px solid var(--brand)' : '1px solid var(--border-default)',
+                  backgroundColor: showMarkersPanel ? 'var(--brand)' : 'var(--bg-raised)',
+                  color: showMarkersPanel ? '#fff' : 'var(--text-secondary)',
+                  fontSize: 11,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+                onClick={() => setShowMarkersPanel(prev => !prev)}
+                title={showMarkersPanel ? 'Hide Markers Panel' : 'Show Markers Panel'}
+                aria-pressed={showMarkersPanel}
+              >
+                Markers
+              </button>
+              <button
+                style={{
+                  padding: '3px 10px',
+                  borderRadius: 4,
+                  border: showTransitionsPanel ? '1px solid var(--brand)' : '1px solid var(--border-default)',
+                  backgroundColor: showTransitionsPanel ? 'var(--brand)' : 'var(--bg-raised)',
+                  color: showTransitionsPanel ? '#fff' : 'var(--text-secondary)',
+                  fontSize: 11,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+                onClick={() => setShowTransitionsPanel(prev => !prev)}
+                title={showTransitionsPanel ? 'Hide Transitions Panel' : 'Show Transitions Panel'}
+                aria-pressed={showTransitionsPanel}
+              >
+                Transitions
+              </button>
+              <button
+                style={{
+                  padding: '3px 10px',
+                  borderRadius: 4,
+                  border: showSequenceBin ? '1px solid var(--brand)' : '1px solid var(--border-default)',
+                  backgroundColor: showSequenceBin ? 'var(--brand)' : 'var(--bg-raised)',
+                  color: showSequenceBin ? '#fff' : 'var(--text-secondary)',
+                  fontSize: 11,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+                onClick={toggleSequenceBin}
+                title={showSequenceBin ? 'Hide Sequence Bin (Ctrl+Shift+B)' : 'Show Sequence Bin (Ctrl+Shift+B)'}
+                aria-pressed={showSequenceBin}
+              >
+                Sequences
+              </button>
+              <button
+                style={{
+                  padding: '3px 10px',
+                  borderRadius: 4,
+                  border: showTimelineSearch ? '1px solid var(--brand)' : '1px solid var(--border-default)',
+                  backgroundColor: showTimelineSearch ? 'var(--brand)' : 'var(--bg-raised)',
+                  color: showTimelineSearch ? '#fff' : 'var(--text-secondary)',
+                  fontSize: 11,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+                onClick={() => setShowTimelineSearch(prev => !prev)}
+                title={showTimelineSearch ? 'Hide Find (Ctrl+F)' : 'Find in Timeline (Ctrl+F)'}
+                aria-pressed={showTimelineSearch}
+              >
+                Find
+              </button>
+            </div>
             <div className={`workspace${showInspector ? '' : ' no-inspector'}`}>
               <div className="left-panels">
+                {showSequenceBin && (
+                  <PanelErrorBoundary panelName="SequenceBin">
+                    <Suspense fallback={<LoadingSpinner />}>
+                      <SequenceBin />
+                    </Suspense>
+                  </PanelErrorBoundary>
+                )}
                 <PanelErrorBoundary panelName="BinPanel">
                   <BinPanel />
                 </PanelErrorBoundary>
@@ -308,6 +435,35 @@ export function EditorPage() {
                   <TrackerPanel />
                 </PanelErrorBoundary>
               )}
+              {/* Markers side panel */}
+              {showMarkersPanel && (
+                <PanelErrorBoundary panelName="MarkersPanel">
+                  <Suspense fallback={<LoadingSpinner />}>
+                    <div style={{ width: 480, height: '100%', flexShrink: 0 }}>
+                      <MarkersPanel />
+                    </div>
+                  </Suspense>
+                </PanelErrorBoundary>
+              )}
+              {/* Transitions side panel */}
+              {showTransitionsPanel && (
+                <PanelErrorBoundary panelName="TransitionsPanel">
+                  <Suspense fallback={<LoadingSpinner />}>
+                    <div style={{ width: 340, height: '100%', flexShrink: 0 }}>
+                      <TransitionsPanel />
+                    </div>
+                  </Suspense>
+                </PanelErrorBoundary>
+              )}
+              {showTimelineSearch && (
+                <PanelErrorBoundary panelName="TimelineSearch">
+                  <Suspense fallback={<LoadingSpinner />}>
+                    <div style={{ width: 280, height: '100%', flexShrink: 0 }}>
+                      <TimelineSearch />
+                    </div>
+                  </Suspense>
+                </PanelErrorBoundary>
+              )}
               {hasVerticalPanel && (
                 <div className="vertical-panel" style={{
                   width: 340,
@@ -328,6 +484,13 @@ export function EditorPage() {
             <PanelErrorBoundary panelName="TimelinePanel">
               <TimelinePanel />
             </PanelErrorBoundary>
+            {selectedClipIds.length === 1 && (
+              <PanelErrorBoundary panelName="KeyframeEditor">
+                <Suspense fallback={<LoadingSpinner />}>
+                  <KeyframeEditor />
+                </Suspense>
+              </PanelErrorBoundary>
+            )}
           </>
         )
       )}

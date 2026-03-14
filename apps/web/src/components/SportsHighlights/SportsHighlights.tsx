@@ -28,7 +28,7 @@ function getEventColor(type: SportEventType): string {
     FOUL: '#e8943a',
     SAVE: '#4ade80',
     INTERCEPTION: '#0ea5e9',
-    SACK: '#7c5cfc',
+    SACK: '#00d4aa',
     RED_CARD: '#ef4444',
     YELLOW_CARD: '#f59e0b',
     HAT_TRICK: '#ef4444',

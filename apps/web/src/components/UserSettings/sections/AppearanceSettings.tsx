@@ -9,7 +9,7 @@ const THEMES: { value: ThemeMode; label: string }[] = [
 ];
 
 const ACCENT_COLORS = [
-  '#6d4cfa', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#06b6d4',
+  '#00c896', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#06b6d4',
 ];
 
 export function AppearanceSettings() {

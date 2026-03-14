@@ -1003,7 +1003,7 @@ function AIGenerateButton({ onGenerate, isGenerating }: { onGenerate: () => void
           padding: '10px 0',
           borderRadius: 'var(--radius-sm)',
           border: 'none',
-          background: isGenerating ? 'var(--bg-elevated)' : 'linear-gradient(135deg, #7c5cfc, #a78bfa)',
+          background: isGenerating ? 'var(--bg-elevated)' : 'linear-gradient(135deg, #00d4aa, #a78bfa)',
           color: isGenerating ? 'var(--text-muted)' : '#fff',
           fontSize: 11,
           fontWeight: 700,

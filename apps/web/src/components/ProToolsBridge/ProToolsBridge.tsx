@@ -214,7 +214,7 @@ function SessionTab() {
   const handleConnect = useCallback(() => {
     connectSession(`session-${Date.now()}`, [
       { userId: 'local', displayName: 'Editor', application: 'avid', color: '#5b6af5', playheadTimeSeconds: 0, selectedTrackIds: [], isOnline: true, lastActiveAt: new Date().toISOString() },
-      { userId: 'pt-mixer', displayName: 'PT Mixer', application: 'protools', color: '#7c5cfc', playheadTimeSeconds: 0, selectedTrackIds: [], isOnline: true, lastActiveAt: new Date().toISOString() },
+      { userId: 'pt-mixer', displayName: 'PT Mixer', application: 'protools', color: '#00d4aa', playheadTimeSeconds: 0, selectedTrackIds: [], isOnline: true, lastActiveAt: new Date().toISOString() },
     ]);
   }, [connectSession]);
 

@@ -146,7 +146,7 @@ export function DashboardPage() {
   const totalDuration = projects.reduce((sum, project) => sum + project.durationSeconds, 0);
   const recentActivity = projects.slice(0, 4).map((project, index) => ({
     user: index % 2 === 0 ? 'Sarah K.' : index % 3 === 0 ? 'You' : 'Marcus T.',
-    color: index % 2 === 0 ? '#7c5cfc' : index % 3 === 0 ? '#4f63f5' : '#25a865',
+    color: index % 2 === 0 ? '#00d4aa' : index % 3 === 0 ? '#4f63f5' : '#25a865',
     action: index === 0 ? 'autosaved a timeline revision' : index === 1 ? 'queued an AI pass' : index === 2 ? 'updated a review note' : 'shared the latest cut',
     project: project.name,
     time: formatRelativeDate(project.updatedAt),

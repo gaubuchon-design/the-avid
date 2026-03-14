@@ -100,7 +100,7 @@ const styles: Record<string, React.CSSProperties> = {
     width: 28,
     height: 28,
     borderRadius: '50%',
-    background: 'var(--brand, #6d4cfa)',
+    background: 'var(--brand, #00c896)',
     color: '#fff',
     fontSize: 11,
     fontWeight: 700,

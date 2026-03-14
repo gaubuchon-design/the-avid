@@ -1,11 +1,12 @@
 // =============================================================================
-//  THE AVID -- Page Navigation (Resolve-Style)
-//  Bottom navigation bar with 5 page tabs: Media | Cut | Edit | Color | Deliver
+//  THE AVID -- Page Navigation (DaVinci Resolve-Style)
+//  Bottom navigation bar with 7 page tabs matching Resolve's full page set:
+//  Media | Cut | Edit | Fusion | Color | Fairlight | Deliver
 // =============================================================================
 
 import React from 'react';
 
-export type EditorPage = 'media' | 'cut' | 'edit' | 'color' | 'deliver';
+export type EditorPage = 'media' | 'cut' | 'edit' | 'fusion' | 'color' | 'fairlight' | 'deliver';
 
 interface PageNavProps {
   activePage: EditorPage;
@@ -16,8 +17,10 @@ const PAGES: { id: EditorPage; label: string; shortcut: string }[] = [
   { id: 'media', label: 'Media', shortcut: 'Shift+1' },
   { id: 'cut', label: 'Cut', shortcut: 'Shift+2' },
   { id: 'edit', label: 'Edit', shortcut: 'Shift+3' },
-  { id: 'color', label: 'Color', shortcut: 'Shift+4' },
-  { id: 'deliver', label: 'Deliver', shortcut: 'Shift+5' },
+  { id: 'fusion', label: 'Fusion', shortcut: 'Shift+4' },
+  { id: 'color', label: 'Color', shortcut: 'Shift+5' },
+  { id: 'fairlight', label: 'Fairlight', shortcut: 'Shift+6' },
+  { id: 'deliver', label: 'Deliver', shortcut: 'Shift+7' },
 ];
 
 export function PageNavigation({ activePage, onPageChange }: PageNavProps) {
@@ -40,7 +43,7 @@ export function PageNavigation({ activePage, onPageChange }: PageNavProps) {
           onClick={() => onPageChange(page.id)}
           title={`${page.label} (${page.shortcut})`}
           style={{
-            padding: '4px 24px',
+            padding: '4px 18px',
             fontSize: 11,
             fontWeight: activePage === page.id ? 600 : 400,
             letterSpacing: '0.08em',

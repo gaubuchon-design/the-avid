@@ -658,7 +658,7 @@ export function RundownPanel() {
                   : isHovered
                   ? 'var(--bg-hover, rgba(255,255,255,0.03))'
                   : ROW_COLORS[story.status],
-                borderLeft: isActive ? '2px solid var(--accent, #7c5cfc)' : '2px solid transparent',
+                borderLeft: isActive ? '2px solid var(--accent, #00d4aa)' : '2px solid transparent',
                 opacity: isKilled ? 0.45 : 1,
                 textDecoration: isKilled ? 'line-through' : 'none',
                 transition: 'background 60ms',

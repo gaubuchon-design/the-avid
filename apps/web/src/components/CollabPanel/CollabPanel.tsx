@@ -378,7 +378,7 @@ function CommentCard({
   const [showReactionPicker, setShowReactionPicker] = useState(false);
 
   // User color lookup
-  const userColor = comment.userName === 'Sarah K.' ? '#7c5cfc' : comment.userName === 'Marcus T.' ? '#2bb672' : '#f59e0b';
+  const userColor = comment.userName === 'Sarah K.' ? '#00d4aa' : comment.userName === 'Marcus T.' ? '#2bb672' : '#f59e0b';
 
   return (
     <div
@@ -572,7 +572,7 @@ function CommentCard({
       {comment.replies.length > 0 && (
         <div style={{ marginTop: 8, paddingLeft: 16, borderLeft: '2px solid var(--border-default)' }}>
           {comment.replies.map((reply) => {
-            const replyColor = reply.userName === 'Sarah K.' ? '#7c5cfc' : reply.userName === 'Marcus T.' ? '#2bb672' : '#f59e0b';
+            const replyColor = reply.userName === 'Sarah K.' ? '#00d4aa' : reply.userName === 'Marcus T.' ? '#2bb672' : '#f59e0b';
             return (
               <div key={reply.id} style={{ marginBottom: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
@@ -828,7 +828,7 @@ function ActivityTab() {
         Recent Activity
       </div>
       {activityFeed.map((entry) => {
-        const userColor = entry.user === 'Sarah K.' ? '#7c5cfc' : entry.user === 'Marcus T.' ? '#2bb672' : '#f59e0b';
+        const userColor = entry.user === 'Sarah K.' ? '#00d4aa' : entry.user === 'Marcus T.' ? '#2bb672' : '#f59e0b';
         return (
           <div
             key={entry.id}

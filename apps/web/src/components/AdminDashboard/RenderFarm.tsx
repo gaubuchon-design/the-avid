@@ -207,11 +207,11 @@ const inputStyle: React.CSSProperties = {
 function statusBadge(status: string) {
   const map: Record<string, { bg: string; color: string }> = {
     idle: { bg: 'rgba(34,197,94,.15)', color: 'var(--success)' },
-    busy: { bg: 'rgba(109,76,250,.15)', color: 'var(--brand-bright)' },
+    busy: { bg: 'rgba(0,200,150,.15)', color: 'var(--brand-bright)' },
     offline: { bg: 'var(--bg-overlay)', color: 'var(--text-tertiary)' },
     error: { bg: 'rgba(239,68,68,.15)', color: 'var(--error)' },
     queued: { bg: 'rgba(245,158,11,.15)', color: 'var(--warning)' },
-    rendering: { bg: 'rgba(109,76,250,.15)', color: 'var(--brand-bright)' },
+    rendering: { bg: 'rgba(0,200,150,.15)', color: 'var(--brand-bright)' },
     complete: { bg: 'rgba(34,197,94,.15)', color: 'var(--success)' },
     failed: { bg: 'rgba(239,68,68,.15)', color: 'var(--error)' },
   };

@@ -160,7 +160,7 @@ function HighlightItem({ highlight, isSelected, onSelect }: {
         padding: '4px 8px',
         cursor: 'pointer',
         background: isSelected ? 'var(--bg-active, rgba(124,92,252,0.08))' : 'transparent',
-        borderLeft: isSelected ? '2px solid var(--accent, #7c5cfc)' : '2px solid transparent',
+        borderLeft: isSelected ? '2px solid var(--accent, #00d4aa)' : '2px solid transparent',
         transition: 'background 60ms',
       }}
     >

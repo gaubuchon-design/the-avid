@@ -66,7 +66,7 @@ const styles: Record<string, React.CSSProperties> = {
     transition: 'all 100ms',
   },
   itemActive: {
-    background: 'rgba(109, 76, 250, 0.12)',
-    color: 'var(--brand-bright, #9b7dff)',
+    background: 'rgba(0, 200, 150, 0.12)',
+    color: 'var(--brand-bright, #00d4aa)',
   },
 };

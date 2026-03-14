@@ -117,6 +117,20 @@ export interface Marker {
   color: string;
 }
 
+/** A Sequence represents an independent timeline with its own tracks, markers, and settings. */
+export interface Sequence {
+  id: string;
+  name: string;
+  tracks: Track[];
+  markers: Marker[];
+  duration: number;
+  fps: number;
+  dropFrame: boolean;
+  inPoint: number | null;
+  outPoint: number | null;
+  createdAt: string;
+}
+
 export interface MediaAsset {
   id: string;
   name: string;
@@ -348,6 +362,12 @@ interface EditorState {
   scrollLeft: number;
   duration: number;
 
+  // Multi-sequence
+  sequences: Sequence[];
+  activeSequenceId: string;
+  sourceSequenceId: string | null;
+  showSequenceBin: boolean;
+
   // Selection
   selectedClipIds: string[];
   selectedTrackId: string | null;
@@ -473,6 +493,18 @@ interface EditorState {
 
   // Workspace
   activeWorkspaceId: string;
+
+  // ── NLE Parity: Additional Editorial State ──────────────────────────────
+  /** Current edit mode: overwrite replaces content, insert pushes downstream. */
+  editMode: 'overwrite' | 'insert';
+  /** Active segment editing mode (lift leaves gap, extract closes gap). */
+  segmentEditMode: 'lift' | 'extract' | null;
+  /** Fine-grained trim mode state for clip-level trim operations. */
+  trimModeState: {
+    active: boolean;
+    clipId: string | null;
+    side: 'head' | 'tail' | null;
+  };
 }
 
 interface EditorActions {
@@ -488,6 +520,7 @@ interface EditorActions {
   toggleLock: (trackId: string) => void;
   setTrackVolume: (trackId: string, v: number) => void;
   selectTrack: (id: string | null) => void;
+  updateTrack: (trackId: string, updates: Partial<Pick<Track, 'name' | 'color' | 'blendMode'>>) => void;
 
   // Tracks (add / remove)
   addTrack: (track: Track) => void;
@@ -677,6 +710,44 @@ interface EditorActions {
 
   // Init
   loadProject: (projectId: string) => void;
+
+  // ── Multi-Sequence Actions ──────────────────────────────────────────────
+  createSequence: (name: string) => string;
+  deleteSequence: (id: string) => void;
+  duplicateSequence: (id: string) => string;
+  renameSequence: (id: string, name: string) => void;
+  setActiveSequence: (id: string) => void;
+  loadSequenceInSource: (id: string) => void;
+  editSourceToRecord: (mode: 'insert' | 'overwrite') => void;
+  toggleSequenceBin: () => void;
+
+  // ── NLE Parity: Additional Editorial Actions ────────────────────────────
+  /** Switch between overwrite and insert editing modes. */
+  setEditMode: (mode: 'overwrite' | 'insert') => void;
+  /** Splice-in (insert edit) a clip at the playhead on a specific track. */
+  spliceIn: (trackId: string, clip: Partial<Clip>) => void;
+  /** Overwrite (replace) at the playhead on a specific track. */
+  overwriteEditOnTrack: (trackId: string, clip: Partial<Clip>) => void;
+  /** Slip the currently selected clip by a number of frames. */
+  slipSelectedClip: (frames: number) => void;
+  /** Slide the currently selected clip by a number of frames. */
+  slideSelectedClip: (frames: number) => void;
+  /** Enter trim mode on a specific clip and side. */
+  enterTrimMode: (clipId: string, side: 'head' | 'tail') => void;
+  /** Apply an incremental trim delta in frames. */
+  applyTrim: (frames: number) => void;
+  /** Exit trim mode, committing changes. */
+  exitTrimModeAction: () => void;
+  /** Group the currently selected clips. */
+  groupSelectedClips: () => void;
+  /** Ungroup the group containing a specific clip. */
+  ungroupClip: (clipId: string) => void;
+  /** Duplicate all currently selected clips. */
+  duplicateSelectedClips: () => void;
+  /** Delete the current selection and close the gap (ripple delete). */
+  rippleDeleteSelection: () => void;
+  /** Set the active segment editing mode. */
+  setSegmentEditMode: (mode: 'lift' | 'extract' | null) => void;
 }
 
 // Waveform generator (random for demo)
@@ -790,6 +861,21 @@ function getPreferredTrack(state: Pick<EditorState, 'tracks' | 'selectedTrackId'
   return matchingTrack ?? state.tracks.find((track) => !track.locked) ?? null;
 }
 
+// ─── Default Sequence ───────────────────────────────────────────────────────
+const DEFAULT_SEQUENCE_ID = 'seq-default';
+const DEFAULT_SEQUENCE: Sequence = {
+  id: DEFAULT_SEQUENCE_ID,
+  name: 'Sequence 1',
+  tracks: INITIAL_TRACKS.map(t => ({ ...t, clips: [...t.clips] })),
+  markers: [],
+  duration: 0,
+  fps: 24,
+  dropFrame: false,
+  inPoint: null,
+  outPoint: null,
+  createdAt: new Date().toISOString(),
+};
+
 // Module-level holder for the alpha dialog resolve callback.
 // Functions are not compatible with Immer proxies, so we store
 // the resolve callback outside of the store state.
@@ -881,13 +967,20 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     zoom: 60,
     scrollLeft: 0,
     duration: 0,
+
+    // Multi-sequence
+    sequences: [{ ...DEFAULT_SEQUENCE, tracks: INITIAL_TRACKS.map(t => ({ ...t, clips: [...t.clips] })) }],
+    activeSequenceId: DEFAULT_SEQUENCE_ID,
+    sourceSequenceId: null,
+    showSequenceBin: false,
+
     selectedClipIds: [],
     selectedTrackId: null,
     inspectedClipId: null,
-    bins: DEMO_BINS,
-    selectedBinId: 'b1a',
-    activeBinAssets: DEMO_BINS[0]!.children[0]!.assets,
-    smartBins: DEMO_SMART_BINS,
+    bins: INITIAL_BINS,
+    selectedBinId: 'b-master',
+    activeBinAssets: [],
+    smartBins: INITIAL_SMART_BINS,
     selectedSmartBinId: null,
     sequenceSettings: {
       name: 'Sequence 1',
@@ -925,7 +1018,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     showSettingsPanel: false,
     isFullscreen: false,
     collabUsers: [
-      { id: 'u1', displayName: 'Sarah K.', color: '#7c5cfc' },
+      { id: 'u1', displayName: 'Sarah K.', color: '#00d4aa' },
       { id: 'u2', displayName: 'Marcus T.', color: '#2bb672' },
     ],
     aiJobs: [],
@@ -991,6 +1084,11 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     // Workspace
     activeWorkspaceId: 'source-record',
 
+    // NLE Parity: Additional Editorial State
+    editMode: 'overwrite' as EditorState['editMode'],
+    segmentEditMode: null as EditorState['segmentEditMode'],
+    trimModeState: { active: false, clipId: null, side: null } as EditorState['trimModeState'],
+
     // Actions
     setPlayhead: (t) => set((s) => { s.playheadTime = Math.max(0, Math.min(t, s.duration)); }),
     togglePlay: () => {
@@ -1024,6 +1122,10 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       const t = s.tracks.find(t => t.id === id); if (t) t.volume = v;
     }),
     selectTrack: (id) => set((s) => { s.selectedTrackId = id; }),
+    updateTrack: (trackId, updates) => set((s) => {
+      const t = s.tracks.find(t => t.id === trackId);
+      if (t) Object.assign(t, updates);
+    }),
 
     addTrack: (track) => set((s) => {
       s.tracks.push(track);
@@ -1623,7 +1725,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       const allAssets = collectAllAssets(state.bins);
       return allAssets.filter(a => matchesSmartBinRules(a, sb.rules, sb.matchAll));
     },
-    addReviewComment: ({ body, author = 'You', role = 'Reviewer', color = '#7c5cfc' }) => set((s) => {
+    addReviewComment: ({ body, author = 'You', role = 'Reviewer', color = '#00d4aa' }) => set((s) => {
       s.reviewComments.unshift({
         id: createId('comment'),
         author,
@@ -1897,6 +1999,255 @@ export const useEditorStore = create<EditorState & EditorActions>()(
 
     loadProject: (id) => set((s) => { s.projectId = id; }),
 
+    // ─── Multi-Sequence Actions ──────────────────────────────────────────
+    createSequence: (name: string) => {
+      const id = createId('seq');
+      set((s) => {
+        const newSeq: Sequence = {
+          id,
+          name,
+          tracks: [
+            { id: createId('t'), name: 'V1', type: 'VIDEO', sortOrder: 0, muted: false, locked: false, solo: false, volume: 1, color: '#5b6af5', clips: [] },
+            { id: createId('t'), name: 'V2', type: 'VIDEO', sortOrder: 1, muted: false, locked: false, solo: false, volume: 1, color: '#818cf8', clips: [] },
+            { id: createId('t'), name: 'A1', type: 'AUDIO', sortOrder: 2, muted: false, locked: false, solo: false, volume: 0.85, color: '#e05b8e', clips: [] },
+            { id: createId('t'), name: 'A2', type: 'AUDIO', sortOrder: 3, muted: false, locked: false, solo: false, volume: 0.6, color: '#4ade80', clips: [] },
+          ],
+          markers: [],
+          duration: 0,
+          fps: s.sequenceSettings.fps,
+          dropFrame: s.sequenceSettings.dropFrame,
+          inPoint: null,
+          outPoint: null,
+          createdAt: new Date().toISOString(),
+        };
+        s.sequences.push(newSeq);
+      });
+      return id;
+    },
+
+    deleteSequence: (id) => set((s) => {
+      // Cannot delete the active sequence if it's the only one
+      if (s.sequences.length <= 1) return;
+      s.sequences = s.sequences.filter(seq => seq.id !== id);
+      // If the deleted sequence was active, switch to the first available
+      if (s.activeSequenceId === id) {
+        const next = s.sequences[0];
+        if (next) {
+          s.activeSequenceId = next.id;
+          s.tracks = next.tracks;
+          s.markers = next.markers;
+          s.duration = next.duration;
+          s.inPoint = next.inPoint;
+          s.outPoint = next.outPoint;
+          s.playheadTime = 0;
+          s.selectedClipIds = [];
+        }
+      }
+      // If the deleted sequence was loaded in source, clear it
+      if (s.sourceSequenceId === id) {
+        s.sourceSequenceId = null;
+      }
+    }),
+
+    duplicateSequence: (id) => {
+      const newId = createId('seq');
+      set((s) => {
+        const source = s.sequences.find(seq => seq.id === id);
+        if (!source) return;
+        const duplicated: Sequence = {
+          ...source,
+          id: newId,
+          name: `${source.name} (Copy)`,
+          tracks: source.tracks.map(t => ({
+            ...t,
+            id: createId('t'),
+            clips: t.clips.map(c => ({
+              ...c,
+              id: createId('clip'),
+              intrinsicVideo: { ...c.intrinsicVideo },
+              intrinsicAudio: { ...c.intrinsicAudio },
+              timeRemap: { ...c.timeRemap, keyframes: c.timeRemap.keyframes.map(kf => ({ ...kf })) },
+              waveformData: c.waveformData ? [...c.waveformData] : undefined,
+            })),
+          })),
+          markers: source.markers.map(m => ({ ...m, id: createId('marker') })),
+          createdAt: new Date().toISOString(),
+        };
+        s.sequences.push(duplicated);
+      });
+      return newId;
+    },
+
+    renameSequence: (id, name) => set((s) => {
+      const seq = s.sequences.find(seq => seq.id === id);
+      if (seq) {
+        seq.name = name;
+        // Also update sequenceSettings.name if this is the active sequence
+        if (s.activeSequenceId === id) {
+          s.sequenceSettings.name = name;
+        }
+      }
+    }),
+
+    setActiveSequence: (id) => set((s) => {
+      if (s.activeSequenceId === id) return;
+      // Save current state back to the active sequence before switching
+      const current = s.sequences.find(seq => seq.id === s.activeSequenceId);
+      if (current) {
+        current.tracks = s.tracks;
+        current.markers = s.markers;
+        current.duration = s.duration;
+        current.inPoint = s.inPoint;
+        current.outPoint = s.outPoint;
+      }
+      // Load the new sequence
+      const next = s.sequences.find(seq => seq.id === id);
+      if (!next) return;
+      s.activeSequenceId = id;
+      s.tracks = next.tracks;
+      s.markers = next.markers;
+      s.duration = next.duration;
+      s.inPoint = next.inPoint;
+      s.outPoint = next.outPoint;
+      s.playheadTime = 0;
+      s.selectedClipIds = [];
+      s.inspectedClipId = null;
+      // Sync sequence settings
+      s.sequenceSettings.name = next.name;
+      s.sequenceSettings.fps = next.fps;
+      s.sequenceSettings.dropFrame = next.dropFrame;
+      // Update enabled track IDs for the new sequence
+      s.enabledTrackIds = next.tracks.map(t => t.id);
+    }),
+
+    loadSequenceInSource: (id) => set((s) => {
+      s.sourceSequenceId = id;
+      // Clear any existing source asset since we're loading a sequence instead
+      s.sourceAsset = null;
+      s.sourceInPoint = null;
+      s.sourceOutPoint = null;
+      s.sourcePlayhead = 0;
+    }),
+
+    editSourceToRecord: (mode) => set((s) => {
+      if (!s.sourceSequenceId) return;
+      const sourceSeq = s.sequences.find(seq => seq.id === s.sourceSequenceId);
+      if (!sourceSeq) return;
+
+      // Determine the source region from in/out points
+      const srcIn = s.sourceInPoint ?? 0;
+      const srcOut = s.sourceOutPoint ?? sourceSeq.duration;
+      const editDuration = srcOut - srcIn;
+      if (editDuration <= 0) return;
+
+      const insertTime = s.playheadTime;
+
+      // For each track in the source sequence, find or create a matching track in record
+      for (const srcTrack of sourceSeq.tracks) {
+        // Find a matching track in the record timeline by type and name
+        let recTrack = s.tracks.find(t => t.type === srcTrack.type && t.name === srcTrack.name);
+        if (!recTrack) {
+          recTrack = s.tracks.find(t => t.type === srcTrack.type && !t.locked);
+        }
+        if (!recTrack) continue;
+
+        // Collect clips from source that overlap with srcIn..srcOut
+        const clipsInRange = srcTrack.clips.filter(c => c.endTime > srcIn && c.startTime < srcOut);
+        if (clipsInRange.length === 0) continue;
+
+        if (mode === 'overwrite') {
+          // Remove or trim clips in the overwrite region on the record track
+          const regionStart = insertTime;
+          const regionEnd = insertTime + editDuration;
+          recTrack.clips = recTrack.clips.filter(c => {
+            if (c.endTime <= regionStart || c.startTime >= regionEnd) return true;
+            if (c.startTime >= regionStart && c.endTime <= regionEnd) return false;
+            if (c.startTime < regionStart && c.endTime > regionEnd) {
+              // Split
+              const tailClip: Clip = makeClip({
+                id: createId('clip'),
+                trackId: recTrack!.id,
+                name: c.name,
+                startTime: regionEnd,
+                endTime: c.endTime,
+                trimStart: c.trimStart + (regionEnd - c.startTime),
+                trimEnd: c.trimEnd,
+                type: c.type,
+                assetId: c.assetId,
+                color: c.color,
+                waveformData: c.waveformData,
+              });
+              c.endTime = regionStart;
+              recTrack!.clips.push(tailClip);
+              return true;
+            }
+            if (c.startTime < regionStart) { c.endTime = regionStart; return true; }
+            if (c.endTime > regionEnd) { c.trimStart += (regionEnd - c.startTime); c.startTime = regionEnd; return true; }
+            return true;
+          });
+        } else {
+          // Insert mode: push existing clips downstream
+          const regionEnd = insertTime + editDuration;
+          for (const c of recTrack.clips) {
+            if (c.startTime >= insertTime) {
+              c.startTime += editDuration;
+              c.endTime += editDuration;
+            } else if (c.startTime < insertTime && c.endTime > insertTime) {
+              const tailClip: Clip = makeClip({
+                id: createId('clip'),
+                trackId: recTrack.id,
+                name: c.name,
+                startTime: regionEnd,
+                endTime: c.endTime + editDuration,
+                trimStart: c.trimStart + (insertTime - c.startTime),
+                trimEnd: c.trimEnd,
+                type: c.type,
+                assetId: c.assetId,
+                color: c.color,
+                waveformData: c.waveformData,
+              });
+              c.endTime = insertTime;
+              recTrack.clips.push(tailClip);
+            }
+          }
+        }
+
+        // Copy the clips from source, offsetting their times
+        for (const srcClip of clipsInRange) {
+          const clipStart = Math.max(srcClip.startTime, srcIn);
+          const clipEnd = Math.min(srcClip.endTime, srcOut);
+          const offsetStart = insertTime + (clipStart - srcIn);
+          const offsetEnd = insertTime + (clipEnd - srcIn);
+          const trimStartAdd = clipStart - srcClip.startTime;
+          const trimEndAdd = srcClip.endTime - clipEnd;
+
+          const newClip: Clip = makeClip({
+            id: createId('clip'),
+            trackId: recTrack.id,
+            name: srcClip.name,
+            startTime: offsetStart,
+            endTime: offsetEnd,
+            trimStart: srcClip.trimStart + trimStartAdd,
+            trimEnd: srcClip.trimEnd + trimEndAdd,
+            type: srcClip.type,
+            assetId: srcClip.assetId,
+            color: recTrack.color,
+            waveformData: srcClip.waveformData ? [...srcClip.waveformData] : undefined,
+          });
+          recTrack.clips.push(newClip);
+        }
+
+        recTrack.clips.sort((a, b) => a.startTime - b.startTime);
+      }
+
+      // Update duration
+      const maxEnd = Math.max(s.duration, ...s.tracks.flatMap(t => t.clips.map(c => c.endTime)));
+      s.duration = maxEnd + 5;
+      s.playheadTime = insertTime + editDuration;
+    }),
+
+    toggleSequenceBin: () => set((s) => { s.showSequenceBin = !s.showSequenceBin; }),
+
     // Sequence settings
     updateSequenceSettings: (settings) => set((s) => {
       Object.assign(s.sequenceSettings, settings);
@@ -1904,6 +2255,13 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       if (settings.width !== undefined) s.projectSettings.width = settings.width;
       if (settings.height !== undefined) s.projectSettings.height = settings.height;
       if (settings.fps !== undefined) s.projectSettings.frameRate = settings.fps;
+      // Sync fps/dropFrame back to the active sequence
+      const activeSeq = s.sequences.find(seq => seq.id === s.activeSequenceId);
+      if (activeSeq) {
+        if (settings.fps !== undefined) activeSeq.fps = settings.fps;
+        if (settings.dropFrame !== undefined) activeSeq.dropFrame = settings.dropFrame;
+        if (settings.name !== undefined) activeSeq.name = settings.name;
+      }
     }),
 
     // Media import — real pipeline with metadata extraction
@@ -2154,8 +2512,337 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       const title = s.titleClips.find((t) => t.id === titleId);
       if (title) Object.assign(title, data);
     }),
+
+    // ─── NLE Parity: Additional Editorial Actions ────────────────────────
+
+    setEditMode: (mode) => set((s) => { s.editMode = mode; }),
+
+    setSegmentEditMode: (mode) => set((s) => { s.segmentEditMode = mode; }),
+
+    spliceIn: (trackId, clip) => set((s) => {
+      const track = s.tracks.find((t) => t.id === trackId);
+      if (!track || track.locked) return;
+
+      const position = s.playheadTime;
+      const duration = clip.endTime != null && clip.startTime != null
+        ? clip.endTime - clip.startTime
+        : 5; // default 5s if no duration specified
+      const endPos = position + duration;
+
+      // Ripple: push all clips at or after position to the right
+      for (const c of track.clips) {
+        if (c.startTime >= position) {
+          c.startTime += duration;
+          c.endTime += duration;
+        } else if (c.startTime < position && c.endTime > position) {
+          // Split clip that straddles the insert position
+          const tailClip: Clip = makeClip({
+            ...c,
+            id: createId('clip'),
+            trackId,
+            startTime: endPos,
+            endTime: c.endTime + duration,
+            trimStart: c.trimStart + (position - c.startTime),
+          });
+          c.endTime = position;
+          track.clips.push(tailClip);
+        }
+      }
+
+      // Insert the new clip
+      const newClip: Clip = makeClip({
+        id: createId('clip'),
+        trackId,
+        name: clip.name ?? 'Inserted Clip',
+        startTime: position,
+        endTime: endPos,
+        trimStart: clip.trimStart ?? 0,
+        trimEnd: clip.trimEnd ?? 0,
+        type: clip.type ?? 'video',
+        assetId: clip.assetId,
+        color: clip.color ?? track.color,
+        waveformData: clip.waveformData,
+      });
+      track.clips.push(newClip);
+      track.clips.sort((a, b) => a.startTime - b.startTime);
+
+      // Sync-lock compensation
+      for (const syncTrackId of s.syncLockedTrackIds) {
+        if (syncTrackId === trackId) continue;
+        const syncTrack = s.tracks.find((t) => t.id === syncTrackId);
+        if (!syncTrack || syncTrack.locked) continue;
+        for (const c of syncTrack.clips) {
+          if (c.startTime >= position) {
+            c.startTime += duration;
+            c.endTime += duration;
+          }
+        }
+      }
+
+      s.selectedClipIds = [newClip.id];
+      s.playheadTime = endPos;
+      if (endPos > s.duration) s.duration = endPos + 5;
+    }),
+
+    overwriteEditOnTrack: (trackId, clip) => set((s) => {
+      const track = s.tracks.find((t) => t.id === trackId);
+      if (!track || track.locked) return;
+
+      const position = s.playheadTime;
+      const duration = clip.endTime != null && clip.startTime != null
+        ? clip.endTime - clip.startTime
+        : 5;
+      const regionStart = position;
+      const regionEnd = position + duration;
+
+      // Clear clips in the overwrite region
+      const newClips: Clip[] = [];
+      for (const c of track.clips) {
+        if (c.endTime <= regionStart || c.startTime >= regionEnd) {
+          newClips.push(c);
+        } else if (c.startTime >= regionStart && c.endTime <= regionEnd) {
+          // Entirely within — remove
+        } else if (c.startTime < regionStart && c.endTime > regionEnd) {
+          // Spans entire region — split
+          const tailClip: Clip = makeClip({
+            ...c,
+            id: createId('clip'),
+            trackId,
+            startTime: regionEnd,
+            endTime: c.endTime,
+            trimStart: c.trimStart + (regionEnd - c.startTime),
+          });
+          c.endTime = regionStart;
+          newClips.push(c);
+          newClips.push(tailClip);
+        } else if (c.startTime < regionStart) {
+          c.endTime = regionStart;
+          newClips.push(c);
+        } else if (c.endTime > regionEnd) {
+          c.trimStart += (regionEnd - c.startTime);
+          c.startTime = regionEnd;
+          newClips.push(c);
+        }
+      }
+      track.clips = newClips;
+
+      // Place the new clip
+      const newClip: Clip = makeClip({
+        id: createId('clip'),
+        trackId,
+        name: clip.name ?? 'Overwrite Clip',
+        startTime: regionStart,
+        endTime: regionEnd,
+        trimStart: clip.trimStart ?? 0,
+        trimEnd: clip.trimEnd ?? 0,
+        type: clip.type ?? 'video',
+        assetId: clip.assetId,
+        color: clip.color ?? track.color,
+        waveformData: clip.waveformData,
+      });
+      track.clips.push(newClip);
+      track.clips.sort((a, b) => a.startTime - b.startTime);
+
+      s.selectedClipIds = [newClip.id];
+      s.playheadTime = regionEnd;
+      if (regionEnd > s.duration) s.duration = regionEnd + 5;
+    }),
+
+    slipSelectedClip: (frames) => set((s) => {
+      if (s.selectedClipIds.length !== 1) return;
+      const clipId = s.selectedClipIds[0]!;
+      const fps = s.sequenceSettings.fps || 24;
+      const delta = frames / fps;
+      for (const t of s.tracks) {
+        const c = t.clips.find((c) => c.id === clipId);
+        if (c) {
+          // Slip: change source window without changing timeline position
+          const maxForward = c.trimEnd;
+          const maxBackward = c.trimStart;
+          const clamped = Math.max(-maxBackward, Math.min(maxForward, delta));
+          c.trimStart += clamped;
+          c.trimEnd -= clamped;
+          return;
+        }
+      }
+    }),
+
+    slideSelectedClip: (frames) => set((s) => {
+      if (s.selectedClipIds.length !== 1) return;
+      const clipId = s.selectedClipIds[0]!;
+      const fps = s.sequenceSettings.fps || 24;
+      const delta = frames / fps;
+      for (const t of s.tracks) {
+        const idx = t.clips.findIndex((c) => c.id === clipId);
+        if (idx >= 0) {
+          const clip = t.clips[idx]!;
+          const prev = idx > 0 ? t.clips[idx - 1] : null;
+          const next = idx < t.clips.length - 1 ? t.clips[idx + 1] : null;
+
+          // Clamp delta
+          let clamped = delta;
+          if (clamped < 0) {
+            if (prev) clamped = Math.max(clamped, prev.startTime + 0.01 - prev.endTime);
+            else clamped = Math.max(clamped, -clip.startTime);
+          }
+          if (clamped > 0 && next) {
+            clamped = Math.min(clamped, next.endTime - 0.01 - next.startTime);
+          }
+
+          // Move clip
+          clip.startTime += clamped;
+          clip.endTime += clamped;
+
+          // Adjust neighbors
+          if (prev) {
+            prev.endTime += clamped;
+            prev.trimEnd = Math.max(0, prev.trimEnd - clamped);
+          }
+          if (next) {
+            next.startTime += clamped;
+            next.trimStart = Math.max(0, next.trimStart + clamped);
+          }
+          return;
+        }
+      }
+    }),
+
+    enterTrimMode: (clipId, side) => set((s) => {
+      s.trimModeState = { active: true, clipId, side };
+      s.trimActive = true;
+    }),
+
+    applyTrim: (frames) => set((s) => {
+      if (!s.trimModeState.active || !s.trimModeState.clipId) return;
+      const fps = s.sequenceSettings.fps || 24;
+      const delta = frames / fps;
+      const clipId = s.trimModeState.clipId;
+      const side = s.trimModeState.side;
+
+      for (const t of s.tracks) {
+        const c = t.clips.find((c) => c.id === clipId);
+        if (c) {
+          if (side === 'head') {
+            // Trim head: adjust startTime
+            const newStart = Math.max(0, c.startTime + delta);
+            const maxStart = c.endTime - (1 / fps); // at least one frame
+            c.trimStart = Math.max(0, c.trimStart + (Math.min(newStart, maxStart) - c.startTime));
+            c.startTime = Math.min(newStart, maxStart);
+          } else if (side === 'tail') {
+            // Trim tail: adjust endTime
+            const newEnd = c.endTime + delta;
+            const minEnd = c.startTime + (1 / fps);
+            c.trimEnd = Math.max(0, c.trimEnd - (Math.max(newEnd, minEnd) - c.endTime));
+            c.endTime = Math.max(newEnd, minEnd);
+          }
+          return;
+        }
+      }
+    }),
+
+    exitTrimModeAction: () => set((s) => {
+      s.trimModeState = { active: false, clipId: null, side: null };
+      s.trimActive = false;
+    }),
+
+    groupSelectedClips: () => set((s) => {
+      if (s.selectedClipIds.length < 2) return;
+      const groupId = createId('group');
+      s.clipGroups[groupId] = [...s.selectedClipIds];
+    }),
+
+    ungroupClip: (clipId) => set((s) => {
+      for (const [groupId, clipIds] of Object.entries(s.clipGroups)) {
+        if (clipIds.includes(clipId)) {
+          delete s.clipGroups[groupId];
+          return;
+        }
+      }
+    }),
+
+    duplicateSelectedClips: () => set((s) => {
+      if (s.selectedClipIds.length === 0) return;
+      const newIds: string[] = [];
+      for (const clipId of s.selectedClipIds) {
+        for (const t of s.tracks) {
+          const clip = t.clips.find((c) => c.id === clipId);
+          if (clip) {
+            const dur = clip.endTime - clip.startTime;
+            const newId = createId('clip');
+            const dup: Clip = {
+              ...clip,
+              id: newId,
+              startTime: clip.endTime,
+              endTime: clip.endTime + dur,
+              intrinsicVideo: { ...clip.intrinsicVideo },
+              intrinsicAudio: { ...clip.intrinsicAudio },
+              timeRemap: { ...clip.timeRemap, keyframes: clip.timeRemap.keyframes.map(kf => ({ ...kf })) },
+              waveformData: clip.waveformData ? [...clip.waveformData] : undefined,
+            };
+            t.clips.push(dup);
+            newIds.push(newId);
+            break;
+          }
+        }
+      }
+      s.selectedClipIds = newIds;
+    }),
+
+    rippleDeleteSelection: () => set((s) => {
+      if (s.selectedClipIds.length === 0) return;
+      for (const t of s.tracks) {
+        const removedClips = t.clips
+          .filter((c) => s.selectedClipIds.includes(c.id))
+          .sort((a, b) => a.startTime - b.startTime);
+        if (removedClips.length === 0) continue;
+
+        // Process from last to first to maintain offsets
+        for (let i = removedClips.length - 1; i >= 0; i--) {
+          const clip = removedClips[i]!;
+          const dur = clip.endTime - clip.startTime;
+          t.clips = t.clips.filter((c) => c.id !== clip.id);
+          // Shift downstream clips left
+          for (const c of t.clips) {
+            if (c.startTime >= clip.startTime) {
+              c.startTime -= dur;
+              c.endTime -= dur;
+            }
+          }
+        }
+      }
+      s.selectedClipIds = [];
+    }),
   }))
 );
+
+// ─── Active Sequence Sync ────────────────────────────────────────────────────
+// Keep the active sequence's tracks/markers/duration in sync with the
+// top-level state whenever they change. This uses a subscribe so that any
+// action that mutates tracks/markers/duration automatically mirrors back.
+let _lastSyncedTracks: Track[] | null = null;
+let _lastSyncedMarkers: Marker[] | null = null;
+let _lastSyncedDuration: number | null = null;
+useEditorStore.subscribe((state) => {
+  if (state.tracks !== _lastSyncedTracks || state.markers !== _lastSyncedMarkers || state.duration !== _lastSyncedDuration) {
+    _lastSyncedTracks = state.tracks;
+    _lastSyncedMarkers = state.markers;
+    _lastSyncedDuration = state.duration;
+    // Sync back to the active sequence record
+    const activeSeq = state.sequences.find(seq => seq.id === state.activeSequenceId);
+    if (activeSeq && (activeSeq.tracks !== state.tracks || activeSeq.markers !== state.markers || activeSeq.duration !== state.duration)) {
+      useEditorStore.setState((s: any) => {
+        const seq = s.sequences.find((seq: Sequence) => seq.id === s.activeSequenceId);
+        if (seq) {
+          seq.tracks = s.tracks;
+          seq.markers = s.markers;
+          seq.duration = s.duration;
+          seq.inPoint = s.inPoint;
+          seq.outPoint = s.outPoint;
+        }
+      });
+    }
+  }
+});
 
 // ─── PlaybackEngine → Store sync ─────────────────────────────────────────────
 // Convert engine frame updates into time-based playhead position.

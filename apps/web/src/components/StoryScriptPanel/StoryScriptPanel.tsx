@@ -103,7 +103,7 @@ function ScriptTextRenderer({ text, teleprompterMode }: { text: string; teleprom
                 padding: teleprompterMode ? '2px 10px' : '1px 6px',
                 borderRadius: 'var(--radius-xs, 3px)',
                 background: teleprompterMode ? 'rgba(124,92,252,0.3)' : 'rgba(124,92,252,0.15)',
-                color: teleprompterMode ? '#c4b5fd' : 'var(--text-accent, #7c5cfc)',
+                color: teleprompterMode ? '#c4b5fd' : 'var(--text-accent, #00d4aa)',
                 fontSize: teleprompterMode ? 14 : 10,
                 fontWeight: 600,
                 verticalAlign: 'baseline',

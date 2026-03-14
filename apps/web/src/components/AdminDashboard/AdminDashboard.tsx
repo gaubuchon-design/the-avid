@@ -309,7 +309,7 @@ function avatarInitials(name: string): string {
     .slice(0, 2);
 }
 
-const AVATAR_COLORS = ['#5b6af5', '#2bb672', '#e8943a', '#e05b8e', '#6bc5e3', '#7c5cfc'];
+const AVATAR_COLORS = ['#5b6af5', '#2bb672', '#e8943a', '#e05b8e', '#6bc5e3', '#00d4aa'];
 
 // =============================================================================
 //  Tab: Team
@@ -690,7 +690,7 @@ function TokensTab() {
       const y = chartH - barH;
 
       // Bar
-      ctx.fillStyle = '#7c5cfc';
+      ctx.fillStyle = '#00d4aa';
       ctx.beginPath();
       ctx.roundRect(x, y, barW, barH, [3, 3, 0, 0]);
       ctx.fill();
