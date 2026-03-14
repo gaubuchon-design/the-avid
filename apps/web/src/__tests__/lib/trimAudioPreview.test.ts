@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+
 import { TrimSide } from '../../engine/TrimEngine';
 import { resolveTrimAudioPreviewRoute } from '../../lib/trimAudioPreview';
+
 import type { TrimMonitorPreview } from '../../lib/trimMonitorPreview';
 
 const basePreviewSide = {

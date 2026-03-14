@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+
 import { ColorEngine } from '../../engine/ColorEngine';
 
 describe('ColorEngine', () => {
@@ -53,7 +54,6 @@ describe('ColorEngine', () => {
 
   it('removeNode() deletes node and cleans up connections', () => {
     const curves = engine.addNode('curves');
-    const sourceNode = engine.getAllNodes().find((n) => n.type === 'source')!;
     const primaryNode = engine.getAllNodes().find((n) => n.type === 'primary')!;
 
     engine.connectNodes(primaryNode.id, curves.id);

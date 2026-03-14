@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { inferAudioChannelLayout, resolveAudioTrackCount } from '../../lib/audioChannelLayout';
 
 describe('audio channel layout helpers', () => {

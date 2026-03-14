@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import type { EffectInstance, Keyframe } from '../../engine/EffectsEngine';
+
+import { effectsEngine, type EffectInstance } from '../../engine/EffectsEngine';
 
 // We need a fresh engine for each test to avoid shared state.
 // The module exports a singleton, so we re-import via dynamic import tricks.
 // Instead, we'll test against the singleton and reset between tests.
-import { effectsEngine } from '../../engine/EffectsEngine';
 
 describe('EffectsEngine', () => {
   // ── Definition Tests ──────────────────────────────────────────────────

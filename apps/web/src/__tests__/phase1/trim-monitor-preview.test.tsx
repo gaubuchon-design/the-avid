@@ -1,9 +1,10 @@
 import React, { act } from 'react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRoot } from 'react-dom/client';
-import { TrimSide, trimEngine } from '../../engine/TrimEngine';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import { RecordMonitor } from '../../components/RecordMonitor/RecordMonitor';
 import { SourceMonitor } from '../../components/SourceMonitor/SourceMonitor';
+import { TrimSide, trimEngine } from '../../engine/TrimEngine';
 import { makeClip, useEditorStore } from '../../store/editor.store';
 import { usePlayerStore } from '../../store/player.store';
 

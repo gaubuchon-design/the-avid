@@ -1,14 +1,15 @@
-import React, { useRef } from 'react';
 import { act, render, waitFor } from '@testing-library/react';
+import React, { useRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import { createFrameTransport } from '../../../../desktop/src/main/videoIO/FrameTransport';
+import { useDesktopParityMonitorPlayback } from '../../hooks/useDesktopParityMonitorPlayback';
 import {
   DEFAULT_INTRINSIC_AUDIO,
   DEFAULT_INTRINSIC_VIDEO,
   DEFAULT_TIME_REMAP,
   useEditorStore,
 } from '../../store/editor.store';
-import { useDesktopParityMonitorPlayback } from '../../hooks/useDesktopParityMonitorPlayback';
 
 function DesktopParityMonitorHarness() {
   const canvasRef = useRef<HTMLCanvasElement>(null);

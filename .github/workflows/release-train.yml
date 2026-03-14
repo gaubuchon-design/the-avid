@@ -321,6 +321,9 @@ jobs:
           path: apps/desktop/out
           merge-multiple: true
 
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
       - name: Publish desktop updater artifacts
         run: npm run publish:desktop:updates -- --artifacts-dir=apps/desktop/out --channel=${{ vars.DESKTOP_UPDATE_CHANNEL || 'stable' }}
         env:

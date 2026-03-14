@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+
 import { trackPatchingEngine } from '../../engine/TrackPatchingEngine';
+
 import type { Track } from '../../store/editor.store';
 
 function makeTrack(

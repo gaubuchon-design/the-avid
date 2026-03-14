@@ -1,9 +1,15 @@
-import React from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { NewProjectDialog } from '../../components/NewProjectDialog/NewProjectDialog';
 import { useEditorStore } from '../../store/editor.store';
+
+const routerFuture = {
+  v7_startTransition: true,
+  v7_relativeSplatPath: true,
+} as const;
 
 const repositoryMocks = vi.hoisted(() => ({
   createProjectInRepository: vi.fn(),
@@ -37,7 +43,7 @@ describe('phase 1 new project dialog', () => {
 
   it('keeps advanced sequence controls hidden until requested', async () => {
     render(
-      <MemoryRouter>
+      <MemoryRouter future={routerFuture}>
         <NewProjectDialog />
       </MemoryRouter>,
     );

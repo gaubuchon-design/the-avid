@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+
 import { applyGaussianBlur } from '../../../engine/effects/blur';
 
 /** Helper: create a simple ImageData-like object. */

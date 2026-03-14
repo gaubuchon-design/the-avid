@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'vitest';
+
 import { isLegacyExportPageParam, resolveEditorPageParam, resolveWorkspaceParam } from '../../lib/editorUrlState';
 
 describe('editorUrlState', () => {
   it('resolves supported editor pages', () => {
     expect(resolveEditorPageParam('media')).toBe('media');
     expect(resolveEditorPageParam('edit')).toBe('edit');
+    expect(resolveEditorPageParam('ai')).toBe('ai');
+    expect(resolveEditorPageParam('admin')).toBe('admin');
+    expect(resolveEditorPageParam('vfx')).toBe('vfx');
   });
 
   it('falls back to edit for unsupported pages', () => {
     expect(resolveEditorPageParam(null)).toBe('edit');
-    expect(resolveEditorPageParam('admin')).toBe('edit');
+    expect(resolveEditorPageParam('admin')).toBe('admin');
     expect(resolveEditorPageParam('deliver')).toBe('edit');
   });
 

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+
 import { editEngine } from '../../engine/EditEngine';
 import { trackPatchingEngine } from '../../engine/TrackPatchingEngine';
 import { makeClip, useEditorStore } from '../../store/editor.store';

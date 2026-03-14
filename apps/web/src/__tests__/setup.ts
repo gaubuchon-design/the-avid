@@ -35,7 +35,7 @@ Object.defineProperty(HTMLVideoElement.prototype, 'pause', { value: vi.fn() });
 
 // Mock requestAnimationFrame
 let rafId = 0;
-Object.defineProperty(globalThis, 'requestAnimationFrame', { value: vi.fn((cb: FrameRequestCallback) => ++rafId), writable: true });
+Object.defineProperty(globalThis, 'requestAnimationFrame', { value: vi.fn((_cb: FrameRequestCallback) => ++rafId), writable: true });
 Object.defineProperty(globalThis, 'cancelAnimationFrame', { value: vi.fn(), writable: true });
 
 class MockResizeObserver {
@@ -81,6 +81,94 @@ if (typeof globalThis.ImageData === 'undefined') {
   });
 }
 
+function createMockCanvasContext(canvas: HTMLCanvasElement) {
+  const gradient = { addColorStop: vi.fn() };
+
+  return {
+    canvas,
+    globalAlpha: 1,
+    fillStyle: '#000000',
+    strokeStyle: '#000000',
+    lineWidth: 1,
+    lineCap: 'butt',
+    lineJoin: 'miter',
+    font: '16px sans-serif',
+    textAlign: 'start',
+    textBaseline: 'alphabetic',
+    clearRect: vi.fn(),
+    drawImage: vi.fn(),
+    fillRect: vi.fn(),
+    strokeRect: vi.fn(),
+    beginPath: vi.fn(),
+    closePath: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
+    bezierCurveTo: vi.fn(),
+    quadraticCurveTo: vi.fn(),
+    arc: vi.fn(),
+    ellipse: vi.fn(),
+    rect: vi.fn(),
+    fill: vi.fn(),
+    stroke: vi.fn(),
+    clip: vi.fn(),
+    save: vi.fn(),
+    restore: vi.fn(),
+    translate: vi.fn(),
+    scale: vi.fn(),
+    rotate: vi.fn(),
+    setTransform: vi.fn(),
+    resetTransform: vi.fn(),
+    fillText: vi.fn(),
+    strokeText: vi.fn(),
+    setLineDash: vi.fn(),
+    getLineDash: vi.fn(() => []),
+    measureText: vi.fn((text: string) => ({
+      width: text.length * 8,
+      actualBoundingBoxAscent: 10,
+      actualBoundingBoxDescent: 4,
+    })),
+    createLinearGradient: vi.fn(() => gradient),
+    createRadialGradient: vi.fn(() => gradient),
+    createPattern: vi.fn(() => ({})),
+    getImageData: vi.fn((_sx = 0, _sy = 0, sw = canvas.width || 1, sh = canvas.height || 1) => (
+      new ImageData(Math.max(sw, 1), Math.max(sh, 1))
+    )),
+    putImageData: vi.fn(),
+  };
+}
+
+const canvasContexts = new WeakMap<HTMLCanvasElement, ReturnType<typeof createMockCanvasContext>>();
+Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+  value: vi.fn(function getContext(this: HTMLCanvasElement, contextId: string) {
+    if (contextId !== '2d') {
+      return null;
+    }
+
+    let context = canvasContexts.get(this);
+
+    if (!context) {
+      context = createMockCanvasContext(this);
+      canvasContexts.set(this, context);
+    }
+
+    return context;
+  }),
+  writable: true,
+  configurable: true,
+});
+Object.defineProperty(HTMLCanvasElement.prototype, 'toBlob', {
+  value: vi.fn(function toBlob(this: HTMLCanvasElement, callback: BlobCallback) {
+    callback(new Blob([], { type: 'image/png' }));
+  }),
+  writable: true,
+  configurable: true,
+});
+Object.defineProperty(HTMLCanvasElement.prototype, 'toDataURL', {
+  value: vi.fn(() => 'data:image/png;base64,mock'),
+  writable: true,
+  configurable: true,
+});
+
 // Mock OffscreenCanvas
 Object.defineProperty(globalThis, 'OffscreenCanvas', { value: undefined, writable: true });
 
@@ -89,6 +177,11 @@ Object.defineProperty(navigator, 'gpu', { value: undefined, writable: true, conf
 
 // Mock window.electronAPI
 Object.defineProperty(window, 'electronAPI', { value: undefined, writable: true, configurable: true });
+Object.defineProperty(HTMLAnchorElement.prototype, 'click', {
+  value: vi.fn(),
+  writable: true,
+  configurable: true,
+});
 
 const localStorageState = new Map<string, string>();
 Object.defineProperty(globalThis, 'localStorage', {

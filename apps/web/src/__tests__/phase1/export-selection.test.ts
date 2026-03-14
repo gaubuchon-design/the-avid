@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { buildPlaybackFrameSignature, buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
 import { buildExportPlaybackSnapshot, buildExportSelectionSummary } from '../../lib/exportSelection';
 import { makeClip } from '../../store/editor.store';

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { extractDesktopDroppedPaths } from '../../lib/desktopDropPaths';
 
 describe('extractDesktopDroppedPaths', () => {

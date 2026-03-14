@@ -1,6 +1,7 @@
-import React from 'react';
 import { act, render } from '@testing-library/react';
+import React from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import { useTrimLoopPlayback } from '../../hooks/useTrimLoopPlayback';
 import { useEditorStore } from '../../store/editor.store';
 import { usePlayerStore } from '../../store/player.store';

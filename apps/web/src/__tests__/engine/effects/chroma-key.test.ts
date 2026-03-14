@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+
 import { applyChromaKey } from '../../../engine/effects/chroma-key';
 
 /** Helper: create RGBA pixel data with a single color. */

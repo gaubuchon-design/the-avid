@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { findTimelineMonitorMediaSource } from '../../lib/monitorPlayback';
 import { makeClip } from '../../store/editor.store';
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { TrimSide } from '../../engine/TrimEngine';
 import { resolveTrimEntryTarget } from '../../lib/trimEntry';
 import { makeClip } from '../../store/editor.store';

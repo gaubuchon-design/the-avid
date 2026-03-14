@@ -5,7 +5,7 @@
 
 import React from 'react';
 
-export type EditorPage = 'media' | 'edit';
+export type EditorPage = 'media' | 'edit' | 'ai' | 'admin' | 'vfx';
 
 interface PageNavProps {
   activePage: EditorPage;
@@ -15,6 +15,9 @@ interface PageNavProps {
 const PAGES: { id: EditorPage; label: string; shortcut: string }[] = [
   { id: 'media', label: 'Media', shortcut: 'Shift+1' },
   { id: 'edit', label: 'Edit', shortcut: 'Shift+2' },
+  { id: 'ai', label: 'AI', shortcut: 'Shift+3' },
+  { id: 'admin', label: 'Admin', shortcut: 'Shift+4' },
+  { id: 'vfx', label: 'VFX', shortcut: 'Shift+5' },
 ];
 
 export function PageNavigation({ activePage, onPageChange }: PageNavProps) {

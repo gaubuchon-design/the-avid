@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { ProjectVersion } from '../../collab/CollabEngine';
+
 import { buildVersionComparison, formatSignedDelta, pickComparisonBaseline } from '../../lib/versionComparison';
+
+import type { ProjectVersion } from '../../collab/CollabEngine';
 
 function makeVersion(overrides: Partial<ProjectVersion>): ProjectVersion {
   return {

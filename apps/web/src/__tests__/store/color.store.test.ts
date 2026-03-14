@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+
 import { useColorStore } from '../../store/color.store';
 
 describe('useColorStore', () => {

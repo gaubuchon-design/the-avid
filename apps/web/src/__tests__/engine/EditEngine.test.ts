@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+
 import { EditEngine } from '../../engine/EditEngine';
+
 import type { Command } from '../../engine/types';
 
 describe('EditEngine', () => {
@@ -65,6 +67,7 @@ describe('EditEngine', () => {
     engine.undo();
     expect(engine.canRedo()).toBe(true);
     engine.execute(cmd2);
+    expect(value).toBe(2);
     expect(engine.canRedo()).toBe(false);
   });
 

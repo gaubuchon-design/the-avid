@@ -1,6 +1,7 @@
 import React, { act } from 'react';
-import { describe, expect, it, vi } from 'vitest';
 import { createRoot } from 'react-dom/client';
+import { describe, expect, it, vi } from 'vitest';
+
 import { Playhead } from '../../components/TimelinePanel/Playhead';
 
 describe('timeline playhead rendering', () => {

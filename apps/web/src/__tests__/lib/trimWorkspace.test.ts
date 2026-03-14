@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+
 import { trimEngine } from '../../engine/TrimEngine';
 import {
   requestTrimWorkspace,
   scrubTimelineTimecodeTrack,
 } from '../../lib/trimWorkspace';
-import { useUserSettingsStore } from '../../store/userSettings.store';
 import { makeClip, useEditorStore } from '../../store/editor.store';
+import { useUserSettingsStore } from '../../store/userSettings.store';
 
 const initialState = useEditorStore.getState();
 

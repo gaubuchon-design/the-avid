@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+
 import {
   buildExportFramePlan,
   buildExportSnapshotForFrame,
@@ -117,9 +118,9 @@ describe('ExportEngine', () => {
 
       const callCount = listener.mock.calls.length;
       unsub();
-
-      // Cleanup
       exportEngine.cancelExport(job.id);
+
+      expect(listener).toHaveBeenCalledTimes(callCount);
     });
   });
 
@@ -290,7 +291,7 @@ describe('ExportEngine', () => {
         .spyOn(exportEngine, 'startRealExport')
         .mockImplementation(async (_jobId, _canvas, _duration, _fps, onProgress) => {
           onProgress?.(0.2);
-          return await new Promise<{ blob: Blob; mimeType: string; audioTrackCount: number }>((resolve) => {
+          return new Promise<{ blob: Blob; mimeType: string; audioTrackCount: number }>((resolve) => {
             setTimeout(() => {
               onProgress?.(1);
               resolve({

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { colorEngine } from '../../engine/ColorEngine';
+import { compositePlaybackSnapshot } from '../../engine/compositeRecordFrame';
 import { effectsEngine } from '../../engine/EffectsEngine';
 import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
-import { compositePlaybackSnapshot } from '../../engine/compositeRecordFrame';
 import {
   getPlaybackRealtimeFallbackStats,
   buildPlaybackSnapshotRenderRevision,

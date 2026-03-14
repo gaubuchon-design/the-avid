@@ -28,6 +28,9 @@ const AudioMixer = lazy(() => import('./components/AudioMixer/AudioMixer').then(
 const EffectsPanel = lazy(() => import('./components/EffectsPanel/EffectsPanel').then(m => ({ default: m.EffectsPanel })));
 const ScriptPanel = lazy(() => import('./components/ScriptPanel/ScriptPanel').then(m => ({ default: m.ScriptPanel })));
 const ExportPanel = lazy(() => import('./components/ExportPanel/ExportPanel').then(m => ({ default: m.ExportPanel })));
+const AIAssistantPanel = lazy(() => import('./components/AIAssistant/AIAssistantPanel').then(m => ({ default: m.AIAssistantPanel })));
+const AdminDashboard = lazy(() => import('./components/AdminDashboard/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
+const VFXWorkspace = lazy(() => import('./components/VFXWorkspace/VFXWorkspace').then(m => ({ default: m.VFXWorkspace })));
 
 // ─── Panel Registry ──────────────────────────────────────────────────────────
 // Maps panel identifiers to their component implementations.
@@ -42,6 +45,9 @@ export const panelRegistry: Record<string, React.ComponentType> = {
   effects: EffectsPanel,
   script: ScriptPanel,
   export: ExportPanel,
+  ai: AIAssistantPanel,
+  admin: AdminDashboard,
+  vfx: VFXWorkspace,
 };
 
 // ─── Workspace Presets ───────────────────────────────────────────────────────

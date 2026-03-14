@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
+
 import {
   compositePlaybackSnapshot,
   inspectPlaybackVideoLayerAvailability,
 } from '../../engine/compositeRecordFrame';
+import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
 import { makeClip } from '../../store/editor.store';
 
 const effectsEngineMocks = vi.hoisted(() => ({
