@@ -1140,6 +1140,8 @@ const PresetRow = memo(function PresetRow({
 //  Effect Browser (center panel)
 // =============================================================================
 
+const AUDIO_EFFECT_CATEGORIES = new Set(['Audio']);
+
 const EffectBrowser = memo(function EffectBrowser({
   selectedNode,
   definitions,
@@ -1158,6 +1160,20 @@ const EffectBrowser = memo(function EffectBrowser({
     updateParam,
   } = useEffectsStore();
 
+  const tracks = useEditorStore((s) => s.tracks);
+
+  // Determine the track type of the currently selected clip so we can filter
+  // effects appropriately (audio effects for audio tracks, video effects for video tracks).
+  const selectedClipTrackType = useMemo(() => {
+    if (!selectedClipId) return null;
+    for (const track of tracks) {
+      if (track.clips.some((c) => c.id === selectedClipId)) {
+        return track.type;
+      }
+    }
+    return null;
+  }, [selectedClipId, tracks]);
+
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [expandedPresets, setExpandedPresets] = useState<Set<string>>(new Set());
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1174,6 +1190,14 @@ const EffectBrowser = memo(function EffectBrowser({
   // Filter definitions
   const filtered = useMemo(() => {
     let list = definitions;
+
+    // Track-type filter: only show effects appropriate for the selected clip's track type.
+    // Audio tracks only see Audio effects; video/effect/graphic tracks only see non-Audio effects.
+    if (selectedClipTrackType === 'AUDIO') {
+      list = list.filter((d) => AUDIO_EFFECT_CATEGORIES.has(d.category));
+    } else if (selectedClipTrackType && selectedClipTrackType !== 'SUBTITLE') {
+      list = list.filter((d) => !AUDIO_EFFECT_CATEGORIES.has(d.category));
+    }
 
     // Category filter
     if (isFavoritesView) {
@@ -1194,7 +1218,7 @@ const EffectBrowser = memo(function EffectBrowser({
     }
 
     return list;
-  }, [definitions, activeCats, isFavoritesView, favorites, searchQuery]);
+  }, [definitions, activeCats, isFavoritesView, favorites, searchQuery, selectedClipTrackType]);
 
   const handleApply = useCallback(
     (defId: string) => {

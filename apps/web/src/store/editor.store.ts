@@ -1557,6 +1557,24 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         s.trimLoopDurationPreset = 'short';
         s.trimLoopPreRollFrames = 12;
         s.trimLoopPostRollFrames = 12;
+
+        // Restore sequences: build an initial sequence from the hydrated project data
+        const restoredSeq: Sequence = {
+          id: hydrated.projectId,
+          name: hydrated.sequenceSettings.name,
+          tracks: hydrated.tracks,
+          markers: hydrated.markers,
+          duration: hydrated.duration,
+          fps: hydrated.sequenceSettings.fps,
+          dropFrame: hydrated.sequenceSettings.dropFrame,
+          inPoint: null,
+          outPoint: null,
+          createdAt: hydrated.projectCreatedAt || new Date().toISOString(),
+        };
+        s.sequences = [restoredSeq];
+        s.activeSequenceId = restoredSeq.id;
+        s.sourceSequenceId = null;
+        s.showSequenceBin = false;
       });
 
       get().setSourceAsset(hydrated.sourceAsset);
@@ -3039,15 +3057,26 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     createSequence: (name: string) => {
       const id = createId('seq');
       set((s) => {
+        // Save current state back to the active sequence before switching
+        const current = s.sequences.find(seq => seq.id === s.activeSequenceId);
+        if (current) {
+          current.tracks = s.tracks;
+          current.markers = s.markers;
+          current.duration = s.duration;
+          current.inPoint = s.inPoint;
+          current.outPoint = s.outPoint;
+        }
+
+        const newTracks = [
+          { id: createId('t'), name: 'V1', type: 'VIDEO' as const, sortOrder: 0, muted: false, locked: false, solo: false, volume: 1, color: '#5b6af5', clips: [] as Clip[] },
+          { id: createId('t'), name: 'V2', type: 'VIDEO' as const, sortOrder: 1, muted: false, locked: false, solo: false, volume: 1, color: '#818cf8', clips: [] as Clip[] },
+          { id: createId('t'), name: 'A1', type: 'AUDIO' as const, sortOrder: 2, muted: false, locked: false, solo: false, volume: 0.85, color: '#e05b8e', clips: [] as Clip[] },
+          { id: createId('t'), name: 'A2', type: 'AUDIO' as const, sortOrder: 3, muted: false, locked: false, solo: false, volume: 0.6, color: '#4ade80', clips: [] as Clip[] },
+        ];
         const newSeq: Sequence = {
           id,
           name,
-          tracks: [
-            { id: createId('t'), name: 'V1', type: 'VIDEO', sortOrder: 0, muted: false, locked: false, solo: false, volume: 1, color: '#5b6af5', clips: [] },
-            { id: createId('t'), name: 'V2', type: 'VIDEO', sortOrder: 1, muted: false, locked: false, solo: false, volume: 1, color: '#818cf8', clips: [] },
-            { id: createId('t'), name: 'A1', type: 'AUDIO', sortOrder: 2, muted: false, locked: false, solo: false, volume: 0.85, color: '#e05b8e', clips: [] },
-            { id: createId('t'), name: 'A2', type: 'AUDIO', sortOrder: 3, muted: false, locked: false, solo: false, volume: 0.6, color: '#4ade80', clips: [] },
-          ],
+          tracks: newTracks,
           markers: [],
           duration: 0,
           fps: s.sequenceSettings.fps,
@@ -3057,6 +3086,19 @@ export const useEditorStore = create<EditorState & EditorActions>()(
           createdAt: new Date().toISOString(),
         };
         s.sequences.push(newSeq);
+
+        // Auto-activate the new sequence
+        s.activeSequenceId = id;
+        s.tracks = newTracks;
+        s.markers = [];
+        s.duration = 0;
+        s.inPoint = null;
+        s.outPoint = null;
+        s.playheadTime = 0;
+        s.selectedClipIds = [];
+        s.inspectedClipId = null;
+        s.sequenceSettings.name = name;
+        s.enabledTrackIds = newTracks.map(t => t.id);
       });
       return id;
     },

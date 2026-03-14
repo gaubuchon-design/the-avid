@@ -66,9 +66,9 @@ import {
   type EditorLayoutState,
 } from '../lib/editorLayout';
 
-// DaVinci Resolve parity pages (lazy-loaded)
-const FusionPage = lazy(() => import('./FusionPage').then(m => ({ default: m.FusionPage })));
-const FairlightPage = lazy(() => import('./FairlightPage').then(m => ({ default: m.FairlightPage })));
+// VFX and ProTools pages (lazy-loaded)
+const VFXPage = lazy(() => import('./FusionPage').then(m => ({ default: m.FusionPage })));
+const ProToolsPage = lazy(() => import('./FairlightPage').then(m => ({ default: m.FairlightPage })));
 
 // Lazy-loaded vertical panels
 const MarkersPanel = lazy(() => import('../components/MarkersPanel/MarkersPanel').then(m => ({ default: m.MarkersPanel })));
@@ -495,6 +495,12 @@ export function EditorPage() {
         e.preventDefault();
         toggleSequenceBin();
       }
+      // ⌘Shift+N / Ctrl+Shift+N to create New Sequence
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'N' || e.key === 'n')) {
+        e.preventDefault();
+        const seqs = useEditorStore.getState().sequences;
+        useEditorStore.getState().createSequence(`Sequence ${seqs.length + 1}`);
+      }
       // ⌘F / Ctrl+F to toggle Find in Timeline
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'f') {
         e.preventDefault();
@@ -502,7 +508,7 @@ export function EditorPage() {
       }
       // Shift+1-7 to switch pages (Resolve-style)
       if (e.shiftKey && !e.metaKey && !e.ctrlKey) {
-        const pageMap: Record<string, PageId> = { '!': 'media', '@': 'cut', '#': 'edit', '$': 'fusion', '%': 'color', '^': 'fairlight', '&': 'deliver' };
+        const pageMap: Record<string, PageId> = { '!': 'media', '@': 'cut', '#': 'edit', '$': 'vfx', '%': 'color', '^': 'protools', '&': 'deliver' };
         const page = pageMap[e.key];
         if (page) { e.preventDefault(); handlePageChange(page); }
       }
@@ -595,18 +601,40 @@ export function EditorPage() {
           </Suspense>
         </ErrorBoundary>
       )}
-      {activePage === 'fusion' && (
+      {activePage === 'vfx' && (
         <ErrorBoundary resetKeys={[activePage]}>
           <Suspense fallback={<div style={{ flex: 1 }} />}>
-            <FusionPage />
+            <VFXPage />
           </Suspense>
         </ErrorBoundary>
       )}
-      {activePage === 'fairlight' && (
+      {activePage === 'color' && (
+        <ErrorBoundary resetKeys={[activePage]}>
+          <div className="workspace workspace-stacked" style={{ gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'minmax(0, 1fr)' }}>
+            <div className="canvas-area workspace-panel" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <PanelErrorBoundary panelName="ComposerPanel">
+                <ComposerPanel dualMonitorSplit={50} onDualMonitorSplitChange={() => {}} />
+              </PanelErrorBoundary>
+            </div>
+          </div>
+        </ErrorBoundary>
+      )}
+      {activePage === 'protools' && (
         <ErrorBoundary resetKeys={[activePage]}>
           <Suspense fallback={<div style={{ flex: 1 }} />}>
-            <FairlightPage />
+            <ProToolsPage />
           </Suspense>
+        </ErrorBoundary>
+      )}
+      {activePage === 'deliver' && (
+        <ErrorBoundary resetKeys={[activePage]}>
+          <div className="workspace workspace-stacked" style={{ gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'minmax(0, 1fr)' }}>
+            <div className="canvas-area workspace-panel" style={{ padding: 18, overflow: 'hidden' }}>
+              <PanelErrorBoundary panelName="ExportPanel">
+                <ExportPanel />
+              </PanelErrorBoundary>
+            </div>
+          </div>
         </ErrorBoundary>
       )}
       {activePage === 'edit' && (
@@ -766,6 +794,34 @@ export function EditorPage() {
       )}
 
       <StatusBar />
+
+      {showSequenceBin && (
+        <div
+          className="export-overlay"
+          role="dialog"
+          aria-label="Sequence Bin"
+          tabIndex={0}
+          onClick={(e) => { if (e.target === e.currentTarget) toggleSequenceBin(); }}
+          onKeyDown={(e) => { if (e.key === 'Escape') toggleSequenceBin(); }}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,0.6)', display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+            padding: 16,
+          }}
+        >
+          <div style={{
+            width: 'min(560px, 100%)', maxWidth: 560, maxHeight: '70vh',
+            borderRadius: 'var(--radius-lg)',
+            overflow: 'hidden', position: 'relative',
+            boxShadow: 'var(--shadow-lg)',
+          }}>
+            <Suspense fallback={<div style={{ padding: 24, background: 'var(--bg-surface)', color: 'var(--fg-muted)' }}>Loading…</div>}>
+              <SequenceBin />
+            </Suspense>
+          </div>
+        </div>
+      )}
 
       {showExportPanel && (
         <div
