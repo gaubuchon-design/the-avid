@@ -9,6 +9,7 @@ import {
   flattenAssets,
   getAudioChannelCountForLayout,
   getMediaAssetPrimaryPath,
+  hydrateMediaAsset,
   normalizeAudioChannelLayoutLabel,
   pickDominantAudioChannelLayout,
   summarizeAudioBusExecutionPolicy,
@@ -17,7 +18,9 @@ import {
 } from '@mcua/core';
 import { detectGPU, getHWAccelDecodeArgs, getHWAccelFFmpegArgs } from './gpu';
 import type {
+  CaptionDescriptor,
   EditorBin,
+  ColorDescriptor,
   EditorClip,
   EditorMediaAsset,
   EditorMediaFingerprint,
@@ -27,7 +30,11 @@ import type {
   EditorProject,
   EditorTrack,
   EditorWatchFolder,
+  GraphicDescriptor,
   MediaStorageMode,
+  ProbeSideDataDescriptor,
+  RationalTimebase,
+  StreamDescriptor,
 } from '@mcua/core';
 
 const execFileAsync = promisify(execFile);
@@ -85,6 +92,11 @@ export interface ExportTranscodeResult {
   outputContainer: string;
   outputVideoCodec: string;
   outputAudioCodec?: string;
+}
+
+interface ProbeMediaResult {
+  technicalMetadata: EditorMediaTechnicalMetadata;
+  streams: StreamDescriptor[];
 }
 
 export interface VideoFrameArtifactRequest {
@@ -165,6 +177,17 @@ type ToolPaths = {
 
 let cachedToolAvailability: Promise<ToolAvailability> | null = null;
 let cachedToolPaths: Promise<ToolPaths> | null = null;
+const failedVideoArtifactSources = new Set<string>();
+const failedAudioArtifactSources = new Set<string>();
+
+async function getMediaSourceIdentity(sourcePath: string): Promise<string> {
+  try {
+    const stats = await stat(sourcePath);
+    return `${sourcePath}:${stats.size}:${Math.round(stats.mtimeMs)}`;
+  } catch {
+    return sourcePath;
+  }
+}
 
 export function createProjectMediaPaths(projectPackagePath: string): ProjectMediaPaths {
   const mediaPath = path.join(projectPackagePath, 'media');
@@ -191,7 +214,7 @@ export async function ensureProjectMediaPaths(paths: ProjectMediaPaths): Promise
 
 export function inferMediaType(filePath: string): EditorMediaAsset['type'] {
   const extension = path.extname(filePath).toLowerCase();
-  if (['.mov', '.mp4', '.mxf', '.webm', '.avi', '.m4v', '.mkv', '.mpg', '.mpeg', '.mts', '.m2ts', '.r3d', '.braw', '.ari'].includes(extension)) {
+  if (['.mov', '.mp4', '.m4p', '.mxf', '.webm', '.avi', '.m4v', '.mkv', '.mpg', '.mpeg', '.mts', '.m2ts', '.ismv', '.isma', '.r3d', '.braw', '.ari'].includes(extension)) {
     return 'VIDEO';
   }
   if (['.wav', '.mp3', '.aif', '.aiff', '.aac', '.m4a', '.flac', '.ogg'].includes(extension)) {
@@ -199,6 +222,9 @@ export function inferMediaType(filePath: string): EditorMediaAsset['type'] {
   }
   if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.tif', '.tiff', '.dng', '.bmp'].includes(extension)) {
     return 'IMAGE';
+  }
+  if (['.svg', '.ai', '.eps', '.pdf', '.psd', '.psb', '.xcf', '.kra'].includes(extension)) {
+    return 'GRAPHIC';
   }
   return 'DOCUMENT';
 }
@@ -233,6 +259,248 @@ function parseFrameRate(value?: string): number | undefined {
     return undefined;
   }
   return numerator! / denominator!;
+}
+
+function parseRationalTimebase(value?: string): RationalTimebase | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  if (!value.includes('/')) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return undefined;
+    }
+    return {
+      numerator: Math.round(parsed),
+      denominator: 1,
+      framesPerSecond: parsed,
+      displayString: `${Math.round(parsed)}/1`,
+      dropFrame: false,
+    };
+  }
+
+  const [numerator, denominator] = value.split('/').map(Number);
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+    return undefined;
+  }
+
+  const framesPerSecond = numerator! / denominator!;
+  return {
+    numerator: Math.round(numerator!),
+    denominator: Math.round(denominator!),
+    framesPerSecond,
+    displayString: value,
+    dropFrame: Math.abs(framesPerSecond - 29.97) < 0.0005 || Math.abs(framesPerSecond - 59.94) < 0.0005,
+  };
+}
+
+function parseDispositionFlags(
+  disposition?: Record<string, unknown>,
+): string[] {
+  if (!disposition) {
+    return [];
+  }
+
+  return Object.entries(disposition)
+    .filter(([, flag]) => flag === 1 || flag === true || flag === '1')
+    .map(([name]) => name);
+}
+
+function normalizeMetadataValue(value: unknown): string | number | boolean | undefined {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+  return undefined;
+}
+
+function parseSideDataDescriptors(sideDataList?: Array<Record<string, unknown>>): ProbeSideDataDescriptor[] {
+  return (sideDataList ?? [])
+    .map((entry) => {
+      const type = typeof entry['side_data_type'] === 'string'
+        ? entry['side_data_type']
+        : typeof entry['type'] === 'string'
+        ? entry['type']
+        : undefined;
+      if (!type) {
+        return null;
+      }
+
+      return {
+        type,
+        metadata: Object.fromEntries(
+          Object.entries(entry)
+            .filter(([key]) => key !== 'side_data_type' && key !== 'type')
+            .map(([key, value]) => [key, normalizeMetadataValue(value)])
+            .filter(([, value]) => value !== undefined),
+        ),
+      } satisfies ProbeSideDataDescriptor;
+    })
+    .filter(isDefined);
+}
+
+function normalizeSideDataDescriptors(value?: ProbeSideDataDescriptor[]): ProbeSideDataDescriptor[] {
+  return uniqueList((value ?? []).map((entry) => JSON.stringify({
+    type: entry.type,
+    metadata: entry.metadata ?? {},
+  }))).map((serialized) => JSON.parse(serialized) as ProbeSideDataDescriptor);
+}
+
+function inferCaptionKind(codec: string | undefined, sideData: ProbeSideDataDescriptor[]): CaptionDescriptor['kind'] {
+  const codecToken = normalizeToken(codec ?? '');
+  const sideDataTypes = sideData.map((entry) => normalizeToken(entry.type));
+  if (codecToken.includes('eia 608') || sideDataTypes.some((value) => value.includes('closed captions') || value.includes('a53'))) {
+    return 'embedded-608';
+  }
+  if (codecToken.includes('eia 708') || sideDataTypes.some((value) => value.includes('cea 708'))) {
+    return 'embedded-708';
+  }
+  if (codecToken.includes('teletext')) {
+    return 'teletext';
+  }
+  if (codecToken.includes('dvb')) {
+    return 'dvb-subtitle';
+  }
+  if (codecToken) {
+    return 'subtitle-stream';
+  }
+  return 'unknown';
+}
+
+function buildCaptionDescriptors(stream: {
+  index?: number;
+  codec_type?: string;
+  codec_name?: string;
+  tags?: Record<string, string>;
+  side_data_list?: Array<Record<string, unknown>>;
+}): CaptionDescriptor[] {
+  const sideData = parseSideDataDescriptors(stream.side_data_list);
+  if (stream.codec_type !== 'subtitle' && !sideData.some((entry) => normalizeToken(entry.type).includes('caption'))) {
+    return [];
+  }
+
+  return [{
+    kind: inferCaptionKind(stream.codec_name, sideData),
+    codec: stream.codec_name,
+    language: stream.tags?.['language'],
+    streamIndex: stream.index,
+    serviceName: stream.tags?.['title'],
+  }];
+}
+
+function normalizeCaptionDescriptors(value?: CaptionDescriptor[]): CaptionDescriptor[] {
+  return uniqueList((value ?? []).map((entry) => JSON.stringify({
+    kind: entry.kind,
+    codec: entry.codec,
+    language: entry.language,
+    streamIndex: entry.streamIndex,
+    serviceName: entry.serviceName,
+  }))).map((serialized) => JSON.parse(serialized) as CaptionDescriptor);
+}
+
+function inferGraphicOrientation(tags?: Record<string, string>): number | undefined {
+  const rotate = tags?.['rotate'] ?? tags?.['orientation'];
+  if (!rotate) {
+    return undefined;
+  }
+  const parsed = Number(rotate);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function isVariableFrameRate(
+  stream?: {
+    r_frame_rate?: string;
+    avg_frame_rate?: string;
+  },
+): boolean {
+  const nominal = parseFrameRate(stream?.r_frame_rate);
+  const average = parseFrameRate(stream?.avg_frame_rate);
+  if (!nominal || !average) {
+    return false;
+  }
+  return Math.abs(nominal - average) > 0.01;
+}
+
+function buildColorDescriptorFromProbe(stream?: {
+  color_space?: string;
+  color_range?: string;
+  color_transfer?: string;
+  color_primaries?: string;
+  color_matrix?: string;
+  bits_per_raw_sample?: string;
+  pix_fmt?: string;
+  side_data_list?: Array<Record<string, unknown>>;
+  tags?: Record<string, string>;
+}): ColorDescriptor | undefined {
+  if (!stream) {
+    return undefined;
+  }
+
+  const sideData = parseSideDataDescriptors(stream.side_data_list);
+  const masteringDisplayMetadata = sideData.find((entry) => normalizeToken(entry.type).includes('mastering'))?.metadata;
+  const contentLightMetadata = sideData.find((entry) => normalizeToken(entry.type).includes('content light'))?.metadata;
+
+  return {
+    colorSpace: stream.color_space,
+    primaries: stream.color_primaries,
+    transfer: stream.color_transfer,
+    matrix: stream.color_matrix ?? stream.color_space,
+    range: stream.color_range === 'pc'
+      ? 'full'
+      : stream.color_range === 'tv'
+      ? 'limited'
+      : 'unknown',
+    bitDepth: stream.bits_per_raw_sample ? Number(stream.bits_per_raw_sample) : undefined,
+    chromaSubsampling: stream.pix_fmt,
+    alphaMode: stream.pix_fmt?.includes('a') ? 'straight' : 'none',
+    hdrMode: stream.color_transfer === 'smpte2084'
+      ? 'pq'
+      : stream.color_transfer === 'arib-std-b67'
+      ? 'hlg'
+      : 'unknown',
+    iccProfileName: stream.tags?.['icc_profile'] ?? stream.tags?.['icc-profile'],
+    masteringDisplayMetadata: masteringDisplayMetadata ? JSON.stringify(masteringDisplayMetadata) : undefined,
+    contentLightLevelMetadata: contentLightMetadata ? JSON.stringify(contentLightMetadata) : undefined,
+  };
+}
+
+function buildGraphicDescriptorFromProbe(
+  extension: string,
+  width: number | undefined,
+  height: number | undefined,
+  pixelFormat: string | undefined,
+  tags?: Record<string, string>,
+): GraphicDescriptor | undefined {
+  if (!['svg', 'pdf', 'ai', 'eps', 'psd', 'psb', 'xcf', 'kra', 'png', 'jpg', 'jpeg', 'tiff', 'tif', 'webp', 'gif', 'bmp'].includes(extension)) {
+    return undefined;
+  }
+
+  const kind: GraphicDescriptor['kind'] = ['psd', 'psb', 'xcf', 'kra'].includes(extension)
+    ? 'layered-graphic'
+    : ['svg', 'pdf', 'ai', 'eps'].includes(extension)
+    ? 'vector'
+    : 'bitmap';
+
+  return {
+    kind,
+    sourceFormat: extension,
+    canvasWidth: width,
+    canvasHeight: height,
+    pageCount: extension === 'pdf' ? 1 : undefined,
+    layerCount: ['psd', 'psb', 'xcf', 'kra'].includes(extension) ? 1 : undefined,
+    hasAlpha: Boolean(pixelFormat?.includes('a') || ['png', 'psd', 'psb', 'svg', 'tiff', 'tif', 'webp'].includes(extension)),
+    orientation: inferGraphicOrientation(tags),
+    flatteningRequired: kind !== 'bitmap',
+    renderStrategy: kind === 'layered-graphic'
+      ? 'flatten'
+      : kind === 'vector'
+      ? 'rasterize'
+      : 'direct',
+  };
+}
+
+function isDefined<T>(value: T | null | undefined): value is T {
+  return value !== null && value !== undefined;
 }
 
 function normalizeAudioChannelLayout(layout?: string): EditorMediaTechnicalMetadata['audioChannelLayout'] | undefined {
@@ -335,10 +603,10 @@ async function resolveFrameDimensions(
     };
   }
 
-  const metadata = await probeMediaFile(sourcePath);
+  const { technicalMetadata } = await probeMediaFile(sourcePath);
   return {
-    width: coerceDimension(width ?? metadata.width, 64),
-    height: coerceDimension(height ?? metadata.height, 36),
+    width: coerceDimension(width ?? technicalMetadata.width, 64),
+    height: coerceDimension(height ?? technicalMetadata.height, 36),
   };
 }
 
@@ -358,13 +626,18 @@ function getToolCandidates(toolName: 'ffmpeg' | 'ffprobe'): string[] {
   const candidates = [
     // 1. Environment variable override
     process.env[envVar],
-    // 2. Platform-specific bundled path (development - monorepo root)
-    path.join(process.cwd(), 'apps/desktop/resources/bin', platformDir, executableName),
-    // 3. Platform-specific bundled path (development - desktop root)
-    path.join(process.cwd(), 'resources/bin', platformDir, executableName),
-    // 4. Packaged app resources path
+    // 2. Packaged app resources path (flattened by electron-builder extraResources)
+    path.join(process.resourcesPath || '', 'bin', executableName),
+    // 3. Packaged app resources path (nested platform directory for compatibility)
     path.join(process.resourcesPath || '', 'bin', platformDir, executableName),
-    // 5. Fall back to system PATH
+    // 4. Platform-specific bundled path (development - monorepo root)
+    path.join(process.cwd(), 'apps/desktop/resources/bin', platformDir, executableName),
+    // 5. Platform-specific bundled path (development - desktop root)
+    path.join(process.cwd(), 'resources/bin', platformDir, executableName),
+    // 6. Flattened bundled path for local packaging verification
+    path.join(process.cwd(), 'apps/desktop/resources/bin', executableName),
+    path.join(process.cwd(), 'resources/bin', executableName),
+    // 7. Fall back to system PATH
     executableName,
   ];
 
@@ -437,7 +710,7 @@ async function computePartialFingerprint(filePath: string): Promise<EditorMediaF
   }
 }
 
-async function probeMediaFile(filePath: string): Promise<EditorMediaTechnicalMetadata> {
+async function probeMediaFile(filePath: string): Promise<ProbeMediaResult> {
   const availability = await getToolAvailability();
   const toolPaths = await getMediaToolPaths();
   const extension = path.extname(filePath).replace(/^\./, '').toLowerCase();
@@ -446,7 +719,10 @@ async function probeMediaFile(filePath: string): Promise<EditorMediaTechnicalMet
   };
 
   if (!availability.ffprobe || !toolPaths.ffprobe) {
-    return fallback;
+    return {
+      technicalMetadata: fallback,
+      streams: [],
+    };
   }
 
   try {
@@ -465,46 +741,148 @@ async function probeMediaFile(filePath: string): Promise<EditorMediaTechnicalMet
         duration?: string;
         bit_rate?: string;
         format_name?: string;
+        format_long_name?: string;
         tags?: Record<string, string>;
       };
       streams?: Array<{
+        index?: number;
         codec_type?: string;
         codec_name?: string;
+        codec_long_name?: string;
+        codec_tag_string?: string;
+        profile?: string;
         width?: number;
         height?: number;
         r_frame_rate?: string;
+        avg_frame_rate?: string;
+        time_base?: string;
         channels?: number;
         channel_layout?: string;
         sample_rate?: string;
+        sample_fmt?: string;
+        bit_rate?: string;
+        duration?: string;
+        disposition?: Record<string, unknown>;
+        field_order?: string;
+        pix_fmt?: string;
+        sample_aspect_ratio?: string;
+        display_aspect_ratio?: string;
+        color_space?: string;
+        color_range?: string;
+        color_transfer?: string;
+        color_primaries?: string;
+        color_matrix?: string;
+        bits_per_raw_sample?: string;
         tags?: Record<string, string>;
+        side_data_list?: Array<Record<string, unknown>>;
       }>;
     };
 
     const videoStream = parsed.streams?.find((stream) => stream.codec_type === 'video');
     const audioStream = parsed.streams?.find((stream) => stream.codec_type === 'audio');
+    const subtitleStreams = parsed.streams?.filter((stream) => stream.codec_type === 'subtitle') ?? [];
     const tags = {
       ...(parsed.format?.tags ?? {}),
       ...(videoStream?.tags ?? {}),
       ...(audioStream?.tags ?? {}),
+      ...(subtitleStreams[0]?.tags ?? {}),
     };
+    const colorDescriptor = buildColorDescriptorFromProbe(videoStream);
+    const graphicDescriptor = buildGraphicDescriptorFromProbe(extension, videoStream?.width, videoStream?.height, videoStream?.pix_fmt, tags);
+    const allSideData = normalizeSideDataDescriptors((parsed.streams ?? []).flatMap((stream) => parseSideDataDescriptors(stream.side_data_list)));
+    const allCaptions = normalizeCaptionDescriptors((parsed.streams ?? []).flatMap((stream) => buildCaptionDescriptors(stream)));
+    const formatTags = { ...(parsed.format?.tags ?? {}) };
+    const variableFrameRate = isVariableFrameRate(videoStream);
+    const streams = (parsed.streams ?? [])
+      .map((stream, index) => {
+        let kind: StreamDescriptor['kind'] | null = null;
+        if (stream.codec_type === 'video') {
+          kind = 'video';
+        } else if (stream.codec_type === 'audio') {
+          kind = 'audio';
+        } else if (stream.codec_type === 'subtitle') {
+          kind = 'subtitle';
+        } else if (stream.codec_type === 'attachment') {
+          kind = 'attachment';
+        } else if (stream.codec_type === 'data') {
+          kind = 'data';
+        }
+        if (!kind) {
+          return null;
+        }
+
+        const sideData = parseSideDataDescriptors(stream.side_data_list);
+        const captions = buildCaptionDescriptors(stream);
+
+        return {
+          id: `stream-${kind}-${stream.index ?? index}`,
+          index: stream.index ?? index,
+          kind,
+          codec: stream.codec_name,
+          codecLongName: stream.codec_long_name,
+          codecTag: stream.codec_tag_string,
+          codecProfile: stream.profile,
+          language: stream.tags?.['language'],
+          title: stream.tags?.['title'],
+          disposition: parseDispositionFlags(stream.disposition),
+          durationSeconds: stream.duration ? Number(stream.duration) : parsed.format?.duration ? Number(parsed.format.duration) : undefined,
+          bitRate: stream.bit_rate ? Number(stream.bit_rate) : undefined,
+          timebase: parseRationalTimebase(stream.time_base),
+          frameRate: parseRationalTimebase(stream.r_frame_rate),
+          averageFrameRate: parseRationalTimebase(stream.avg_frame_rate),
+          width: stream.width,
+          height: stream.height,
+          sampleAspectRatio: stream.sample_aspect_ratio,
+          displayAspectRatio: stream.display_aspect_ratio,
+          fieldOrder: stream.field_order,
+          pixelFormat: stream.pix_fmt,
+          audioChannels: stream.channels,
+          audioChannelLayout: normalizeAudioChannelLayout(stream.channel_layout),
+          sampleRate: stream.sample_rate ? Number(stream.sample_rate) : undefined,
+          sampleFormat: stream.sample_fmt,
+          reelName: stream.tags?.['reel_name'] ?? stream.tags?.['reel'] ?? tags['reel_name'] ?? tags['reel'],
+          timecodeStart: stream.tags?.['timecode'] ?? tags['timecode'],
+          colorDescriptor: kind === 'video' ? buildColorDescriptorFromProbe(stream) : undefined,
+          sideData,
+          captions,
+        };
+      })
+      .filter(isDefined);
 
     return {
-      container: parsed.format?.format_name ?? fallback.container,
-      videoCodec: videoStream?.codec_name,
-      audioCodec: audioStream?.codec_name,
-      durationSeconds: parsed.format?.duration ? Number(parsed.format.duration) : undefined,
-      frameRate: parseFrameRate(videoStream?.r_frame_rate),
-      width: videoStream?.width,
-      height: videoStream?.height,
-      audioChannels: audioStream?.channels,
-      audioChannelLayout: normalizeAudioChannelLayout(audioStream?.channel_layout),
-      sampleRate: audioStream?.sample_rate ? Number(audioStream.sample_rate) : undefined,
-      bitRate: parsed.format?.bit_rate ? Number(parsed.format.bit_rate) : undefined,
-      timecodeStart: tags['timecode'],
-      reelName: tags['reel_name'] ?? tags['reel'],
+      technicalMetadata: {
+        container: parsed.format?.format_name ?? fallback.container,
+        containerLongName: parsed.format?.format_long_name,
+        videoCodec: videoStream?.codec_name,
+        audioCodec: audioStream?.codec_name,
+        subtitleCodec: subtitleStreams[0]?.codec_name,
+        durationSeconds: parsed.format?.duration ? Number(parsed.format.duration) : undefined,
+        frameRate: parseFrameRate(videoStream?.r_frame_rate),
+        width: videoStream?.width,
+        height: videoStream?.height,
+        audioChannels: audioStream?.channels,
+        audioChannelLayout: normalizeAudioChannelLayout(audioStream?.channel_layout),
+        sampleRate: audioStream?.sample_rate ? Number(audioStream.sample_rate) : undefined,
+        bitRate: parsed.format?.bit_rate ? Number(parsed.format.bit_rate) : undefined,
+        timecodeStart: tags['timecode'],
+        reelName: tags['reel_name'] ?? tags['reel'],
+        timebase: parseRationalTimebase(videoStream?.time_base),
+        averageFrameRate: parseRationalTimebase(videoStream?.avg_frame_rate),
+        colorDescriptor,
+        graphicDescriptor,
+        subtitleLanguages: uniqueList(subtitleStreams.map((stream) => stream.tags?.['language'] ?? '').filter(Boolean)),
+        sideData: allSideData,
+        captions: allCaptions,
+        formatTags,
+        isVariableFrameRate: variableFrameRate,
+      },
+      streams,
     };
   } catch {
-    return fallback;
+    return {
+      technicalMetadata: fallback,
+      streams: [],
+    };
   }
 }
 
@@ -765,10 +1143,11 @@ export async function extractVideoFrameArtifact(
   }
 
   const startedAt = Date.now();
+  const sourceIdentity = await getMediaSourceIdentity(request.sourcePath);
   const availability = await getToolAvailability();
   const toolPaths = await getMediaToolPaths();
 
-  if (availability.ffmpeg && toolPaths.ffmpeg) {
+  if (availability.ffmpeg && toolPaths.ffmpeg && !failedVideoArtifactSources.has(sourceIdentity)) {
     try {
       const hwDecodeArgs = request.preferHardware ? getHWAccelDecodeArgs(await detectGPU()) : [];
       storage = hwDecodeArgs.length > 0 ? 'gpu' : 'cpu';
@@ -805,10 +1184,12 @@ export async function extractVideoFrameArtifact(
         decodeLatencyMs: Date.now() - startedAt,
       };
     } catch {
+      failedVideoArtifactSources.add(sourceIdentity);
       storage = 'cpu';
     }
   }
 
+  await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(
     outputPath,
     createDeterministicPpmBuffer(
@@ -859,9 +1240,10 @@ export async function extractAudioSliceArtifact(
   }
 
   const startedAt = Date.now();
+  const sourceIdentity = await getMediaSourceIdentity(request.sourcePath);
   const availability = await getToolAvailability();
   const toolPaths = await getMediaToolPaths();
-  if (availability.ffmpeg && toolPaths.ffmpeg) {
+  if (availability.ffmpeg && toolPaths.ffmpeg && !failedAudioArtifactSources.has(sourceIdentity)) {
     try {
       await execFileAsync(toolPaths.ffmpeg, [
         '-y',
@@ -888,10 +1270,12 @@ export async function extractAudioSliceArtifact(
         decodeLatencyMs: Date.now() - startedAt,
       };
     } catch {
+      failedAudioArtifactSources.add(sourceIdentity);
       // Fall through to a deterministic silent slice so the runtime keeps a real artifact.
     }
   }
 
+  await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(outputPath, createSilentWavBuffer(safeSampleRate, safeChannelCount, durationSeconds));
   return {
     outputPath,
@@ -999,9 +1383,11 @@ export async function composeFrameArtifact(
   const topLayer = request.layers[request.layers.length - 1];
   if (topLayer && await pathExists(topLayer.sourcePath)) {
     if (topLayer.sourcePath !== outputPath) {
+      await mkdir(path.dirname(outputPath), { recursive: true });
       await copyFile(topLayer.sourcePath, outputPath);
     }
   } else {
+    await mkdir(path.dirname(outputPath), { recursive: true });
     await writeFile(
       outputPath,
       createDeterministicPpmBuffer(width, height, `composite:${request.cacheKey}`),
@@ -1030,7 +1416,8 @@ export async function ingestMediaFile(
   const fileStats = await stat(sourcePath);
   const assetId = createId('asset');
   const fingerprint = await computePartialFingerprint(sourcePath);
-  const technicalMetadata = await probeMediaFile(sourcePath);
+  const probeResult = await probeMediaFile(sourcePath);
+  const technicalMetadata = probeResult.technicalMetadata;
   const destinationFileName = `${Date.now()}-${sanitizeFileName(fileName)}`;
   const managedPath = storageMode === 'COPY'
     ? path.join(paths.managedPath, destinationFileName)
@@ -1068,7 +1455,7 @@ export async function ingestMediaFile(
     'utf8',
   );
 
-  return {
+  return hydrateMediaAsset({
     id: assetId,
     name: path.basename(fileName, path.extname(fileName)),
     type: mediaType,
@@ -1114,9 +1501,10 @@ export async function ingestMediaFile(
       scenes: [],
       updatedAt: new Date().toISOString(),
     },
+    streams: probeResult.streams,
     tags: uniqueList(['desktop-import', ...semanticTags]),
     isFavorite: false,
-  };
+  });
 }
 
 function createBin(name: string, color = '#4f63f5', parentId?: string): EditorBin {
@@ -1196,7 +1584,7 @@ async function collectFilesRecursively(rootPath: string): Promise<string[]> {
 }
 
 function isSupportedIngestFile(filePath: string): boolean {
-  return inferMediaType(filePath) !== 'DOCUMENT' || path.extname(filePath).toLowerCase() === '.pdf';
+  return path.basename(filePath).trim().length > 0;
 }
 
 export async function resolveImportSourcePaths(filePaths: string[]): Promise<string[]> {
@@ -1646,12 +2034,12 @@ function buildAudioTurnoverManifest(project: EditorProject, assetMap: Map<string
       label: 'Verify fold-down print chain',
       status: getAudioChannelCountForLayout(projectLayout, 2) <= 2
         ? 'not-applicable'
-        : Boolean(
+        : (
           foldDownBus
-            && summarizeAudioBusProcessingPolicy(foldDownBus).print.activeStages
-              .some((stage) => stage.kind === 'fold-down-matrix')
-            && summarizeAudioBusProcessingPolicy(foldDownBus).print.activeStages
-              .some((stage) => stage.kind === 'limiter')
+          && summarizeAudioBusProcessingPolicy(foldDownBus).print.activeStages
+            .some((stage) => stage.kind === 'fold-down-matrix')
+          && summarizeAudioBusProcessingPolicy(foldDownBus).print.activeStages
+            .some((stage) => stage.kind === 'limiter')
         )
           ? 'complete'
           : 'needs-attention',

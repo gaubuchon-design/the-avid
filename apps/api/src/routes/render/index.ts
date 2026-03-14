@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { normalizeWorkerKindList } from '@mcua/media-backend';
 import { renderFarmService } from '../../services/renderfarm.service';
 import { NotFoundError } from '../../utils/errors';
 import { validate, schemas } from '../../utils/validation';
@@ -128,7 +129,9 @@ router.put('/queue/reorder', validate(schemas.reorderRenderQueue), async (req: R
 // GET /install-script — generate a bash install script for render agents
 router.get('/install-script', validate(schemas.renderInstallScriptQuery, 'query'), async (req: Request, res: Response) => {
   const host = (req.query['host'] as string) || req.get('host') || 'localhost:4000';
-  const workerTypes = (req.query['workerTypes'] as string)?.split(',') ?? ['render'];
+  const workerTypes = normalizeWorkerKindList(
+    (((req.query['workerTypes'] as string) ?? 'render').split(',').map((value) => value.trim()).filter(Boolean)) as Array<'metadata' | 'transcribe' | 'render' | 'probe' | 'transcode' | 'transcription' | 'ingest' | 'encode' | 'effects'>,
+  );
 
   const script = renderFarmService.generateInstallScript(host, workerTypes);
 

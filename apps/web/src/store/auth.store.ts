@@ -3,6 +3,7 @@ import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import type { AuthUser } from '../lib/auth';
 import { loginWithEmail, registerUser, refreshAccessToken, storeTokens, getStoredTokens, clearTokens } from '../lib/auth';
+import { isDevelopmentEnvironment } from '../lib/runtimeEnvironment';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -148,7 +149,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         }), true, 'auth/resetStore');
       },
     })),
-    { name: 'AuthStore', enabled: import.meta.env.DEV },
+    { name: 'AuthStore', enabled: isDevelopmentEnvironment() },
   )
 );
 

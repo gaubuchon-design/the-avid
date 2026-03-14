@@ -195,6 +195,7 @@ function buildAvidDefaultBindings(): KeyBinding[] {
     // ═══════════════════════════════════════════════════════════════════════
     //  Navigation
     // ═══════════════════════════════════════════════════════════════════════
+    createBinding('Tab', [], 'monitor.toggleSourceRecord', 'Toggle Source/Record Monitor Focus', 'navigation'),
     createBinding('a', [], 'nav.prevEdit', 'Go to Previous Edit Point', 'navigation'),
     createBinding('s', [], 'nav.nextEdit', 'Go to Next Edit Point', 'navigation'),
 

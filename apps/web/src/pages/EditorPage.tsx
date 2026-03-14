@@ -3,6 +3,7 @@ import { ErrorBoundary, PanelErrorBoundary } from '../components/ErrorBoundary';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { trimEngine } from '../engine/TrimEngine';
 import { keyboardEngine } from '../engine/KeyboardEngine';
+import { multicamEngine } from '../engine/MulticamEngine';
 import { trackPatchingEngine } from '../engine/TrackPatchingEngine';
 import { Toolbar } from '../components/Toolbar/Toolbar';
 import { BinPanel } from '../components/Bins/BinPanel';
@@ -28,10 +29,14 @@ import { TrackerPanel } from '../components/TrackerPanel/TrackerPanel';
 import { TrackingOverlay } from '../components/TrackerPanel/TrackingOverlay';
 import { type EditorPage as PageId } from '../components/PageNavigation/PageNavigation';
 import {
+  activateRecordMonitor,
+  activateSourceMonitor,
   clearInForActiveMonitor,
   clearMarksForActiveMonitor,
   clearOutForActiveMonitor,
+  goToEndForActiveMonitor,
   goToInForActiveMonitor,
+  goToStartForActiveMonitor,
   goToOutForActiveMonitor,
   matchFrameAtPlayhead,
   markClipForActiveMonitor,
@@ -39,7 +44,9 @@ import {
   markOutForActiveMonitor,
   playForwardForActiveMonitor,
   playReverseForActiveMonitor,
+  stepFramesForActiveMonitor,
   stopActiveMonitorPlayback,
+  toggleMonitorFocus,
   togglePlayForActiveMonitor,
 } from '../lib/editorMonitorActions';
 import { buildProjectPersistenceSnapshot, getProjectPersistenceHash } from '../lib/editorProjectState';
@@ -50,6 +57,19 @@ import { subscribeTrimStateToStore } from '../lib/trimStateBridge';
 import { subscribeTrackPatchingStateToStore } from '../lib/trackPatchingStateBridge';
 import { requestTrimWorkspace } from '../lib/trimWorkspace';
 import { MediaPage } from './MediaPage';
+import { PanelResizeHandle } from '../components/Layout/PanelResizeHandle';
+import {
+  clampEditorLayoutForViewport,
+  readStoredEditorLayout,
+  type EditorLayoutState,
+} from '../lib/editorLayout';
+
+function areViewportDimensionsEqual(
+  left: { width: number; height: number },
+  right: { width: number; height: number },
+) {
+  return left.width === right.width && left.height === right.height;
+}
 
 // Playback is driven by PlaybackEngine (RAF-based) via editor.store.ts togglePlay().
 // Keyboard dispatch is centralized in useGlobalKeyboard() — called once from EditorPage.
@@ -73,6 +93,13 @@ export function EditorPage() {
 
   const [showTracker, setShowTracker] = useState(false);
   const [activePage, setActivePage] = useState<PageId>(() => resolveEditorPageParam(searchParams.get('page')));
+  const [viewport, setViewport] = useState(() => ({
+    width: typeof window === 'undefined' ? 1440 : window.innerWidth,
+    height: typeof window === 'undefined' ? 900 : window.innerHeight,
+  }));
+  const [layout, setLayout] = useState<EditorLayoutState>(() => (
+    readStoredEditorLayout(typeof window === 'undefined' ? null : window.localStorage)
+  ));
   // Centralized keyboard dispatch — routes keys based on active monitor
   useGlobalKeyboard();
   useTrimLoopPlayback();
@@ -80,8 +107,6 @@ export function EditorPage() {
   // ─── Register core keyboard actions with the KeyboardEngine ──────────
   const insertEdit = useEditorStore((s) => s.insertEdit);
   const overwriteEdit = useEditorStore((s) => s.overwriteEdit);
-  const goToStart = useEditorStore((s) => s.goToStart);
-  const goToEnd = useEditorStore((s) => s.goToEnd);
   const goToNextEditPoint = useEditorStore((s) => s.goToNextEditPoint);
   const goToPrevEditPoint = useEditorStore((s) => s.goToPrevEditPoint);
   const deleteSelectedClips = useEditorStore((s) => s.deleteSelectedClips);
@@ -103,10 +128,7 @@ export function EditorPage() {
       return;
     }
 
-    const { playheadTime, duration, setPlayhead } = useEditorStore.getState();
-    const safeDuration = Number.isFinite(duration) ? duration : 0;
-    const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
-    setPlayhead(Math.min(safeTime + 1 / 24, safeDuration));
+    stepFramesForActiveMonitor(1);
   }, []);
   const stepBackward = useCallback(() => {
     if (trimEngine.getState().active || useEditorStore.getState().trimActive) {
@@ -116,9 +138,7 @@ export function EditorPage() {
       return;
     }
 
-    const { playheadTime, setPlayhead } = useEditorStore.getState();
-    const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
-    setPlayhead(Math.max(safeTime - 1 / 24, 0));
+    stepFramesForActiveMonitor(-1);
   }, []);
   const enterTrimMode = useCallback(() => {
     requestTrimWorkspace();
@@ -213,6 +233,40 @@ export function EditorPage() {
       useEditorStore.getState().selectTrack(nextState.rollers[0]!.trackId);
     }
   }, []);
+  const toggleMulticamMode = useCallback(() => {
+    if (multicamEngine.isActive()) {
+      multicamEngine.exitMulticamMode();
+      return;
+    }
+
+    const state = useEditorStore.getState();
+    const candidateAssets = state.activeBinAssets.filter((asset) => asset.type === 'VIDEO' || asset.type === 'AUDIO');
+    if (candidateAssets.length < 2) {
+      return;
+    }
+
+    const group = multicamEngine.createGroup(
+      `${state.projectName || 'Current Bin'} MultiCam`,
+      candidateAssets.map((asset) => asset.id),
+      'timecode',
+    );
+    multicamEngine.enterMulticamMode(group.id);
+    activateSourceMonitor();
+  }, []);
+  const cutToMulticamAngle = useCallback((angleIndex: number) => {
+    if (!multicamEngine.isActive()) {
+      return;
+    }
+
+    const isLiveSwitching = useEditorStore.getState().isPlaying || multicamEngine.getState().isRecording;
+    if (isLiveSwitching) {
+      multicamEngine.cutToAngle(angleIndex);
+    } else {
+      multicamEngine.setActiveAngle(angleIndex);
+    }
+
+    activateSourceMonitor();
+  }, []);
 
   useKeyboardAction('transport.playForward', playTrimForward, [playTrimForward]);
   useKeyboardAction('transport.playReverse', playTrimReverse, [playTrimReverse]);
@@ -222,8 +276,8 @@ export function EditorPage() {
   useKeyboardAction('transport.stepForward', stepForward, [stepForward]);
   useKeyboardAction('transport.stepBack', stepBackward, [stepBackward]);
   useKeyboardAction('transport.stepBackward', stepBackward, [stepBackward]);
-  useKeyboardAction('transport.goToStart', goToStart, [goToStart]);
-  useKeyboardAction('transport.goToEnd', goToEnd, [goToEnd]);
+  useKeyboardAction('transport.goToStart', goToStartForActiveMonitor, []);
+  useKeyboardAction('transport.goToEnd', goToEndForActiveMonitor, []);
   useKeyboardAction('transport.playLoop', playTrimLoop, [playTrimLoop]);
   useKeyboardAction('mark.in', markInForActiveMonitor, []);
   useKeyboardAction('mark.out', markOutForActiveMonitor, []);
@@ -239,6 +293,9 @@ export function EditorPage() {
       matchFrameAtPlayhead();
     }
   }, []);
+  useKeyboardAction('monitor.toggleSourceRecord', toggleMonitorFocus, []);
+  useKeyboardAction('monitor.activateSource', activateSourceMonitor, []);
+  useKeyboardAction('monitor.activateRecord', activateRecordMonitor, []);
   useKeyboardAction('edit.spliceIn', insertEdit, [insertEdit]);
   useKeyboardAction('edit.overwrite', overwriteEdit, [overwriteEdit]);
   useKeyboardAction('edit.lift', liftEdit, [liftEdit]);
@@ -261,6 +318,15 @@ export function EditorPage() {
   useKeyboardAction('trim.toggleViewMode', toggleTrimViewMode, [toggleTrimViewMode]);
   useKeyboardAction('nav.prevEdit', goToPrevEditPoint, [goToPrevEditPoint]);
   useKeyboardAction('nav.nextEdit', goToNextEditPoint, [goToNextEditPoint]);
+  useKeyboardAction('file.multicameraMode', toggleMulticamMode, [toggleMulticamMode]);
+  useKeyboardAction('multicam.cut1', () => cutToMulticamAngle(0), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut2', () => cutToMulticamAngle(1), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut3', () => cutToMulticamAngle(2), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut4', () => cutToMulticamAngle(3), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut5', () => cutToMulticamAngle(4), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut6', () => cutToMulticamAngle(5), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut7', () => cutToMulticamAngle(6), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut8', () => cutToMulticamAngle(7), [cutToMulticamAngle]);
   useKeyboardAction('smartTool.toggleLiftOverwrite', toggleSmartToolLiftOverwrite, [toggleSmartToolLiftOverwrite]);
   useKeyboardAction('smartTool.toggleExtractSplice', toggleSmartToolExtractSplice, [toggleSmartToolExtractSplice]);
   useKeyboardAction('smartTool.toggleOverwriteTrim', toggleSmartToolOverwriteTrim, [toggleSmartToolOverwriteTrim]);
@@ -271,6 +337,10 @@ export function EditorPage() {
   }, []);
 
   useEffect(() => {
+    multicamEngine.reset();
+    useEditorStore.getState().setMulticamActive(false);
+    useEditorStore.getState().setMulticamGroupId(null);
+
     if (projectId && projectId !== 'new') {
       void loadProject(projectId);
     }
@@ -411,8 +481,53 @@ export function EditorPage() {
     return () => window.removeEventListener('keydown', handler);
   }, [handlePageChange]);
 
+  useEffect(() => {
+    const syncViewport = () => {
+      const nextViewport = {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      };
+      setViewport((current) => (
+        areViewportDimensionsEqual(current, nextViewport) ? current : nextViewport
+      ));
+    };
+
+    syncViewport();
+    window.addEventListener('resize', syncViewport);
+    return () => window.removeEventListener('resize', syncViewport);
+  }, []);
+
+  const effectiveLayout = clampEditorLayoutForViewport(layout, viewport.width, viewport.height);
+  const maxBinWidth = Math.min(420, Math.max(260, Math.floor(Math.max(960, viewport.width) * 0.34)));
+  const maxTrackerWidth = Math.min(420, Math.max(280, Math.floor(Math.max(960, viewport.width) * 0.28)));
+  const maxInspectorWidth = Math.min(440, Math.max(300, Math.floor(Math.max(960, viewport.width) * 0.32)));
+  const maxTimelineHeight = Math.min(460, Math.max(220, Math.floor(Math.max(720, viewport.height) * 0.46)));
+  const dockTracker = showTracker && viewport.width >= 1520;
+  const overlayTracker = showTracker && !dockTracker;
+  const dockInspector = showInspector && viewport.width >= 1320;
+  const overlayInspector = showInspector && !dockInspector;
+  const workspaceColumns = [
+    `${effectiveLayout.binWidth}px`,
+    'var(--panel-divider-w)',
+    'minmax(0, 1fr)',
+    ...(dockTracker ? ['var(--panel-divider-w)', `${effectiveLayout.trackerWidth}px`] : []),
+    ...(dockInspector ? ['var(--panel-divider-w)', `${effectiveLayout.inspectorWidth}px`] : []),
+  ].join(' ');
+  const editorShellStyle = {
+    '--timeline-h': `${effectiveLayout.timelineHeight}px`,
+  } as React.CSSProperties;
+  const auxiliaryPanelRightInset = showInspector ? effectiveLayout.inspectorWidth + 16 : 0;
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem('the-avid.editor-layout.v1', JSON.stringify(effectiveLayout));
+  }, [effectiveLayout]);
+
   return (
-    <div className="editor-shell" onContextMenu={e => e.preventDefault()}>
+    <div className="editor-shell" style={editorShellStyle} onContextMenu={e => e.preventDefault()}>
       <Toolbar />
       <EditorWorkbenchBar
         activePage={activePage}
@@ -427,15 +542,30 @@ export function EditorPage() {
       )}
       {activePage === 'edit' && (
         <>
-          <div className={`workspace${showInspector ? '' : ' no-inspector'}`}>
-            <div className="left-panels">
+          <div
+            className={`workspace${overlayTracker || overlayInspector ? ' workspace-has-overlay' : ''}`}
+            style={{ gridTemplateColumns: workspaceColumns }}
+          >
+            <div className="left-panels workspace-panel">
               <PanelErrorBoundary panelName="BinPanel">
                 <BinPanel />
               </PanelErrorBoundary>
             </div>
-            <div className="canvas-area" style={{ position: 'relative' }}>
+            <PanelResizeHandle
+              axis="horizontal"
+              ariaLabel="Resize media bin"
+              value={effectiveLayout.binWidth}
+              min={220}
+              max={maxBinWidth}
+              className="workspace-resize-handle resize-handle-h"
+              onChange={(next) => setLayout((current) => ({ ...current, binWidth: next }))}
+            />
+            <div className="canvas-area workspace-panel" style={{ position: 'relative' }}>
               <PanelErrorBoundary panelName="ComposerPanel">
-                <ComposerPanel />
+                <ComposerPanel
+                  dualMonitorSplit={effectiveLayout.dualMonitorSplit}
+                  onDualMonitorSplitChange={(next) => setLayout((current) => ({ ...current, dualMonitorSplit: next }))}
+                />
               </PanelErrorBoundary>
               {showTracker && (
                 <PanelErrorBoundary panelName="TrackingOverlay">
@@ -443,20 +573,108 @@ export function EditorPage() {
                 </PanelErrorBoundary>
               )}
             </div>
-            {showTracker && (
-              <PanelErrorBoundary panelName="TrackerPanel">
-                <TrackerPanel />
-              </PanelErrorBoundary>
+            {dockTracker && (
+              <>
+                <PanelResizeHandle
+                  axis="horizontal"
+                  ariaLabel="Resize tracker panel"
+                  value={effectiveLayout.trackerWidth}
+                  min={260}
+                  max={maxTrackerWidth}
+                  invert
+                  className="workspace-resize-handle resize-handle-h"
+                  onChange={(next) => setLayout((current) => ({ ...current, trackerWidth: next }))}
+                />
+                <div className="workspace-panel tracker-panel-shell">
+                  <PanelErrorBoundary panelName="TrackerPanel">
+                    <TrackerPanel />
+                  </PanelErrorBoundary>
+                </div>
+              </>
             )}
-            {showInspector && (
-              <PanelErrorBoundary panelName="InspectorPanel">
-                <InspectorPanel />
-              </PanelErrorBoundary>
+            {dockInspector && (
+              <>
+                <PanelResizeHandle
+                  axis="horizontal"
+                  ariaLabel="Resize inspector panel"
+                  value={effectiveLayout.inspectorWidth}
+                  min={280}
+                  max={maxInspectorWidth}
+                  invert
+                  className="workspace-resize-handle resize-handle-h"
+                  onChange={(next) => setLayout((current) => ({ ...current, inspectorWidth: next }))}
+                />
+                <div className="workspace-panel inspector-panel-shell">
+                  <PanelErrorBoundary panelName="InspectorPanel">
+                    <InspectorPanel />
+                  </PanelErrorBoundary>
+                </div>
+              </>
+            )}
+            {(overlayTracker || overlayInspector) && (
+              <div className="workspace-overlay-rail" aria-label="Secondary editor panels">
+                {overlayTracker && (
+                  <div
+                    className="workspace-overlay-panel"
+                    style={{ gridTemplateColumns: `var(--panel-divider-w) ${effectiveLayout.trackerWidth}px` }}
+                  >
+                    <PanelResizeHandle
+                      axis="horizontal"
+                      ariaLabel="Resize tracker panel"
+                      value={effectiveLayout.trackerWidth}
+                      min={260}
+                      max={maxTrackerWidth}
+                      invert
+                      className="workspace-resize-handle resize-handle-h"
+                      onChange={(next) => setLayout((current) => ({ ...current, trackerWidth: next }))}
+                    />
+                    <div className="workspace-panel tracker-panel-shell workspace-overlay-surface">
+                      <PanelErrorBoundary panelName="TrackerPanel">
+                        <TrackerPanel />
+                      </PanelErrorBoundary>
+                    </div>
+                  </div>
+                )}
+                {overlayInspector && (
+                  <div
+                    className="workspace-overlay-panel"
+                    style={{ gridTemplateColumns: `var(--panel-divider-w) ${effectiveLayout.inspectorWidth}px` }}
+                  >
+                    <PanelResizeHandle
+                      axis="horizontal"
+                      ariaLabel="Resize inspector panel"
+                      value={effectiveLayout.inspectorWidth}
+                      min={280}
+                      max={maxInspectorWidth}
+                      invert
+                      className="workspace-resize-handle resize-handle-h"
+                      onChange={(next) => setLayout((current) => ({ ...current, inspectorWidth: next }))}
+                    />
+                    <div className="workspace-panel inspector-panel-shell workspace-overlay-surface">
+                      <PanelErrorBoundary panelName="InspectorPanel">
+                        <InspectorPanel />
+                      </PanelErrorBoundary>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
-          <PanelErrorBoundary panelName="TimelinePanel">
-            <TimelinePanel />
-          </PanelErrorBoundary>
+          <div className="timeline-shell">
+            <PanelResizeHandle
+              axis="vertical"
+              ariaLabel="Resize timeline"
+              value={effectiveLayout.timelineHeight}
+              min={180}
+              max={maxTimelineHeight}
+              invert
+              className="timeline-resize-handle resize-handle-v"
+              onChange={(next) => setLayout((current) => ({ ...current, timelineHeight: next }))}
+            />
+            <PanelErrorBoundary panelName="TimelinePanel">
+              <TimelinePanel />
+            </PanelErrorBoundary>
+          </div>
         </>
       )}
 
@@ -511,7 +729,7 @@ export function EditorPage() {
       {showAlphaImportDialog && <AlphaImportDialog />}
       {showTitleTool && (
         <div style={{
-          position: 'fixed', top: 40, right: showInspector ? 340 : 0, bottom: 40,
+          position: 'fixed', top: 40, right: auxiliaryPanelRightInset, bottom: 40,
           width: 360, zIndex: 900,
           background: 'var(--bg-surface)',
           borderLeft: '1px solid var(--border-default)',
@@ -522,7 +740,7 @@ export function EditorPage() {
       )}
       {showSubtitleEditor && (
         <div style={{
-          position: 'fixed', top: 40, right: showInspector ? 340 : 0, bottom: 40,
+          position: 'fixed', top: 40, right: auxiliaryPanelRightInset, bottom: 40,
           width: 380, zIndex: 900,
           background: 'var(--bg-surface)',
           borderLeft: '1px solid var(--border-default)',

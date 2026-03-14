@@ -33,9 +33,20 @@ the-avid/
 
 | Package | Purpose |
 |---------|---------|
-| `core` | Shared TypeScript types, domain constants, utility functions |
+| `core` | Shared TypeScript types, domain constants, utility functions, and the canonical media asset contract |
 | `ui` | Shared React hooks, theme tokens, design-system primitives |
 | `render-agent` | Distributed rendering node that connects via WebSocket for parallel encoding |
+
+### Canonical Media Backbone
+
+The shared project/media schema now centers on a canonical asset record in `@mcua/core` rather than treating imported media as one path plus a few loose metadata fields.
+
+- `AssetRecord` is the shared contract that carries `assetClass`, `supportTier`, `references`, `streams`, `variants`, `capabilityReport`, rational `timebase`, `colorDescriptor`, and `graphicDescriptor`.
+- Assets can now explicitly model `video`, `audio`, `subtitle`, `bitmap`, `vector`, and `layered-graphic` sources while preserving their canonical source documents.
+- Desktop ingest populates stream-level metadata from `ffprobe`, including codec, reel, timecode, channel layout, frame cadence, and color metadata.
+- Helper code resolves playback and primary paths through canonical `VariantRecord` and `MediaReference` data first, then falls back to legacy path fields.
+
+This backbone is the first layer of the universal media backend: it gives web, desktop, API, and worker surfaces a shared vocabulary for source identity, editability, and variant selection before Prompt 2 introduces the dedicated `media-backend` workspace.
 
 ## 3. State Management
 

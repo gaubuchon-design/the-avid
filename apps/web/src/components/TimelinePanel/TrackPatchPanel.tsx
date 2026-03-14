@@ -38,7 +38,7 @@ function getSourceChipClass(options: {
 }
 
 function getRouteButtonClass(options: {
-  tone: 'record' | 'sync';
+  tone: 'monitor' | 'record' | 'sync' | 'lock';
   active: boolean;
 }): string {
   return [
@@ -51,6 +51,9 @@ function getRouteButtonClass(options: {
 export function TrackPatchPanel() {
   const tracks = useEditorStore((state) => state.tracks);
   const sourceAsset = useEditorStore((state) => state.sourceAsset);
+  const toggleLock = useEditorStore((state) => state.toggleLock);
+  const setVideoMonitorTrack = useEditorStore((state) => state.setVideoMonitorTrack);
+  const videoMonitorTrackId = useEditorStore((state) => state.videoMonitorTrackId);
   const [revision, setRevision] = useState(0);
   const [activeSourceTrackId, setActiveSourceTrackId] = useState<string | null>(null);
   const [dragSourceTrackId, setDragSourceTrackId] = useState<string | null>(null);
@@ -319,8 +322,10 @@ export function TrackPatchPanel() {
       <div className="track-patch-panel-grid-head" aria-hidden="true">
         <span>Record Side</span>
         <span>Patch</span>
+        <span>Mon</span>
         <span>Edit</span>
         <span>Sync</span>
+        <span>Lock</span>
       </div>
 
       <div className="track-patch-panel-rows">
@@ -332,6 +337,8 @@ export function TrackPatchPanel() {
             ? trackPatchingEngine.getOrderedPatchMovePreview(routingSourceTrackId, track.id, tracks)
             : null;
           const shiftsPatchBank = Boolean(orderedMovePreview && orderedMovePreview.length > 1);
+          const isVisualTrack = track.type === 'VIDEO' || track.type === 'GRAPHIC';
+          const isMonitored = videoMonitorTrackId === track.id;
           const canRouteHere = Boolean(
             routingSourceTrack
             && !track.locked
@@ -473,6 +480,21 @@ export function TrackPatchPanel() {
 
               <button
                 type="button"
+                onClick={() => setVideoMonitorTrack(track.id)}
+                aria-label={isVisualTrack
+                  ? `${isMonitored ? 'Stop monitoring' : 'Monitor'} ${track.name}`
+                  : `${track.name} is not a monitorable picture track`}
+                title={isVisualTrack
+                  ? `${isMonitored ? 'Monitored' : 'Set as monitored'} picture track`
+                  : `${track.name} does not drive the record monitor picture`}
+                className={getRouteButtonClass({ tone: 'monitor', active: isMonitored })}
+                disabled={track.locked || !isVisualTrack}
+              >
+                MON
+              </button>
+
+              <button
+                type="button"
                 onClick={() => handleRecordToggle(track.id)}
                 aria-label={`${isEnabled ? 'Disable' : 'Enable'} ${track.name}`}
                 title={`${isEnabled ? 'Disable' : 'Enable'} ${track.name} for edits`}
@@ -491,6 +513,16 @@ export function TrackPatchPanel() {
                 disabled={track.locked}
               >
                 SYNC
+              </button>
+
+              <button
+                type="button"
+                onClick={() => toggleLock(track.id)}
+                aria-label={`${track.locked ? 'Unlock' : 'Lock'} ${track.name}`}
+                title={`${track.locked ? 'Unlock' : 'Lock'} ${track.name}`}
+                className={getRouteButtonClass({ tone: 'lock', active: track.locked })}
+              >
+                LOCK
               </button>
             </div>
           );

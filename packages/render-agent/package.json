@@ -22,6 +22,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@mcua/media-backend": "*",
     "ws": "^8.18.0"
   },
   "devDependencies": {

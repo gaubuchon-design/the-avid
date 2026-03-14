@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EditorBin, EditorClip, EditorMediaAsset, EditorProject, EditorTrack } from '@mcua/core';
 import { DesktopParityPlaybackManager } from '../parity/DesktopParityPlaybackManager';
+import { createDesktopProjectFixture } from './projectTestFactory';
 
 function makeAsset(sourcePath: string): EditorMediaAsset {
   return {
@@ -77,60 +78,36 @@ function makeBin(asset: EditorMediaAsset): EditorBin {
 
 function makeProject(sourcePath: string): EditorProject {
   const asset = makeAsset(sourcePath);
-  return {
-    schemaVersion: 2,
+  return createDesktopProjectFixture({
     id: 'desktop-project-bridge',
     name: 'Desktop Playback Bridge',
-    description: '',
-    template: 'film',
-    tags: [],
-    createdAt: '2024-01-01T00:00:00Z',
-    updatedAt: '2024-01-01T00:00:00Z',
-    progress: 0,
-    settings: {
-      frameRate: 24,
-      width: 1920,
-      height: 1080,
-      sampleRate: 48000,
-      exportFormat: 'mov',
-    },
+    bins: [makeBin(asset)],
     tracks: [
       makeTrack('V1', 'VIDEO', [makeClip('clip-v1', 'V1', asset.id, 'video')]),
       makeTrack('A1', 'AUDIO', [makeClip('clip-a1', 'A1', asset.id, 'audio')]),
     ],
-    markers: [],
-    bins: [makeBin(asset)],
-    collaborators: [],
-    aiJobs: [],
-    transcript: [],
-    reviewComments: [],
-    approvals: [],
-    publishJobs: [],
-    watchFolders: [],
-    tokenBalance: 1000,
-    editorialState: {
-      selectedBinId: 'main',
-      sourceAssetId: asset.id,
-      enabledTrackIds: ['V1', 'A1'],
-      syncLockedTrackIds: [],
-      videoMonitorTrackId: 'V1',
-      sourceTrackDescriptors: [],
-      trackPatches: [],
-    },
-    workstationState: {
-      subtitleTracks: [],
-      titleClips: [],
-      trackHeights: {},
-      activeWorkspaceId: 'source-record',
-      composerLayout: 'source-record',
-      showTrackingInfo: true,
-      trackingInfoFields: ['master-tc'],
-      clipTextDisplay: 'name',
-      dupeDetectionEnabled: false,
-      versionHistoryRetentionPreference: 'manual',
-      versionHistoryCompareMode: 'summary',
-    },
-  };
+    sourceAssetId: asset.id,
+    enabledTrackIds: ['V1', 'A1'],
+    videoMonitorTrackId: 'V1',
+  });
+}
+
+async function waitForCondition(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 1_500,
+  intervalMs = 25,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) {
+      return;
+    }
+    await new Promise((resolve) => {
+      setTimeout(resolve, intervalMs);
+    });
+  }
+
+  throw new Error(`Timed out waiting for condition after ${timeoutMs}ms`);
 }
 
 describe('DesktopParityPlaybackManager', () => {
@@ -254,32 +231,30 @@ describe('DesktopParityPlaybackManager', () => {
       revisionId: 'rev-loop',
     });
 
-    await manager.attachStreams(descriptor.transportHandle, [
-      { streamId: 'program-video', assetId: 'asset-online', mediaType: 'video', role: 'program' },
-      { streamId: 'program-audio', assetId: 'asset-online', mediaType: 'audio', role: 'program' },
-    ]);
-    await manager.preroll(descriptor.transportHandle, { startFrame: 0, endFrame: 24 });
-    await manager.attachOutputDevice(descriptor.transportHandle, {
-      deviceId: 'decklink-1',
-      displayModeId: '1080p24',
-      pixelFormat: '8BitBGRA',
-      audioChannels: 2,
-      audioBitDepth: 24,
-    });
+    try {
+      await manager.attachStreams(descriptor.transportHandle, [
+        { streamId: 'program-video', assetId: 'asset-online', mediaType: 'video', role: 'program' },
+        { streamId: 'program-audio', assetId: 'asset-online', mediaType: 'audio', role: 'program' },
+      ]);
+      await manager.preroll(descriptor.transportHandle, { startFrame: 0, endFrame: 24 });
+      await manager.attachOutputDevice(descriptor.transportHandle, {
+        deviceId: 'decklink-1',
+        displayModeId: '1080p24',
+        pixelFormat: '8BitBGRA',
+        audioChannels: 2,
+        audioBitDepth: 24,
+      });
 
-    await manager.play(descriptor.transportHandle, 0);
-    await new Promise((resolve) => {
-      setTimeout(resolve, 175);
-    });
+      await manager.play(descriptor.transportHandle, 0);
+      await waitForCondition(() => sendFrame.mock.calls.length > 1);
 
-    expect(sendFrame.mock.calls.length).toBeGreaterThan(1);
-
-    const telemetry = await manager.getTelemetry(descriptor.transportHandle);
-    expect(telemetry.activeStreamCount).toBe(2);
-    expect(telemetry.currentQuality).toBe('full');
-
-    await manager.stop(descriptor.transportHandle);
-    await manager.releaseTransport(descriptor.transportHandle);
+      const telemetry = await manager.getTelemetry(descriptor.transportHandle);
+      expect(telemetry.activeStreamCount).toBe(2);
+      expect(telemetry.currentQuality).toBe('full');
+    } finally {
+      await manager.stop(descriptor.transportHandle);
+      await manager.releaseTransport(descriptor.transportHandle);
+    }
   });
 
   it('drops into promoted-cache policy under heavy multistream pressure', async () => {
@@ -309,38 +284,42 @@ describe('DesktopParityPlaybackManager', () => {
       revisionId: 'rev-heavy',
     });
 
-    await manager.attachStreams(descriptor.transportHandle, [
-      { streamId: 'video-1', assetId: 'asset-online', mediaType: 'video', role: 'program' },
-      { streamId: 'video-2', assetId: 'asset-online', mediaType: 'video', role: 'program' },
-      { streamId: 'video-3', assetId: 'asset-online', mediaType: 'video', role: 'program' },
-      { streamId: 'video-4', assetId: 'asset-online', mediaType: 'video', role: 'program' },
-      { streamId: 'video-5', assetId: 'asset-online', mediaType: 'video', role: 'program' },
-      { streamId: 'audio-1', assetId: 'asset-online', mediaType: 'audio', role: 'program' },
-    ]);
-    await manager.preroll(descriptor.transportHandle, { startFrame: 0, endFrame: 24 });
-    await manager.attachOutputDevice(descriptor.transportHandle, {
-      deviceId: 'decklink-1',
-      displayModeId: '1080p24',
-      pixelFormat: '8BitBGRA',
-      audioChannels: 2,
-      audioBitDepth: 24,
-    });
+    try {
+      await manager.attachStreams(descriptor.transportHandle, [
+        { streamId: 'video-1', assetId: 'asset-online', mediaType: 'video', role: 'program' },
+        { streamId: 'video-2', assetId: 'asset-online', mediaType: 'video', role: 'program' },
+        { streamId: 'video-3', assetId: 'asset-online', mediaType: 'video', role: 'program' },
+        { streamId: 'video-4', assetId: 'asset-online', mediaType: 'video', role: 'program' },
+        { streamId: 'video-5', assetId: 'asset-online', mediaType: 'video', role: 'program' },
+        { streamId: 'audio-1', assetId: 'asset-online', mediaType: 'audio', role: 'program' },
+      ]);
+      await manager.preroll(descriptor.transportHandle, { startFrame: 0, endFrame: 24 });
+      await manager.attachOutputDevice(descriptor.transportHandle, {
+        deviceId: 'decklink-1',
+        displayModeId: '1080p24',
+        pixelFormat: '8BitBGRA',
+        audioChannels: 2,
+        audioBitDepth: 24,
+      });
 
-    await manager.play(descriptor.transportHandle, 0);
-    await new Promise((resolve) => {
-      setTimeout(resolve, 225);
-    });
+      await manager.play(descriptor.transportHandle, 0);
+      await waitForCondition(async () => {
+        if (sendFrame.mock.calls.length <= 1) {
+          return false;
+        }
+        const telemetry = await manager.getTelemetry(descriptor.transportHandle);
+        return telemetry.promotedFrameCount > 0;
+      });
 
-    expect(sendFrame.mock.calls.length).toBeGreaterThan(1);
-
-    const telemetry = await manager.getTelemetry(descriptor.transportHandle);
-    expect(telemetry.activeStreamCount).toBe(6);
-    expect(telemetry.streamPressure).toBe('heavy');
-    expect(telemetry.currentQuality).toBe('draft');
-    expect(telemetry.cacheStrategy).toBe('prefer-promoted-cache');
-    expect(telemetry.promotedFrameCount).toBeGreaterThan(0);
-
-    await manager.stop(descriptor.transportHandle);
-    await manager.releaseTransport(descriptor.transportHandle);
+      const telemetry = await manager.getTelemetry(descriptor.transportHandle);
+      expect(telemetry.activeStreamCount).toBe(6);
+      expect(telemetry.streamPressure).toBe('heavy');
+      expect(telemetry.currentQuality).toBe('draft');
+      expect(telemetry.cacheStrategy).toBe('prefer-promoted-cache');
+      expect(telemetry.promotedFrameCount).toBeGreaterThan(0);
+    } finally {
+      await manager.stop(descriptor.transportHandle);
+      await manager.releaseTransport(descriptor.transportHandle);
+    }
   });
 });

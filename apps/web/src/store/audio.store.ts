@@ -6,6 +6,7 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { audioEngine } from '../engine/AudioEngine';
+import { isDevelopmentEnvironment } from '../lib/runtimeEnvironment';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -255,7 +256,7 @@ export const useAudioStore = create<AudioState & AudioActions>()(
         })),
       }), true, 'audio/resetStore'),
     })),
-    { name: 'AudioStore', enabled: import.meta.env.DEV },
+    { name: 'AudioStore', enabled: isDevelopmentEnvironment() },
   )
 );
 

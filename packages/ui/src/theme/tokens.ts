@@ -10,73 +10,73 @@
 // ─── Brand Colors ────────────────────────────────────────────────────────────
 
 export const brand = {
-  50:  '#eef2ff',
-  100: '#e0e7ff',
-  200: '#c7d2fe',
-  300: '#a5b4fc',
-  400: '#818cf8',
-  500: '#6366f1',
-  600: '#4f46e5',
-  700: '#4338ca',
-  800: '#3730a3',
-  900: '#312e81',
+  50:  '#f5f5f7',
+  100: '#e7e7eb',
+  200: '#d1d1d8',
+  300: '#b5b5bf',
+  400: '#9a9aa6',
+  500: '#81818d',
+  600: '#676772',
+  700: '#50505a',
+  800: '#393942',
+  900: '#232329',
 } as const;
 
 // ─── Palette ─────────────────────────────────────────────────────────────────
 // Maps directly to the CSS custom properties used in design-system.css
 
 export const palette = {
-  brand:        '#6d4cfa',
-  brandBright:  '#9b7dff',
-  brandDim:     'rgba(109,76,250,0.18)',
-  accent:       '#7c5cfc',
-  accentDim:    '#5a3fd4',
-  accentGlow:   'rgba(124,92,252,0.3)',
-  accentMuted:  'rgba(124,92,252,0.14)',
+  brand:        '#81818d',
+  brandBright:  '#d1d1d8',
+  brandDim:     'rgba(129,129,141,0.18)',
+  accent:       '#b5b5bf',
+  accentDim:    '#676772',
+  accentGlow:   'rgba(181,181,191,0.24)',
+  accentMuted:  'rgba(181,181,191,0.14)',
 
   // Track lane colors
-  trackVideo:   '#4f63f5',
-  trackAudio:   '#25a865',
-  trackEffect:  '#d4873a',
-  trackSub:     '#5ab8d9',
-  trackGfx:     '#c94f84',
+  trackVideo:   '#b8b8c0',
+  trackAudio:   '#96969f',
+  trackEffect:  '#7b7b84',
+  trackSub:     '#a5a5ae',
+  trackGfx:     '#5f5f68',
 
   // Playhead
-  playhead:     '#ff3b3b',
+  playhead:     '#ececf2',
 
   // Semantic / status
-  success:      '#22c55e',
-  warning:      '#f59e0b',
-  error:        '#ef4444',
-  info:         '#3b82f6',
+  success:      '#d7d7de',
+  warning:      '#b9b9c2',
+  error:        '#8d8d98',
+  info:         '#ececf2',
 
   // AI
-  aiAccent:     '#00D4AA',
-  aiAccentDim:  'rgba(0,212,170,0.15)',
+  aiAccent:     '#b8b8c2',
+  aiAccentDim:  'rgba(184,184,194,0.15)',
 } as const;
 
 // ─── Surface / Background (dark-first for NLE) ──────────────────────────────
 
 export const surfaceDark = {
   void:      '#000000',
-  canvas:    '#050508',
-  base:      '#0a0a10',
-  surface:   '#0e0e1a',
-  raised:    '#141420',
-  elevated:  '#1a1a2e',
-  overlay:   '#222240',
+  canvas:    '#070708',
+  base:      '#101013',
+  surface:   '#151519',
+  raised:    '#1b1b20',
+  elevated:  '#232329',
+  overlay:   '#2b2b33',
   hover:     'rgba(255,255,255,0.05)',
   active:    'rgba(255,255,255,0.09)',
 } as const;
 
 export const surfaceLight = {
-  void:      '#f5f5f8',
-  canvas:    '#ebebf0',
-  base:      '#e2e2ea',
+  void:      '#f3f3f5',
+  canvas:    '#ebebee',
+  base:      '#e1e1e6',
   surface:   '#ffffff',
-  raised:    '#f8f8fc',
+  raised:    '#f7f7f9',
   elevated:  '#ffffff',
-  overlay:   '#e8e8f0',
+  overlay:   '#ececf0',
   hover:     'rgba(0,0,0,0.04)',
   active:    'rgba(0,0,0,0.07)',
 } as const;
@@ -84,22 +84,22 @@ export const surfaceLight = {
 // ─── Text ────────────────────────────────────────────────────────────────────
 
 export const textDark = {
-  primary:   '#e0e6ef',
-  secondary: '#8a9cb5',
-  tertiary:  '#556880',
-  muted:     '#384a5e',
-  disabled:  '#263344',
-  accent:    '#9b7dff',
+  primary:   '#efeff2',
+  secondary: '#b4b4bc',
+  tertiary:  '#83838c',
+  muted:     '#5e5e68',
+  disabled:  '#44444d',
+  accent:    '#d1d1d8',
   onBrand:   '#ffffff',
 } as const;
 
 export const textLight = {
-  primary:   '#1a1a2e',
-  secondary: '#4a5568',
-  tertiary:  '#718096',
-  muted:     '#a0aec0',
-  disabled:  '#cbd5e0',
-  accent:    '#6d4cfa',
+  primary:   '#17171b',
+  secondary: '#4f4f57',
+  tertiary:  '#787880',
+  muted:     '#a1a1a8',
+  disabled:  '#c9c9cf',
+  accent:    '#5f5f68',
   onBrand:   '#ffffff',
 } as const;
 
@@ -109,16 +109,16 @@ export const borderDark = {
   default:  'rgba(255,255,255,0.08)',
   subtle:   'rgba(255,255,255,0.04)',
   strong:   'rgba(255,255,255,0.14)',
-  accent:   'rgba(109,76,250,0.4)',
-  focus:    '#6d4cfa',
+  accent:   'rgba(181,181,191,0.4)',
+  focus:    '#b5b5bf',
 } as const;
 
 export const borderLight = {
   default:  'rgba(0,0,0,0.1)',
   subtle:   'rgba(0,0,0,0.04)',
   strong:   'rgba(0,0,0,0.16)',
-  accent:   'rgba(109,76,250,0.3)',
-  focus:    '#6d4cfa',
+  accent:   'rgba(95,95,104,0.3)',
+  focus:    '#5f5f68',
 } as const;
 
 // ─── Shadows ─────────────────────────────────────────────────────────────────
@@ -127,16 +127,16 @@ export const shadowDark = {
   sm:     '0 1px 3px rgba(0,0,0,0.4)',
   md:     '0 4px 12px rgba(0,0,0,0.5)',
   lg:     '0 8px 24px rgba(0,0,0,0.6)',
-  brand:  '0 0 16px rgba(109,76,250,0.3)',
-  accent: '0 0 0 1px rgba(124,92,252,0.4)',
+  brand:  '0 0 16px rgba(181,181,191,0.22)',
+  accent: '0 0 0 1px rgba(181,181,191,0.35)',
 } as const;
 
 export const shadowLight = {
   sm:     '0 1px 3px rgba(0,0,0,0.08)',
   md:     '0 4px 12px rgba(0,0,0,0.12)',
   lg:     '0 8px 24px rgba(0,0,0,0.15)',
-  brand:  '0 0 16px rgba(109,76,250,0.15)',
-  accent: '0 0 0 1px rgba(124,92,252,0.25)',
+  brand:  '0 0 16px rgba(95,95,104,0.12)',
+  accent: '0 0 0 1px rgba(95,95,104,0.2)',
 } as const;
 
 // ─── Typography ──────────────────────────────────────────────────────────────

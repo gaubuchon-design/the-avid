@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { effectsEngine } from '../../engine/EffectsEngine';
 import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
 import { makeClip } from '../../store/editor.store';
 
@@ -289,5 +290,52 @@ describe('phase 1 playback snapshot contract', () => {
     }, 'record-monitor');
 
     expect(remappedSnapshot.sequenceRevision).not.toBe(linearSnapshot.sequenceRevision);
+  });
+
+  it('surfaces active effect layers for adjustment-style clips', () => {
+    const effectClipId = `fx-layer-${Date.now()}`;
+    const instance = effectsEngine.createInstance('blur-gaussian');
+    if (!instance) {
+      throw new Error('Failed to create effect instance for snapshot test.');
+    }
+
+    effectsEngine.addEffectToClip(effectClipId, instance.id);
+
+    const snapshot = buildPlaybackSnapshot({
+      ...baseSource,
+      playheadTime: 2,
+      tracks: [
+        ...baseSource.tracks,
+        {
+          id: 't-fx1',
+          name: 'FX1',
+          type: 'EFFECT',
+          sortOrder: 1,
+          muted: false,
+          locked: false,
+          solo: false,
+          volume: 1,
+          color: '#8f87a8',
+          clips: [
+            makeClip({
+              id: effectClipId,
+              trackId: 't-fx1',
+              name: 'Adjustment Layer',
+              startTime: 1,
+              endTime: 5,
+              trimStart: 0,
+              trimEnd: 0,
+              type: 'effect',
+            }),
+          ],
+        },
+      ],
+    }, 'record-monitor');
+
+    expect(snapshot.effectLayers).toHaveLength(1);
+    expect(snapshot.effectLayers[0]?.clip.id).toBe(effectClipId);
+    expect(snapshot.effectsRevision).toContain(effectClipId);
+
+    effectsEngine.removeInstance(instance.id);
   });
 });

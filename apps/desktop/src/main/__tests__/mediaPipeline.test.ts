@@ -14,7 +14,7 @@ describe('resolveImportSourcePaths', () => {
     tempDirs.length = 0;
   });
 
-  it('expands dropped directories and filters to supported ingest files', async () => {
+  it('expands dropped directories and keeps unsupported files for explicit classification', async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'avid-ingest-'));
     tempDirs.push(tempRoot);
 
@@ -31,6 +31,6 @@ describe('resolveImportSourcePaths', () => {
 
     const resolved = await resolveImportSourcePaths([cardFolder, videoPath, unsupportedPath]);
 
-    expect(resolved).toEqual([videoPath, audioPath]);
+    expect(resolved).toEqual([videoPath, audioPath, unsupportedPath]);
   });
 });

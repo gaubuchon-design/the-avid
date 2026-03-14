@@ -19,7 +19,9 @@
     "emitDecoratorMetadata": true,
     "paths": {
       "@mcua/core": ["../../packages/core/src"],
-      "@mcua/core/*": ["../../packages/core/src/*"]
+      "@mcua/core/*": ["../../packages/core/src/*"],
+      "@mcua/media-backend": ["../../packages/media-backend/dist/index.d.ts"],
+      "@mcua/media-backend/*": ["../../packages/media-backend/dist/*"]
     }
   },
   "include": ["src/**/*"],

@@ -1,8 +1,9 @@
-export type AudioChannelLayout = 'mono' | 'stereo' | '5.1' | '7.1';
+export type AudioChannelLayout = 'mono' | 'stereo' | 'quad' | '5.1' | '7.1';
 
 const LAYOUT_CHANNEL_COUNT: Record<AudioChannelLayout, number> = {
   mono: 1,
   stereo: 2,
+  quad: 4,
   '5.1': 6,
   '7.1': 8,
 };
@@ -24,6 +25,15 @@ export function normalizeAudioChannelLayoutLabel(
     || (channelCount !== null && channelCount !== undefined && channelCount >= 8)
   ) {
     return '7.1';
+  }
+
+  if (
+    normalizedLayout.includes('quad')
+    || normalizedLayout.includes('4ch')
+    || normalizedLayout.includes('4.0')
+    || (channelCount !== null && channelCount !== undefined && channelCount === 4)
+  ) {
+    return 'quad';
   }
 
   if (

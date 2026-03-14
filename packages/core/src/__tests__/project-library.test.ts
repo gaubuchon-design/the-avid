@@ -4,6 +4,7 @@ import {
   buildSeedProjectLibrary,
   flattenAssets,
   getProjectDuration,
+  hydrateMediaAsset,
   hydrateProject,
 } from '../project-library';
 import type { EditorBin, EditorMediaAsset, EditorProject, EditorTrack, EditorClip } from '../project-library';
@@ -450,5 +451,280 @@ describe('buildProject', () => {
     expect(seededProject!.reviewComments.length).toBeGreaterThan(0);
     expect(seededProject!.transcriptSpeakers.length).toBeGreaterThan(0);
     expect(seededProject!.scriptDocument?.lines.length).toBeGreaterThan(0);
+  });
+});
+
+describe('hydrateMediaAsset canonical contracts', () => {
+  it('builds canonical records for normalized raw video sources', () => {
+    const asset = hydrateMediaAsset(makeAsset({
+      name: 'Scene 01 - Take 02.r3d',
+      type: 'VIDEO',
+      duration: 48.7,
+      fileExtension: 'r3d',
+      locations: {
+        originalPath: '/media/originals/scene-01-take-02.r3d',
+        managedPath: '/project/media/managed/scene-01-take-02.r3d',
+        relativeManagedPath: 'managed/scene-01-take-02.r3d',
+        pathHistory: [],
+      },
+      technicalMetadata: {
+        container: 'r3d',
+        videoCodec: 'redcode_raw',
+        audioCodec: 'pcm_s24le',
+        durationSeconds: 48.7,
+        frameRate: 23.976,
+        width: 6144,
+        height: 3160,
+        audioChannels: 2,
+        audioChannelLayout: 'stereo',
+        sampleRate: 48000,
+        timecodeStart: '01:00:45:05',
+        reelName: 'A002',
+        colorDescriptor: {
+          colorSpace: 'Rec.2020',
+          primaries: 'bt2020',
+          transfer: 'smpte2084',
+          matrix: 'bt2020nc',
+          range: 'full',
+        },
+      },
+      proxyMetadata: {
+        status: 'READY',
+        filePath: '/project/media/proxies/scene-01-take-02.mov',
+        playbackUrl: 'file:///project/media/proxies/scene-01-take-02.mov',
+        codec: 'prores',
+        width: 2048,
+        height: 1080,
+      },
+    }));
+
+    expect(asset.assetClass).toBe('video');
+    expect(asset.supportTier).toBe('normalized');
+    expect(asset.timebase).toMatchObject({ numerator: 24000, denominator: 1001 });
+    expect(asset.colorDescriptor?.transfer).toBe('smpte2084');
+    expect(asset.references?.map((reference) => reference.role)).toEqual(
+      expect.arrayContaining(['original', 'managed', 'playback', 'proxy']),
+    );
+    expect(asset.streams?.map((stream) => stream.kind)).toEqual(expect.arrayContaining(['video', 'audio']));
+    expect(asset.variants?.map((variant) => variant.purpose)).toEqual(expect.arrayContaining(['source', 'managed', 'proxy', 'playback']));
+    expect(asset.capabilityReport?.surfaces.find((surface) => surface.surface === 'desktop')?.disposition).toBe('proxy-only');
+    expect(asset.capabilityReport?.surfaces.find((surface) => surface.surface === 'web')?.disposition).toBe('proxy-only');
+    expect(asset.capabilityReport?.surfaces.find((surface) => surface.surface === 'worker')?.disposition).toBe('mezzanine-required');
+  });
+
+  it('preserves multichannel audio details for surround assets', () => {
+    const asset = hydrateMediaAsset(makeAsset({
+      name: 'Main Theme.wav',
+      type: 'AUDIO',
+      duration: 180,
+      fileExtension: 'wav',
+      technicalMetadata: {
+        container: 'wav',
+        audioCodec: 'pcm_s24le',
+        durationSeconds: 180,
+        audioChannels: 6,
+        audioChannelLayout: '5.1',
+        sampleRate: 48000,
+        timecodeStart: '00:58:00:00',
+        reelName: 'MUS01',
+      },
+      waveformData: [0.1, 0.4, 0.2],
+    }));
+
+    expect(asset.assetClass).toBe('audio');
+    expect(asset.supportTier).toBe('native');
+    expect(asset.streams).toHaveLength(1);
+    expect(asset.streams?.[0]).toMatchObject({
+      kind: 'audio',
+      audioChannels: 6,
+      audioChannelLayout: '5.1',
+      sampleRate: 48000,
+    });
+    expect(asset.capabilityReport?.surfaces.find((surface) => surface.surface === 'desktop')?.disposition).toBe('native');
+    expect(asset.capabilityReport?.surfaces.find((surface) => surface.surface === 'web')?.disposition).toBe('mezzanine-required');
+    expect(asset.capabilityReport?.surfaces.find((surface) => surface.surface === 'worker')?.disposition).toBe('native');
+  });
+
+  it('models bitmap stills, subtitle sidecars, and layered graphics explicitly', () => {
+    const bitmap = hydrateMediaAsset(makeAsset({
+      name: 'Title Card.png',
+      type: 'IMAGE',
+      fileExtension: 'png',
+      technicalMetadata: {
+        container: 'png',
+        width: 3840,
+        height: 2160,
+        colorDescriptor: {
+          colorSpace: 'sRGB',
+          alphaMode: 'straight',
+        },
+        graphicDescriptor: {
+          kind: 'bitmap',
+          sourceFormat: 'png',
+          canvasWidth: 3840,
+          canvasHeight: 2160,
+          hasAlpha: true,
+        },
+      },
+    }));
+    const subtitle = hydrateMediaAsset(makeAsset({
+      name: 'Scene 01 English.srt',
+      type: 'DOCUMENT',
+      duration: 48.7,
+      fileExtension: 'srt',
+      locations: {
+        originalPath: '/media/captions/scene-01-en.srt',
+        pathHistory: [],
+      },
+      technicalMetadata: {
+        container: 'srt',
+        subtitleCodec: 'subrip',
+        durationSeconds: 48.7,
+        frameRate: 23.976,
+        subtitleLanguages: ['en'],
+      },
+    }));
+    const layeredGraphic = hydrateMediaAsset(makeAsset({
+      name: 'Segment Opener.psd',
+      type: 'GRAPHIC',
+      fileExtension: 'psd',
+      locations: {
+        originalPath: '/media/graphics/segment-opener.psd',
+        pathHistory: [],
+      },
+      proxyMetadata: {
+        status: 'READY',
+        filePath: '/project/media/renders/segment-opener.png',
+        playbackUrl: 'file:///project/media/renders/segment-opener.png',
+        codec: 'png',
+        width: 3840,
+        height: 2160,
+      },
+      technicalMetadata: {
+        container: 'psd',
+        width: 3840,
+        height: 2160,
+        graphicDescriptor: {
+          kind: 'layered-graphic',
+          sourceFormat: 'psd',
+          canvasWidth: 3840,
+          canvasHeight: 2160,
+          layerCount: 12,
+          hasAlpha: true,
+          flatteningRequired: true,
+          renderStrategy: 'flatten',
+        },
+      },
+    }));
+
+    expect(bitmap.assetClass).toBe('bitmap');
+    expect(bitmap.graphicDescriptor?.kind).toBe('bitmap');
+    expect(bitmap.supportTier).toBe('native');
+
+    expect(subtitle.assetClass).toBe('subtitle');
+    expect(subtitle.references?.map((reference) => reference.role)).toContain('subtitle-sidecar');
+    expect(subtitle.streams?.[0]).toMatchObject({ kind: 'subtitle', language: 'en' });
+    expect(subtitle.capabilityReport?.surfaces.find((surface) => surface.surface === 'desktop')?.disposition).toBe('adapter-required');
+    expect(subtitle.capabilityReport?.surfaces.find((surface) => surface.surface === 'worker')?.disposition).toBe('native');
+
+    expect(layeredGraphic.assetClass).toBe('layered-graphic');
+    expect(layeredGraphic.supportTier).toBe('adapter');
+    expect(layeredGraphic.graphicDescriptor).toMatchObject({ layerCount: 12, renderStrategy: 'flatten' });
+    expect(layeredGraphic.references?.map((reference) => reference.role)).toEqual(
+      expect.arrayContaining(['graphic-source', 'proxy']),
+    );
+    expect(layeredGraphic.variants?.map((variant) => variant.purpose)).toContain('graphic-render');
+    expect(layeredGraphic.capabilityReport?.surfaces.find((surface) => surface.surface === 'desktop')?.disposition).toBe('proxy-only');
+  });
+
+  it('flags HDR/VFR sources and proprietary media explicitly', () => {
+    const hdrReview = hydrateMediaAsset(makeAsset({
+      name: 'Festival Reel.mov',
+      type: 'VIDEO',
+      fileExtension: 'mov',
+      technicalMetadata: {
+        container: 'mov',
+        containerLongName: 'QuickTime / MOV',
+        videoCodec: 'prores',
+        audioCodec: 'pcm_s24le',
+        durationSeconds: 91.2,
+        frameRate: 29.97,
+        averageFrameRate: {
+          numerator: 24000,
+          denominator: 1001,
+          framesPerSecond: 23.976,
+          displayString: '24000/1001',
+        },
+        width: 3840,
+        height: 2160,
+        colorDescriptor: {
+          colorSpace: 'Rec.2020',
+          transfer: 'smpte2084',
+          hdrMode: 'pq',
+          alphaMode: 'none',
+        },
+        sideData: [
+          {
+            type: 'Mastering display metadata',
+            metadata: {
+              red_x: '34000/50000',
+            },
+          },
+        ],
+      },
+      streams: [
+        {
+          id: 'stream-video',
+          index: 0,
+          kind: 'video',
+          codec: 'prores',
+          width: 3840,
+          height: 2160,
+          frameRate: {
+            numerator: 30000,
+            denominator: 1001,
+            framesPerSecond: 29.97,
+          },
+          averageFrameRate: {
+            numerator: 24000,
+            denominator: 1001,
+            framesPerSecond: 23.976,
+          },
+          colorDescriptor: {
+            colorSpace: 'Rec.2020',
+            transfer: 'smpte2084',
+            hdrMode: 'pq',
+          },
+          sideData: [
+            {
+              type: 'Mastering display metadata',
+              metadata: {
+                red_x: '34000/50000',
+              },
+            },
+          ],
+        },
+      ],
+    }));
+    const proprietary = hydrateMediaAsset(makeAsset({
+      name: 'Protected Dailies.m4p',
+      type: 'VIDEO',
+      fileExtension: 'm4p',
+      technicalMetadata: {
+        container: 'm4p',
+        videoCodec: 'h264',
+      },
+    }));
+
+    expect(hdrReview.technicalMetadata?.isVariableFrameRate).toBe(true);
+    expect(hdrReview.capabilityReport?.surfaces.find((surface) => surface.surface === 'desktop')?.disposition).toBe('native');
+    expect(hdrReview.capabilityReport?.surfaces.find((surface) => surface.surface === 'web')?.disposition).toBe('mezzanine-required');
+    expect(hdrReview.capabilityReport?.issues).toEqual(expect.arrayContaining([
+      expect.stringContaining('HDR'),
+      expect.stringContaining('Variable or mixed frame-rate'),
+    ]));
+
+    expect(proprietary.supportTier).toBe('unsupported');
+    expect(proprietary.capabilityReport?.surfaces.every((surface) => surface.disposition === 'unsupported')).toBe(true);
   });
 });

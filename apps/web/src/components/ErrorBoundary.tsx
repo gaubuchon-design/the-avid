@@ -6,6 +6,7 @@
 
 import React, { Component, ErrorInfo, ReactNode, useCallback, useState } from 'react';
 import { createLogger } from '../lib/logger';
+import { isDevelopmentEnvironment } from '../lib/runtimeEnvironment';
 
 const logger = createLogger('ErrorBoundary');
 
@@ -125,9 +126,7 @@ function DefaultErrorFallback({
 }: DefaultErrorFallbackProps) {
   const [showDetails, setShowDetails] = useState(false);
 
-  const isDev =
-    typeof import.meta !== 'undefined' &&
-    (import.meta as unknown as Record<string, Record<string, unknown>>)['env']?.['DEV'] === true;
+  const isDev = isDevelopmentEnvironment();
 
   const isRecurring = errorCount > 2;
 

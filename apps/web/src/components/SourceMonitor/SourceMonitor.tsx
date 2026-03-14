@@ -8,6 +8,12 @@ import {
   releaseMonitorAudioOutput,
   reviewMonitorAudioOutput,
 } from '../../lib/monitorPlayback';
+import {
+  activateRecordMonitor,
+  activateSourceMonitor,
+  clearMarksForActiveMonitor,
+  markClipForActiveMonitor,
+} from '../../lib/editorMonitorActions';
 import { usePointerScrub } from '../../hooks/usePointerScrub';
 import { useTrimMonitorPreview } from '../../lib/trimMonitorPreview';
 import { trimEngine } from '../../engine/TrimEngine';
@@ -66,9 +72,16 @@ export function SourceMonitor() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 480, h: 270 });
   const [videoReady, setVideoReady] = useState(false);
+  const [metadataDuration, setMetadataDuration] = useState<number | null>(null);
   const rafRef = useRef<number>();
   const syncRafRef = useRef<number>();
   const cachedFrameRef = useRef<HTMLCanvasElement | null>(null);
+  const displayedPlayheadRef = useRef(0);
+  const playbackBoundsRef = useRef({
+    duration: 0,
+    inPoint: null as number | null,
+    outPoint: null as number | null,
+  });
   const renderStateRef = useRef({
     assetName: '',
     fps: 24,
@@ -99,6 +112,8 @@ export function SourceMonitor() {
   const sourceOutPoint = useEditorStore((s) => s.sourceOutPoint);
   const setSourceInPoint = useEditorStore((s) => s.setSourceInPoint);
   const setSourceOutPoint = useEditorStore((s) => s.setSourceOutPoint);
+  const insertEdit = useEditorStore((s) => s.insertEdit);
+  const overwriteEdit = useEditorStore((s) => s.overwriteEdit);
   const trimSelectionLabel = useEditorStore((s) => s.trimSelectionLabel);
   const trimActive = useEditorStore((s) => s.trimActive);
   const trimMode = useEditorStore((s) => s.trimMode);
@@ -145,9 +160,7 @@ export function SourceMonitor() {
     : sourcePlayhead;
   const displayedInPoint = trimPreviewActive ? null : sourceInPoint;
   const displayedOutPoint = trimPreviewActive ? null : sourceOutPoint;
-  const displayedDuration = trimPreviewActive
-    ? (displayedAsset?.duration ?? 0)
-    : (sourceAsset?.duration ?? 0);
+  const displayedDuration = Math.max(displayedAsset?.duration ?? 0, metadataDuration ?? 0);
   const effectiveIsPlaying = trimSessionActive ? false : isPlaying;
   const sourceTrimSideActive = trimSessionActive
     && (trimSelectionLabel === 'A' || trimSelectionLabel === 'AB' || trimSelectionLabel === 'ASYM');
@@ -155,6 +168,18 @@ export function SourceMonitor() {
   const trimLoopStatusLabel = trimLoopPlaybackActive
     ? `${trimLoopPlaybackDirection < 0 ? 'REV' : 'FWD'} ${trimLoopPlaybackRate}x`
     : null;
+
+  useEffect(() => {
+    displayedPlayheadRef.current = displayedPlayhead;
+  }, [displayedPlayhead]);
+
+  useEffect(() => {
+    playbackBoundsRef.current = {
+      duration: displayedDuration,
+      inPoint: displayedInPoint,
+      outPoint: displayedOutPoint,
+    };
+  }, [displayedDuration, displayedInPoint, displayedOutPoint]);
 
   useEffect(() => {
     renderStateRef.current = {
@@ -203,6 +228,7 @@ export function SourceMonitor() {
   // Load/update video element when source asset changes
   useEffect(() => {
     setVideoReady(false);
+    setMetadataDuration(null);
     cachedFrameRef.current = null;
 
     if (!displayedAsset || !(displayedAsset.fileHandle || displayedAsset.playbackUrl)) {
@@ -229,8 +255,11 @@ export function SourceMonitor() {
     const handleLoadedMetadata = () => {
       videoRef.current = video;
       attachMonitorAudioOutput('source-monitor', video);
-      if (Number.isFinite(displayedPlayhead) && displayedPlayhead > 0) {
-        video.currentTime = displayedPlayhead;
+      if (Number.isFinite(video.duration) && video.duration > 0) {
+        setMetadataDuration(video.duration);
+      }
+      if (Number.isFinite(displayedPlayheadRef.current) && displayedPlayheadRef.current > 0) {
+        video.currentTime = displayedPlayheadRef.current;
       }
       setVideoReady(true);
     };
@@ -239,8 +268,18 @@ export function SourceMonitor() {
       setVideoReady(false);
     };
 
+    const handleEnded = () => {
+      const playbackEnd = playbackBoundsRef.current.outPoint
+        ?? playbackBoundsRef.current.duration
+        ?? video.duration
+        ?? 0;
+      setSourcePlayhead(Math.max(0, Math.min(video.currentTime, playbackEnd)));
+      usePlayerStore.getState().pause();
+    };
+
     video.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
     video.addEventListener('error', handleError, { once: true });
+    video.addEventListener('ended', handleEnded);
     video.load();
 
     return () => {
@@ -248,6 +287,7 @@ export function SourceMonitor() {
       video.pause();
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
       video.removeEventListener('error', handleError);
+      video.removeEventListener('ended', handleEnded);
       video.src = '';
       if (ownedUrl) {
         URL.revokeObjectURL(ownedUrl);
@@ -256,7 +296,7 @@ export function SourceMonitor() {
         videoRef.current = null;
       }
     };
-  }, [displayedAsset?.fileHandle, displayedAsset?.id, displayedAsset?.playbackUrl, displayedPlayhead]);
+  }, [displayedAsset?.fileHandle, displayedAsset?.id, displayedAsset?.playbackUrl, setSourcePlayhead]);
 
   // Render loop — draw video frame or placeholder
   useEffect(() => {
@@ -342,16 +382,26 @@ export function SourceMonitor() {
     const video = videoRef.current;
     if (!video || !videoReady) return;
     const frameTolerance = fps > 0 ? 0.5 / fps : 0.02;
-    if (!effectiveIsPlaying && isFinite(displayedPlayhead) && Math.abs(video.currentTime - displayedPlayhead) > frameTolerance) {
-      video.currentTime = Math.max(0, displayedPlayhead);
+    const playbackStart = displayedInPoint ?? 0;
+    const playbackEnd = displayedOutPoint ?? displayedDuration;
+    const clampedPlayhead = Math.max(
+      playbackStart,
+      playbackEnd > 0 ? Math.min(displayedPlayhead, playbackEnd) : displayedPlayhead,
+    );
+
+    if (!effectiveIsPlaying && isFinite(clampedPlayhead) && Math.abs(video.currentTime - clampedPlayhead) > frameTolerance) {
+      video.currentTime = Math.max(0, clampedPlayhead);
     }
-  }, [displayedPlayhead, effectiveIsPlaying, fps, videoReady]);
+  }, [displayedDuration, displayedInPoint, displayedOutPoint, displayedPlayhead, effectiveIsPlaying, fps, videoReady]);
 
   // Play/pause — properly cancel previous RAF sync loop before creating new one.
   // Also applies playback rate from playerStore.speed for JKL shuttle support.
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !videoReady) return;
+    const playbackStart = displayedInPoint ?? 0;
+    const playbackEnd = displayedOutPoint ?? displayedDuration;
+    const frameTolerance = fps > 0 ? 0.5 / fps : 0.02;
 
     // Always cancel any existing sync loop first
     if (syncRafRef.current) {
@@ -372,10 +422,10 @@ export function SourceMonitor() {
         const stepBack = () => {
           if (!videoRef.current) { syncRafRef.current = undefined; return; }
           const step = absSpeed / fps;
-          const newTime = Math.max(0, videoRef.current.currentTime - step);
+          const newTime = Math.max(playbackStart, videoRef.current.currentTime - step);
           videoRef.current.currentTime = newTime;
           setSourcePlayhead(newTime);
-          if (newTime <= 0) {
+          if (newTime <= playbackStart + frameTolerance) {
             usePlayerStore.getState().pause();
             syncRafRef.current = undefined;
             return;
@@ -392,7 +442,17 @@ export function SourceMonitor() {
             syncRafRef.current = undefined;
             return;
           }
-          setSourcePlayhead(videoRef.current.currentTime);
+          const currentTime = playbackEnd > 0
+            ? Math.min(videoRef.current.currentTime, playbackEnd)
+            : videoRef.current.currentTime;
+          setSourcePlayhead(currentTime);
+          if (playbackEnd > 0 && currentTime >= playbackEnd - frameTolerance) {
+            videoRef.current.pause();
+            videoRef.current.currentTime = playbackEnd;
+            usePlayerStore.getState().pause();
+            syncRafRef.current = undefined;
+            return;
+          }
           syncRafRef.current = requestAnimationFrame(sync);
         };
         syncRafRef.current = requestAnimationFrame(sync);
@@ -407,7 +467,7 @@ export function SourceMonitor() {
         syncRafRef.current = undefined;
       }
     };
-  }, [effectiveIsPlaying, speed, videoReady, fps, setSourcePlayhead]);
+  }, [displayedDuration, displayedInPoint, displayedOutPoint, effectiveIsPlaying, speed, videoReady, fps, setSourcePlayhead]);
 
   useEffect(() => {
     return () => {
@@ -542,9 +602,9 @@ export function SourceMonitor() {
     if (nudgeTrim(1)) {
       return;
     }
-    const maxDur = sourceAsset?.duration ?? 999;
+    const maxDur = displayedDuration || sourceAsset?.duration || 999;
     setSourcePlayhead(Math.min(maxDur, sourcePlayhead + 1 / fps));
-  }, [nudgeTrim, sourcePlayhead, fps, sourceAsset?.duration, setSourcePlayhead]);
+  }, [displayedDuration, nudgeTrim, sourcePlayhead, fps, sourceAsset?.duration, setSourcePlayhead]);
 
   const handleRewind = useCallback(() => {
     if (nudgeTrim(-10)) {
@@ -557,9 +617,9 @@ export function SourceMonitor() {
     if (nudgeTrim(10)) {
       return;
     }
-    const maxDur = sourceAsset?.duration ?? 999;
+    const maxDur = displayedDuration || sourceAsset?.duration || 999;
     setSourcePlayhead(Math.min(maxDur, sourcePlayhead + 1));
-  }, [nudgeTrim, sourcePlayhead, sourceAsset?.duration, setSourcePlayhead]);
+  }, [displayedDuration, nudgeTrim, sourcePlayhead, sourceAsset?.duration, setSourcePlayhead]);
 
   const handleMarkIn = useCallback(() => {
     setSourceInPoint(sourcePlayhead);
@@ -568,6 +628,26 @@ export function SourceMonitor() {
   const handleMarkOut = useCallback(() => {
     setSourceOutPoint(sourcePlayhead);
   }, [sourcePlayhead, setSourceOutPoint]);
+
+  const handleMarkClip = useCallback(() => {
+    activateSourceMonitor();
+    markClipForActiveMonitor();
+  }, []);
+
+  const handleClearMarks = useCallback(() => {
+    activateSourceMonitor();
+    clearMarksForActiveMonitor();
+  }, []);
+
+  const handleInsertEdit = useCallback(() => {
+    activateSourceMonitor();
+    insertEdit();
+  }, [insertEdit]);
+
+  const handleOverwriteEdit = useCallback(() => {
+    activateSourceMonitor();
+    overwriteEdit();
+  }, [overwriteEdit]);
 
   const handleScopeChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -580,6 +660,14 @@ export function SourceMonitor() {
   const handleFocus = useCallback(() => {
     setActiveMonitor('source');
   }, [setActiveMonitor]);
+
+  const handleActivateSource = useCallback(() => {
+    activateSourceMonitor();
+  }, []);
+
+  const handleActivateRecord = useCallback(() => {
+    activateRecordMonitor();
+  }, []);
 
   const handleSelectTrimASide = useCallback(() => {
     setActiveMonitor('source');
@@ -649,8 +737,9 @@ export function SourceMonitor() {
     },
   });
 
-  const tc = formatTimecode(displayedPlayhead, fps);
   const dur = displayedDuration;
+  const tc = formatTimecode(displayedPlayhead, fps);
+  const durationTc = dur > 0 ? formatTimecode(dur, fps) : null;
   const progress = dur > 0 ? (displayedPlayhead / dur) * 100 : 0;
   const inPct = displayedInPoint !== null && dur > 0 ? (displayedInPoint / dur) * 100 : null;
   const outPct = displayedOutPoint !== null && dur > 0 ? (displayedOutPoint / dur) * 100 : null;
@@ -724,7 +813,12 @@ export function SourceMonitor() {
           className="composer-scrubbar"
           ref={scrubRef}
           {...scrubBindings}
+          role="slider"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={progress}
           aria-label="Source playback position"
+          tabIndex={0}
           style={{ height: 6, margin: '0 4px', cursor: 'pointer' }}
         >
           {inPct !== null && <div className="composer-scrubbar-mark in" style={{ left: `${inPct}%` }} />}
@@ -739,6 +833,27 @@ export function SourceMonitor() {
 
       {/* Footer / Transport */}
       <div className="monitor-footer">
+        <div className="monitor-footer-group monitor-focus-group" role="group" aria-label="Monitor focus controls">
+          <button
+            type="button"
+            className={`transport-btn monitor-toolbar-btn is-monitor${activeMonitor === 'source' ? ' active' : ''}`}
+            onClick={handleActivateSource}
+            aria-pressed={activeMonitor === 'source'}
+            title="Activate Source Monitor"
+          >
+            SRC
+          </button>
+          <button
+            type="button"
+            className={`transport-btn monitor-toolbar-btn is-monitor${activeMonitor === 'record' ? ' active' : ''}`}
+            onClick={handleActivateRecord}
+            aria-pressed={activeMonitor === 'record'}
+            title="Activate Record Monitor"
+          >
+            REC
+          </button>
+        </div>
+
         <div className="monitor-footer-group" role="group" aria-label="Source mark controls">
           <button
             className={`transport-btn monitor-toolbar-btn is-mark${sourceInPoint !== null ? ' active' : ''}`}
@@ -755,6 +870,41 @@ export function SourceMonitor() {
             disabled={trimSessionActive}
           >
             OUT
+          </button>
+          <button
+            className="transport-btn monitor-toolbar-btn"
+            onClick={handleMarkClip}
+            title="Mark Clip (E)"
+            disabled={trimSessionActive}
+          >
+            CLIP
+          </button>
+          <button
+            className="transport-btn monitor-toolbar-btn"
+            onClick={handleClearMarks}
+            title="Clear Marks (D)"
+            disabled={trimSessionActive}
+          >
+            CLR
+          </button>
+        </div>
+
+        <div className="monitor-footer-group" role="group" aria-label="Source edit controls">
+          <button
+            className="transport-btn monitor-toolbar-btn"
+            onClick={handleInsertEdit}
+            title="Splice-In (V)"
+            disabled={trimSessionActive}
+          >
+            INS
+          </button>
+          <button
+            className="transport-btn monitor-toolbar-btn"
+            onClick={handleOverwriteEdit}
+            title="Overwrite (B)"
+            disabled={trimSessionActive}
+          >
+            OVR
           </button>
         </div>
 
@@ -854,7 +1004,7 @@ export function SourceMonitor() {
 
         <div className="monitor-footer-group">
           <div className="timecode-display monitor-footer-timecode" role="status" aria-live="polite" aria-label="Current timecode">
-            {tc}
+            {durationTc ? `${tc} / ${durationTc}` : tc}
           </div>
         </div>
       </div>

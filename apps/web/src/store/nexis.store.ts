@@ -20,6 +20,7 @@ import type {
   CacheEntry,
   CacheStats,
 } from '@mcua/core';
+import { isDevelopmentEnvironment } from '../lib/runtimeEnvironment';
 
 // ─── State ─────────────────────────────────────────────────────────────────
 
@@ -326,7 +327,7 @@ export const useNexisStore = create<NEXISState & NEXISActions>()(
       cacheStats: { ...DEFAULT_CACHE_STATS },
     }), true, 'nexis/resetStore'),
   })),
-  { name: 'NexisStore', enabled: import.meta.env.DEV },
+  { name: 'NexisStore', enabled: isDevelopmentEnvironment() },
   )
 );
 

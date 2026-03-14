@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
+import { isDevelopmentEnvironment } from '../lib/runtimeEnvironment';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 //
@@ -152,7 +153,7 @@ export const usePlayerStore = create<PlayerState & PlayerActions>()(
       resetStore: () =>
         set(() => ({ ...INITIAL_STATE }), true, 'player/resetStore'),
     })),
-    { name: 'PlayerStore', enabled: import.meta.env.DEV },
+    { name: 'PlayerStore', enabled: isDevelopmentEnvironment() },
   )
 );
 

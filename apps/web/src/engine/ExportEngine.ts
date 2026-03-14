@@ -648,6 +648,7 @@ class ExportEngine {
         canvas,
         colorProcessing: 'post',
         overlayProcessing,
+        effectQuality: 'final',
         useCache: false,
       });
       this.updateJobRenderState(jobId, frameIndex + 1, plan.frameCount);

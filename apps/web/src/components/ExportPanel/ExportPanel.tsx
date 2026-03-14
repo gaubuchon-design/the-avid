@@ -572,6 +572,7 @@ function StepExport() {
         canvas: previewCanvas,
         colorProcessing: 'post',
         overlayProcessing: 'post',
+        effectQuality: 'final',
         useCache: true,
       });
 

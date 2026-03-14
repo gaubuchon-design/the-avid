@@ -3,10 +3,16 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 import react from '@vitejs/plugin-react';
 
 const isProduction = process.env['NODE_ENV'] === 'production';
+const workspaceAliases = {
+  '@mcua/core': path.resolve(__dirname, '../../packages/core/src'),
+  '@mcua/media-backend': path.resolve(__dirname, '../../packages/media-backend/src'),
+  '@mcua/ui': path.resolve(__dirname, '../../packages/ui/src'),
+};
+const bundledWorkspacePackages = Object.keys(workspaceAliases);
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [externalizeDepsPlugin({ exclude: bundledWorkspacePackages })],
     build: {
       outDir: 'dist/main',
       minify: 'esbuild',
@@ -22,13 +28,19 @@ export default defineConfig({
     define: {
       'process.env.NODE_ENV': JSON.stringify(process.env['NODE_ENV'] ?? 'development'),
     },
+    resolve: {
+      alias: workspaceAliases,
+    },
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [externalizeDepsPlugin({ exclude: bundledWorkspacePackages })],
     build: {
       outDir: 'dist/preload',
       minify: 'esbuild',
       sourcemap: isProduction ? 'hidden' : true,
+    },
+    resolve: {
+      alias: workspaceAliases,
     },
   },
   renderer: {
@@ -69,9 +81,7 @@ export default defineConfig({
       },
     },
     resolve: {
-      alias: {
-        '@mcua/core': path.resolve(__dirname, '../../packages/core/src'),
-      },
+      alias: workspaceAliases,
     },
   },
 });

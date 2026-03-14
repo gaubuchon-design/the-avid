@@ -28,6 +28,7 @@ const ALLOWED_INVOKE_CHANNELS = new Set([
   'app:reveal-in-finder',
   'app:download-update',
   'app:check-for-updates',
+  'app:get-update-state',
   'app:install-update',
   'app:notify',
   'app:get-theme',
@@ -194,6 +195,7 @@ const ALLOWED_SUBSCRIBE_CHANNELS = new Set([
   'app:update-available',
   'app:update-progress',
   'app:update-downloaded',
+  'app:update-state',
 
   // Deep link events
   'app:deep-link',
@@ -221,7 +223,7 @@ function safeSubscribe<Args extends unknown[]>(
 ): () => void {
   if (!ALLOWED_SUBSCRIBE_CHANNELS.has(channel)) {
     console.warn(`[Preload] Attempted subscription to disallowed channel: ${channel}`);
-    return () => {};
+    return () => undefined;
   }
   return subscribe(channel, callback);
 }
@@ -240,6 +242,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     revealInFinder: (filePath: string) => safeInvoke('app:reveal-in-finder', filePath) as Promise<boolean>,
     downloadUpdate: () => safeInvoke('app:download-update') as Promise<boolean>,
     checkForUpdates: () => safeInvoke('app:check-for-updates') as Promise<unknown>,
+    getUpdateState: () => safeInvoke('app:get-update-state') as Promise<unknown>,
     installUpdate: () => safeInvoke('app:install-update') as Promise<void>,
   },
   gpu: {
@@ -437,6 +440,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onUpdateAvailable:  (cb: (info: { version: string }) => void) => safeSubscribe('app:update-available', cb),
   onUpdateProgress:   (cb: (info: { percent: number }) => void) => safeSubscribe('app:update-progress', cb),
   onUpdateDownloaded: (cb: (info: { version: string }) => void) => safeSubscribe('app:update-downloaded', cb),
+  onUpdateState:      (cb: (info: unknown) => void) => safeSubscribe('app:update-state', cb),
 
   // Deep link events
   onDeepLink: (cb: (url: string) => void) => safeSubscribe('app:deep-link', cb),

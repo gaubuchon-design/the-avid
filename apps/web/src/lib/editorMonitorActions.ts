@@ -8,6 +8,68 @@ import { usePlayerStore } from '../store/player.store';
 let sourceShuttleJ = 0;
 let sourceShuttleL = 0;
 
+function getSourceDuration(): number {
+  const sourceDuration = useEditorStore.getState().sourceAsset?.duration;
+  return Number.isFinite(sourceDuration) && sourceDuration !== undefined
+    ? Math.max(0, sourceDuration)
+    : Number.POSITIVE_INFINITY;
+}
+
+function clampSourceTime(time: number): number {
+  const sourceDuration = getSourceDuration();
+  return Number.isFinite(sourceDuration)
+    ? Math.max(0, Math.min(time, sourceDuration))
+    : Math.max(0, time);
+}
+
+export function activateSourceMonitor(): void {
+  usePlayerStore.getState().setActiveMonitor('source');
+}
+
+export function activateRecordMonitor(): void {
+  usePlayerStore.getState().setActiveMonitor('record');
+}
+
+export function toggleMonitorFocus(): void {
+  const playerState = usePlayerStore.getState();
+  playerState.setActiveMonitor(playerState.activeMonitor === 'source' ? 'record' : 'source');
+}
+
+export function stepFramesForActiveMonitor(frameDelta: number): void {
+  const editorState = useEditorStore.getState();
+  const fps = editorState.sequenceSettings?.fps || editorState.projectSettings.frameRate || 24;
+  const timeDelta = frameDelta / fps;
+
+  if (usePlayerStore.getState().activeMonitor === 'source') {
+    editorState.setSourcePlayhead(clampSourceTime(editorState.sourcePlayhead + timeDelta));
+    return;
+  }
+
+  editorState.setPlayhead(editorState.playheadTime + timeDelta);
+}
+
+export function goToStartForActiveMonitor(): void {
+  const editorState = useEditorStore.getState();
+
+  if (usePlayerStore.getState().activeMonitor === 'source') {
+    editorState.setSourcePlayhead(0);
+    return;
+  }
+
+  editorState.setPlayhead(0);
+}
+
+export function goToEndForActiveMonitor(): void {
+  const editorState = useEditorStore.getState();
+
+  if (usePlayerStore.getState().activeMonitor === 'source') {
+    editorState.setSourcePlayhead(clampSourceTime(Number.POSITIVE_INFINITY));
+    return;
+  }
+
+  editorState.setPlayhead(editorState.duration);
+}
+
 function findAssetInBins(bins: Bin[], assetId: string): MediaAsset | null {
   for (const bin of bins) {
     const asset = bin.assets.find((candidate) => candidate.id === assetId);

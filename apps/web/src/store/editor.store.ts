@@ -3,6 +3,9 @@ import { immer } from 'zustand/middleware/immer';
 import {
   DEFAULT_EDITORIAL_WORKSPACE_ID,
   PROJECT_SCHEMA_VERSION,
+  hydrateMediaAsset,
+  type EditorMediaAsset,
+  type EditorMediaTechnicalMetadata,
   type EditorProject,
   type ProjectTemplate,
 } from '@mcua/core';
@@ -151,7 +154,7 @@ export interface Marker {
   color: string;
 }
 
-export interface MediaAsset {
+export interface MediaAsset extends EditorMediaAsset {
   id: string;
   name: string;
   type: 'VIDEO' | 'AUDIO' | 'IMAGE' | 'GRAPHIC' | 'DOCUMENT';
@@ -177,6 +180,7 @@ export interface MediaAsset {
   startTimecode?: string;
   bitDepth?: number;
   mimeType?: string;
+  technicalMetadata?: EditorMediaTechnicalMetadata;
   colorLabel?: string;
   rating?: number;
   // File reference for re-probe or relink
@@ -291,10 +295,12 @@ export interface Approval {
 
 export interface DesktopJob {
   id: string;
-  kind: 'INGEST' | 'EXPORT';
+  kind: 'INGEST' | 'INDEX' | 'EXPORT' | 'TRANSCODE' | 'TRANSCRIPTION' | 'RENDER' | 'EFFECTS';
   label: string;
   status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
   progress: number;
+  detail?: string;
+  dispatchMode?: 'LOCAL' | 'DISTRIBUTED' | 'HYBRID';
 }
 
 export interface PublishJob {
@@ -737,6 +743,8 @@ interface EditorActions {
   setApprovalStatus: (approvalId: string, status: Approval['status'], notes?: string) => void;
   queuePublishJob: (job: Pick<PublishJob, 'label' | 'preset' | 'destination'>) => string;
   updatePublishJob: (jobId: string, patch: Partial<PublishJob>) => void;
+  setDesktopJobs: (jobs: DesktopJob[]) => void;
+  upsertDesktopJob: (job: DesktopJob) => void;
 
   // Enhanced trim operations
   rippleDelete: (clipId: string) => void;
@@ -767,6 +775,18 @@ interface EditorActions {
   addTitleClip: (title: TitleClipData) => void;
   removeTitleClip: (titleId: string) => void;
   updateTitleClip: (titleId: string, data: Partial<TitleClipData>) => void;
+  addAdjustmentLayerClip: (options?: {
+    durationSeconds?: number;
+    startTime?: number;
+    endTime?: number;
+    trackId?: string | null;
+    name?: string;
+  }) => string | null;
+  buildTranscriptTitleEffects: (options?: {
+    trackId?: string | null;
+    useTranslations?: boolean;
+    includeSpeakerLabels?: boolean;
+  }) => number;
 
   // Intrinsic property updates
   updateIntrinsicVideo: (clipId: string, patch: Partial<IntrinsicVideoProps>) => void;
@@ -875,11 +895,19 @@ export function makeClip(base: Omit<Clip, 'intrinsicVideo' | 'intrinsicAudio' | 
   };
 }
 
+const DEFAULT_TRACK_COLORS: Record<TrackType, string> = {
+  VIDEO: '#7f8ca3',
+  AUDIO: '#6f9a86',
+  EFFECT: '#8f87a8',
+  SUBTITLE: '#7a8ea7',
+  GRAPHIC: '#9a8f7a',
+};
+
 const INITIAL_TRACKS: Track[] = [
-  { id: 't-v1', name: 'V1', type: 'VIDEO', sortOrder: 0, muted: false, locked: false, solo: false, volume: 1, color: '#5b6af5', clips: [] },
-  { id: 't-v2', name: 'V2', type: 'VIDEO', sortOrder: 1, muted: false, locked: false, solo: false, volume: 1, color: '#818cf8', clips: [] },
-  { id: 't-a1', name: 'A1', type: 'AUDIO', sortOrder: 2, muted: false, locked: false, solo: false, volume: 0.85, color: '#e05b8e', clips: [] },
-  { id: 't-a2', name: 'A2', type: 'AUDIO', sortOrder: 3, muted: false, locked: false, solo: false, volume: 0.6, color: '#4ade80', clips: [] },
+  { id: 't-v1', name: 'V1', type: 'VIDEO', sortOrder: 0, muted: false, locked: false, solo: false, volume: 1, color: DEFAULT_TRACK_COLORS.VIDEO, clips: [] },
+  { id: 't-v2', name: 'V2', type: 'VIDEO', sortOrder: 1, muted: false, locked: false, solo: false, volume: 1, color: '#8e9bb2', clips: [] },
+  { id: 't-a1', name: 'A1', type: 'AUDIO', sortOrder: 2, muted: false, locked: false, solo: false, volume: 0.85, color: DEFAULT_TRACK_COLORS.AUDIO, clips: [] },
+  { id: 't-a2', name: 'A2', type: 'AUDIO', sortOrder: 3, muted: false, locked: false, solo: false, volume: 0.6, color: '#7fa28f', clips: [] },
 ];
 
 const INITIAL_BINS: Bin[] = [
@@ -948,6 +976,87 @@ function createId(prefix: string): string {
     return `${prefix}-${globalThis.crypto.randomUUID()}`;
   }
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function isVisualTrack(track: Pick<Track, 'type'>): boolean {
+  return track.type === 'VIDEO' || track.type === 'GRAPHIC' || track.type === 'EFFECT';
+}
+
+function normalizeTrackOrdering(tracks: Track[]): void {
+  tracks.sort((left, right) => left.sortOrder - right.sortOrder);
+  tracks.forEach((track, index) => {
+    track.sortOrder = index;
+  });
+}
+
+function nextTrackName(tracks: Track[], type: TrackType): string {
+  const prefix = type === 'VIDEO'
+    ? 'V'
+    : type === 'AUDIO'
+      ? 'A'
+      : type === 'GRAPHIC'
+        ? 'G'
+        : type === 'SUBTITLE'
+          ? 'S'
+          : 'FX';
+  const count = tracks.filter((track) => track.type === type).length;
+  return `${prefix}${count + 1}`;
+}
+
+function insertTrackAfterVisualTracks(tracks: Track[], track: Track): Track {
+  normalizeTrackOrdering(tracks);
+  const lastVisualIndex = tracks.reduce((lastIndex, currentTrack, index) => {
+    return isVisualTrack(currentTrack) ? index : lastIndex;
+  }, -1);
+  const insertIndex = Math.max(0, lastVisualIndex + 1);
+  tracks.splice(insertIndex, 0, track);
+  normalizeTrackOrdering(tracks);
+  return tracks[insertIndex] ?? track;
+}
+
+function ensureTimelineTrack(
+  tracks: Track[],
+  type: Extract<TrackType, 'EFFECT' | 'GRAPHIC'>,
+): Track {
+  const existing = tracks.find((track) => track.type === type && !track.locked);
+  if (existing) {
+    return existing;
+  }
+
+  const track: Track = {
+    id: createId('track'),
+    name: nextTrackName(tracks, type),
+    type,
+    sortOrder: tracks.length,
+    muted: false,
+    locked: false,
+    solo: false,
+    volume: 1,
+    clips: [],
+    color: DEFAULT_TRACK_COLORS[type],
+  };
+
+  return insertTrackAfterVisualTracks(tracks, track);
+}
+
+function removeAutogeneratedTranscriptTitles(state: EditorState): void {
+  const generatedTitleIds = new Set(
+    state.titleClips
+      .filter((title) => title.templateId === 'auto-transcript-subtitle')
+      .map((title) => title.id),
+  );
+
+  if (generatedTitleIds.size === 0) {
+    return;
+  }
+
+  state.titleClips = state.titleClips.filter((title) => !generatedTitleIds.has(title.id));
+  for (const track of state.tracks) {
+    if (track.type !== 'GRAPHIC') {
+      continue;
+    }
+    track.clips = track.clips.filter((clip) => !generatedTitleIds.has(clip.assetId ?? ''));
+  }
 }
 
 function areDesktopMonitorAudioPreviewStatusesEqual(
@@ -2317,6 +2426,17 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         Object.assign(job, patch);
       }
     }),
+    setDesktopJobs: (jobs) => set((s) => {
+      s.desktopJobs = jobs.map((job) => ({ ...job }));
+    }),
+    upsertDesktopJob: (job) => set((s) => {
+      const existing = s.desktopJobs.find((entry) => entry.id === job.id);
+      if (existing) {
+        Object.assign(existing, job);
+        return;
+      }
+      s.desktopJobs.unshift({ ...job });
+    }),
 
     // Enhanced trim operations
     rippleDelete: (clipId) => set((s) => {
@@ -2446,7 +2566,13 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     // ─── Source Monitor ──────────────────────────────────────────────────────────
     setSourceInPoint: (t) => set((s) => { s.sourceInPoint = t; }),
     setSourceOutPoint: (t) => set((s) => { s.sourceOutPoint = t; }),
-    setSourcePlayhead: (t) => set((s) => { s.sourcePlayhead = isFinite(t) ? Math.max(0, t) : 0; }),
+    setSourcePlayhead: (t) => set((s) => {
+      const sourceDuration = s.sourceAsset?.duration;
+      const clampedTime = isFinite(t) ? Math.max(0, t) : 0;
+      s.sourcePlayhead = Number.isFinite(sourceDuration)
+        ? Math.min(clampedTime, Math.max(0, sourceDuration!))
+        : clampedTime;
+    }),
     setSourceInToPlayhead: () => set((s) => { s.sourceInPoint = s.sourcePlayhead; }),
     setSourceOutToPlayhead: () => set((s) => { s.sourceOutPoint = s.sourcePlayhead; }),
     clearSourceInOut: () => set((s) => { s.sourceInPoint = null; s.sourceOutPoint = null; }),
@@ -2807,7 +2933,21 @@ export const useEditorStore = create<EditorState & EditorActions>()(
             tags: [],
             isFavorite: false,
             fileSize: file!.size!,
+            fileSizeBytes: file!.size!,
+            fileExtension: ext || undefined,
             mimeType: mime,
+            indexStatus: 'INDEXING',
+            ingestMetadata: {
+              importedAt: new Date().toISOString(),
+              storageMode: 'LINK',
+              importedFileName: file!.name!,
+              originalFileName: file!.name!,
+            },
+            locations: {
+              originalPath: file!.name!,
+              playbackUrl: url,
+              pathHistory: [file!.name!],
+            },
             fileHandle: file,
           };
 
@@ -2858,27 +2998,99 @@ export const useEditorStore = create<EditorState & EditorActions>()(
             }
             const asset = findAsset(s.bins);
             if (asset) {
-              asset.status = 'READY';
-              asset.duration = isFinite(metadata.duration) ? metadata.duration : 0;
-              asset.width = metadata.width;
-              asset.height = metadata.height;
-              asset.fps = metadata.fps;
-              asset.codec = metadata.codec;
-              asset.colorSpace = metadata.colorSpace;
-              asset.hasAlpha = metadata.hasAlpha;
-              // Alpha mode will be set after dialog resolves (see below)
-              asset.audioChannels = metadata.audioChannels;
-              asset.audioChannelLayout = metadata.audioChannelLayout;
-              asset.sampleRate = metadata.sampleRate;
-              asset.fileSize = metadata.fileSize;
-              asset.startTimecode = metadata.startTimecode;
-              asset.bitDepth = metadata.bitDepth;
-              asset.mimeType = metadata.mimeType;
-              asset.thumbnailUrl = metadata.thumbnailUrl;
-              if (metadata.waveformData) {
-                asset.waveformData = Array.from(metadata.waveformData);
-              }
-              asset.mediaDbId = assetId;
+              const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+              const isGraphicAsset = asset.type === 'GRAPHIC' || asset.type === 'IMAGE';
+              const technicalMetadata: EditorMediaTechnicalMetadata = {
+                container: ext || undefined,
+                videoCodec: asset.type === 'VIDEO' || asset.type === 'IMAGE' || asset.type === 'GRAPHIC' ? metadata.codec.toLowerCase() : undefined,
+                audioCodec: asset.type === 'AUDIO' ? metadata.codec.toLowerCase() : asset.type === 'VIDEO' ? undefined : undefined,
+                durationSeconds: isFinite(metadata.duration) ? metadata.duration : 0,
+                frameRate: metadata.fps || undefined,
+                width: metadata.width || undefined,
+                height: metadata.height || undefined,
+                audioChannels: metadata.audioChannels > 0 ? metadata.audioChannels : undefined,
+                audioChannelLayout: metadata.audioChannelLayout !== 'none'
+                  ? metadata.audioChannelLayout as EditorMediaTechnicalMetadata['audioChannelLayout']
+                  : undefined,
+                sampleRate: metadata.sampleRate || undefined,
+                timecodeStart: metadata.startTimecode || undefined,
+                colorDescriptor: {
+                  colorSpace: metadata.colorSpace !== 'n/a' ? metadata.colorSpace : undefined,
+                  range: 'unknown',
+                  alphaMode: metadata.hasAlpha ? 'straight' : 'none',
+                  hdrMode: 'unknown',
+                  bitDepth: metadata.bitDepth || undefined,
+                },
+                graphicDescriptor: isGraphicAsset
+                  ? {
+                      kind: asset.type === 'GRAPHIC' ? (ext === 'svg' || ext === 'pdf' ? 'vector' : 'layered-graphic') : 'bitmap',
+                      sourceFormat: ext || undefined,
+                      canvasWidth: metadata.width || undefined,
+                      canvasHeight: metadata.height || undefined,
+                      hasAlpha: metadata.hasAlpha,
+                      flatteningRequired: asset.type === 'GRAPHIC',
+                      renderStrategy: asset.type === 'GRAPHIC'
+                        ? (ext === 'svg' || ext === 'pdf' ? 'rasterize' : 'flatten')
+                        : 'direct',
+                    }
+                  : undefined,
+                sideData: [],
+                captions: [],
+                formatTags: {},
+              };
+              const hydrated = hydrateMediaAsset({
+                id: asset.id,
+                name: asset.name,
+                type: asset.type,
+                duration: isFinite(metadata.duration) ? metadata.duration : 0,
+                status: 'READY',
+                playbackUrl: asset.playbackUrl,
+                thumbnailUrl: metadata.thumbnailUrl,
+                waveformData: metadata.waveformData ? Array.from(metadata.waveformData) : undefined,
+                fileExtension: ext || undefined,
+                fileSizeBytes: metadata.fileSize,
+                indexStatus: 'READY',
+                ingestMetadata: asset.ingestMetadata,
+                locations: asset.locations,
+                technicalMetadata,
+                proxyMetadata: {
+                  status: 'NOT_REQUESTED',
+                },
+                waveformMetadata: metadata.waveformData
+                  ? {
+                      status: 'READY',
+                      peaks: Array.from(metadata.waveformData),
+                      sampleCount: metadata.waveformData.length,
+                      updatedAt: new Date().toISOString(),
+                    }
+                  : {
+                      status: 'UNAVAILABLE',
+                      peaks: [],
+                      sampleCount: 0,
+                    },
+                tags: asset.tags,
+                isFavorite: asset.isFavorite,
+              });
+
+              Object.assign(asset, hydrated, {
+                status: 'READY',
+                width: metadata.width,
+                height: metadata.height,
+                fps: metadata.fps,
+                codec: metadata.codec,
+                colorSpace: metadata.colorSpace,
+                hasAlpha: metadata.hasAlpha,
+                audioChannels: metadata.audioChannels,
+                audioChannelLayout: metadata.audioChannelLayout,
+                sampleRate: metadata.sampleRate,
+                fileSize: metadata.fileSize,
+                startTimecode: metadata.startTimecode,
+                bitDepth: metadata.bitDepth,
+                mimeType: metadata.mimeType,
+                thumbnailUrl: metadata.thumbnailUrl,
+                waveformData: metadata.waveformData ? Array.from(metadata.waveformData) : asset.waveformData,
+                mediaDbId: assetId,
+              });
             }
             delete s.ingestProgress[assetId];
 
@@ -2934,7 +3146,25 @@ export const useEditorStore = create<EditorState & EditorActions>()(
               return null;
             }
             const asset = findAsset(s.bins);
-            if (asset) asset.status = 'ERROR';
+            if (asset) {
+              const message = err instanceof Error ? err.message : 'Media probe failed';
+              asset.status = 'ERROR';
+              asset.indexStatus = 'ERROR';
+              asset.capabilityReport = {
+                primarySurface: window.electronAPI ? 'desktop' : 'web',
+                primaryDisposition: 'unsupported',
+                sourceSupportTier: asset.supportTier ?? 'unsupported',
+                preferredVariantId: asset.capabilityReport?.preferredVariantId,
+                surfaces: ['desktop', 'web', 'mobile', 'worker'].map((surface) => ({
+                  surface: surface as 'desktop' | 'web' | 'mobile' | 'worker',
+                  disposition: 'unsupported' as const,
+                  supportTier: asset.supportTier ?? 'unsupported',
+                  preferredVariantId: asset.capabilityReport?.preferredVariantId,
+                  reasons: [message],
+                })),
+                issues: [message],
+              };
+            }
             delete s.ingestProgress[assetId];
           });
         }
@@ -3015,11 +3245,141 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     addTitleClip: (title) => set((s) => { s.titleClips.push(title); }),
     removeTitleClip: (titleId) => set((s) => {
       s.titleClips = s.titleClips.filter((t) => t.id !== titleId);
+      for (const track of s.tracks) {
+        if (track.type !== 'GRAPHIC') {
+          continue;
+        }
+        track.clips = track.clips.filter((clip) => clip.assetId !== titleId);
+      }
     }),
     updateTitleClip: (titleId, data) => set((s) => {
       const title = s.titleClips.find((t) => t.id === titleId);
       if (title) Object.assign(title, data);
     }),
+    addAdjustmentLayerClip: (options) => {
+      let clipId: string | null = null;
+      set((s) => {
+        const startTime = options?.startTime ?? s.inPoint ?? s.playheadTime;
+        const endTime = options?.endTime
+          ?? (
+            s.outPoint !== null && s.outPoint > startTime
+              ? s.outPoint
+              : startTime + Math.max(options?.durationSeconds ?? 5, MIN_CLIP_DURATION)
+          );
+        if (endTime <= startTime) {
+          return;
+        }
+
+        const preferredTrack = options?.trackId
+          ? s.tracks.find((track) => track.id === options.trackId && track.type === 'EFFECT' && !track.locked) ?? null
+          : null;
+        const effectTrack = preferredTrack ?? ensureTimelineTrack(s.tracks, 'EFFECT');
+        const clip = makeClip({
+          id: createId('fxclip'),
+          trackId: effectTrack.id,
+          name: options?.name ?? 'Adjustment Layer',
+          startTime,
+          endTime,
+          trimStart: 0,
+          trimEnd: 0,
+          type: 'effect',
+          color: effectTrack.color,
+        });
+
+        effectTrack.clips.push(clip);
+        effectTrack.clips.sort((left, right) => left.startTime - right.startTime);
+        s.selectedTrackId = effectTrack.id;
+        s.selectedClipIds = [clip.id];
+        s.inspectedClipId = clip.id;
+        s.activeInspectorTab = 'effects';
+        if (clip.endTime > s.duration) {
+          s.duration = clip.endTime + 1;
+        }
+        clipId = clip.id;
+      });
+      return clipId;
+    },
+    buildTranscriptTitleEffects: (options) => {
+      let createdCount = 0;
+      set((s) => {
+        if (s.transcript.length === 0) {
+          return;
+        }
+
+        removeAutogeneratedTranscriptTitles(s);
+
+        const preferredTrack = options?.trackId
+          ? s.tracks.find((track) => track.id === options.trackId && track.type === 'GRAPHIC' && !track.locked) ?? null
+          : null;
+        const graphicTrack = preferredTrack ?? ensureTimelineTrack(s.tracks, 'GRAPHIC');
+        const useTranslations = options?.useTranslations ?? true;
+        const includeSpeakerLabels = options?.includeSpeakerLabels ?? false;
+
+        for (const cue of s.transcript) {
+          const textBody = useTranslations && cue.translation ? cue.translation : cue.text;
+          const text = includeSpeakerLabels && cue.speaker
+            ? `${cue.speaker}: ${textBody}`
+            : textBody;
+          const titleId = createId('title');
+          const titleClip: TitleClipData = {
+            id: titleId,
+            templateId: 'auto-transcript-subtitle',
+            text,
+            style: {
+              fontFamily: 'system-ui',
+              fontSize: 42,
+              fontWeight: 600,
+              color: '#f6f7fa',
+              outlineColor: '#000000',
+              outlineWidth: 2,
+              shadowColor: 'rgba(0, 0, 0, 0.72)',
+              shadowBlur: 8,
+              opacity: 1,
+              textAlign: 'center',
+            },
+            position: {
+              x: 0.12,
+              y: 0.78,
+              width: 0.76,
+              height: 0.14,
+            },
+            background: {
+              type: 'solid',
+              color: '#000000',
+              opacity: 0.62,
+            },
+            animation: {
+              type: 'none',
+              duration: 0,
+            },
+          };
+          const clip = makeClip({
+            id: createId('clip'),
+            trackId: graphicTrack.id,
+            name: text.slice(0, 48) || 'Transcript Title',
+            startTime: cue.startTime,
+            endTime: Math.max(cue.endTime, cue.startTime + MIN_CLIP_DURATION),
+            trimStart: 0,
+            trimEnd: 0,
+            type: 'video',
+            assetId: titleId,
+            color: graphicTrack.color,
+          });
+
+          s.titleClips.push(titleClip);
+          graphicTrack.clips.push(clip);
+          createdCount += 1;
+          if (clip.endTime > s.duration) {
+            s.duration = clip.endTime + 1;
+          }
+        }
+
+        graphicTrack.clips.sort((left, right) => left.startTime - right.startTime);
+        s.selectedTrackId = graphicTrack.id;
+        s.activeInspectorTab = 'effects';
+      });
+      return createdCount;
+    },
     });
   })
 );

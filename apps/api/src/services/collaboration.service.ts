@@ -1,3 +1,4 @@
+import type { ApprovalStatus } from '@prisma/client';
 import { db } from '../db/client';
 import { logger } from '../utils/logger';
 import { NotFoundError, ConflictError, ForbiddenError } from '../utils/errors';
@@ -80,7 +81,7 @@ class CollaborationService {
   async upsertApproval(
     projectId: string,
     userId: string,
-    data: { status: string; version: string; notes?: string },
+    data: { status: ApprovalStatus; version: string; notes?: string },
   ) {
     const existing = await db.approval.findFirst({
       where: { projectId, userId, version: data.version },
@@ -107,6 +108,7 @@ class CollaborationService {
     const { projectId, resourceType, resourceId, userId, sessionId } = params;
     const ttlMs = params.ttlMs ?? CollaborationService.DEFAULT_LOCK_TTL_MS;
     const expiresAt = new Date(Date.now() + ttlMs);
+    const resolvedSessionId = sessionId ?? `lock-session:${userId}`;
 
     const existingLock = await db.resourceLock.findUnique({
       where: { resourceType_resourceId: { resourceType, resourceId } },
@@ -120,8 +122,15 @@ class CollaborationService {
 
     const lock = await db.resourceLock.upsert({
       where: { resourceType_resourceId: { resourceType, resourceId } },
-      update: { lockedById: userId, sessionId, expiresAt },
-      create: { projectId, resourceType, resourceId, lockedById: userId, sessionId, expiresAt },
+      update: { lockedById: userId, sessionId: resolvedSessionId, expiresAt },
+      create: {
+        projectId,
+        resourceType,
+        resourceId,
+        lockedById: userId,
+        sessionId: resolvedSessionId,
+        expiresAt,
+      },
     });
 
     logger.info('Resource lock acquired', { projectId, resourceType, resourceId, userId });

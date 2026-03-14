@@ -6,6 +6,7 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { effectsEngine, EffectInstance, Keyframe } from '../engine/EffectsEngine';
+import { isDevelopmentEnvironment } from '../lib/runtimeEnvironment';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -95,7 +96,9 @@ export const useEffectsStore = create<EffectsState & EffectsActions>()(
       if (!effects) return;
       const effect = effects.find((e) => e.id === effectId);
       if (effect) {
-        effect.enabled = !effect.enabled;
+        const nextEnabled = !effect.enabled;
+        effect.enabled = nextEnabled;
+        effectsEngine.setEnabled(effectId, nextEnabled);
       }
     }),
 
@@ -176,7 +179,7 @@ export const useEffectsStore = create<EffectsState & EffectsActions>()(
       favorites: [...INITIAL_EFFECTS_STATE.favorites],
     }), true, 'effects/resetStore'),
   })),
-  { name: 'EffectsStore', enabled: import.meta.env.DEV },
+  { name: 'EffectsStore', enabled: isDevelopmentEnvironment() },
   )
 );
 

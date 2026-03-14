@@ -1,20 +1,26 @@
 import { randomUUID } from 'crypto';
+import {
+  JOB_PRIORITY_WEIGHT,
+  createArtifactManifest,
+  createRenderExecutionJob,
+  matchesWorkerToJob,
+  normalizeWorkerCapabilityReport,
+  normalizeWorkerKindList,
+  type ArtifactManifest,
+  type JobLineage,
+  type JobPriority,
+  type MediaWorkerKind,
+  type RenderJob as MediaRenderJob,
+  type RenderJobSubmission,
+  type WorkerCapabilityReport,
+  type WorkerRegistration,
+} from '@mcua/media-backend';
 import { logger } from '../utils/logger';
 import { BadRequestError, NotFoundError } from '../utils/errors';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export interface WorkerCapabilities {
-  gpuVendor: string;
-  gpuName: string;
-  vramMB: number;
-  cpuCores: number;
-  memoryGB: number;
-  availableCodecs: string[];
-  ffmpegVersion: string;
-  maxConcurrentJobs: number;
-  hwAccel: string[];
-}
+export type WorkerCapabilities = WorkerCapabilityReport;
 
 export interface WorkerMetrics {
   jobsCompleted: number;
@@ -31,7 +37,7 @@ export interface WorkerNode {
   hostname: string;
   ip: string;
   port: number;
-  workerTypes: string[];
+  workerTypes: MediaWorkerKind[];
   status: 'idle' | 'busy' | 'offline' | 'error' | 'draining';
   currentJobId: string | null;
   progress: number;
@@ -52,8 +58,6 @@ export type RenderJobStatus =
   | 'failed'
   | 'cancelled'
   | 'paused';
-
-export type JobPriority = 'critical' | 'high' | 'normal' | 'low' | 'background';
 
 export interface RenderJobSegment {
   id: string;
@@ -85,7 +89,10 @@ export interface RenderJob {
   outputPath?: string;
   outputSize?: number;
   error?: string;
-  exportSettings: any;
+  exportSettings: Record<string, unknown>;
+  workerJob: MediaRenderJob;
+  artifactManifest: ArtifactManifest;
+  lineage: JobLineage;
 }
 
 export interface FarmStats {
@@ -100,17 +107,26 @@ export interface FarmStats {
   averageFps: number;
 }
 
-// Priority weight for sorting — lower value = higher priority
-const PRIORITY_WEIGHT: Record<JobPriority, number> = {
-  critical: 0,
-  high: 1,
-  normal: 2,
-  low: 3,
-  background: 4,
-};
-
 const HEARTBEAT_TIMEOUT_MS = 30_000;
 const STALE_CHECK_INTERVAL_MS = 10_000;
+
+function buildInitialLineage(jobId: string, createdAt: string): JobLineage {
+  return {
+    rootJobId: jobId,
+    entries: [
+      {
+        jobId,
+        stage: 'render',
+        parentJobIds: [],
+        inputArtifactIds: [],
+        outputArtifactIds: [],
+        createdAt,
+        attempt: 1,
+        metadata: {},
+      },
+    ],
+  };
+}
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
@@ -118,7 +134,7 @@ class RenderFarmService {
   private workers = new Map<string, WorkerNode>();
   private jobs = new Map<string, RenderJob>();
   private completedJobs: RenderJob[] = [];
-  private agentSockets = new Map<string, any>(); // nodeId -> socket
+  private agentSockets = new Map<string, unknown>(); // nodeId -> socket/channel
 
   /** Set by WebSocket layer to relay events to frontend clients */
   public onBroadcast: ((event: string, payload: any) => void) | null = null;
@@ -132,14 +148,8 @@ class RenderFarmService {
   // ─── Worker Management ────────────────────────────────────────────────────
 
   registerWorker(
-    nodeInfo: {
-      hostname: string;
-      ip: string;
-      port: number;
-      workerTypes?: string[];
-      capabilities?: Partial<WorkerCapabilities>;
-    },
-    socket?: any,
+    nodeInfo: WorkerRegistration,
+    socket?: unknown,
   ): WorkerNode {
     if (!nodeInfo.hostname) {
       throw new BadRequestError('hostname is required');
@@ -147,28 +157,18 @@ class RenderFarmService {
 
     const id = randomUUID();
     const now = Date.now();
+    const workerTypes = normalizeWorkerKindList(nodeInfo.workerTypes ?? ['render']);
 
     const node: WorkerNode = {
       id,
       hostname: nodeInfo.hostname,
-      ip: nodeInfo.ip,
-      port: nodeInfo.port,
-      workerTypes: nodeInfo.workerTypes ?? ['render'],
+      ip: nodeInfo.ip ?? '0.0.0.0',
+      port: nodeInfo.port ?? 0,
+      workerTypes,
       status: 'idle',
       currentJobId: null,
       progress: 0,
-      capabilities: {
-        gpuVendor: 'unknown',
-        gpuName: 'unknown',
-        vramMB: 0,
-        cpuCores: 0,
-        memoryGB: 0,
-        availableCodecs: [],
-        ffmpegVersion: 'unknown',
-        maxConcurrentJobs: 1,
-        hwAccel: [],
-        ...nodeInfo.capabilities,
-      },
+      capabilities: normalizeWorkerCapabilityReport(nodeInfo.capabilities ?? {}, workerTypes),
       lastHeartbeat: now,
       connectedAt: now,
       metrics: {
@@ -248,16 +248,7 @@ class RenderFarmService {
 
   // ─── Job Management ───────────────────────────────────────────────────────
 
-  submitJob(jobData: {
-    name: string;
-    presetId: string;
-    priority?: JobPriority;
-    sourceTimelineId: string;
-    totalFrames: number;
-    templateId?: string;
-    exportSettings?: any;
-    segmentCount?: number;
-  }): RenderJob {
+  submitJob(jobData: RenderJobSubmission): RenderJob {
     if (!jobData.name) {
       throw new BadRequestError('name is required');
     }
@@ -274,6 +265,19 @@ class RenderFarmService {
     const id = randomUUID();
     const segmentCount = jobData.segmentCount ?? Math.max(1, Math.ceil(jobData.totalFrames / 1000));
     const framesPerSegment = Math.ceil(jobData.totalFrames / segmentCount);
+    const createdAt = new Date().toISOString();
+    const lineage = jobData.lineage ?? buildInitialLineage(id, createdAt);
+    const artifactManifest = jobData.artifactManifest
+      ?? createArtifactManifest({
+        manifestId: `${id}-artifacts`,
+        jobId: id,
+        createdAt,
+        metadata: {},
+      });
+    const workerJob = createRenderExecutionJob(id, jobData, {
+      artifactManifest,
+      lineage,
+    });
 
     const segments: RenderJobSegment[] = [];
     for (let i = 0; i < segmentCount; i++) {
@@ -303,6 +307,9 @@ class RenderFarmService {
       sourceTimelineId: jobData.sourceTimelineId,
       totalFrames: jobData.totalFrames,
       exportSettings: jobData.exportSettings ?? {},
+      workerJob,
+      artifactManifest,
+      lineage,
     };
 
     this.jobs.set(id, job);
@@ -382,7 +389,7 @@ class RenderFarmService {
 
   getJobs(): RenderJob[] {
     return Array.from(this.jobs.values()).sort(
-      (a, b) => PRIORITY_WEIGHT[a.priority] - PRIORITY_WEIGHT[b.priority] || a.createdAt - b.createdAt,
+      (a, b) => JOB_PRIORITY_WEIGHT[b.priority] - JOB_PRIORITY_WEIGHT[a.priority] || a.createdAt - b.createdAt,
     );
   }
 
@@ -404,7 +411,11 @@ class RenderFarmService {
     if (pendingJobs.length === 0) return;
 
     for (const worker of idleWorkers) {
-      const nextJob = pendingJobs.shift();
+      const nextJobIndex = pendingJobs.findIndex((candidate) => matchesWorkerToJob(worker.capabilities, candidate.workerJob));
+      if (nextJobIndex < 0) {
+        continue;
+      }
+      const [nextJob] = pendingJobs.splice(nextJobIndex, 1);
       if (!nextJob) break;
 
       this.assignJobToAgent(nextJob, worker.id);
@@ -434,7 +445,10 @@ class RenderFarmService {
     // Send job to the agent via its socket if available
     const socket = this.agentSockets.get(workerId);
     if (socket) {
-      socket.emit('render:agent:assign', { job });
+      this.sendAgentMessage(socket, {
+        type: 'job:assign',
+        job: job.workerJob,
+      });
     }
   }
 
@@ -484,6 +498,16 @@ class RenderFarmService {
       seg.status = 'completed';
       seg.progress = 100;
       seg.outputPath = outputPath;
+      if (!job.artifactManifest.artifacts.some((artifact) => artifact.id === segmentId)) {
+        job.artifactManifest.artifacts.push({
+          id: segmentId,
+          kind: 'render',
+          uri: outputPath,
+          createdAt: new Date().toISOString(),
+          derivedFromArtifactIds: [],
+          metadata: { segmentIndex: seg.index },
+        });
+      }
     }
 
     // Check if all segments are done
@@ -508,6 +532,27 @@ class RenderFarmService {
     job.completedAt = Date.now();
     job.outputPath = outputPath;
     if (outputSize !== undefined) job.outputSize = outputSize;
+    if (!job.artifactManifest.artifacts.some((artifact) => artifact.id === `${jobId}-final`)) {
+      job.artifactManifest.artifacts.push({
+        id: `${jobId}-final`,
+        kind: 'delivery',
+        uri: outputPath,
+        sizeBytes: outputSize,
+        createdAt: new Date().toISOString(),
+        derivedFromArtifactIds: job.segments.map((segment) => segment.id),
+        metadata: {
+          presetId: job.presetId,
+          sourceTimelineId: job.sourceTimelineId,
+        },
+      });
+    }
+    const rootLineageEntry = job.lineage.entries[0];
+    if (rootLineageEntry) {
+      rootLineageEntry.outputArtifactIds = Array.from(new Set([
+        ...rootLineageEntry.outputArtifactIds,
+        `${jobId}-final`,
+      ]));
+    }
 
     // Release workers
     for (const nodeId of job.assignedNodeIds) {
@@ -623,7 +668,7 @@ class RenderFarmService {
 
   // ─── Install Script ───────────────────────────────────────────────────────
 
-  generateInstallScript(host: string, workerTypes: string[]): string {
+  generateInstallScript(host: string, workerTypes: MediaWorkerKind[]): string {
     const typesArg = workerTypes.join(',');
     return `#!/usr/bin/env bash
 # ── The Avid Render Farm Agent Installer ──────────────────────────────────────
@@ -632,56 +677,56 @@ set -euo pipefail
 
 FARM_HOST="${host}"
 WORKER_TYPES="${typesArg}"
-INSTALL_DIR="\$HOME/.avid-render-agent"
+INSTALL_DIR="$HOME/.avid-render-agent"
 
 echo "╔═══════════════════════════════════════════════════╗"
 echo "║      The Avid — Render Farm Agent Installer       ║"
 echo "╚═══════════════════════════════════════════════════╝"
 echo ""
-echo "Farm host : \$FARM_HOST"
-echo "Worker types: \$WORKER_TYPES"
-echo "Install dir : \$INSTALL_DIR"
+echo "Farm host : $FARM_HOST"
+echo "Worker types: $WORKER_TYPES"
+echo "Install dir : $INSTALL_DIR"
 echo ""
 
 # Check deps
 command -v ffmpeg >/dev/null 2>&1 || { echo "Error: ffmpeg is required. Install it first."; exit 1; }
 command -v node >/dev/null 2>&1 || { echo "Error: Node.js >=18 is required. Install it first."; exit 1; }
 
-FFMPEG_VERSION=\$(ffmpeg -version | head -1 | awk '{print \$3}')
-echo "ffmpeg version: \$FFMPEG_VERSION"
+FFMPEG_VERSION=$(ffmpeg -version | head -1 | awk '{print $3}')
+echo "ffmpeg version: $FFMPEG_VERSION"
 
 # Detect GPU
 GPU_VENDOR="none"
 GPU_NAME="none"
 if command -v nvidia-smi >/dev/null 2>&1; then
   GPU_VENDOR="nvidia"
-  GPU_NAME=\$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
+  GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
 elif system_profiler SPDisplaysDataType 2>/dev/null | grep -q "Apple"; then
   GPU_VENDOR="apple"
   GPU_NAME="Apple Silicon"
 fi
 
-echo "GPU: \$GPU_VENDOR — \$GPU_NAME"
+echo "GPU: $GPU_VENDOR — $GPU_NAME"
 
 # Create install directory
-mkdir -p "\$INSTALL_DIR"
-cat > "\$INSTALL_DIR/agent-config.json" <<AGENTEOF
+mkdir -p "$INSTALL_DIR"
+cat > "$INSTALL_DIR/agent-config.json" <<AGENTEOF
 {
-  "farmHost": "\$FARM_HOST",
-  "workerTypes": "\$WORKER_TYPES",
-  "hostname": "\$(hostname)",
-  "ip": "\$(hostname -I 2>/dev/null | awk '{print \$1}' || ipconfig getifaddr en0 2>/dev/null || echo '0.0.0.0')",
-  "gpuVendor": "\$GPU_VENDOR",
-  "gpuName": "\$GPU_NAME",
-  "ffmpegVersion": "\$FFMPEG_VERSION",
-  "cpuCores": \$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1),
-  "memoryGB": \$(free -g 2>/dev/null | awk '/Mem:/{print \$2}' || echo \$(( \$(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 )))
+  "farmHost": "$FARM_HOST",
+  "workerTypes": "$WORKER_TYPES",
+  "hostname": "$(hostname)",
+  "ip": "$(hostname -I 2>/dev/null | awk '{print $1}' || ipconfig getifaddr en0 2>/dev/null || echo '0.0.0.0')",
+  "gpuVendor": "$GPU_VENDOR",
+  "gpuName": "$GPU_NAME",
+  "ffmpegVersion": "$FFMPEG_VERSION",
+  "cpuCores": $(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1),
+  "memoryGB": $(free -g 2>/dev/null | awk '/Mem:/{print $2}' || echo $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 )))
 }
 AGENTEOF
 
 echo ""
-echo "Agent config written to \$INSTALL_DIR/agent-config.json"
-echo "Agent ready. Connect to farm at ws://\$FARM_HOST with the render agent client."
+echo "Agent config written to $INSTALL_DIR/agent-config.json"
+echo "Agent ready. Connect to farm at ws://$FARM_HOST with the render agent client."
 echo "Done."
 `;
   }
@@ -696,6 +741,21 @@ echo "Done."
 
   private broadcastStats(): void {
     this.broadcast('render:farm:stats', this.getFarmStats());
+  }
+
+  private sendAgentMessage(socket: unknown, payload: unknown): void {
+    if (!socket || typeof socket !== 'object') {
+      return;
+    }
+
+    if ('send' in socket && typeof socket.send === 'function') {
+      socket.send(JSON.stringify(payload));
+      return;
+    }
+
+    if ('emit' in socket && typeof socket.emit === 'function') {
+      socket.emit('render:agent:assign', payload);
+    }
   }
 
   private checkStaleWorkers(): void {

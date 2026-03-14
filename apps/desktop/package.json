@@ -9,14 +9,18 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "sync:version": "node scripts/sync-version.js",
     "prepare:packaging": "node scripts/prepare-packaging.js",
-    "pack": "npm run prepare:packaging -- current && electron-vite build && electron-builder --dir --publish never",
-    "dist": "npm run prepare:packaging -- current && electron-vite build && electron-builder --publish never",
-    "dist:mac": "npm run prepare:packaging -- mac && electron-vite build && electron-builder --mac --arm64 --publish never",
-    "dist:mac:x64": "npm run prepare:packaging -- darwin-x64 && electron-vite build && electron-builder --mac --x64 --publish never",
-    "dist:win": "npm run prepare:packaging -- win32-x64 && electron-vite build && electron-builder --win nsis portable --x64 --publish never",
-    "dist:linux": "npm run prepare:packaging -- linux-x64 && electron-vite build && electron-builder --linux --x64 --publish never",
-    "postinstall": "electron-builder install-app-deps",
+    "pack": "npm run sync:version && npm run prepare:packaging -- current && electron-vite build && electron-builder --config electron-builder.config.cjs --dir --publish never",
+    "dist": "npm run sync:version && npm run prepare:packaging -- current && electron-vite build && electron-builder --config electron-builder.config.cjs --publish never",
+    "dist:refresh": "node scripts/rebuild-installers.js",
+    "dist:refresh:mac": "node scripts/rebuild-installers.js --targets=mac",
+    "dist:refresh:win": "node scripts/rebuild-installers.js --targets=win",
+    "dist:mac": "npm run sync:version && npm run prepare:packaging -- mac && electron-vite build && electron-builder --config electron-builder.config.cjs --mac --arm64 --publish never",
+    "dist:mac:x64": "npm run sync:version && npm run prepare:packaging -- darwin-x64 && electron-vite build && electron-builder --config electron-builder.config.cjs --mac --x64 --publish never",
+    "dist:win": "npm run sync:version && npm run prepare:packaging -- win32-x64 && electron-vite build && electron-builder --config electron-builder.config.cjs --win nsis portable --x64 --publish never",
+    "dist:linux": "npm run sync:version && npm run prepare:packaging -- linux-x64 && electron-vite build && electron-builder --config electron-builder.config.cjs --linux --x64 --publish never",
+    "postinstall": "node scripts/postinstall.js",
     "lint": "eslint src --ext .ts,.tsx",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
@@ -30,14 +34,16 @@
     "@mcua/ui": "*",
     "@eyevinn/srt": "^0.8.3",
     "electron-updater": "^6.2.0",
-    "grandiose": "^0.0.4",
     "immer": "^10.1.0",
-    "macadam": "^2.0.18",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-router-dom": "^6.24.0",
-    "serialport": "^12.0.0",
     "zustand": "^4.5.0"
+  },
+  "optionalDependencies": {
+    "grandiose": "^0.0.4",
+    "macadam": "^2.0.18",
+    "serialport": "^12.0.0"
   },
   "devDependencies": {
     "@electron/notarize": "^2.3.0",
@@ -153,10 +159,9 @@
     ],
     "publish": [
       {
-        "provider": "github",
-        "owner": "the-avid",
-        "repo": "the-avid",
-        "releaseType": "release"
+        "provider": "generic",
+        "url": "https://downloads.theavid.com/desktop/stable",
+        "channel": "stable"
       }
     ],
     "afterSign": "scripts/notarize.js"

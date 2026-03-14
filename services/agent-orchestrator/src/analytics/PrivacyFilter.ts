@@ -43,7 +43,7 @@ const PRIVACY_LEVEL_ORDER: readonly PrivacyLevel[] = [
  * Regex pattern matching most common email address formats.
  * RFC 5322 simplified -- sufficient for stripping, not for validation.
  */
-const EMAIL_PATTERN = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
+const EMAIL_PATTERN = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 
 /**
  * IPv4 address pattern (e.g. `192.168.1.1`).

@@ -1,9 +1,12 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useEditorStore } from '../../store/editor.store';
+import { usePlayerStore } from '../../store/player.store';
 import { SourceMonitor } from '../SourceMonitor/SourceMonitor';
 import { RecordMonitor } from '../RecordMonitor/RecordMonitor';
 import { MonitorArea } from '../Monitor/MonitorArea';
+import { MultiCamSourceView } from './MultiCamSourceView';
 import { trimEngine } from '../../engine/TrimEngine';
+import { PanelResizeHandle } from '../Layout/PanelResizeHandle';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -57,12 +60,23 @@ function storeToMode(storeLayout: 'source-record' | 'full-frame'): ComposerLayou
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export function ComposerPanel() {
+interface ComposerPanelProps {
+  dualMonitorSplit?: number;
+  onDualMonitorSplitChange?: (value: number) => void;
+}
+
+export function ComposerPanel({
+  dualMonitorSplit = 50,
+  onDualMonitorSplitChange,
+}: ComposerPanelProps) {
   const composerLayout = useEditorStore((s) => s.composerLayout);
   const setComposerLayout = useEditorStore((s) => s.setComposerLayout);
   const trimActive = useEditorStore((s) => s.trimActive);
   const trimViewMode = useEditorStore((s) => s.trimViewMode);
   const setTrimViewMode = useEditorStore((s) => s.setTrimViewMode);
+  const multicamActive = useEditorStore((s) => s.multicamActive);
+  const multicamDisplayMode = useEditorStore((s) => s.multicamDisplayMode);
+  const activeMonitor = usePlayerStore((s) => s.activeMonitor);
 
   // Local state for 'full-source' since the store only has 'source-record' | 'full-frame'
   const [sourceOnly, setSourceOnly] = useState(false);
@@ -70,6 +84,8 @@ export function ComposerPanel() {
   // Derive the effective layout mode
   const mode: ComposerLayoutMode = trimActive
     ? 'source-record'
+    : multicamActive
+      ? 'source-record'
     : (sourceOnly ? 'full-source' : storeToMode(composerLayout));
   const hasPreviousTrimConfiguration = trimEngine.hasPreviousConfiguration();
 
@@ -114,10 +130,20 @@ export function ComposerPanel() {
     }
   }, []);
 
+  useEffect(() => {
+    if (trimActive || composerLayout !== 'full-frame') {
+      return;
+    }
+
+    setSourceOnly(activeMonitor === 'source');
+  }, [activeMonitor, composerLayout, trimActive]);
+
   // ── Active monitor label ────────────────────────────────────────────────
 
   const activeLabel = trimActive
     ? `Trim ${trimViewMode === 'big' ? 'Big' : 'Small'} View`
+    : multicamActive
+      ? `MultiCam ${multicamDisplayMode === 'quad' ? '2x2' : multicamDisplayMode === 'nine' ? '3x3' : '4x4'}`
     : isDual
       ? 'Source | Record'
       : isSingleSource
@@ -202,12 +228,24 @@ export function ComposerPanel() {
       {/* Monitor area */}
       <div
         className={`composer-panel-monitors ${isDual ? 'composer-panel-dual' : 'composer-panel-single'}`}
+        style={isDual ? {
+          gridTemplateColumns: `minmax(0, ${dualMonitorSplit}fr) var(--panel-divider-w) minmax(0, ${100 - dualMonitorSplit}fr)`,
+        } : undefined}
       >
         {isDual && (
           <>
             <div className="composer-panel-monitor-slot">
-              <SourceMonitor />
+              {multicamActive ? <MultiCamSourceView /> : <SourceMonitor />}
             </div>
+            <PanelResizeHandle
+              axis="horizontal"
+              ariaLabel="Resize source and record monitors"
+              value={dualMonitorSplit}
+              min={30}
+              max={70}
+              className="composer-panel-resize-handle resize-handle-h"
+              onChange={(next) => onDualMonitorSplitChange?.(next)}
+            />
             <div className="composer-panel-monitor-slot">
               <RecordMonitor />
             </div>
@@ -216,7 +254,7 @@ export function ComposerPanel() {
 
         {isSingleSource && (
           <div className="composer-panel-monitor-slot">
-            <SourceMonitor />
+            {multicamActive ? <MultiCamSourceView /> : <SourceMonitor />}
           </div>
         )}
 

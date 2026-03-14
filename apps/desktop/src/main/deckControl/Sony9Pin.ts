@@ -359,8 +359,8 @@ export class Sony9Pin {
    */
   private buildFrame(data: Buffer): Buffer {
     let sum = 0;
-    for (let i = 0; i < data.length; i++) {
-      sum += data[i]!;
+    for (const value of data) {
+      sum += value;
     }
     const checksum = sum & 0xFF;
     return Buffer.concat([data, Buffer.from([checksum])]);

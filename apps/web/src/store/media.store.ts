@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
+import { isDevelopmentEnvironment } from '../lib/runtimeEnvironment';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -362,7 +363,7 @@ export const useMediaStore = create<MediaState & MediaActions>()(
       ...INITIAL_MEDIA_STATE,
     }), true, 'media/resetStore'),
   })),
-  { name: 'MediaStore', enabled: import.meta.env.DEV },
+  { name: 'MediaStore', enabled: isDevelopmentEnvironment() },
   )
 );
 

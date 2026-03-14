@@ -106,7 +106,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
 
   // Appearance
   theme: 'dark',
-  accentColor: '#6d4cfa',
+  accentColor: '#81818d',
   uiScale: 1.0,
 
   // Timeline

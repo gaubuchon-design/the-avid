@@ -53,6 +53,7 @@ function resolveTargets(rawArg) {
 function main() {
   const targets = resolveTargets(process.argv[2]);
   console.log(`Preparing packaging assets for: ${targets.join(', ')}`);
+  run('sync-version.js');
 
   const resourcesDir = path.resolve(scriptsDir, '..', 'resources');
   const needsMacAssets = targets.some((target) => target.startsWith('darwin'));

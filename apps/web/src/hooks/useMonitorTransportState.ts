@@ -4,6 +4,7 @@ interface MonitorTransportState {
   transportActive: boolean;
   renderScale: number;
   colorProcessing: 'pre' | 'post';
+  effectQuality: 'draft' | 'preview';
   useCache: boolean;
 }
 
@@ -61,6 +62,7 @@ export function useMonitorTransportState(
     transportActive,
     renderScale: transportActive ? 1 : devicePixelRatio,
     colorProcessing: transportActive ? 'pre' : 'post',
+    effectQuality: transportActive ? 'draft' : 'preview',
     useCache: !transportActive,
   };
 }

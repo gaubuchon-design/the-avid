@@ -67,7 +67,7 @@ interface SaveDialogResult {
 
 interface DesktopJob {
   id: string;
-  kind: 'INGEST' | 'EXPORT';
+  kind: 'INGEST' | 'INDEX' | 'EXPORT' | 'TRANSCODE' | 'TRANSCRIPTION' | 'RENDER' | 'EFFECTS';
   projectId: string;
   label: string;
   status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
@@ -76,6 +76,8 @@ interface DesktopJob {
   updatedAt: string;
   outputPath?: string;
   error?: string;
+  detail?: string;
+  dispatchMode?: 'LOCAL' | 'DISTRIBUTED' | 'HYBRID';
 }
 
 // ─── Media Types ──────────────────────────────────────────────────────────────
@@ -118,6 +120,19 @@ interface AppPaths {
   logs: string;
   temp: string;
   documents: string;
+}
+
+interface DesktopUpdateState {
+  currentVersion: string;
+  channel: string;
+  status: 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error';
+  availableVersion: string | null;
+  downloadPercent: number | null;
+  message: string | null;
+  error: string | null;
+  checkedAt: string | null;
+  restartScheduled: boolean;
+  autoInstallOnQuit: boolean;
 }
 
 // ─── Video I/O Types ──────────────────────────────────────────────────────────
@@ -277,6 +292,7 @@ interface DesktopBridge {
     revealInFinder: (filePath: string) => Promise<boolean>;
     downloadUpdate: () => Promise<boolean>;
     checkForUpdates: () => Promise<unknown>;
+    getUpdateState: () => Promise<DesktopUpdateState>;
     installUpdate: () => Promise<void>;
   };
   gpu: {
@@ -448,6 +464,7 @@ interface DesktopBridge {
   onUpdateAvailable: (callback: (info: { version: string }) => void) => () => void;
   onUpdateProgress: (callback: (info: { percent: number }) => void) => () => void;
   onUpdateDownloaded: (callback: (info: { version: string }) => void) => () => void;
+  onUpdateState: (callback: (info: DesktopUpdateState) => void) => () => void;
 
   // Deep link events
   onDeepLink: (callback: (url: string) => void) => () => void;

@@ -53,6 +53,27 @@ Every media asset should carry:
 
 This is the bridge between Media Composer-style reliability and AI-assisted organization.
 
+### Canonical Record Shape
+
+The shared `@mcua/core` media model now treats an editorial asset as a canonical record instead of a single file path:
+
+- `AssetRecord` carries `assetClass`, `supportTier`, `references`, `streams`, `variants`, `capabilityReport`, `timebase`, `colorDescriptor`, and `graphicDescriptor`.
+- `assetClass` distinguishes `video`, `audio`, `subtitle`, `bitmap`, `vector`, `layered-graphic`, and `document`.
+- `supportTier` is explicit and honest: `native`, `normalized`, `adapter`, or `unsupported`.
+- `MediaReference` records canonical/original, managed, proxy, playback, subtitle-sidecar, and graphic-render locations separately.
+- `StreamDescriptor` preserves stream-level codec, language, channel layout, timecode, reel, rational timebase, and color metadata.
+- `VariantRecord` models edit/playback/renderable variants instead of assuming one source path equals one usable asset.
+- `CapabilityReport` captures whether each runtime surface should use the canonical source directly or require a mezzanine/adapter path.
+
+This lets the app preserve raw camera masters, multichannel audio, stills, vector/layered graphics, and subtitle sidecars without flattening them into the lowest-common-denominator file model.
+
+### Support-Tier Semantics
+
+- `native`: the canonical source is directly usable for the target editorial path.
+- `normalized`: the source is preserved canonically, but the edit path prefers a mezzanine or proxy representation.
+- `adapter`: the source needs a domain-specific adapter, such as subtitle interpretation, vector rasterization, or layered-document flattening.
+- `unsupported`: the source is preserved as a record, but no edit path is currently defined.
+
 ## Pipeline Stages
 
 ### 1. Ingest
@@ -68,6 +89,8 @@ This is the bridge between Media Composer-style reliability and AI-assisted orga
 - Compute a partial content hash.
 - Capture extension, size, modified time, and path history.
 - Probe technical metadata when a probe tool is available.
+- Build canonical `StreamDescriptor` records with rational timebase, channel layout, and color metadata when probing succeeds.
+- Classify the imported source into a support tier immediately so later proxy/adapter work is explainable.
 
 ### 3. Waveform Extraction
 
@@ -81,6 +104,7 @@ This is the bridge between Media Composer-style reliability and AI-assisted orga
 - Never block ingest.
 - Prefer proxy playback when available.
 - Keep originals as the conform source of truth.
+- Persist proxies and rendered-graphic outputs as `VariantRecord`s that point back to the canonical source references.
 
 ### 5. Semantic Organization
 
@@ -104,6 +128,7 @@ This is the bridge between Media Composer-style reliability and AI-assisted orga
 - Desktop should prefer managed originals for immediate editability.
 - If the original format is poor for UI playback, background proxies can take over automatically when ready.
 - Browser and mobile should stay metadata-first unless a streamable playback URL exists.
+- Vector graphics, layered graphics, and subtitle sidecars should resolve through adapter-backed variants instead of pretending the source document is already a renderable timeline frame.
 
 ## Current Implementation Direction
 

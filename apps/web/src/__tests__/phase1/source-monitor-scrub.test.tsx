@@ -1,5 +1,5 @@
 import React, { act } from 'react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot } from 'react-dom/client';
 import { SourceMonitor } from '../../components/SourceMonitor/SourceMonitor';
 import { useEditorStore } from '../../store/editor.store';
@@ -10,6 +10,7 @@ const initialPlayerState = usePlayerStore.getState();
 const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
 const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
 const originalGetContext = HTMLCanvasElement.prototype.getContext;
+const originalCreateElement = document.createElement.bind(document);
 const pointerEventDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'PointerEvent');
 let rafQueue: FrameRequestCallback[] = [];
 
@@ -30,6 +31,7 @@ describe('source monitor scrub', () => {
   beforeEach(() => {
     useEditorStore.setState(initialEditorState, true);
     usePlayerStore.setState(initialPlayerState, true);
+    vi.restoreAllMocks();
     rafQueue = [];
     globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
       rafQueue.push(cb);
@@ -107,6 +109,91 @@ describe('source monitor scrub', () => {
     await flushAnimationFrames();
 
     expect(useEditorStore.getState().sourcePlayhead).toBeCloseTo(12, 5);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('does not recreate the source video element when the source playhead changes', async () => {
+    let videoCreateCount = 0;
+
+    vi.spyOn(document, 'createElement').mockImplementation(((tagName: string, options?: ElementCreationOptions) => {
+      const element = originalCreateElement(tagName, options);
+      if (tagName.toLowerCase() !== 'video') {
+        return element;
+      }
+
+      videoCreateCount += 1;
+      let currentTime = 0;
+
+      Object.defineProperty(element, 'currentTime', {
+        configurable: true,
+        get: () => currentTime,
+        set: (value: number) => {
+          currentTime = value;
+        },
+      });
+      Object.defineProperty(element, 'duration', { configurable: true, value: 20 });
+      Object.defineProperty(element, 'readyState', { configurable: true, value: 2 });
+      Object.defineProperty(element, 'videoWidth', { configurable: true, value: 1920 });
+      Object.defineProperty(element, 'videoHeight', { configurable: true, value: 1080 });
+      Object.defineProperty(element, 'load', {
+        configurable: true,
+        value: () => {
+          queueMicrotask(() => {
+            element.dispatchEvent(new Event('loadedmetadata'));
+          });
+        },
+      });
+      Object.defineProperty(element, 'play', {
+        configurable: true,
+        value: vi.fn(() => Promise.resolve()),
+      });
+      Object.defineProperty(element, 'pause', {
+        configurable: true,
+        value: vi.fn(),
+      });
+
+      return element;
+    }) as typeof document.createElement);
+
+    useEditorStore.setState({
+      sourceAsset: {
+        id: 'asset-source',
+        name: 'Source Clip',
+        type: 'VIDEO',
+        duration: 0,
+        playbackUrl: 'https://example.com/source.mov',
+        status: 'READY',
+        tags: [],
+        isFavorite: false,
+      },
+      sourcePlayhead: 0,
+    });
+
+    const container = document.createElement('div');
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<SourceMonitor />);
+    });
+    await flushAnimationFrames();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(videoCreateCount).toBe(1);
+
+    await act(async () => {
+      useEditorStore.getState().setSourcePlayhead(5);
+    });
+    await flushAnimationFrames();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(videoCreateCount).toBe(1);
 
     await act(async () => {
       root.unmount();
