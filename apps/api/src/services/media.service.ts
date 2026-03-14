@@ -277,7 +277,7 @@ class MediaService {
         logger.info('Asset processing complete', { assetId });
       } catch (e: unknown) {
         logger.error('Asset processing failed', { assetId, error: (e as Error).message });
-        await db.mediaAsset.update({ where: { id: assetId }, data: { status: 'ERROR' } }).catch(() => {});
+        await db.mediaAsset.update({ where: { id: assetId }, data: { status: 'ERROR' } }).catch(() => undefined);
       }
     }, 2000);
   }

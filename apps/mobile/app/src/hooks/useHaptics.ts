@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { Platform } from 'react-native';
+import { Platform, Vibration } from 'react-native';
 
 /**
  * Lightweight haptic feedback hook.
@@ -10,16 +10,10 @@ import { Platform } from 'react-native';
 
 type HapticStyle = 'light' | 'medium' | 'heavy' | 'selection';
 
-let ReactNativeHapticFeedback: {
-  trigger: (type: string) => void;
-} | null = null;
-
 // Attempt to use the RN vibration API as a lightweight fallback
 function vibrateLight(): void {
   try {
     if (Platform.OS === 'ios' || Platform.OS === 'android') {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { Vibration } = require('react-native') as typeof import('react-native');
       // A very short vibration for tactile feedback
       Vibration.vibrate(Platform.OS === 'ios' ? 10 : 15);
     }

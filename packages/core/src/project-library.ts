@@ -2653,17 +2653,18 @@ export function flattenAssets(bins: EditorBin[]): EditorMediaAsset[] {
   const stack: EditorBin[] = [...bins];
 
   while (stack.length > 0) {
-    const bin = stack.pop()!;
+    const bin = stack.pop();
+    if (!bin) continue;
     const assets = bin.assets;
     if (assets && assets.length > 0) {
-      for (let i = 0; i < assets.length; i++) {
-        result.push(assets[i]!);
+      for (const asset of assets) {
+        result.push(asset);
       }
     }
     const children = bin.children;
     if (children && children.length > 0) {
-      for (let i = children.length - 1; i >= 0; i--) {
-        stack.push(children[i]!);
+      for (const child of [...children].reverse()) {
+        stack.push(child);
       }
     }
   }
@@ -2686,10 +2687,10 @@ export function getProjectDuration(project: Pick<EditorProject, 'tracks'>): numb
   // Avoid intermediate array allocation from flatMap + reduce.
   // Iterate tracks and clips inline for O(n) with zero allocations.
   let maxEnd = 0;
-  for (let t = 0; t < tracks.length; t++) {
-    const clips = tracks[t]!.clips ?? [];
-    for (let c = 0; c < clips.length; c++) {
-      const endTime = clips[c]!.endTime;
+  for (const track of tracks) {
+    const clips = track.clips ?? [];
+    for (const clip of clips) {
+      const endTime = clip.endTime;
       if (Number.isFinite(endTime) && endTime > maxEnd) {
         maxEnd = endTime;
       }

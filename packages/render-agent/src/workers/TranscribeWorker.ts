@@ -33,7 +33,7 @@ export class TranscribeWorker {
   private childProcess: ChildProcess | null = null;
   private cancelled = false;
   /** Track temp files for cleanup on any exit path. */
-  private tempFiles: Set<string> = new Set();
+  private tempFiles: Set<string> = new Set<string>();
 
   /**
    * Process a transcription job.
@@ -241,7 +241,7 @@ export class TranscribeWorker {
         }
 
         const result = (await response.json()) as {
-          segments: Array<{ startTime: number; endTime: number; text: string }>;
+          segments: { startTime: number; endTime: number; text: string }[];
         };
 
         return result.segments.map((seg, index) => ({
@@ -282,7 +282,7 @@ export class TranscribeWorker {
         }
 
         const result = (await response.json()) as {
-          segments: Array<{ id: number; start: number; end: number; text: string }>;
+          segments: { id: number; start: number; end: number; text: string }[];
         };
 
         return result.segments.map((seg, i) => ({

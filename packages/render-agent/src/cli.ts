@@ -63,7 +63,7 @@ function parseArgs(argv: string[]): CLIArgs {
 
   const allTypes: WorkerJobType[] = ['ingest', 'probe', 'transcode', 'transcription', 'render', 'encode', 'effects'];
   const workerTypes: WorkerJobType[] = workerTypesStr
-    ? normalizeWorkerKindList(workerTypesStr.split(',').map((s) => s.trim()) as Array<WorkerJobType | 'metadata' | 'transcribe'>) as WorkerJobType[]
+    ? normalizeWorkerKindList(workerTypesStr.split(',').map((s) => s.trim()) as (WorkerJobType | 'metadata' | 'transcribe')[]) as WorkerJobType[]
     : allTypes;
 
   return { coordinator, workerTypes, name };

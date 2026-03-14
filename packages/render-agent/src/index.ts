@@ -295,7 +295,7 @@ export class RenderAgent extends EventEmitter {
   private lastResourceUsage: ResourceUsage | null = null;
 
   /** Signal handler references for cleanup. */
-  private signalHandlers: Map<string, () => void> = new Map();
+  private signalHandlers: Map<string, () => void> = new Map<string, () => void>();
 
   constructor(
     nodeInfo: Partial<RenderNodeInfo> = {},

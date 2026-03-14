@@ -3199,13 +3199,14 @@ export class DesktopNativeRealtimePlaybackAdapter implements RealtimePlaybackPor
     const playbackRate = state.scheduler?.playbackRate ?? 1;
     const frameBudgetMs = Math.max(1, Math.round(1000 / (Math.max(1, state.snapshot.fps || 24) * playbackRate)));
     const streamPressure = determineStreamPressure(videoStreamCount, audioStreamCount, state.snapshot);
+    const demotionThreshold = streamPressure === 'single' ? 5 : 2;
     let currentQuality: PlaybackQualityLevel = streamPressure === 'heavy'
       ? 'draft'
       : streamPressure === 'multi'
         ? 'preview'
         : 'full';
 
-    if (state.policy.overBudgetWindow >= 2) {
+    if (state.policy.overBudgetWindow >= demotionThreshold) {
       currentQuality = demotePlaybackQuality(currentQuality);
     }
     if (

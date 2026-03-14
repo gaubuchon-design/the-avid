@@ -9,6 +9,7 @@
   "parserOptions": {
     "ecmaVersion": 2022,
     "sourceType": "module",
+    "project": true,
     "ecmaFeatures": {
       "jsx": true
     }
@@ -40,10 +41,17 @@
     "@typescript-eslint/no-import-type-side-effects": "warn",
     "@typescript-eslint/consistent-type-definitions": ["warn", "interface"],
     "@typescript-eslint/no-non-null-assertion": "warn",
+    "@typescript-eslint/no-empty-function": "warn",
+    "@typescript-eslint/no-confusing-non-null-assertion": "warn",
+    "@typescript-eslint/no-non-null-asserted-optional-chain": "warn",
     "@typescript-eslint/prefer-nullish-coalescing": "off",
     "@typescript-eslint/prefer-optional-chain": "warn",
+    "@typescript-eslint/prefer-for-of": "warn",
+    "@typescript-eslint/prefer-function-type": "warn",
     "@typescript-eslint/no-empty-interface": ["warn", { "allowSingleExtends": true }],
     "@typescript-eslint/no-inferrable-types": "warn",
+    "@typescript-eslint/array-type": "warn",
+    "@typescript-eslint/consistent-generic-constructors": "warn",
 
     "import/order": [
       "warn",
@@ -83,6 +91,7 @@
     "no-throw-literal": "error",
     "no-return-await": "warn",
     "no-param-reassign": ["warn", { "props": false }],
+    "no-inner-declarations": "warn",
     "no-nested-ternary": "warn",
     "object-shorthand": "warn",
     "prefer-template": "warn"
@@ -108,7 +117,8 @@
       "rules": {
         "@typescript-eslint/no-explicit-any": "off",
         "no-console": "off",
-        "@typescript-eslint/no-non-null-assertion": "off"
+        "@typescript-eslint/no-non-null-assertion": "off",
+        "@typescript-eslint/no-empty-function": "off"
       }
     },
     {

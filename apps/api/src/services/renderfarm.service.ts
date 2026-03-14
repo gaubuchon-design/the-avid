@@ -677,56 +677,56 @@ set -euo pipefail
 
 FARM_HOST="${host}"
 WORKER_TYPES="${typesArg}"
-INSTALL_DIR="\$HOME/.avid-render-agent"
+INSTALL_DIR="$HOME/.avid-render-agent"
 
 echo "╔═══════════════════════════════════════════════════╗"
 echo "║      The Avid — Render Farm Agent Installer       ║"
 echo "╚═══════════════════════════════════════════════════╝"
 echo ""
-echo "Farm host : \$FARM_HOST"
-echo "Worker types: \$WORKER_TYPES"
-echo "Install dir : \$INSTALL_DIR"
+echo "Farm host : $FARM_HOST"
+echo "Worker types: $WORKER_TYPES"
+echo "Install dir : $INSTALL_DIR"
 echo ""
 
 # Check deps
 command -v ffmpeg >/dev/null 2>&1 || { echo "Error: ffmpeg is required. Install it first."; exit 1; }
 command -v node >/dev/null 2>&1 || { echo "Error: Node.js >=18 is required. Install it first."; exit 1; }
 
-FFMPEG_VERSION=\$(ffmpeg -version | head -1 | awk '{print \$3}')
-echo "ffmpeg version: \$FFMPEG_VERSION"
+FFMPEG_VERSION=$(ffmpeg -version | head -1 | awk '{print $3}')
+echo "ffmpeg version: $FFMPEG_VERSION"
 
 # Detect GPU
 GPU_VENDOR="none"
 GPU_NAME="none"
 if command -v nvidia-smi >/dev/null 2>&1; then
   GPU_VENDOR="nvidia"
-  GPU_NAME=\$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
+  GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
 elif system_profiler SPDisplaysDataType 2>/dev/null | grep -q "Apple"; then
   GPU_VENDOR="apple"
   GPU_NAME="Apple Silicon"
 fi
 
-echo "GPU: \$GPU_VENDOR — \$GPU_NAME"
+echo "GPU: $GPU_VENDOR — $GPU_NAME"
 
 # Create install directory
-mkdir -p "\$INSTALL_DIR"
-cat > "\$INSTALL_DIR/agent-config.json" <<AGENTEOF
+mkdir -p "$INSTALL_DIR"
+cat > "$INSTALL_DIR/agent-config.json" <<AGENTEOF
 {
-  "farmHost": "\$FARM_HOST",
-  "workerTypes": "\$WORKER_TYPES",
-  "hostname": "\$(hostname)",
-  "ip": "\$(hostname -I 2>/dev/null | awk '{print \$1}' || ipconfig getifaddr en0 2>/dev/null || echo '0.0.0.0')",
-  "gpuVendor": "\$GPU_VENDOR",
-  "gpuName": "\$GPU_NAME",
-  "ffmpegVersion": "\$FFMPEG_VERSION",
-  "cpuCores": \$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1),
-  "memoryGB": \$(free -g 2>/dev/null | awk '/Mem:/{print \$2}' || echo \$(( \$(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 )))
+  "farmHost": "$FARM_HOST",
+  "workerTypes": "$WORKER_TYPES",
+  "hostname": "$(hostname)",
+  "ip": "$(hostname -I 2>/dev/null | awk '{print $1}' || ipconfig getifaddr en0 2>/dev/null || echo '0.0.0.0')",
+  "gpuVendor": "$GPU_VENDOR",
+  "gpuName": "$GPU_NAME",
+  "ffmpegVersion": "$FFMPEG_VERSION",
+  "cpuCores": $(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1),
+  "memoryGB": $(free -g 2>/dev/null | awk '/Mem:/{print $2}' || echo $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 )))
 }
 AGENTEOF
 
 echo ""
-echo "Agent config written to \$INSTALL_DIR/agent-config.json"
-echo "Agent ready. Connect to farm at ws://\$FARM_HOST with the render agent client."
+echo "Agent config written to $INSTALL_DIR/agent-config.json"
+echo "Agent ready. Connect to farm at ws://$FARM_HOST with the render agent client."
 echo "Done."
 `;
   }

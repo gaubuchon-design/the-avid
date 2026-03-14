@@ -1393,6 +1393,24 @@ const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
 } else {
+  const handleDeepLink = (url: string): void => {
+    log('info', 'DeepLink', 'Received deep link', { url });
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('app:deep-link', url);
+    } else {
+      pendingDeepLink = url;
+    }
+  };
+
+  const handleFileOpen = (filePath: string): void => {
+    log('info', 'FileOpen', 'Received file open request', { filePath });
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('menu:open-project', filePath);
+    } else {
+      pendingFileOpen = filePath;
+    }
+  };
+
   app.on('second-instance', (_event, argv, _workingDir) => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
@@ -1412,26 +1430,6 @@ if (!gotTheLock) {
       handleFileOpen(fileArg);
     }
   });
-
-  // ─── Deep Link & File Open Helpers ──────────────────────────────────────────
-
-  function handleDeepLink(url: string): void {
-    log('info', 'DeepLink', 'Received deep link', { url });
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('app:deep-link', url);
-    } else {
-      pendingDeepLink = url;
-    }
-  }
-
-  function handleFileOpen(filePath: string): void {
-    log('info', 'FileOpen', 'Received file open request', { filePath });
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('menu:open-project', filePath);
-    } else {
-      pendingFileOpen = filePath;
-    }
-  }
 
   // macOS: deep link via open-url (avid://...)
   app.on('open-url', (event, url) => {

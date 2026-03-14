@@ -223,7 +223,7 @@ function safeSubscribe<Args extends unknown[]>(
 ): () => void {
   if (!ALLOWED_SUBSCRIBE_CHANNELS.has(channel)) {
     console.warn(`[Preload] Attempted subscription to disallowed channel: ${channel}`);
-    return () => {};
+    return () => undefined;
   }
   return subscribe(channel, callback);
 }

@@ -2034,12 +2034,12 @@ function buildAudioTurnoverManifest(project: EditorProject, assetMap: Map<string
       label: 'Verify fold-down print chain',
       status: getAudioChannelCountForLayout(projectLayout, 2) <= 2
         ? 'not-applicable'
-        : Boolean(
+        : (
           foldDownBus
-            && summarizeAudioBusProcessingPolicy(foldDownBus).print.activeStages
-              .some((stage) => stage.kind === 'fold-down-matrix')
-            && summarizeAudioBusProcessingPolicy(foldDownBus).print.activeStages
-              .some((stage) => stage.kind === 'limiter')
+          && summarizeAudioBusProcessingPolicy(foldDownBus).print.activeStages
+            .some((stage) => stage.kind === 'fold-down-matrix')
+          && summarizeAudioBusProcessingPolicy(foldDownBus).print.activeStages
+            .some((stage) => stage.kind === 'limiter')
         )
           ? 'complete'
           : 'needs-attention',

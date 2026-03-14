@@ -76,7 +76,7 @@ async function detectGPU(): Promise<GPUInfo> {
     try {
       const { stdout } = await execFileAsync('system_profiler', ['SPDisplaysDataType', '-json']);
       const data = JSON.parse(stdout) as Record<string, unknown>;
-      const displays = (data['SPDisplaysDataType'] as Array<Record<string, unknown>> | undefined) ?? [];
+      const displays = (data['SPDisplaysDataType'] as Record<string, unknown>[] | undefined) ?? [];
       const firstGpu = displays[0];
       if (firstGpu) {
         const name = (firstGpu['sppci_model'] as string | undefined) ?? 'Unknown GPU';
