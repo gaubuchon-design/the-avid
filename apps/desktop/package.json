@@ -20,7 +20,7 @@
     "dist:mac:x64": "npm run sync:version && npm run prepare:packaging -- darwin-x64 && electron-vite build && electron-builder --config electron-builder.config.cjs --mac --x64 --publish never",
     "dist:win": "npm run sync:version && npm run prepare:packaging -- win32-x64 && electron-vite build && electron-builder --config electron-builder.config.cjs --win nsis portable --x64 --publish never",
     "dist:linux": "npm run sync:version && npm run prepare:packaging -- linux-x64 && electron-vite build && electron-builder --config electron-builder.config.cjs --linux --x64 --publish never",
-    "postinstall": "electron-builder install-app-deps",
+    "postinstall": "node scripts/postinstall.js",
     "lint": "eslint src --ext .ts,.tsx",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
