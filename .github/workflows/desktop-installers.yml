@@ -96,6 +96,15 @@ jobs:
         if: ${{ steps.selection.outputs.should_build == 'true' }}
         run: npm run version:desktop -- --set=${{ needs.resolve-desktop-version.outputs.desktop_version }}
 
+      # macOS: Import code signing certificate from base64-encoded .p12
+      - name: Import macOS code signing certificate
+        if: ${{ steps.selection.outputs.should_build == 'true' && matrix.target == 'mac' && secrets.CSC_LINK != '' }}
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          echo "Code signing certificate configured via CSC_LINK"
+
       - name: Build installer
         if: ${{ steps.selection.outputs.should_build == 'true' }}
         run: ${{ matrix.script }}
@@ -103,6 +112,16 @@ jobs:
           DESKTOP_UPDATE_BASE_URL: ${{ vars.DESKTOP_UPDATE_BASE_URL || 'https://the-avid-desktop-updates.vercel.app/desktop-updates' }}
           DESKTOP_UPDATE_CHANNEL: ${{ vars.DESKTOP_UPDATE_CHANNEL || 'stable' }}
           DESKTOP_UPDATE_SHARED_KEY: ${{ secrets.DESKTOP_UPDATE_SHARED_KEY }}
+          # macOS code signing (electron-builder reads these automatically)
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # macOS notarization
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          # Windows code signing (if configured)
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
       - name: Upload installer artifacts
         if: ${{ steps.selection.outputs.should_build == 'true' }}
