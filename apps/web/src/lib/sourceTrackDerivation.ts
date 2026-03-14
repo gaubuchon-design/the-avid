@@ -39,7 +39,7 @@ export function deriveSourceTracksFromAsset(asset: MediaAsset): SourceTrackDescr
     ...asset,
     codec: codecHint,
     audioChannels: asset.audioChannels ?? technicalMetadata?.audioChannels,
-    audioChannelLayout: asset.audioChannelLayout ?? technicalMetadata?.audioChannelLayout,
+    audioChannelLayout: (asset as AssetWithTechnicalMetadata).technicalMetadata?.audioChannelLayout ?? technicalMetadata?.audioChannelLayout,
   });
   for (let index = 1; index <= audioTrackCount; index += 1) {
     descriptors.push({ id: `src-a${index}`, type: 'AUDIO', index });

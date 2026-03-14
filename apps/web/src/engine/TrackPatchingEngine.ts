@@ -343,6 +343,21 @@ export class TrackPatchingEngine {
   }
 
   /**
+   * Remove whatever source track is patched to a given record (timeline) track.
+   *
+   * @param recordTrackId Timeline track identifier.
+   * @example
+   * trackPatchingEngine.unpatchRecord('timeline-v2');
+   */
+  unpatchRecord(recordTrackId: string): void {
+    const sourceId = this.reversePatchMap.get(recordTrackId);
+    if (sourceId !== undefined) {
+      this.removeExistingPatch(sourceId);
+    }
+    this.notify();
+  }
+
+  /**
    * Return all current patches as an array (snapshot).
    *
    * @returns Array of TrackPatch objects.
@@ -402,6 +417,21 @@ export class TrackPatchingEngine {
     }
 
     this.notify();
+  }
+
+  /**
+   * Auto-match-patch source tracks to record tracks by name convention
+   * (DaVinci Resolve style). Maps source V1 -> record V1, source A1 -> record A1,
+   * etc. This is typically called when loading a new clip into the source monitor.
+   *
+   * Delegates to `autoPatch()` which handles the actual matching logic.
+   *
+   * @param recordTracks Optional array of timeline Track objects for matching.
+   * @example
+   * trackPatchingEngine.autoMatchPatch(useEditorStore.getState().tracks);
+   */
+  autoMatchPatch(recordTracks?: Track[]): void {
+    this.autoPatch(recordTracks);
   }
 
   // ── Auto-patch helpers ──────────────────────────────────────────────────
@@ -515,6 +545,40 @@ export class TrackPatchingEngine {
    */
   getEnabledRecordTracks(): string[] {
     return Array.from(this.monitorState.enabledRecordTracks);
+  }
+
+  /**
+   * Check whether a record track is both patched (has a source routed to it)
+   * AND enabled for editing. In Avid MC, a track must satisfy both conditions
+   * to participate in edit operations.
+   *
+   * @param recordTrackId Timeline track identifier.
+   * @returns `true` if the track has an active patch and is enabled.
+   */
+  isTrackEnabled(recordTrackId: string): boolean {
+    const isPatched = this.reversePatchMap.has(recordTrackId);
+    const isEnabled = this.monitorState.enabledRecordTracks.has(recordTrackId);
+    return isPatched && isEnabled;
+  }
+
+  /**
+   * Return the set of record tracks that will participate in the next edit
+   * operation (Overwrite, Splice-In, etc.).
+   *
+   * A track participates when it is:
+   *   1. Patched (a source track is routed to it)
+   *   2. Enabled (the green "record enable" light is on)
+   *   3. Not locked
+   *
+   * @returns Array of record track IDs eligible for editing.
+   */
+  getEditParticipatingTracks(): string[] {
+    const enabled = this.getEnabledRecordTracks();
+    return enabled.filter((trackId) => {
+      const isPatched = this.reversePatchMap.has(trackId);
+      const isLocked = this.monitorState.lockedTracks.has(trackId);
+      return isPatched && !isLocked;
+    });
   }
 
   /**

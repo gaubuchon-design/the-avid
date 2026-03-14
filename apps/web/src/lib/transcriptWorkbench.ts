@@ -239,7 +239,7 @@ export function phraseFindTranscriptWorkbench(
         text: line.text,
         speaker: line.speaker,
         score,
-        linkedCueIds: [...line.linkedCueIds],
+        linkedCueIds: [...(line.linkedCueIds ?? [])],
       });
     }
   }

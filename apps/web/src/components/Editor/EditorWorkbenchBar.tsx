@@ -21,7 +21,6 @@ export function EditorWorkbenchBar({
   const projectName = useEditorStore((s) => s.projectName);
   const saveProject = useEditorStore((s) => s.saveProject);
   const saveStatus = useEditorStore((s) => s.saveStatus);
-  const hasUnsavedChanges = useEditorStore((s) => s.hasUnsavedChanges);
   const lastSavedAt = useEditorStore((s) => s.lastSavedAt);
   const activeTool = useEditorStore((s) => s.activeTool);
   const setActiveTool = useEditorStore((s) => s.setActiveTool);
@@ -29,6 +28,7 @@ export function EditorWorkbenchBar({
   const overwriteEdit = useEditorStore((s) => s.overwriteEdit);
   const liftEdit = useEditorStore((s) => s.liftEdit);
   const extractEdit = useEditorStore((s) => s.extractEdit);
+  const hasUnsavedChanges = saveStatus === 'unsaved';
   const trimActive = useEditorStore((s) => s.trimActive);
   const trimMode = useEditorStore((s) => s.trimMode);
   const saveStateLabel = saveStatus === 'saving'

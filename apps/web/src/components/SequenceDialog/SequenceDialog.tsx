@@ -338,6 +338,7 @@ export const SequenceDialog: React.FC = () => {
   );
   const showSequenceDialog = useEditorStore((s) => s.showSequenceDialog);
   const toggleSequenceDialog = useEditorStore((s) => s.toggleSequenceDialog);
+  const sequenceDialogTargetBinId = useEditorStore((s) => s.sequenceDialogTargetBinId);
 
   // -- Local draft state (mirrors store, committed on save) ------------------
 
@@ -480,6 +481,17 @@ export const SequenceDialog: React.FC = () => {
     };
 
     updateSequenceSettings(patch);
+
+    // Also create or update the sequence in the sequences list
+    const store = useEditorStore.getState();
+    const fullSettings: SequenceSettings = {
+      ...store.sequenceSettings,
+      ...patch,
+    };
+    if (!isEditing) {
+      store.createSequence(fullSettings, sequenceDialogTargetBinId ?? undefined);
+    }
+
     toggleSequenceDialog();
   }, [
     name,
@@ -490,9 +502,24 @@ export const SequenceDialog: React.FC = () => {
     width,
     height,
     sampleRate,
+    isEditing,
     updateSequenceSettings,
     toggleSequenceDialog,
+    sequenceDialogTargetBinId,
   ]);
+
+  // "Create from Clip" — auto-match sequence settings to the selected clip
+  const sourceAsset = useEditorStore((s) => s.sourceAsset);
+
+  const handleCreateFromClip = useCallback(() => {
+    if (!sourceAsset) return;
+    // Auto-fill from clip metadata
+    if (sourceAsset.fps) setFps(sourceAsset.fps);
+    if (sourceAsset.width) setWidth(sourceAsset.width);
+    if (sourceAsset.height) setHeight(sourceAsset.height);
+    if (sourceAsset.sampleRate) setSampleRate(sourceAsset.sampleRate);
+    setName(sourceAsset.name + ' Sequence');
+  }, [sourceAsset]);
 
   const handleBackdropClick = useCallback(
     (e: React.MouseEvent) => {
@@ -766,6 +793,29 @@ export const SequenceDialog: React.FC = () => {
 
         {/* ---- Footer ---- */}
         <div style={footer}>
+          {/* Create from Clip button — only shown when a source clip is loaded */}
+          {sourceAsset && !isEditing && (
+            <button
+              type="button"
+              style={{
+                ...btnSecondary,
+                marginRight: 'auto',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 11,
+              }}
+              onClick={handleCreateFromClip}
+              title={`Match settings to ${sourceAsset.name}`}
+              aria-label="Create sequence from selected clip properties"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="23 7 16 12 23 17 23 7" />
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+              </svg>
+              From Clip
+            </button>
+          )}
           <button
             type="button"
             style={btnSecondary}

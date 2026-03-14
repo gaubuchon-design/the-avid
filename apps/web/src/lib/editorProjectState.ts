@@ -26,7 +26,7 @@ import type {
 export interface EditorProjectPersistenceSource {
   projectId: string | null;
   projectName: string;
-  projectTemplate: ProjectTemplate;
+  projectTemplate: ProjectTemplate | string;
   projectDescription: string;
   projectTags: string[];
   projectSchemaVersion: number;
@@ -37,15 +37,15 @@ export interface EditorProjectPersistenceSource {
   markers: Marker[];
   bins: Bin[];
   transcript: TranscriptCue[];
-  transcriptSpeakers: EditorProject['transcriptSpeakers'];
-  scriptDocument: EditorProject['scriptDocument'];
-  transcriptionSettings: EditorProject['transcriptionSettings'];
+  transcriptSpeakers: unknown[];
+  scriptDocument: unknown;
+  transcriptionSettings: unknown;
   reviewComments: ReviewComment[];
   approvals: Approval[];
   publishJobs: PublishJob[];
   watchFolders: WatchFolder[];
-  subtitleTracks: EditorProject['workstationState']['subtitleTracks'];
-  titleClips: EditorProject['workstationState']['titleClips'];
+  subtitleTracks: unknown[];
+  titleClips: unknown[];
   trackHeights: Record<string, number>;
   activeWorkspaceId: string;
   composerLayout: 'source-record' | 'full-frame';
@@ -410,7 +410,7 @@ export function buildProjectPersistenceSnapshot(
   return {
     projectId: state.projectId,
     projectName: state.projectName,
-    projectTemplate: state.projectTemplate,
+    projectTemplate: state.projectTemplate as ProjectTemplate,
     projectDescription: state.projectDescription,
     projectTags: [...state.projectTags],
     projectSchemaVersion: state.projectSchemaVersion || PROJECT_SCHEMA_VERSION,
@@ -421,15 +421,15 @@ export function buildProjectPersistenceSnapshot(
     markers: state.markers,
     bins: state.bins,
     transcript: state.transcript,
-    transcriptSpeakers: state.transcriptSpeakers,
-    scriptDocument: state.scriptDocument,
-    transcriptionSettings: state.transcriptionSettings,
+    transcriptSpeakers: state.transcriptSpeakers as any,
+    scriptDocument: state.scriptDocument as any,
+    transcriptionSettings: state.transcriptionSettings as any,
     reviewComments: state.reviewComments,
     approvals: state.approvals,
     publishJobs: state.publishJobs,
     watchFolders: state.watchFolders,
-    subtitleTracks: state.subtitleTracks,
-    titleClips: state.titleClips,
+    subtitleTracks: state.subtitleTracks as any,
+    titleClips: state.titleClips as any,
     trackHeights: { ...state.trackHeights },
     activeWorkspaceId: state.activeWorkspaceId,
     composerLayout: state.composerLayout,
@@ -519,10 +519,10 @@ export function buildProjectFromEditorState(
     bins: snapshot.bins,
     collaborators: [],
     aiJobs: [],
-    transcript: snapshot.transcript,
-    transcriptSpeakers: snapshot.transcriptSpeakers,
-    scriptDocument: snapshot.scriptDocument,
-    transcriptionSettings: snapshot.transcriptionSettings,
+    transcript: snapshot.transcript as any,
+    transcriptSpeakers: snapshot.transcriptSpeakers as any,
+    scriptDocument: snapshot.scriptDocument as any,
+    transcriptionSettings: snapshot.transcriptionSettings as any,
     reviewComments: serializeReviewComments(snapshot.reviewComments),
     approvals: serializeApprovals(snapshot.approvals),
     publishJobs: serializePublishJobs(snapshot.publishJobs),

@@ -1,102 +1,289 @@
 // =============================================================================
-//  THE AVID -- Cut Page (DaVinci Resolve Cut Page Parity)
-//  Dual source/record monitors, edit mode buttons, transport controls,
-//  quick export, sync bin, trim controls, and compact filmstrip timeline.
+//  THE AVID -- Cut Page (DaVinci Resolve-Style)
+//  Speed-focused interface: Source Tape, Fast Review, Smart Insert,
+//  compact filmstrip timeline, Quick Transitions, Duration Overlay.
+//  No inspector. No effects rack. Minimal UI chrome.
 // =============================================================================
 
-import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useRef, memo } from 'react';
 import { SourceMonitor } from '../components/SourceMonitor/SourceMonitor';
 import { RecordMonitor } from '../components/RecordMonitor/RecordMonitor';
 import { TimelinePanel } from '../components/TimelinePanel/TimelinePanel';
 import { BinPanel } from '../components/Bins/BinPanel';
 import { useEditorStore } from '../store/editor.store';
-import { Timecode } from '../lib/timecode';
 
-// =============================================================================
-//  Types
-// =============================================================================
+// ─── Styles ─────────────────────────────────────────────────────────────────
 
-type CutEditMode = 'insert' | 'overwrite' | 'replace' | 'placeOnTop' | 'appendAtEnd';
-type TrimMode = 'off' | 'ripple' | 'roll';
-
-// =============================================================================
-//  Styles
-// =============================================================================
-
-const toolbarBtnStyle: React.CSSProperties = {
-  padding: '3px 8px',
-  fontSize: 9,
-  fontWeight: 600,
-  textTransform: 'uppercase',
-  letterSpacing: '0.04em',
-  border: '1px solid var(--border-default)',
-  borderRadius: 3,
-  cursor: 'pointer',
-  display: 'flex',
-  alignItems: 'center',
-  gap: 4,
-  transition: 'all 120ms ease',
-  whiteSpace: 'nowrap',
+const S = {
+  root: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    overflow: 'hidden',
+  } as React.CSSProperties,
+  topArea: {
+    flex: 1,
+    display: 'flex',
+    overflow: 'hidden',
+    minHeight: 0,
+  } as React.CSSProperties,
+  binStrip: {
+    width: 200,
+    flexShrink: 0,
+    borderRight: '1px solid var(--border-default)',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    overflow: 'hidden',
+  } as React.CSSProperties,
+  monitorArea: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    minWidth: 0,
+    overflow: 'hidden',
+  } as React.CSSProperties,
+  monitors: {
+    flex: 1,
+    display: 'flex',
+    overflow: 'hidden',
+    minHeight: 0,
+  } as React.CSSProperties,
+  // Source Tape Bar
+  sourceTapeBar: {
+    height: 56,
+    flexShrink: 0,
+    borderBottom: '1px solid var(--border-default)',
+    background: 'var(--bg-raised)',
+    display: 'flex',
+    alignItems: 'center',
+    padding: '0 8px',
+    gap: 4,
+    overflow: 'hidden',
+  } as React.CSSProperties,
+  sourceTapeThumb: (isActive: boolean) => ({
+    width: 72,
+    height: 42,
+    flexShrink: 0,
+    borderRadius: 3,
+    border: `2px solid ${isActive ? 'var(--brand)' : 'transparent'}`,
+    background: 'var(--bg-void)',
+    cursor: 'pointer',
+    position: 'relative' as const,
+    overflow: 'hidden',
+    transition: 'border-color 100ms',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  }),
+  sourceTapeLabel: {
+    fontSize: 7,
+    color: 'rgba(255,255,255,0.6)',
+    fontWeight: 600,
+    textAlign: 'center' as const,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
+    maxWidth: 68,
+  } as React.CSSProperties,
+  // Quick Actions Bar
+  quickBar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '4px 8px',
+    borderBottom: '1px solid var(--border-subtle)',
+    background: 'var(--bg-surface)',
+    flexShrink: 0,
+  } as React.CSSProperties,
+  quickBtn: (variant: 'primary' | 'secondary' | 'accent') => ({
+    padding: '4px 10px',
+    fontSize: 9,
+    fontWeight: 700,
+    letterSpacing: '0.04em',
+    textTransform: 'uppercase' as const,
+    border: 'none',
+    borderRadius: 4,
+    cursor: 'pointer',
+    transition: 'all 100ms',
+    background: variant === 'primary'
+      ? 'var(--brand)'
+      : variant === 'accent'
+        ? 'rgba(34,197,94,0.15)'
+        : 'rgba(255,255,255,0.08)',
+    color: variant === 'primary'
+      ? '#fff'
+      : variant === 'accent'
+        ? '#22c55e'
+        : 'var(--text-secondary)',
+  }),
+  // Duration Overlay
+  durationOverlay: {
+    position: 'absolute' as const,
+    top: 8,
+    right: 8,
+    background: 'rgba(0,0,0,0.7)',
+    backdropFilter: 'blur(8px)',
+    borderRadius: 6,
+    padding: '6px 12px',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    alignItems: 'flex-end',
+    gap: 2,
+    zIndex: 5,
+    border: '1px solid rgba(255,255,255,0.08)',
+  } as React.CSSProperties,
+  durationLabel: {
+    fontSize: 8,
+    fontWeight: 700,
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase' as const,
+    color: 'var(--text-muted)',
+  } as React.CSSProperties,
+  durationValue: {
+    fontFamily: 'var(--font-mono)',
+    fontSize: 16,
+    fontWeight: 700,
+    color: 'var(--text-primary)',
+    letterSpacing: '0.02em',
+  } as React.CSSProperties,
+  // Quick Transition Buttons
+  transitionBar: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    padding: '4px 0',
+    borderBottom: '1px solid var(--border-subtle)',
+    background: 'var(--bg-surface)',
+    flexShrink: 0,
+  } as React.CSSProperties,
+  transitionBtn: (isActive: boolean) => ({
+    padding: '3px 12px',
+    fontSize: 9,
+    fontWeight: 600,
+    letterSpacing: '0.03em',
+    border: `1px solid ${isActive ? 'var(--brand)' : 'var(--border-subtle)'}`,
+    borderRadius: 4,
+    cursor: 'pointer',
+    background: isActive ? 'var(--brand-dim)' : 'transparent',
+    color: isActive ? 'var(--brand-bright)' : 'var(--text-muted)',
+    transition: 'all 100ms',
+  }),
+  // Compact Timeline
+  compactTimeline: {
+    height: 160,
+    flexShrink: 0,
+    borderTop: '1px solid var(--border-default)',
+    position: 'relative' as const,
+    overflow: 'hidden',
+  } as React.CSSProperties,
+  // Source Tape Mode Badge
+  modeBadge: (active: boolean) => ({
+    padding: '3px 8px',
+    fontSize: 8,
+    fontWeight: 700,
+    letterSpacing: '0.06em',
+    textTransform: 'uppercase' as const,
+    borderRadius: 4,
+    background: active ? 'rgba(91,106,245,0.15)' : 'rgba(255,255,255,0.06)',
+    color: active ? 'var(--brand-bright)' : 'var(--text-muted)',
+    border: `1px solid ${active ? 'var(--brand)' : 'transparent'}`,
+    cursor: 'pointer',
+    transition: 'all 150ms',
+  }),
 };
 
-const toolbarSeparator: React.CSSProperties = {
-  width: 1,
-  height: 18,
-  background: 'var(--border-default)',
-  margin: '0 4px',
-  flexShrink: 0,
-};
+// ─── Source Tape (Filmstrip of all media concatenated) ──────────────────────
 
-const sectionLabelStyle: React.CSSProperties = {
-  fontSize: 8,
-  fontWeight: 700,
-  letterSpacing: '0.08em',
-  textTransform: 'uppercase',
-  color: 'var(--text-tertiary)',
-  padding: '0 2px',
-  flexShrink: 0,
-};
+interface SourceTapeItem {
+  id: string;
+  name: string;
+  color: string;
+}
 
-const tcDisplayStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-mono, "SF Mono", "Fira Code", monospace)',
-  fontSize: 11,
-  fontWeight: 600,
-  color: 'var(--text-primary)',
-  background: 'var(--bg-void)',
-  border: '1px solid var(--border-default)',
-  borderRadius: 3,
-  padding: '2px 8px',
-  letterSpacing: '0.04em',
-  userSelect: 'none',
-  minWidth: 88,
-  textAlign: 'center' as const,
-};
+const SourceTape = memo(function SourceTape({
+  items,
+  activeIndex,
+  onSelect,
+}: {
+  items: SourceTapeItem[];
+  activeIndex: number;
+  onSelect: (index: number) => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-const durationBadgeStyle: React.CSSProperties = {
-  fontSize: 9,
-  fontWeight: 600,
-  color: 'var(--brand-bright)',
-  background: 'rgba(91, 110, 244, 0.12)',
-  border: '1px solid rgba(91, 110, 244, 0.25)',
-  borderRadius: 3,
-  padding: '1px 6px',
-  fontFamily: 'var(--font-mono, monospace)',
-  letterSpacing: '0.02em',
-};
+  useEffect(() => {
+    if (scrollRef.current) {
+      const activeEl = scrollRef.current.children[activeIndex] as HTMLElement | undefined;
+      if (activeEl) {
+        activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      }
+    }
+  }, [activeIndex]);
 
-// =============================================================================
-//  CutPage Skeleton (Loading State)
-// =============================================================================
+  return (
+    <div
+      ref={scrollRef}
+      style={S.sourceTapeBar}
+      role="listbox"
+      aria-label="Source tape - all media clips"
+    >
+      <span style={{
+        fontSize: 8, fontWeight: 700, letterSpacing: '0.06em',
+        textTransform: 'uppercase', color: 'var(--text-muted)',
+        marginRight: 4, flexShrink: 0,
+      }}>
+        TAPE
+      </span>
+      {items.map((item, i) => (
+        <div
+          key={item.id}
+          style={S.sourceTapeThumb(i === activeIndex)}
+          onClick={() => onSelect(i)}
+          role="option"
+          aria-selected={i === activeIndex}
+          aria-label={item.name}
+          tabIndex={0}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelect(i); }}
+        >
+          <div style={{
+            position: 'absolute', bottom: 0, left: 0, right: 0,
+            background: 'linear-gradient(transparent, rgba(0,0,0,0.8))',
+            padding: '2px 3px',
+          }}>
+            <span style={S.sourceTapeLabel}>{item.name}</span>
+          </div>
+          {/* Color accent bar */}
+          <div style={{
+            position: 'absolute', top: 0, left: 0, right: 0, height: 2,
+            background: item.color,
+          }} />
+        </div>
+      ))}
+      {items.length === 0 && (
+        <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+          No media in bins
+        </span>
+      )}
+    </div>
+  );
+});
+
+// ─── Timecode Formatter ─────────────────────────────────────────────────────
+
+function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const f = Math.floor((seconds % 1) * 24);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}:${String(f).padStart(2, '0')}`;
+}
+
+// ─── Loading Skeleton ───────────────────────────────────────────────────────
 
 function CutPageSkeleton() {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }} aria-hidden="true">
-      {/* Toolbar skeleton */}
-      <div style={{ height: 32, flexShrink: 0, background: 'var(--bg-raised)', borderBottom: '1px solid var(--border-default)', display: 'flex', alignItems: 'center', gap: 8, padding: '0 12px' }}>
-        {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} style={{ height: 14, background: 'var(--bg-elevated)', borderRadius: 3, width: `${40 + Math.random() * 40}px` }} />
-        ))}
-      </div>
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
         <div style={{ width: 200, flexShrink: 0, borderRight: '1px solid var(--border-default)', background: 'var(--bg-surface)' }}>
           <div style={{ padding: 12 }}>
@@ -108,1039 +295,228 @@ function CutPageSkeleton() {
         <div style={{ flex: 1, background: 'var(--bg-void)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ width: 48, height: 48, borderRadius: '50%', border: '2px solid var(--border-subtle)', borderTopColor: 'var(--brand)', animation: 'spin 0.8s linear infinite' }} />
         </div>
-        <div style={{ flex: 1, background: 'var(--bg-void)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ width: 48, height: 48, borderRadius: '50%', border: '2px solid var(--border-subtle)', borderTopColor: 'var(--brand)', animation: 'spin 0.8s linear infinite' }} />
-        </div>
       </div>
-      <div style={{ height: 200, flexShrink: 0, borderTop: '1px solid var(--border-default)', background: 'var(--bg-surface)' }} />
+      <div style={{ height: 160, flexShrink: 0, borderTop: '1px solid var(--border-default)', background: 'var(--bg-surface)' }} />
     </div>
   );
 }
 
-// =============================================================================
-//  Quick Export Dialog (Inline compact panel)
-// =============================================================================
-
-function QuickExportDialog({ onClose }: { onClose: () => void }) {
-  const [format, setFormat] = useState<'h264' | 'h265' | 'prores' | 'dnxhd'>('h264');
-  const [resolution, setResolution] = useState<'source' | '1080p' | '4k'>('source');
-  const [exporting, setExporting] = useState(false);
-  const projectName = useEditorStore((s) => s.projectName);
-  const duration = useEditorStore((s) => s.duration);
-
-  const handleExport = useCallback(() => {
-    setExporting(true);
-    // Simulate export start -- in production this would dispatch to RenderFarmEngine
-    setTimeout(() => {
-      setExporting(false);
-      onClose();
-    }, 1500);
-  }, [onClose]);
-
-  return (
-    <div
-      style={{
-        position: 'fixed', inset: 0, zIndex: 1000,
-        background: 'rgba(0,0,0,0.55)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      role="dialog"
-      aria-label="Quick Export"
-    >
-      <div style={{
-        width: 360, background: 'var(--bg-surface)',
-        border: '1px solid var(--border-default)',
-        borderRadius: 8, boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
-        overflow: 'hidden',
-      }}>
-        {/* Header */}
-        <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: '10px 14px',
-          borderBottom: '1px solid var(--border-default)',
-          background: 'var(--bg-raised)',
-        }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '0.02em' }}>
-            Quick Export
-          </span>
-          <button
-            onClick={onClose}
-            aria-label="Close quick export"
-            style={{
-              background: 'transparent', border: 'none', color: 'var(--text-tertiary)',
-              fontSize: 14, cursor: 'pointer', lineHeight: 1, padding: '2px 4px',
-            }}
-          >
-            &#x2715;
-          </button>
-        </div>
-
-        {/* Body */}
-        <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {/* Project info */}
-          <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
-            {projectName || 'Untitled Project'} &mdash; {duration > 0 ? `${Math.floor(duration / 60)}:${String(Math.floor(duration % 60)).padStart(2, '0')}` : '0:00'}
-          </div>
-
-          {/* Format */}
-          <div>
-            <label style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 4 }}>
-              Format
-            </label>
-            <div style={{ display: 'flex', gap: 4 }}>
-              {(['h264', 'h265', 'prores', 'dnxhd'] as const).map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setFormat(f)}
-                  style={{
-                    ...toolbarBtnStyle,
-                    background: format === f ? 'var(--brand)' : 'var(--bg-raised)',
-                    color: format === f ? '#fff' : 'var(--text-secondary)',
-                    borderColor: format === f ? 'var(--brand)' : 'var(--border-default)',
-                    fontSize: 9,
-                  }}
-                >
-                  {f.toUpperCase()}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Resolution */}
-          <div>
-            <label style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 4 }}>
-              Resolution
-            </label>
-            <select
-              value={resolution}
-              onChange={(e) => setResolution(e.target.value as typeof resolution)}
-              style={{
-                width: '100%', padding: '4px 8px', fontSize: 10,
-                background: 'var(--bg-raised)', color: 'var(--text-primary)',
-                border: '1px solid var(--border-default)', borderRadius: 3,
-                outline: 'none',
-              }}
-            >
-              <option value="source">Source Resolution</option>
-              <option value="1080p">1920 x 1080 (HD)</option>
-              <option value="4k">3840 x 2160 (4K UHD)</option>
-            </select>
-          </div>
-
-          {/* Export button */}
-          <button
-            onClick={handleExport}
-            disabled={exporting}
-            style={{
-              padding: '8px 16px', fontSize: 11, fontWeight: 700,
-              background: exporting ? 'var(--bg-elevated)' : 'var(--brand)',
-              color: exporting ? 'var(--text-tertiary)' : '#fff',
-              border: 'none', borderRadius: 4, cursor: exporting ? 'default' : 'pointer',
-              transition: 'all 150ms',
-            }}
-          >
-            {exporting ? 'Starting Export...' : 'Export'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// =============================================================================
-//  Source Viewer Toolbar (Mark In/Out, Clear Marks, Go to In/Out)
-// =============================================================================
-
-function SourceViewerToolbar() {
-  const sourceInPoint = useEditorStore((s) => s.sourceInPoint);
-  const sourceOutPoint = useEditorStore((s) => s.sourceOutPoint);
-  const sourcePlayhead = useEditorStore((s) => s.sourcePlayhead);
-  const setSourceInPoint = useEditorStore((s) => s.setSourceInPoint);
-  const setSourceOutPoint = useEditorStore((s) => s.setSourceOutPoint);
-  const clearSourceInOut = useEditorStore((s) => s.clearSourceInOut);
-  const setSourcePlayhead = useEditorStore((s) => s.setSourcePlayhead);
-  const fps = useEditorStore((s) => s.sequenceSettings.fps);
-
-  const tc = useMemo(
-    () => new Timecode({ fps, dropFrame: false }),
-    [fps],
-  );
-
-  const handleMarkIn = useCallback(() => {
-    setSourceInPoint(sourcePlayhead);
-  }, [sourcePlayhead, setSourceInPoint]);
-
-  const handleMarkOut = useCallback(() => {
-    setSourceOutPoint(sourcePlayhead);
-  }, [sourcePlayhead, setSourceOutPoint]);
-
-  const handleGoToIn = useCallback(() => {
-    if (sourceInPoint !== null) setSourcePlayhead(sourceInPoint);
-  }, [sourceInPoint, setSourcePlayhead]);
-
-  const handleGoToOut = useCallback(() => {
-    if (sourceOutPoint !== null) setSourcePlayhead(sourceOutPoint);
-  }, [sourceOutPoint, setSourcePlayhead]);
-
-  // Marked duration display
-  const markedDuration = useMemo(() => {
-    if (sourceInPoint !== null && sourceOutPoint !== null && sourceOutPoint > sourceInPoint) {
-      return tc.secondsToTC(sourceOutPoint - sourceInPoint);
-    }
-    return null;
-  }, [sourceInPoint, sourceOutPoint, tc]);
-
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 3,
-      padding: '2px 6px',
-      background: 'var(--bg-raised)',
-      borderBottom: '1px solid var(--border-default)',
-    }}>
-      <span style={sectionLabelStyle}>Source</span>
-      <div style={toolbarSeparator} />
-
-      {/* Mark In */}
-      <button
-        onClick={handleMarkIn}
-        title="Mark In (I)"
-        aria-label="Mark In point"
-        style={{
-          ...toolbarBtnStyle,
-          background: sourceInPoint !== null ? 'rgba(59, 130, 246, 0.15)' : 'var(--bg-surface)',
-          color: sourceInPoint !== null ? '#60a5fa' : 'var(--text-secondary)',
-          borderColor: sourceInPoint !== null ? 'rgba(59, 130, 246, 0.3)' : 'var(--border-default)',
-        }}
-      >
-        Mark In
-      </button>
-
-      {/* Mark Out */}
-      <button
-        onClick={handleMarkOut}
-        title="Mark Out (O)"
-        aria-label="Mark Out point"
-        style={{
-          ...toolbarBtnStyle,
-          background: sourceOutPoint !== null ? 'rgba(59, 130, 246, 0.15)' : 'var(--bg-surface)',
-          color: sourceOutPoint !== null ? '#60a5fa' : 'var(--text-secondary)',
-          borderColor: sourceOutPoint !== null ? 'rgba(59, 130, 246, 0.3)' : 'var(--border-default)',
-        }}
-      >
-        Mark Out
-      </button>
-
-      {/* Clear Marks */}
-      <button
-        onClick={clearSourceInOut}
-        title="Clear In/Out marks (G)"
-        aria-label="Clear In and Out marks"
-        style={{
-          ...toolbarBtnStyle,
-          background: 'var(--bg-surface)',
-          color: 'var(--text-tertiary)',
-        }}
-      >
-        Clear
-      </button>
-
-      <div style={toolbarSeparator} />
-
-      {/* Go to In */}
-      <button
-        onClick={handleGoToIn}
-        title="Go to In point (Shift+I)"
-        aria-label="Go to In point"
-        disabled={sourceInPoint === null}
-        style={{
-          ...toolbarBtnStyle,
-          background: 'var(--bg-surface)',
-          color: sourceInPoint !== null ? 'var(--text-secondary)' : 'var(--text-muted)',
-          opacity: sourceInPoint !== null ? 1 : 0.4,
-        }}
-      >
-        Go In
-      </button>
-
-      {/* Go to Out */}
-      <button
-        onClick={handleGoToOut}
-        title="Go to Out point (Shift+O)"
-        aria-label="Go to Out point"
-        disabled={sourceOutPoint === null}
-        style={{
-          ...toolbarBtnStyle,
-          background: 'var(--bg-surface)',
-          color: sourceOutPoint !== null ? 'var(--text-secondary)' : 'var(--text-muted)',
-          opacity: sourceOutPoint !== null ? 1 : 0.4,
-        }}
-      >
-        Go Out
-      </button>
-
-      {/* Duration badge */}
-      {markedDuration && (
-        <>
-          <div style={toolbarSeparator} />
-          <span style={durationBadgeStyle} title="Marked duration">
-            DUR {markedDuration}
-          </span>
-        </>
-      )}
-    </div>
-  );
-}
-
-// =============================================================================
-//  Edit Mode Buttons (Insert, Overwrite, Replace, Place on Top, Append)
-// =============================================================================
-
-const EDIT_MODES: { key: CutEditMode; label: string; shortcut: string; color: string; hoverBg: string }[] = [
-  { key: 'insert', label: 'Insert', shortcut: 'F9', color: '#facc15', hoverBg: 'rgba(250, 204, 21, 0.15)' },
-  { key: 'overwrite', label: 'Overwrite', shortcut: 'F10', color: '#ef4444', hoverBg: 'rgba(239, 68, 68, 0.15)' },
-  { key: 'replace', label: 'Replace', shortcut: 'F11', color: 'var(--text-secondary)', hoverBg: 'var(--bg-elevated)' },
-  { key: 'placeOnTop', label: 'Place on Top', shortcut: 'F12', color: 'var(--text-secondary)', hoverBg: 'var(--bg-elevated)' },
-  { key: 'appendAtEnd', label: 'Append at End', shortcut: 'Shift+F12', color: 'var(--brand-bright)', hoverBg: 'rgba(91, 110, 244, 0.15)' },
-];
-
-function EditModeButtons({
-  activeMode,
-  onModeSelect,
-}: {
-  activeMode: CutEditMode;
-  onModeSelect: (mode: CutEditMode) => void;
-}) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 2 }} role="group" aria-label="Edit mode buttons">
-      <span style={sectionLabelStyle}>Edit</span>
-      <div style={toolbarSeparator} />
-      {EDIT_MODES.map((mode) => {
-        const isActive = activeMode === mode.key;
-        return (
-          <button
-            key={mode.key}
-            onClick={() => onModeSelect(mode.key)}
-            title={`${mode.label} (${mode.shortcut})`}
-            aria-pressed={isActive}
-            style={{
-              ...toolbarBtnStyle,
-              background: isActive ? mode.hoverBg : 'var(--bg-surface)',
-              color: isActive ? mode.color : 'var(--text-tertiary)',
-              borderColor: isActive ? mode.color : 'var(--border-default)',
-              borderWidth: isActive ? 1 : 1,
-              fontWeight: isActive ? 700 : 600,
-            }}
-          >
-            {mode.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-// =============================================================================
-//  Trim Mode Controls (Ripple, Roll)
-// =============================================================================
-
-function TrimControls({
-  trimMode,
-  onTrimModeChange,
-}: {
-  trimMode: TrimMode;
-  onTrimModeChange: (mode: TrimMode) => void;
-}) {
-  const trimModes: { key: TrimMode; label: string; title: string }[] = [
-    { key: 'off', label: 'Select', title: 'Selection mode (A)' },
-    { key: 'ripple', label: 'Ripple', title: 'Ripple trim mode (B)' },
-    { key: 'roll', label: 'Roll', title: 'Roll trim mode (N)' },
-  ];
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 2 }} role="group" aria-label="Trim mode controls">
-      <span style={sectionLabelStyle}>Trim</span>
-      <div style={toolbarSeparator} />
-      {trimModes.map((tm) => {
-        const isActive = trimMode === tm.key;
-        return (
-          <button
-            key={tm.key}
-            onClick={() => onTrimModeChange(tm.key)}
-            title={tm.title}
-            aria-pressed={isActive}
-            style={{
-              ...toolbarBtnStyle,
-              background: isActive ? 'var(--bg-elevated)' : 'var(--bg-surface)',
-              color: isActive ? 'var(--text-primary)' : 'var(--text-tertiary)',
-              borderColor: isActive ? 'var(--brand)' : 'var(--border-default)',
-            }}
-          >
-            {tm.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-// =============================================================================
-//  Transport Controls (JKL, Play/Pause, Step, Go to Start/End)
-// =============================================================================
-
-function TransportBar() {
-  const isPlaying = useEditorStore((s) => s.isPlaying);
-  const playheadTime = useEditorStore((s) => s.playheadTime);
-  const duration = useEditorStore((s) => s.duration);
-  const togglePlay = useEditorStore((s) => s.togglePlay);
-  const setPlayhead = useEditorStore((s) => s.setPlayhead);
-  const goToStart = useEditorStore((s) => s.goToStart);
-  const goToEnd = useEditorStore((s) => s.goToEnd);
-  const inPoint = useEditorStore((s) => s.inPoint);
-  const outPoint = useEditorStore((s) => s.outPoint);
-  const setInToPlayhead = useEditorStore((s) => s.setInToPlayhead);
-  const setOutToPlayhead = useEditorStore((s) => s.setOutToPlayhead);
-  const clearInOut = useEditorStore((s) => s.clearInOut);
-  const fps = useEditorStore((s) => s.sequenceSettings.fps);
-
-  const [shuttleSpeed, setShuttleSpeed] = useState(0); // -3 to 3 for J/K/L
-
-  const tc = useMemo(
-    () => new Timecode({ fps, dropFrame: false }),
-    [fps],
-  );
-
-  const currentTC = useMemo(
-    () => tc.secondsToTC(playheadTime),
-    [tc, playheadTime],
-  );
-
-  const durationTC = useMemo(
-    () => tc.secondsToTC(duration),
-    [tc, duration],
-  );
-
-  // Record marked duration
-  const recordMarkedDuration = useMemo(() => {
-    if (inPoint !== null && outPoint !== null && outPoint > inPoint) {
-      return tc.secondsToTC(outPoint - inPoint);
-    }
-    return null;
-  }, [inPoint, outPoint, tc]);
-
-  const stepForward = useCallback(() => {
-    const safeDuration = Number.isFinite(duration) ? duration : 0;
-    const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
-    setPlayhead(Math.min(safeTime + 1 / fps, safeDuration));
-  }, [playheadTime, duration, fps, setPlayhead]);
-
-  const stepBackward = useCallback(() => {
-    const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
-    setPlayhead(Math.max(safeTime - 1 / fps, 0));
-  }, [playheadTime, fps, setPlayhead]);
-
-  // JKL shuttle control
-  const handleJ = useCallback(() => {
-    setShuttleSpeed((prev) => Math.max(-3, prev - 1));
-  }, []);
-
-  const handleK = useCallback(() => {
-    setShuttleSpeed(0);
-    if (isPlaying) togglePlay();
-  }, [isPlaying, togglePlay]);
-
-  const handleL = useCallback(() => {
-    setShuttleSpeed((prev) => Math.min(3, prev + 1));
-    if (!isPlaying) togglePlay();
-  }, [isPlaying, togglePlay]);
-
-  const transportBtnStyle: React.CSSProperties = {
-    background: 'transparent',
-    border: 'none',
-    color: 'var(--text-secondary)',
-    fontSize: 13,
-    cursor: 'pointer',
-    padding: '2px 5px',
-    borderRadius: 3,
-    lineHeight: 1,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 24,
-    height: 24,
-    transition: 'color 100ms, background 100ms',
-  };
-
-  const jklBtnStyle = (active: boolean): React.CSSProperties => ({
-    ...transportBtnStyle,
-    fontSize: 11,
-    fontWeight: 700,
-    fontFamily: 'var(--font-mono, monospace)',
-    color: active ? 'var(--brand-bright)' : 'var(--text-tertiary)',
-    background: active ? 'rgba(91, 110, 244, 0.12)' : 'transparent',
-    border: active ? '1px solid rgba(91, 110, 244, 0.3)' : '1px solid transparent',
-  });
-
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 4,
-      padding: '3px 10px',
-      background: 'var(--bg-raised)',
-      borderTop: '1px solid var(--border-default)',
-    }}>
-      {/* Record monitor mark controls */}
-      <button
-        onClick={setInToPlayhead}
-        title="Mark In (I)"
-        style={{
-          ...transportBtnStyle,
-          fontSize: 10, fontWeight: 700,
-          color: inPoint !== null ? '#60a5fa' : 'var(--text-tertiary)',
-        }}
-      >
-        I
-      </button>
-      <button
-        onClick={setOutToPlayhead}
-        title="Mark Out (O)"
-        style={{
-          ...transportBtnStyle,
-          fontSize: 10, fontWeight: 700,
-          color: outPoint !== null ? '#60a5fa' : 'var(--text-tertiary)',
-        }}
-      >
-        O
-      </button>
-      <button
-        onClick={clearInOut}
-        title="Clear In/Out (G)"
-        style={{
-          ...transportBtnStyle,
-          fontSize: 8, fontWeight: 600, color: 'var(--text-muted)',
-        }}
-      >
-        CLR
-      </button>
-
-      <div style={toolbarSeparator} />
-
-      {/* JKL shuttle controls */}
-      <span style={{ ...sectionLabelStyle, marginRight: 2 }}>JKL</span>
-      <button onClick={handleJ} title="Shuttle Reverse (J)" style={jklBtnStyle(shuttleSpeed < 0)}>
-        J
-      </button>
-      <button onClick={handleK} title="Stop / Pause (K)" style={jklBtnStyle(shuttleSpeed === 0 && !isPlaying)}>
-        K
-      </button>
-      <button onClick={handleL} title="Shuttle Forward (L)" style={jklBtnStyle(shuttleSpeed > 0)}>
-        L
-      </button>
-
-      {shuttleSpeed !== 0 && (
-        <span style={{ fontSize: 8, color: 'var(--warning-text)', fontWeight: 600, marginLeft: 2 }}>
-          {shuttleSpeed > 0 ? '+' : ''}{shuttleSpeed}x
-        </span>
-      )}
-
-      <div style={toolbarSeparator} />
-
-      {/* Standard transport */}
-      <button onClick={goToStart} title="Go to Start (Home)" style={transportBtnStyle} aria-label="Go to start">
-        |&#x25C0;
-      </button>
-      <button onClick={stepBackward} title="Step Backward (Left arrow)" style={transportBtnStyle} aria-label="Step backward one frame">
-        &#x25C0;
-      </button>
-      <button
-        onClick={togglePlay}
-        title="Play/Pause (Space)"
-        style={{
-          ...transportBtnStyle,
-          fontSize: 16,
-          color: isPlaying ? 'var(--brand-bright)' : 'var(--text-primary)',
-          background: isPlaying ? 'rgba(91, 110, 244, 0.1)' : 'transparent',
-          borderRadius: '50%',
-          width: 28, height: 28, minWidth: 28,
-        }}
-        aria-label={isPlaying ? 'Pause' : 'Play'}
-      >
-        {isPlaying ? '\u23F8' : '\u25B6'}
-      </button>
-      <button onClick={stepForward} title="Step Forward (Right arrow)" style={transportBtnStyle} aria-label="Step forward one frame">
-        &#x25B6;
-      </button>
-      <button onClick={goToEnd} title="Go to End (End)" style={transportBtnStyle} aria-label="Go to end">
-        &#x25B6;|
-      </button>
-
-      <div style={toolbarSeparator} />
-
-      {/* Timecode display */}
-      <div style={tcDisplayStyle} role="status" aria-live="polite" aria-label="Current timecode">
-        {currentTC}
-      </div>
-
-      <span style={{ fontSize: 8, color: 'var(--text-muted)', padding: '0 2px' }}>/</span>
-
-      <div style={{ ...tcDisplayStyle, color: 'var(--text-tertiary)', background: 'transparent', border: 'none', minWidth: 'auto', padding: '2px 4px' }}>
-        {durationTC}
-      </div>
-
-      {/* Record marked duration */}
-      {recordMarkedDuration && (
-        <>
-          <div style={toolbarSeparator} />
-          <span style={durationBadgeStyle} title="Timeline marked duration">
-            SEL {recordMarkedDuration}
-          </span>
-        </>
-      )}
-
-      <div style={{ flex: 1 }} />
-
-      {/* Shuttle speed indicator */}
-      {shuttleSpeed !== 0 && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 2,
-          padding: '1px 6px',
-          background: 'rgba(240, 165, 0, 0.1)',
-          border: '1px solid rgba(240, 165, 0, 0.25)',
-          borderRadius: 3,
-        }}>
-          <span style={{ fontSize: 8, fontWeight: 700, color: 'var(--warning-text)' }}>
-            SHUTTLE {shuttleSpeed > 0 ? 'FWD' : 'REV'} {Math.abs(shuttleSpeed)}x
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// =============================================================================
-//  Compact Timeline Strip (filmstrip view with track lanes)
-// =============================================================================
-
-function CompactTimeline() {
-  const tracks = useEditorStore((s) => s.tracks);
-  const playheadTime = useEditorStore((s) => s.playheadTime);
-  const duration = useEditorStore((s) => s.duration);
-  const zoom = useEditorStore((s) => s.zoom);
-  const setPlayhead = useEditorStore((s) => s.setPlayhead);
-
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [containerWidth, setContainerWidth] = useState(800);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.contentRect.width > 0) {
-          setContainerWidth(entry.contentRect.width);
-        }
-      }
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  const effectiveDuration = Math.max(duration, 10);
-  const pxPerSecond = containerWidth / effectiveDuration;
-  const playheadPx = playheadTime * pxPerSecond;
-
-  const handleTimelineClick = useCallback((e: React.MouseEvent) => {
-    const el = containerRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const time = Math.max(0, Math.min(effectiveDuration, x / pxPerSecond));
-    setPlayhead(time);
-  }, [effectiveDuration, pxPerSecond, setPlayhead]);
-
-  const trackColors: Record<string, string> = {
-    VIDEO: '#5b6ef4',
-    AUDIO: '#22c896',
-    EFFECT: '#f0a500',
-    SUBTITLE: '#c084fc',
-    GRAPHIC: '#fb7185',
-  };
-
-  const trackHeight = 20;
-
-  return (
-    <div
-      ref={containerRef}
-      style={{
-        flex: 1, position: 'relative', overflow: 'hidden',
-        cursor: 'crosshair',
-      }}
-      onClick={handleTimelineClick}
-      role="region"
-      aria-label="Compact filmstrip timeline"
-    >
-      {/* Track lanes */}
-      {tracks.map((track, idx) => {
-        const bgColor = trackColors[track.type] || '#5b6ef4';
-        return (
-          <div
-            key={track.id}
-            style={{
-              position: 'absolute',
-              top: idx * (trackHeight + 1),
-              left: 0, right: 0,
-              height: trackHeight,
-              background: 'var(--bg-void)',
-              borderBottom: '1px solid var(--border-default)',
-            }}
-          >
-            {/* Track label */}
-            <div style={{
-              position: 'absolute', left: 0, top: 0, bottom: 0,
-              width: 30, background: 'var(--bg-raised)',
-              borderRight: '1px solid var(--border-default)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 8, fontWeight: 700, color: bgColor,
-              zIndex: 2, userSelect: 'none',
-            }}>
-              {track.name}
-            </div>
-
-            {/* Clips */}
-            {track.clips.map((clip) => {
-              const clipLeft = clip.startTime * pxPerSecond + 30;
-              const clipWidth = Math.max(2, (clip.endTime - clip.startTime) * pxPerSecond);
-              return (
-                <div
-                  key={clip.id}
-                  style={{
-                    position: 'absolute',
-                    left: clipLeft,
-                    top: 1,
-                    width: clipWidth,
-                    height: trackHeight - 2,
-                    background: clip.color || bgColor,
-                    opacity: track.muted ? 0.3 : 0.75,
-                    borderRadius: 2,
-                    overflow: 'hidden',
-                    display: 'flex',
-                    alignItems: 'center',
-                    paddingLeft: 3,
-                  }}
-                  title={clip.name}
-                >
-                  {clipWidth > 40 && (
-                    <span style={{
-                      fontSize: 7, fontWeight: 600,
-                      color: 'rgba(255,255,255,0.9)',
-                      overflow: 'hidden', textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap', maxWidth: clipWidth - 6,
-                    }}>
-                      {clip.name}
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        );
-      })}
-
-      {/* Playhead */}
-      <div style={{
-        position: 'absolute',
-        left: playheadPx + 30,
-        top: 0, bottom: 0,
-        width: 1,
-        background: 'var(--error)',
-        zIndex: 10,
-        pointerEvents: 'none',
-      }}>
-        {/* Playhead triangle */}
-        <div style={{
-          position: 'absolute',
-          top: -1,
-          left: -4,
-          width: 0, height: 0,
-          borderLeft: '4px solid transparent',
-          borderRight: '4px solid transparent',
-          borderTop: '5px solid var(--error)',
-        }} />
-      </div>
-
-      {/* Empty state */}
-      {tracks.length === 0 && (
-        <div style={{
-          position: 'absolute', inset: 0,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: 'var(--text-muted)', fontSize: 10,
-        }}>
-          No tracks in timeline
-        </div>
-      )}
-    </div>
-  );
-}
-
-// =============================================================================
-//  Main Cut Page Component
-// =============================================================================
+// ─── Main CutPage ───────────────────────────────────────────────────────────
 
 export function CutPage() {
   const [isReady, setIsReady] = useState(false);
-  const [cutEditMode, setCutEditMode] = useState<CutEditMode>('overwrite');
-  const [cutTrimMode, setCutTrimMode] = useState<TrimMode>('off');
-  const [syncBinActive, setSyncBinActive] = useState(false);
-  const [showQuickExport, setShowQuickExport] = useState(false);
+  const [sourceTapeMode, setSourceTapeMode] = useState(true);
+  const [activeTapeIndex, setActiveTapeIndex] = useState(0);
+  const [fastReviewActive, setFastReviewActive] = useState(false);
+  const [activeTransition, setActiveTransition] = useState<'cut' | 'dissolve' | 'wipe'>('cut');
 
-  // Store actions for edit operations
-  const insertEdit = useEditorStore((s) => s.insertEdit);
-  const overwriteEdit = useEditorStore((s) => s.overwriteEdit);
-  const setTrimMode = useEditorStore((s) => s.setTrimMode);
+  const duration = useEditorStore((s) => s.duration);
+  const playheadTime = useEditorStore((s) => s.playheadTime);
+  const togglePlay = useEditorStore((s) => s.togglePlay);
+  const isPlaying = useEditorStore((s) => s.isPlaying);
+
+  // Build source tape items from bins
+  const bins = useEditorStore((s) => s.bins);
+  const sourceTapeItems: SourceTapeItem[] = bins.flatMap((bin) =>
+    bin.assets.map((asset) => ({
+      id: asset.id,
+      name: asset.name,
+      color: bin.color || '#5b6af5',
+    }))
+  );
+
+  // Add some demo items if bins are empty
+  const tapeItems = sourceTapeItems.length > 0 ? sourceTapeItems : [
+    { id: 'demo-1', name: 'Interview_A_01', color: '#4a90d9' },
+    { id: 'demo-2', name: 'Interview_A_02', color: '#4a90d9' },
+    { id: 'demo-3', name: 'B-Roll_Street', color: '#d4a843' },
+    { id: 'demo-4', name: 'B-Roll_Office', color: '#d4a843' },
+    { id: 'demo-5', name: 'GFX_LowerThird', color: '#4dc95e' },
+    { id: 'demo-6', name: 'Music_Underscore', color: '#8a6dcf' },
+    { id: 'demo-7', name: 'SFX_Whoosh', color: '#cf6d6d' },
+    { id: 'demo-8', name: 'VO_Narration_01', color: '#5cbed6' },
+  ];
 
   useEffect(() => {
     const timer = setTimeout(() => setIsReady(true), 150);
     return () => clearTimeout(timer);
   }, []);
 
-  // Sync trim mode to store
-  useEffect(() => {
-    if (cutTrimMode === 'ripple') {
-      setTrimMode('ripple');
-    } else if (cutTrimMode === 'roll') {
-      setTrimMode('roll');
-    } else {
-      setTrimMode('off');
+  // Fast Review: play at 2x (simulated by toggling play)
+  const handleFastReview = useCallback(() => {
+    setFastReviewActive((prev) => !prev);
+    if (!isPlaying) {
+      togglePlay();
     }
-  }, [cutTrimMode, setTrimMode]);
+  }, [isPlaying, togglePlay]);
 
-  // Handle edit mode action dispatch
-  const handleEditModeAction = useCallback((mode: CutEditMode) => {
-    setCutEditMode(mode);
-    // Dispatch the appropriate edit action to the store
-    switch (mode) {
-      case 'insert':
-        insertEdit();
-        break;
-      case 'overwrite':
-        overwriteEdit();
-        break;
-      case 'replace':
-        // Replace uses overwrite semantics on the current track
-        overwriteEdit();
-        break;
-      case 'placeOnTop':
-        // Place on top performs an insert on the next available track
-        insertEdit();
-        break;
-      case 'appendAtEnd':
-        // Append navigates to end then inserts
-        useEditorStore.getState().goToEnd();
-        insertEdit();
-        break;
-    }
-  }, [insertEdit, overwriteEdit]);
-
-  // Keyboard shortcuts for Cut page
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      // F9-F12 for edit modes
-      if (e.key === 'F9') { e.preventDefault(); handleEditModeAction('insert'); }
-      if (e.key === 'F10') { e.preventDefault(); handleEditModeAction('overwrite'); }
-      if (e.key === 'F11') { e.preventDefault(); handleEditModeAction('replace'); }
-      if (e.key === 'F12' && !e.shiftKey) { e.preventDefault(); handleEditModeAction('placeOnTop'); }
-      if (e.key === 'F12' && e.shiftKey) { e.preventDefault(); handleEditModeAction('appendAtEnd'); }
-
-      // Trim modes
-      if (e.key === 'a' && !e.metaKey && !e.ctrlKey) { setCutTrimMode('off'); }
-      if (e.key === 'b' && !e.metaKey && !e.ctrlKey) { setCutTrimMode('ripple'); }
-      if (e.key === 'n' && !e.metaKey && !e.ctrlKey) { setCutTrimMode('roll'); }
-
-      // Quick export
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'E') {
-        e.preventDefault();
-        setShowQuickExport((prev) => !prev);
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [handleEditModeAction]);
+  // Smart Insert: auto-detect best insert point (demo: insert at playhead)
+  const handleSmartInsert = useCallback(() => {
+    // In production, this would analyze the timeline for the optimal cut point
+    // For now, it just triggers an insert at the playhead position
+    console.log('[CutPage] Smart Insert at', playheadTime);
+  }, [playheadTime]);
 
   if (!isReady) {
     return <CutPageSkeleton />;
   }
 
+  const safeDuration = Number.isFinite(duration) ? duration : 0;
+
   return (
     <div
-      style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+      style={S.root}
       role="region"
-      aria-label="Cut Page - DaVinci Resolve-style fast editing"
+      aria-label="Cut Page - Speed-focused editing"
     >
-      {/* ─── Top Toolbar: Edit Modes, Trim Controls, Quick Export, Sync Bin ─── */}
-      <div style={{
-        height: 32, flexShrink: 0,
-        display: 'flex', alignItems: 'center', gap: 6,
-        padding: '0 8px',
-        background: 'var(--bg-raised)',
-        borderBottom: '1px solid var(--border-default)',
-        overflow: 'hidden',
-      }}>
-        {/* Edit Mode Buttons */}
-        <EditModeButtons activeMode={cutEditMode} onModeSelect={setCutEditMode} />
-
-        <div style={toolbarSeparator} />
-
-        {/* Trim Controls */}
-        <TrimControls trimMode={cutTrimMode} onTrimModeChange={setCutTrimMode} />
-
-        <div style={toolbarSeparator} />
-
-        {/* Sync Bin toggle */}
-        <button
-          onClick={() => setSyncBinActive((prev) => !prev)}
-          title="Sync Bin - Show clips synced to timeline position"
-          aria-pressed={syncBinActive}
-          style={{
-            ...toolbarBtnStyle,
-            background: syncBinActive ? 'rgba(34, 200, 150, 0.15)' : 'var(--bg-surface)',
-            color: syncBinActive ? '#22c896' : 'var(--text-tertiary)',
-            borderColor: syncBinActive ? 'rgba(34, 200, 150, 0.3)' : 'var(--border-default)',
-          }}
-        >
-          Sync Bin
-        </button>
-
-        {/* Smart Insert indicator */}
-        <button
-          title="Smart Insert - Drop clips anywhere to intelligently insert"
-          style={{
-            ...toolbarBtnStyle,
-            background: 'var(--bg-surface)',
-            color: 'var(--text-tertiary)',
-          }}
-        >
-          Smart Insert
-        </button>
-
-        <div style={{ flex: 1 }} />
-
-        {/* Quick Export */}
-        <button
-          onClick={() => setShowQuickExport(true)}
-          title="Quick Export (Cmd+Shift+E)"
-          style={{
-            ...toolbarBtnStyle,
-            background: 'var(--brand)',
-            color: '#fff',
-            borderColor: 'var(--brand)',
-            fontWeight: 700,
-            padding: '3px 12px',
-          }}
-        >
-          Quick Export
-        </button>
-      </div>
-
-      {/* ─── Main Content: Bin + Source Monitor + Record Monitor ──────────── */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
-        {/* Compact bin strip / Sync Bin */}
-        <div style={{
-          width: syncBinActive ? 240 : 200, flexShrink: 0,
-          borderRight: '1px solid var(--border-default)',
-          display: 'flex', flexDirection: 'column', overflow: 'hidden',
-          transition: 'width 200ms ease',
-        }}>
-          {/* Bin header with Sync Bin indicator */}
-          {syncBinActive && (
-            <div style={{
-              padding: '4px 8px',
-              fontSize: 9, fontWeight: 700,
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
-              color: '#22c896',
-              borderBottom: '1px solid var(--border-default)',
-              background: 'rgba(34, 200, 150, 0.06)',
-              display: 'flex', alignItems: 'center', gap: 6,
-            }}>
-              <span style={{
-                width: 6, height: 6, borderRadius: '50%',
-                background: '#22c896',
-                display: 'inline-block',
-              }} />
-              Sync Bin Active
-            </div>
-          )}
+      {/* Top: Source Tape + Monitors */}
+      <div style={S.topArea}>
+        {/* Compact bin strip */}
+        <div style={S.binStrip}>
           <BinPanel />
         </div>
 
-        {/* Source Monitor with toolbar overlay */}
-        <div
-          style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, borderRight: '1px solid var(--border-subtle)' }}
-          role="region"
-          aria-label="Source monitor"
-        >
-          <SourceViewerToolbar />
-          <SourceMonitor />
-        </div>
+        {/* Monitor + Controls area */}
+        <div style={S.monitorArea}>
+          {/* Source Tape filmstrip */}
+          {sourceTapeMode && (
+            <SourceTape
+              items={tapeItems}
+              activeIndex={activeTapeIndex}
+              onSelect={setActiveTapeIndex}
+            />
+          )}
 
-        {/* Record Monitor */}
-        <div
-          style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}
-          role="region"
-          aria-label="Record monitor"
-        >
-          <RecordMonitor />
+          {/* Quick Actions Bar */}
+          <div style={S.quickBar}>
+            <div
+              style={S.modeBadge(sourceTapeMode)}
+              onClick={() => setSourceTapeMode((p) => !p)}
+              role="switch"
+              aria-checked={sourceTapeMode}
+              aria-label="Source Tape mode"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSourceTapeMode((p) => !p); }}
+            >
+              Source Tape
+            </div>
+
+            <div style={{ width: 1, height: 16, background: 'var(--border-subtle)' }} />
+
+            <button
+              style={S.quickBtn(fastReviewActive ? 'accent' : 'secondary')}
+              onClick={handleFastReview}
+              title="Fast Review (2x playback)"
+              aria-label="Fast Review"
+              aria-pressed={fastReviewActive}
+            >
+              {fastReviewActive ? 'Reviewing 2x' : 'Fast Review'}
+            </button>
+
+            <button
+              style={S.quickBtn('primary')}
+              onClick={handleSmartInsert}
+              title="Smart Insert at optimal cut point"
+              aria-label="Smart Insert"
+            >
+              Smart Insert
+            </button>
+
+            <div style={{ flex: 1 }} />
+
+            {/* Duration Readout (compact) */}
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+              <span style={{ fontSize: 8, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                DUR
+              </span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                {formatDuration(safeDuration)}
+              </span>
+            </div>
+          </div>
+
+          {/* Dual Monitors */}
+          <div style={S.monitors}>
+            {/* Source Monitor */}
+            <div
+              style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, borderRight: '1px solid var(--border-subtle)', position: 'relative' }}
+              role="region"
+              aria-label="Source monitor"
+            >
+              <SourceMonitor />
+            </div>
+
+            {/* Record Monitor */}
+            <div
+              style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, position: 'relative' }}
+              role="region"
+              aria-label="Record monitor"
+            >
+              <RecordMonitor />
+              {/* Duration Overlay on Record Monitor */}
+              <div style={S.durationOverlay}>
+                <span style={S.durationLabel}>Sequence</span>
+                <span style={S.durationValue}>{formatDuration(safeDuration)}</span>
+                <span style={{ ...S.durationLabel, color: 'var(--brand-bright)', marginTop: 2 }}>
+                  {Math.ceil(safeDuration * 24)} frames
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* ─── Transport Controls Bar ──────────────────────────────────────── */}
-      <TransportBar />
+      {/* Quick Transition Buttons */}
+      <div style={S.transitionBar} role="radiogroup" aria-label="Quick transition type">
+        {[
+          { id: 'cut' as const, label: 'Straight Cut', icon: '|' },
+          { id: 'dissolve' as const, label: 'Dissolve', icon: 'X' },
+          { id: 'wipe' as const, label: 'Wipe', icon: '>' },
+        ].map((t) => (
+          <button
+            key={t.id}
+            style={S.transitionBtn(activeTransition === t.id)}
+            onClick={() => setActiveTransition(t.id)}
+            role="radio"
+            aria-checked={activeTransition === t.id}
+            aria-label={t.label}
+          >
+            <span style={{ marginRight: 4 }}>{t.icon}</span>
+            {t.label}
+          </button>
+        ))}
 
-      {/* ─── Bottom: Compact Filmstrip Timeline ─────────────────────────── */}
+        <div style={{ width: 1, height: 16, background: 'var(--border-subtle)', margin: '0 4px' }} />
+
+        {/* Transition duration */}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, color: 'var(--text-muted)' }}>
+          <span style={{ fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Dur:</span>
+          <select
+            style={{
+              background: 'var(--bg-void)', border: '1px solid var(--border-default)',
+              borderRadius: 3, color: 'var(--text-primary)', fontSize: 9,
+              padding: '2px 4px', fontFamily: 'var(--font-mono)',
+            }}
+            aria-label="Transition duration"
+            defaultValue="15"
+          >
+            <option value="6">6f</option>
+            <option value="10">10f</option>
+            <option value="15">15f</option>
+            <option value="24">1s</option>
+            <option value="48">2s</option>
+          </select>
+        </label>
+      </div>
+
+      {/* Compact Timeline (no view mode toggles, no zoom slider) */}
       <div
-        style={{
-          height: 140, flexShrink: 0,
-          borderTop: '1px solid var(--border-default)',
-          display: 'flex', flexDirection: 'column',
-          overflow: 'hidden',
-        }}
+        style={S.compactTimeline}
         role="region"
-        aria-label="Cut page filmstrip timeline"
+        aria-label="Cut page compact timeline"
       >
-        {/* Timeline header */}
-        <div style={{
-          height: 20, flexShrink: 0,
-          display: 'flex', alignItems: 'center',
-          padding: '0 8px', gap: 6,
-          background: 'var(--bg-raised)',
-          borderBottom: '1px solid var(--border-default)',
-        }}>
-          <span style={{
-            fontSize: 9, fontWeight: 700,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-            color: 'var(--text-tertiary)',
-          }}>
-            Timeline
-          </span>
-          <div style={{ flex: 1 }} />
-          <span style={{
-            fontSize: 8, color: 'var(--text-muted)',
-            fontFamily: 'var(--font-mono, monospace)',
-          }}>
-            Cut Page View
-          </span>
-        </div>
-
-        {/* Timeline content - use the full TimelinePanel */}
-        <div style={{ flex: 1, overflow: 'hidden' }}>
-          <TimelinePanel />
-        </div>
+        <TimelinePanel />
       </div>
-
-      {/* ─── Quick Export Dialog ──────────────────────────────────────────── */}
-      {showQuickExport && (
-        <QuickExportDialog onClose={() => setShowQuickExport(false)} />
-      )}
     </div>
   );
 }

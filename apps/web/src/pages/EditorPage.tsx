@@ -1,10 +1,7 @@
-import React, { lazy, Suspense, useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, Suspense, lazy } from 'react';
+import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorBoundary, PanelErrorBoundary } from '../components/ErrorBoundary';
-import { useParams, useSearchParams } from 'react-router-dom';
-import { trimEngine } from '../engine/TrimEngine';
-import { keyboardEngine } from '../engine/KeyboardEngine';
-import { multicamEngine } from '../engine/MulticamEngine';
-import { trackPatchingEngine } from '../engine/TrackPatchingEngine';
+import { useParams } from 'react-router-dom';
 import { Toolbar } from '../components/Toolbar/Toolbar';
 import { BinPanel } from '../components/Bins/BinPanel';
 import { ComposerPanel } from '../components/ComposerPanel/ComposerPanel';
@@ -12,581 +9,406 @@ import { TimelinePanel } from '../components/TimelinePanel/TimelinePanel';
 import { InspectorPanel } from '../components/Editor/InspectorPanel';
 import { ExportPanel } from '../components/ExportPanel/ExportPanel';
 import { StatusBar } from '../components/Editor/StatusBar';
-import { EditorWorkbenchBar } from '../components/Editor/EditorWorkbenchBar';
 import { NewProjectDialog } from '../components/NewProjectDialog/NewProjectDialog';
 import { SequenceDialog } from '../components/SequenceDialog/SequenceDialog';
 import { TitleTool } from '../components/TitleTool/TitleTool';
 import { SubtitleEditor } from '../components/SubtitleEditor/SubtitleEditor';
 import { useEditorStore } from '../store/editor.store';
-import { usePlayerStore } from '../store/player.store';
 import { useGlobalKeyboard } from '../hooks/useGlobalKeyboard';
-import { useTrimLoopPlayback } from '../hooks/useTrimLoopPlayback';
 import { UserSettingsPanel } from '../components/UserSettings/UserSettingsPanel';
 import { useKeyboardAction } from '../hooks/useKeyboardAction';
 import { editEngine } from '../engine/EditEngine';
 import { AlphaImportDialog } from '../components/AlphaImportDialog/AlphaImportDialog';
 import { TrackerPanel } from '../components/TrackerPanel/TrackerPanel';
 import { TrackingOverlay } from '../components/TrackerPanel/TrackingOverlay';
-import { type EditorPage as PageId } from '../components/PageNavigation/PageNavigation';
-import {
-  activateRecordMonitor,
-  activateSourceMonitor,
-  clearInForActiveMonitor,
-  clearMarksForActiveMonitor,
-  clearOutForActiveMonitor,
-  goToEndForActiveMonitor,
-  goToInForActiveMonitor,
-  goToStartForActiveMonitor,
-  goToOutForActiveMonitor,
-  matchFrameAtPlayhead,
-  markClipForActiveMonitor,
-  markInForActiveMonitor,
-  markOutForActiveMonitor,
-  playForwardForActiveMonitor,
-  playReverseForActiveMonitor,
-  stepFramesForActiveMonitor,
-  stopActiveMonitorPlayback,
-  toggleMonitorFocus,
-  togglePlayForActiveMonitor,
-} from '../lib/editorMonitorActions';
-import { buildProjectPersistenceSnapshot, getProjectPersistenceHash } from '../lib/editorProjectState';
-import { isLegacyExportPageParam, resolveEditorPageParam } from '../lib/editorUrlState';
-import { subscribeSmartToolStateToStore } from '../lib/smartToolStateBridge';
-import { subscribeTrimHistoryToEditEngine } from '../lib/trimHistoryBridge';
-import { subscribeTrimStateToStore } from '../lib/trimStateBridge';
-import { subscribeTrackPatchingStateToStore } from '../lib/trackPatchingStateBridge';
-import { requestTrimWorkspace } from '../lib/trimWorkspace';
+import { PageNavigation, type EditorPage as PageId } from '../components/PageNavigation/PageNavigation';
 import { MediaPage } from './MediaPage';
 import { CutPage } from './CutPage';
-import { PanelResizeHandle } from '../components/Layout/PanelResizeHandle';
-import {
-  clampEditorLayoutForViewport,
-  getEditorLayoutViewportBounds,
-  readStoredEditorLayout,
-  type EditorLayoutState,
-} from '../lib/editorLayout';
 
-// VFX and ProTools pages (lazy-loaded)
-const VFXPage = lazy(() => import('./FusionPage').then(m => ({ default: m.FusionPage })));
-const ProToolsPage = lazy(() => import('./FairlightPage').then(m => ({ default: m.FairlightPage })));
+// Lazy-load new pages and deliver components for share panel
+const VFXPage = lazy(() => import('./VFXPage').then(m => ({ default: m.VFXPage })));
+const ProToolsPage = lazy(() => import('./ProToolsPage').then(m => ({ default: m.ProToolsPage })));
+const RenderPanel = lazy(() => import('../components/RenderPanel/RenderPanel').then(m => ({ default: m.RenderPanel })));
 
-// Lazy-loaded vertical panels
-const MarkersPanel = lazy(() => import('../components/MarkersPanel/MarkersPanel').then(m => ({ default: m.MarkersPanel })));
-const TransitionsPanel = lazy(() => import('../components/TransitionsPanel/TransitionsPanel').then(m => ({ default: m.TransitionsPanel })));
-const KeyframeEditor = lazy(() => import('../components/KeyframeEditor/KeyframeEditor').then(m => ({ default: m.KeyframeEditor })));
-const SequenceBin = lazy(() => import('../components/SequenceBin/SequenceBin').then(m => ({ default: m.SequenceBin })));
-const TimelineSearch = lazy(() => import('../components/TimelineSearch/TimelineSearch').then(m => ({ default: m.TimelineSearch })));
+// Deliver components for Share panel
+const TemplatePanel = lazy(() => import('../components/Deliver/TemplatePanel').then(m => ({ default: m.TemplatePanel })));
+const FormatSettingsPanel = lazy(() => import('../components/Deliver/FormatSettingsPanel').then(m => ({ default: m.FormatSettingsPanel })));
+const RenderQueuePanel = lazy(() => import('../components/Deliver/RenderQueuePanel').then(m => ({ default: m.RenderQueuePanel })));
 
-function areViewportDimensionsEqual(
-  left: { width: number; height: number },
-  right: { width: number; height: number },
-) {
-  return left.width === right.width && left.height === right.height;
-}
+// Lazy-loaded utility panels
+const MultiCamPanel = lazy(() => import('../components/MultiCamPanel/MultiCamPanel').then(m => ({ default: m.MultiCamPanel })));
 
 // Playback is driven by PlaybackEngine (RAF-based) via editor.store.ts togglePlay().
 // Keyboard dispatch is centralized in useGlobalKeyboard() — called once from EditorPage.
 
+// ─── Share / Deliver Panel ──────────────────────────────────────────────────
+
+function SharePanel({ onClose }: { onClose: () => void }) {
+  const [activeTab, setActiveTab] = useState<'quick' | 'deliver' | 'publish'>('quick');
+
+  return (
+    <div
+      className="share-overlay"
+      role="dialog"
+      aria-label="Share and Deliver"
+      tabIndex={0}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        background: 'rgba(0,0,0,0.6)',
+        display: 'flex', alignItems: 'stretch', justifyContent: 'flex-end',
+      }}
+    >
+      <div
+        style={{
+          width: '85%', maxWidth: 1100,
+          background: 'var(--bg-surface)',
+          borderLeft: '1px solid var(--border-default)',
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '-8px 0 32px rgba(0,0,0,0.4)',
+          animation: 'slideInRight 200ms ease',
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '12px 16px',
+          borderBottom: '1px solid var(--border-default)',
+          background: 'var(--bg-raised)',
+          flexShrink: 0,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="18" cy="5" r="3" />
+              <circle cx="6" cy="12" r="3" />
+              <circle cx="18" cy="19" r="3" />
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+            </svg>
+            <span style={{
+              fontSize: 13, fontWeight: 700, letterSpacing: '0.04em',
+              textTransform: 'uppercase', color: 'var(--text-primary)',
+            }}>
+              Share & Deliver
+            </span>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close share panel"
+            style={{
+              background: 'transparent', border: 'none',
+              color: 'var(--text-tertiary)', fontSize: 18,
+              cursor: 'pointer', lineHeight: 1, padding: '4px 8px',
+            }}
+            title="Close (Esc)"
+          >&#x2715;</button>
+        </div>
+
+        {/* Tab Bar */}
+        <div style={{
+          display: 'flex', borderBottom: '1px solid var(--border-default)',
+          flexShrink: 0,
+        }} role="tablist" aria-label="Share panel tabs">
+          {[
+            { id: 'quick' as const, label: 'Quick Export' },
+            { id: 'deliver' as const, label: 'Deliver' },
+            { id: 'publish' as const, label: 'Publish' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                flex: 1, padding: '10px 0',
+                fontSize: 11, fontWeight: 600,
+                letterSpacing: '0.05em', textTransform: 'uppercase',
+                border: 'none', cursor: 'pointer',
+                background: activeTab === tab.id ? 'var(--bg-hover)' : 'transparent',
+                color: activeTab === tab.id ? 'var(--brand-bright)' : 'var(--text-muted)',
+                borderBottom: activeTab === tab.id ? '2px solid var(--brand)' : '2px solid transparent',
+                transition: 'all 150ms',
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Tab Content */}
+        <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+          {activeTab === 'quick' && <QuickExportTab />}
+          {activeTab === 'deliver' && (
+            <Suspense fallback={<LoadingSpinner />}>
+              <div style={{ flex: 1, display: 'flex', overflow: 'hidden', height: '100%' }}>
+                <TemplatePanel />
+                <FormatSettingsPanel />
+                <div style={{
+                  width: 280, flexShrink: 0,
+                  borderLeft: '1px solid var(--border-default)',
+                  overflow: 'auto',
+                }}>
+                  <RenderQueuePanel />
+                </div>
+              </div>
+            </Suspense>
+          )}
+          {activeTab === 'publish' && <PublishTab />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QuickExportTab() {
+  const presets = [
+    { id: 'h264-web', name: 'H.264 Web Optimized', desc: 'MP4 1080p, 8Mbps, AAC 256k', icon: 'WEB' },
+    { id: 'h264-master', name: 'H.264 Master', desc: 'MP4 4K, 50Mbps, AAC 320k', icon: 'HD' },
+    { id: 'prores-422', name: 'ProRes 422 HQ', desc: 'MOV, ProRes 422 HQ, PCM', icon: 'PRO' },
+    { id: 'prores-4444', name: 'ProRes 4444', desc: 'MOV, ProRes 4444 + Alpha, PCM', icon: '4K' },
+    { id: 'dnxhd-36', name: 'DNxHD 36', desc: 'MXF, DNxHD 36 Mbps', icon: 'DNX' },
+    { id: 'youtube', name: 'YouTube Upload', desc: 'H.264, 1080p60, AAC 384k', icon: 'YT' },
+    { id: 'instagram', name: 'Instagram Reels', desc: 'H.264, 1080x1920, 30fps', icon: 'IG' },
+    { id: 'audio-only', name: 'Audio Mixdown', desc: 'WAV 48kHz/24-bit, Stereo', icon: 'WAV' },
+  ];
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{
+        fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
+        textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 12,
+      }}>
+        Export Presets
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240, 1fr))', gap: 8 }}>
+        {presets.map((preset) => (
+          <button
+            key={preset.id}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '12px 14px',
+              background: 'var(--bg-void)',
+              border: '1px solid var(--border-default)',
+              borderRadius: 6, cursor: 'pointer',
+              transition: 'all 150ms', textAlign: 'left',
+            }}
+            onMouseOver={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--brand)';
+              (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)';
+            }}
+            onMouseOut={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border-default)';
+              (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-void)';
+            }}
+            aria-label={`Export as ${preset.name}`}
+          >
+            <div style={{
+              width: 36, height: 36, borderRadius: 6,
+              background: 'var(--brand-dim)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 10, fontWeight: 800, color: 'var(--brand-bright)',
+              letterSpacing: '0.05em', flexShrink: 0,
+            }}>
+              {preset.icon}
+            </div>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>
+                {preset.name}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                {preset.desc}
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PublishTab() {
+  const destinations = [
+    { id: 'youtube', name: 'YouTube', status: 'connected', icon: 'YT', color: '#ff0000' },
+    { id: 'vimeo', name: 'Vimeo', status: 'connected', icon: 'VM', color: '#1ab7ea' },
+    { id: 'frame', name: 'Frame.io', status: 'connected', icon: 'FR', color: '#7c5cfc' },
+    { id: 'dropbox', name: 'Dropbox', status: 'disconnected', icon: 'DB', color: '#0061ff' },
+    { id: 'gdrive', name: 'Google Drive', status: 'disconnected', icon: 'GD', color: '#34a853' },
+    { id: 'nexis', name: 'Avid NEXIS', status: 'connected', icon: 'NX', color: '#5b6af5' },
+  ];
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{
+        fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
+        textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 12,
+      }}>
+        Publish Destinations
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200, 1fr))', gap: 8 }}>
+        {destinations.map((dest) => (
+          <div
+            key={dest.id}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '10px 12px',
+              background: 'var(--bg-void)',
+              border: '1px solid var(--border-default)',
+              borderRadius: 6,
+            }}
+          >
+            <div style={{
+              width: 32, height: 32, borderRadius: 6,
+              background: `${dest.color}22`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 10, fontWeight: 800, color: dest.color,
+              flexShrink: 0,
+            }}>
+              {dest.icon}
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>
+                {dest.name}
+              </div>
+              <div style={{
+                fontSize: 9, fontWeight: 600,
+                color: dest.status === 'connected' ? 'var(--success)' : 'var(--text-muted)',
+              }}>
+                {dest.status === 'connected' ? 'Connected' : 'Not connected'}
+              </div>
+            </div>
+            <button style={{
+              padding: '4px 8px', fontSize: 9, fontWeight: 600,
+              border: '1px solid var(--border-default)', borderRadius: 3,
+              background: dest.status === 'connected' ? 'var(--brand)' : 'transparent',
+              color: dest.status === 'connected' ? '#fff' : 'var(--text-secondary)',
+              cursor: 'pointer',
+            }}>
+              {dest.status === 'connected' ? 'Publish' : 'Connect'}
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main EditorPage ────────────────────────────────────────────────────────
+
 export function EditorPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const showAIPanel = useEditorStore((s) => s.showAIPanel);
   const showExportPanel = useEditorStore((s) => s.showExportPanel);
+  const showSharePanel = useEditorStore((s) => s.showSharePanel);
   const showSettingsPanel = useEditorStore((s) => s.showSettingsPanel);
+  const showTranscriptPanel = useEditorStore((s) => s.showTranscriptPanel);
   const showInspector = useEditorStore((s) => s.showInspector);
   const showNewProjectDialog = useEditorStore((s) => s.showNewProjectDialog);
   const showSequenceDialog = useEditorStore((s) => s.showSequenceDialog);
   const showTitleTool = useEditorStore((s) => s.showTitleTool);
   const showSubtitleEditor = useEditorStore((s) => s.showSubtitleEditor);
   const showAlphaImportDialog = useEditorStore((s) => s.showAlphaImportDialog);
-  const showSequenceBin = useEditorStore((s) => s.showSequenceBin);
   const toggleExportPanel = useEditorStore((s) => s.toggleExportPanel);
+  const toggleSharePanel = useEditorStore((s) => s.toggleSharePanel);
   const toggleSettingsPanel = useEditorStore((s) => s.toggleSettingsPanel);
-  const toggleSequenceBin = useEditorStore((s) => s.toggleSequenceBin);
   const loadProject = useEditorStore((s) => s.loadProject);
-  const saveProject = useEditorStore((s) => s.saveProject);
-  const tracks = useEditorStore((s) => s.tracks);
-
-  const selectedClipIds = useEditorStore((s) => s.selectedClipIds);
 
   const [showTracker, setShowTracker] = useState(false);
-  const [showMarkersPanel, setShowMarkersPanel] = useState(false);
-  const [showTransitionsPanel, setShowTransitionsPanel] = useState(false);
-  const [showTimelineSearch, setShowTimelineSearch] = useState(false);
-  const [activePage, setActivePage] = useState<PageId>(() => resolveEditorPageParam(searchParams.get('page')));
-  const [viewport, setViewport] = useState(() => ({
-    width: typeof window === 'undefined' ? 1440 : window.innerWidth,
-    height: typeof window === 'undefined' ? 900 : window.innerHeight,
-  }));
-  const [layout, setLayout] = useState<EditorLayoutState>(() => (
-    readStoredEditorLayout(typeof window === 'undefined' ? null : window.localStorage)
-  ));
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showMultiCam, setShowMultiCam] = useState(false);
+  const [activePage, setActivePage] = useState<PageId>('edit');
   // Centralized keyboard dispatch — routes keys based on active monitor
   useGlobalKeyboard();
-  useTrimLoopPlayback();
 
   // ─── Register core keyboard actions with the KeyboardEngine ──────────
-  const insertEdit = useEditorStore((s) => s.insertEdit);
-  const overwriteEdit = useEditorStore((s) => s.overwriteEdit);
-  const goToNextEditPoint = useEditorStore((s) => s.goToNextEditPoint);
-  const goToPrevEditPoint = useEditorStore((s) => s.goToPrevEditPoint);
+  const togglePlay = useEditorStore((s) => s.togglePlay);
+  const setInToPlayhead = useEditorStore((s) => s.setInToPlayhead);
+  const setOutToPlayhead = useEditorStore((s) => s.setOutToPlayhead);
+  const clearInOut = useEditorStore((s) => s.clearInOut);
+  const goToStart = useEditorStore((s) => s.goToStart);
+  const goToEnd = useEditorStore((s) => s.goToEnd);
   const deleteSelectedClips = useEditorStore((s) => s.deleteSelectedClips);
-  const liftEdit = useEditorStore((s) => s.liftEdit);
-  const extractEdit = useEditorStore((s) => s.extractEdit);
-  const setActiveTool = useEditorStore((s) => s.setActiveTool);
-  const toggleSmartToolLiftOverwrite = useEditorStore((s) => s.toggleSmartToolLiftOverwrite);
-  const toggleSmartToolExtractSplice = useEditorStore((s) => s.toggleSmartToolExtractSplice);
-  const toggleSmartToolOverwriteTrim = useEditorStore((s) => s.toggleSmartToolOverwriteTrim);
-  const toggleSmartToolRippleTrim = useEditorStore((s) => s.toggleSmartToolRippleTrim);
-  const toggleTrimViewMode = useEditorStore((s) => s.toggleTrimViewMode);
 
   // Read from store directly to avoid stale closures in frame-stepping callbacks
   const stepForward = useCallback(() => {
-    if (trimEngine.getState().active || useEditorStore.getState().trimActive) {
-      const state = useEditorStore.getState();
-      const frameRate = state.sequenceSettings?.fps || state.projectSettings.frameRate || 24;
-      trimEngine.trimByFrames(1, frameRate);
-      return;
-    }
-
-    stepFramesForActiveMonitor(1);
+    const { playheadTime, duration, setPlayhead } = useEditorStore.getState();
+    const safeDuration = Number.isFinite(duration) ? duration : 0;
+    const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
+    setPlayhead(Math.min(safeTime + 1 / 24, safeDuration));
   }, []);
   const stepBackward = useCallback(() => {
-    if (trimEngine.getState().active || useEditorStore.getState().trimActive) {
-      const state = useEditorStore.getState();
-      const frameRate = state.sequenceSettings?.fps || state.projectSettings.frameRate || 24;
-      trimEngine.trimByFrames(-1, frameRate);
-      return;
-    }
-
-    stepFramesForActiveMonitor(-1);
-  }, []);
-  const enterTrimMode = useCallback(() => {
-    requestTrimWorkspace();
-  }, []);
-  const selectTrimASide = useCallback(() => {
-    trimEngine.selectASide();
-  }, []);
-  const selectTrimBSide = useCallback(() => {
-    trimEngine.selectBSide();
-  }, []);
-  const selectTrimBothSides = useCallback(() => {
-    trimEngine.selectBothSides();
-  }, []);
-  const trimByFrames = useCallback((frames: number) => {
-    const state = useEditorStore.getState();
-    const frameRate = state.sequenceSettings?.fps || state.projectSettings.frameRate || 24;
-    trimEngine.trimByFrames(frames, frameRate);
-  }, []);
-  const trimLeftOneFrame = useCallback(() => trimByFrames(-1), [trimByFrames]);
-  const trimRightOneFrame = useCallback(() => trimByFrames(1), [trimByFrames]);
-  const trimLeftTenFrames = useCallback(() => trimByFrames(-10), [trimByFrames]);
-  const trimRightTenFrames = useCallback(() => trimByFrames(10), [trimByFrames]);
-  const startTrimTransport = useCallback((direction: -1 | 1, requestedSpeed?: number) => {
-    const state = useEditorStore.getState();
-    if (!state.trimActive) {
-      const request = requestTrimWorkspace();
-      if (request.outcome === 'noop') {
-        return false;
-      }
-    }
-
-    const speed = Math.max(
-      0.25,
-      Math.min(8, requestedSpeed ?? (Math.abs(keyboardEngine.getJKLSpeed()) || 1)),
-    );
-    useEditorStore.getState().setTrimLoopPlaybackDirection(direction);
-    useEditorStore.getState().setTrimLoopPlaybackRate(speed);
-    useEditorStore.getState().setTrimLoopPlaybackActive(true);
-    return true;
-  }, []);
-  const stopTrimTransport = useCallback(() => {
-    if (trimEngine.getState().active || useEditorStore.getState().trimActive) {
-      useEditorStore.getState().setTrimLoopPlaybackActive(false);
-      return;
-    }
-
-    stopActiveMonitorPlayback();
-  }, []);
-  const toggleTrimAwarePlayback = useCallback(() => {
-    const state = useEditorStore.getState();
-    if (trimEngine.getState().active || state.trimActive) {
-      if (state.trimLoopPlaybackActive) {
-        state.setTrimLoopPlaybackActive(false);
-        return;
-      }
-
-      startTrimTransport(1, 1);
-      return;
-    }
-
-    togglePlayForActiveMonitor();
-  }, [startTrimTransport]);
-  const playTrimForward = useCallback(() => {
-    if (trimEngine.getState().active || useEditorStore.getState().trimActive) {
-      void startTrimTransport(1);
-      return;
-    }
-
-    playForwardForActiveMonitor();
-  }, [startTrimTransport]);
-  const playTrimReverse = useCallback(() => {
-    if (trimEngine.getState().active || useEditorStore.getState().trimActive) {
-      void startTrimTransport(-1);
-      return;
-    }
-
-    playReverseForActiveMonitor();
-  }, [startTrimTransport]);
-  const playTrimLoop = useCallback(() => {
-    const state = useEditorStore.getState();
-    if (state.trimLoopPlaybackActive) {
-      state.setTrimLoopPlaybackActive(false);
-      return;
-    }
-
-    startTrimTransport(1, 1);
-  }, [startTrimTransport]);
-  const recallPreviousTrimConfiguration = useCallback(() => {
-    const nextState = trimEngine.recallPreviousConfiguration();
-    if (nextState.active && nextState.rollers.length > 0) {
-      useEditorStore.getState().setActiveTool('trim');
-      useEditorStore.getState().selectTrack(nextState.rollers[0]!.trackId);
-    }
-  }, []);
-  const toggleMulticamMode = useCallback(() => {
-    if (multicamEngine.isActive()) {
-      multicamEngine.exitMulticamMode();
-      return;
-    }
-
-    const state = useEditorStore.getState();
-    const candidateAssets = state.activeBinAssets.filter((asset) => asset.type === 'VIDEO' || asset.type === 'AUDIO');
-    if (candidateAssets.length < 2) {
-      return;
-    }
-
-    const group = multicamEngine.createGroup(
-      `${state.projectName || 'Current Bin'} MultiCam`,
-      candidateAssets.map((asset) => asset.id),
-      'timecode',
-    );
-    multicamEngine.enterMulticamMode(group.id);
-    activateSourceMonitor();
-  }, []);
-  const cutToMulticamAngle = useCallback((angleIndex: number) => {
-    if (!multicamEngine.isActive()) {
-      return;
-    }
-
-    const isLiveSwitching = useEditorStore.getState().isPlaying || multicamEngine.getState().isRecording;
-    if (isLiveSwitching) {
-      multicamEngine.cutToAngle(angleIndex);
-    } else {
-      multicamEngine.setActiveAngle(angleIndex);
-    }
-
-    activateSourceMonitor();
+    const { playheadTime, setPlayhead } = useEditorStore.getState();
+    const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
+    setPlayhead(Math.max(safeTime - 1 / 24, 0));
   }, []);
 
-  useKeyboardAction('transport.playForward', playTrimForward, [playTrimForward]);
-  useKeyboardAction('transport.playReverse', playTrimReverse, [playTrimReverse]);
-  useKeyboardAction('transport.stop', stopTrimTransport, [stopTrimTransport]);
-  useKeyboardAction('transport.playStop', toggleTrimAwarePlayback, [toggleTrimAwarePlayback]);
-  useKeyboardAction('transport.playToggle', toggleTrimAwarePlayback, [toggleTrimAwarePlayback]);
+  useKeyboardAction('transport.playForward', togglePlay, [togglePlay]);
+  useKeyboardAction('transport.playReverse', togglePlay, [togglePlay]);
+  useKeyboardAction('transport.stop', () => useEditorStore.getState().isPlaying && togglePlay(), [togglePlay]);
+  useKeyboardAction('transport.playToggle', togglePlay, [togglePlay]);
   useKeyboardAction('transport.stepForward', stepForward, [stepForward]);
-  useKeyboardAction('transport.stepBack', stepBackward, [stepBackward]);
   useKeyboardAction('transport.stepBackward', stepBackward, [stepBackward]);
-  useKeyboardAction('transport.goToStart', goToStartForActiveMonitor, []);
-  useKeyboardAction('transport.goToEnd', goToEndForActiveMonitor, []);
-  useKeyboardAction('transport.playLoop', playTrimLoop, [playTrimLoop]);
-  useKeyboardAction('mark.in', markInForActiveMonitor, []);
-  useKeyboardAction('mark.out', markOutForActiveMonitor, []);
-  useKeyboardAction('mark.clip', markClipForActiveMonitor, []);
-  useKeyboardAction('mark.clipAlt', markClipForActiveMonitor, []);
-  useKeyboardAction('mark.clearBoth', clearMarksForActiveMonitor, []);
-  useKeyboardAction('mark.clearIn', clearInForActiveMonitor, []);
-  useKeyboardAction('mark.clearOut', clearOutForActiveMonitor, []);
-  useKeyboardAction('mark.goToIn', goToInForActiveMonitor, []);
-  useKeyboardAction('mark.goToOut', goToOutForActiveMonitor, []);
-  useKeyboardAction('monitor.matchFrame', () => {
-    if (usePlayerStore.getState().activeMonitor !== 'source') {
-      matchFrameAtPlayhead();
-    }
-  }, []);
-  useKeyboardAction('monitor.toggleSourceRecord', toggleMonitorFocus, []);
-  useKeyboardAction('monitor.activateSource', activateSourceMonitor, []);
-  useKeyboardAction('monitor.activateRecord', activateRecordMonitor, []);
-  useKeyboardAction('edit.spliceIn', insertEdit, [insertEdit]);
-  useKeyboardAction('edit.overwrite', overwriteEdit, [overwriteEdit]);
-  useKeyboardAction('edit.lift', liftEdit, [liftEdit]);
-  useKeyboardAction('edit.extract', extractEdit, [extractEdit]);
+  useKeyboardAction('transport.goToStart', goToStart, [goToStart]);
+  useKeyboardAction('transport.goToEnd', goToEnd, [goToEnd]);
+  useKeyboardAction('mark.in', setInToPlayhead, [setInToPlayhead]);
+  useKeyboardAction('mark.out', setOutToPlayhead, [setOutToPlayhead]);
+  useKeyboardAction('mark.clearBoth', clearInOut, [clearInOut]);
   useKeyboardAction('edit.undo', () => editEngine.undo(), []);
   useKeyboardAction('edit.redo', () => editEngine.redo(), []);
   useKeyboardAction('edit.delete', deleteSelectedClips, [deleteSelectedClips]);
-  useKeyboardAction('file.save', () => {
-    void saveProject();
-  }, [saveProject]);
-  useKeyboardAction('trim.enterMode', enterTrimMode, [enterTrimMode]);
-  useKeyboardAction('trim.selectASide', selectTrimASide, [selectTrimASide]);
-  useKeyboardAction('trim.selectBSide', selectTrimBSide, [selectTrimBSide]);
-  useKeyboardAction('trim.selectBoth', selectTrimBothSides, [selectTrimBothSides]);
-  useKeyboardAction('trim.left1', trimLeftOneFrame, [trimLeftOneFrame]);
-  useKeyboardAction('trim.right1', trimRightOneFrame, [trimRightOneFrame]);
-  useKeyboardAction('trim.left10', trimLeftTenFrames, [trimLeftTenFrames]);
-  useKeyboardAction('trim.right10', trimRightTenFrames, [trimRightTenFrames]);
-  useKeyboardAction('trim.recallPrevious', recallPreviousTrimConfiguration, [recallPreviousTrimConfiguration]);
-  useKeyboardAction('trim.toggleViewMode', toggleTrimViewMode, [toggleTrimViewMode]);
-  useKeyboardAction('nav.prevEdit', goToPrevEditPoint, [goToPrevEditPoint]);
-  useKeyboardAction('nav.nextEdit', goToNextEditPoint, [goToNextEditPoint]);
-  useKeyboardAction('file.multicameraMode', toggleMulticamMode, [toggleMulticamMode]);
-  useKeyboardAction('multicam.cut1', () => cutToMulticamAngle(0), [cutToMulticamAngle]);
-  useKeyboardAction('multicam.cut2', () => cutToMulticamAngle(1), [cutToMulticamAngle]);
-  useKeyboardAction('multicam.cut3', () => cutToMulticamAngle(2), [cutToMulticamAngle]);
-  useKeyboardAction('multicam.cut4', () => cutToMulticamAngle(3), [cutToMulticamAngle]);
-  useKeyboardAction('multicam.cut5', () => cutToMulticamAngle(4), [cutToMulticamAngle]);
-  useKeyboardAction('multicam.cut6', () => cutToMulticamAngle(5), [cutToMulticamAngle]);
-  useKeyboardAction('multicam.cut7', () => cutToMulticamAngle(6), [cutToMulticamAngle]);
-  useKeyboardAction('multicam.cut8', () => cutToMulticamAngle(7), [cutToMulticamAngle]);
-  useKeyboardAction('smartTool.toggleLiftOverwrite', toggleSmartToolLiftOverwrite, [toggleSmartToolLiftOverwrite]);
-  useKeyboardAction('smartTool.toggleExtractSplice', toggleSmartToolExtractSplice, [toggleSmartToolExtractSplice]);
-  useKeyboardAction('smartTool.toggleOverwriteTrim', toggleSmartToolOverwriteTrim, [toggleSmartToolOverwriteTrim]);
-  useKeyboardAction('smartTool.toggleRippleTrim', toggleSmartToolRippleTrim, [toggleSmartToolRippleTrim]);
   useKeyboardAction('view.fullScreen', () => {
     if (document.fullscreenElement) void document.exitFullscreen();
     else void document.documentElement.requestFullscreen();
   }, []);
 
   useEffect(() => {
-    multicamEngine.reset();
-    useEditorStore.getState().setMulticamActive(false);
-    useEditorStore.getState().setMulticamGroupId(null);
-
-    if (projectId && projectId !== 'new') {
-      void loadProject(projectId);
-    }
+    if (projectId && projectId !== 'new') loadProject(projectId);
   }, [projectId, loadProject]);
 
-  useEffect(() => {
-    let autosaveTimeout: number | null = null;
-
-    const scheduleAutosave = (state: ReturnType<typeof useEditorStore.getState>) => {
-      const snapshot = buildProjectPersistenceSnapshot(state);
-      if (!snapshot || state.saveStatus === 'saving') {
-        return;
-      }
-
-      const nextHash = getProjectPersistenceHash(snapshot);
-      const isDirty = nextHash !== state.persistedProjectHash;
-      if (state.hasUnsavedChanges !== isDirty) {
-        useEditorStore.setState({ hasUnsavedChanges: isDirty });
-      }
-
-      if (!isDirty) {
-        return;
-      }
-
-      if (autosaveTimeout !== null) {
-        window.clearTimeout(autosaveTimeout);
-      }
-
-      autosaveTimeout = window.setTimeout(() => {
-        void useEditorStore.getState().saveProject();
-      }, 800);
-    };
-
-    const unsubscribe = useEditorStore.subscribe((state) => {
-      scheduleAutosave(state);
-    });
-
-    return () => {
-      unsubscribe();
-      if (autosaveTimeout !== null) {
-        window.clearTimeout(autosaveTimeout);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (tracks.length > 0 && trackPatchingEngine.getEnabledRecordTracks().length === 0) {
-      for (const track of tracks) {
-        if (!track.locked) {
-          trackPatchingEngine.enableRecordTrack(track.id);
-        }
-      }
-    }
-
-    const monitoredTrackId = trackPatchingEngine.getVideoMonitorTrack();
-    const visibleVideoTracks = tracks
-      .filter((track) => (track.type === 'VIDEO' || track.type === 'GRAPHIC') && !track.muted)
-      .sort((a, b) => a.sortOrder - b.sortOrder);
-    const fallbackVideoTrack = visibleVideoTracks[0]
-      ?? tracks
-        .filter((track) => track.type === 'VIDEO' || track.type === 'GRAPHIC')
-        .sort((a, b) => a.sortOrder - b.sortOrder)[0];
-
-    const monitoredVideoTrack = tracks.find(
-      (track) =>
-        track.id === monitoredTrackId
-        && (track.type === 'VIDEO' || track.type === 'GRAPHIC'),
-    );
-
-    if (fallbackVideoTrack && (!monitoredVideoTrack || monitoredVideoTrack.muted)) {
-      trackPatchingEngine.setVideoMonitorTrack(fallbackVideoTrack.id);
-    }
-
-    return subscribeTrackPatchingStateToStore();
-  }, [tracks]);
-
-  useEffect(() => {
-    return subscribeTrimStateToStore();
-  }, []);
-
-  useEffect(() => {
-    return subscribeTrimHistoryToEditEngine();
-  }, []);
-
-  useEffect(() => {
-    return subscribeSmartToolStateToStore();
-  }, []);
-
-  const updateSearchParam = useCallback((key: string, value: string | null) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (value) next.set(key, value);
-      else next.delete(key);
-      return next;
-    }, { replace: true });
-  }, [setSearchParams]);
-
-  const handlePageChange = useCallback((nextPage: PageId) => {
-    setActivePage(nextPage);
-    updateSearchParam('page', nextPage === 'edit' ? null : nextPage);
-  }, [updateSearchParam]);
-
-  useEffect(() => {
-    const rawPageParam = searchParams.get('page');
-    const nextPage = resolveEditorPageParam(rawPageParam);
-    if (nextPage !== activePage) {
-      setActivePage(nextPage);
-    }
-
-    if (rawPageParam && rawPageParam !== nextPage) {
-      updateSearchParam('page', nextPage === 'edit' ? null : nextPage);
-    }
-
-    if (isLegacyExportPageParam(rawPageParam) && !useEditorStore.getState().showExportPanel) {
-      useEditorStore.setState({ showExportPanel: true });
-    }
-
-    if (searchParams.has('workspace')) {
-      updateSearchParam('workspace', null);
-    }
-  }, [activePage, searchParams, updateSearchParam]);
-
+  // Command palette, multicam, tracker, and page switching shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // ⌘T / Ctrl+T to toggle planar tracker panel
-      if ((e.metaKey || e.ctrlKey) && e.key === 't') {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setShowCommandPalette(prev => !prev);
+      }
+      // Multicam toggle
+      if ((e.metaKey || e.ctrlKey) && e.key === 'm') {
+        e.preventDefault();
+        setShowMultiCam(prev => !prev);
+      }
+      // Title Tool toggle (Ctrl/Cmd+T)
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 't') {
+        e.preventDefault();
+        useEditorStore.getState().toggleTitleTool();
+      }
+      // Tracker toggle (Ctrl/Cmd+Shift+T)
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'T') {
         e.preventDefault();
         setShowTracker(prev => !prev);
       }
-      // ⌘Shift+B / Ctrl+Shift+B to toggle Sequence Bin
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'B') {
-        e.preventDefault();
-        toggleSequenceBin();
-      }
-      // ⌘Shift+N / Ctrl+Shift+N to create New Sequence
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'N' || e.key === 'n')) {
-        e.preventDefault();
-        const seqs = useEditorStore.getState().sequences;
-        useEditorStore.getState().createSequence(`Sequence ${seqs.length + 1}`);
-      }
-      // ⌘F / Ctrl+F to toggle Find in Timeline
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'f') {
-        e.preventDefault();
-        setShowTimelineSearch(prev => !prev);
-      }
-      // Shift+1-7 to switch pages (Resolve-style)
+      // Shift+1-6 to switch pages (Resolve-style)
+      // On US keyboard, Shift+1='!', Shift+2='@', Shift+3='#', Shift+4='$', Shift+5='%', Shift+6='^'
       if (e.shiftKey && !e.metaKey && !e.ctrlKey) {
-        const pageMap: Record<string, PageId> = { '!': 'media', '@': 'cut', '#': 'edit', '$': 'vfx', '%': 'color', '^': 'protools', '&': 'deliver' };
+        const pageMap: Record<string, PageId> = {
+          '!': 'media',
+          '@': 'cut',
+          '#': 'edit',
+          '$': 'vfx',
+          '%': 'protools',
+          '^': 'color',
+        };
         const page = pageMap[e.key];
-        if (page) { e.preventDefault(); handlePageChange(page); }
+        if (page) { e.preventDefault(); setActivePage(page); }
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [handlePageChange]);
-
-  useEffect(() => {
-    const syncViewport = () => {
-      const nextViewport = {
-        width: window.innerWidth,
-        height: window.innerHeight,
-      };
-      setViewport((current) => (
-        areViewportDimensionsEqual(current, nextViewport) ? current : nextViewport
-      ));
-    };
-
-    syncViewport();
-    window.addEventListener('resize', syncViewport);
-    return () => window.removeEventListener('resize', syncViewport);
   }, []);
 
-  const effectiveLayout = clampEditorLayoutForViewport(layout, viewport.width, viewport.height);
-  const viewportBounds = getEditorLayoutViewportBounds(viewport.width, viewport.height);
-  const maxBinWidth = viewportBounds.maxBinWidth;
-  const maxTrackerWidth = viewportBounds.maxTrackerWidth;
-  const maxInspectorWidth = viewportBounds.maxInspectorWidth;
-  const maxTimelineHeight = viewportBounds.maxTimelineHeight;
-  const isStackedWorkspace = viewport.width < 1040;
-  const isShortViewport = viewport.height < 820;
-  const dockTracker = showTracker && viewport.width >= 1520;
-  const overlayTracker = showTracker && !dockTracker;
-  const dockInspector = showInspector && viewport.width >= 1320;
-  const overlayInspector = showInspector && !dockInspector;
-  const overlayWidthCap = Math.max(
-    260,
-    Math.min(400, Math.floor(viewport.width * (viewport.width < 1320 ? 0.42 : 0.36))),
-  );
-  const overlayTrackerWidth = Math.min(effectiveLayout.trackerWidth, overlayWidthCap);
-  const overlayInspectorWidth = Math.min(effectiveLayout.inspectorWidth, overlayWidthCap);
-  const stackedBinHeight = Math.max(
-    168,
-    Math.min(320, Math.floor(viewport.height * (isShortViewport ? 0.24 : 0.28))),
-  );
-  const workspaceColumns = [
-    `${effectiveLayout.binWidth}px`,
-    'var(--panel-divider-w)',
-    'minmax(0, 1fr)',
-    ...(dockTracker ? ['var(--panel-divider-w)', `${effectiveLayout.trackerWidth}px`] : []),
-    ...(dockInspector ? ['var(--panel-divider-w)', `${effectiveLayout.inspectorWidth}px`] : []),
-  ].join(' ');
-  const editorShellStyle = {
-    '--timeline-h': `${effectiveLayout.timelineHeight}px`,
-  } as React.CSSProperties;
-  const inspectorInsetWidth = dockInspector
-    ? effectiveLayout.inspectorWidth
-    : overlayInspector && !isStackedWorkspace
-      ? overlayInspectorWidth
-      : 0;
-  const auxiliaryPanelRightInset = showInspector ? inspectorInsetWidth + 16 : 16;
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem('the-avid.editor-layout.v1', JSON.stringify(effectiveLayout));
-  }, [effectiveLayout]);
-
   return (
-    <div className="editor-shell" style={editorShellStyle} onContextMenu={e => e.preventDefault()}>
+    <div className="editor-shell" onContextMenu={e => e.preventDefault()}>
       <Toolbar />
-      <EditorWorkbenchBar
-        activePage={activePage}
-        onPageChange={handlePageChange}
-      />
 
       {/* Page-specific content */}
       {activePage === 'media' && (
@@ -596,232 +418,77 @@ export function EditorPage() {
       )}
       {activePage === 'cut' && (
         <ErrorBoundary resetKeys={[activePage]}>
-          <Suspense fallback={<div style={{ flex: 1 }} />}>
-            <CutPage />
-          </Suspense>
-        </ErrorBoundary>
-      )}
-      {activePage === 'vfx' && (
-        <ErrorBoundary resetKeys={[activePage]}>
-          <Suspense fallback={<div style={{ flex: 1 }} />}>
-            <VFXPage />
-          </Suspense>
+          <CutPage />
         </ErrorBoundary>
       )}
       {activePage === 'color' && (
         <ErrorBoundary resetKeys={[activePage]}>
-          <div className="workspace workspace-stacked" style={{ gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'minmax(0, 1fr)' }}>
-            <div className="canvas-area workspace-panel" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <PanelErrorBoundary panelName="ComposerPanel">
-                <ComposerPanel dualMonitorSplit={50} onDualMonitorSplitChange={() => {}} />
-              </PanelErrorBoundary>
-            </div>
-          </div>
+          <div style={{ gridRow: '2 / 5', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>Color Page</div>
+        </ErrorBoundary>
+      )}
+      {activePage === 'vfx' && (
+        <ErrorBoundary resetKeys={[activePage]}>
+          <Suspense fallback={<LoadingSpinner />}>
+            <VFXPage />
+          </Suspense>
         </ErrorBoundary>
       )}
       {activePage === 'protools' && (
         <ErrorBoundary resetKeys={[activePage]}>
-          <Suspense fallback={<div style={{ flex: 1 }} />}>
+          <Suspense fallback={<LoadingSpinner />}>
             <ProToolsPage />
           </Suspense>
         </ErrorBoundary>
       )}
-      {activePage === 'deliver' && (
-        <ErrorBoundary resetKeys={[activePage]}>
-          <div className="workspace workspace-stacked" style={{ gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'minmax(0, 1fr)' }}>
-            <div className="canvas-area workspace-panel" style={{ padding: 18, overflow: 'hidden' }}>
-              <PanelErrorBoundary panelName="ExportPanel">
-                <ExportPanel />
-              </PanelErrorBoundary>
-            </div>
-          </div>
-        </ErrorBoundary>
-      )}
       {activePage === 'edit' && (
         <>
-          <div
-            className={`workspace${overlayTracker || overlayInspector ? ' workspace-has-overlay' : ''}${isStackedWorkspace ? ' workspace-stacked' : ''}`}
-            style={isStackedWorkspace
-              ? {
-                  gridTemplateColumns: 'minmax(0, 1fr)',
-                  gridTemplateRows: `${stackedBinHeight}px minmax(0, 1fr)`,
-                }
-              : { gridTemplateColumns: workspaceColumns }}
-          >
-            <div className="left-panels workspace-panel">
+          <div className={`workspace${showInspector ? '' : ' no-inspector'}`}>
+            <div className="left-panels">
               <PanelErrorBoundary panelName="BinPanel">
                 <BinPanel />
               </PanelErrorBoundary>
+              {/* TranscriptPanel removed in this branch */}
             </div>
-            {!isStackedWorkspace ? (
-              <PanelResizeHandle
-                axis="horizontal"
-                ariaLabel="Resize media bin"
-                value={effectiveLayout.binWidth}
-                min={viewportBounds.minBinWidth}
-                max={maxBinWidth}
-                className="workspace-resize-handle resize-handle-h"
-                onChange={(next) => setLayout((current) => ({ ...current, binWidth: next }))}
-              />
-            ) : null}
-            <div className="canvas-area workspace-panel" style={{ position: 'relative' }}>
+            <div className="canvas-area" style={{ position: 'relative' }}>
               <PanelErrorBoundary panelName="ComposerPanel">
-                <ComposerPanel
-                  dualMonitorSplit={effectiveLayout.dualMonitorSplit}
-                  onDualMonitorSplitChange={(next) => setLayout((current) => ({ ...current, dualMonitorSplit: next }))}
-                />
+                {showMultiCam ? (
+                  <Suspense fallback={<LoadingSpinner />}>
+                    <MultiCamPanel />
+                  </Suspense>
+                ) : (
+                  <ComposerPanel />
+                )}
               </PanelErrorBoundary>
+              {/* Tracking ROI overlay on top of monitor canvas */}
               {showTracker && (
                 <PanelErrorBoundary panelName="TrackingOverlay">
                   <TrackingOverlay width={1920} height={1080} />
                 </PanelErrorBoundary>
               )}
+              {/* AIPanel removed in this branch */}
             </div>
-            {dockTracker && (
-              <>
-                <PanelResizeHandle
-                  axis="horizontal"
-                  ariaLabel="Resize tracker panel"
-                  value={effectiveLayout.trackerWidth}
-                  min={viewportBounds.minTrackerWidth}
-                  max={maxTrackerWidth}
-                  invert
-                  className="workspace-resize-handle resize-handle-h"
-                  onChange={(next) => setLayout((current) => ({ ...current, trackerWidth: next }))}
-                />
-                <div className="workspace-panel tracker-panel-shell">
-                  <PanelErrorBoundary panelName="TrackerPanel">
-                    <TrackerPanel />
-                  </PanelErrorBoundary>
-                </div>
-              </>
+            {/* Planar tracker side panel */}
+            {showTracker && (
+              <PanelErrorBoundary panelName="TrackerPanel">
+                <TrackerPanel />
+              </PanelErrorBoundary>
             )}
-            {dockInspector && (
-              <>
-                <PanelResizeHandle
-                  axis="horizontal"
-                  ariaLabel="Resize inspector panel"
-                  value={effectiveLayout.inspectorWidth}
-                  min={viewportBounds.minInspectorWidth}
-                  max={maxInspectorWidth}
-                  invert
-                  className="workspace-resize-handle resize-handle-h"
-                  onChange={(next) => setLayout((current) => ({ ...current, inspectorWidth: next }))}
-                />
-                <div className="workspace-panel inspector-panel-shell">
-                  <PanelErrorBoundary panelName="InspectorPanel">
-                    <InspectorPanel />
-                  </PanelErrorBoundary>
-                </div>
-              </>
-            )}
-            {(overlayTracker || overlayInspector) && (
-              <div
-                className={`workspace-overlay-rail${isStackedWorkspace ? ' workspace-overlay-rail-stacked' : ''}`}
-                aria-label="Secondary editor panels"
-              >
-                {overlayTracker && (
-                  <div
-                    className={`workspace-overlay-panel${isStackedWorkspace ? ' workspace-overlay-panel-stacked' : ''}`}
-                    style={isStackedWorkspace
-                      ? undefined
-                      : { gridTemplateColumns: `var(--panel-divider-w) ${overlayTrackerWidth}px` }}
-                  >
-                    {!isStackedWorkspace ? (
-                      <PanelResizeHandle
-                        axis="horizontal"
-                        ariaLabel="Resize tracker panel"
-                        value={effectiveLayout.trackerWidth}
-                        min={viewportBounds.minTrackerWidth}
-                        max={maxTrackerWidth}
-                        invert
-                        className="workspace-resize-handle resize-handle-h"
-                        onChange={(next) => setLayout((current) => ({ ...current, trackerWidth: next }))}
-                      />
-                    ) : null}
-                    <div className="workspace-panel tracker-panel-shell workspace-overlay-surface">
-                      <PanelErrorBoundary panelName="TrackerPanel">
-                        <TrackerPanel />
-                      </PanelErrorBoundary>
-                    </div>
-                  </div>
-                )}
-                {overlayInspector && (
-                  <div
-                    className={`workspace-overlay-panel${isStackedWorkspace ? ' workspace-overlay-panel-stacked' : ''}`}
-                    style={isStackedWorkspace
-                      ? undefined
-                      : { gridTemplateColumns: `var(--panel-divider-w) ${overlayInspectorWidth}px` }}
-                  >
-                    {!isStackedWorkspace ? (
-                      <PanelResizeHandle
-                        axis="horizontal"
-                        ariaLabel="Resize inspector panel"
-                        value={effectiveLayout.inspectorWidth}
-                        min={viewportBounds.minInspectorWidth}
-                        max={maxInspectorWidth}
-                        invert
-                        className="workspace-resize-handle resize-handle-h"
-                        onChange={(next) => setLayout((current) => ({ ...current, inspectorWidth: next }))}
-                      />
-                    ) : null}
-                    <div className="workspace-panel inspector-panel-shell workspace-overlay-surface">
-                      <PanelErrorBoundary panelName="InspectorPanel">
-                        <InspectorPanel />
-                      </PanelErrorBoundary>
-                    </div>
-                  </div>
-                )}
-              </div>
+            {showInspector && (
+              <PanelErrorBoundary panelName="InspectorPanel">
+                <InspectorPanel />
+              </PanelErrorBoundary>
             )}
           </div>
-          <div className="timeline-shell">
-            <PanelResizeHandle
-              axis="vertical"
-              ariaLabel="Resize timeline"
-              value={effectiveLayout.timelineHeight}
-              min={viewportBounds.minTimelineHeight}
-              max={maxTimelineHeight}
-              invert
-              className="timeline-resize-handle resize-handle-v"
-              onChange={(next) => setLayout((current) => ({ ...current, timelineHeight: next }))}
-            />
-            <PanelErrorBoundary panelName="TimelinePanel">
-              <TimelinePanel />
-            </PanelErrorBoundary>
-          </div>
+          <PanelErrorBoundary panelName="TimelinePanel">
+            <TimelinePanel />
+          </PanelErrorBoundary>
         </>
       )}
 
+      <PageNavigation activePage={activePage} onPageChange={setActivePage} />
       <StatusBar />
 
-      {showSequenceBin && (
-        <div
-          className="export-overlay"
-          role="dialog"
-          aria-label="Sequence Bin"
-          tabIndex={0}
-          onClick={(e) => { if (e.target === e.currentTarget) toggleSequenceBin(); }}
-          onKeyDown={(e) => { if (e.key === 'Escape') toggleSequenceBin(); }}
-          style={{
-            position: 'fixed', inset: 0, zIndex: 1000,
-            background: 'rgba(0,0,0,0.6)', display: 'flex',
-            alignItems: 'center', justifyContent: 'center',
-            padding: 16,
-          }}
-        >
-          <div style={{
-            width: 'min(560px, 100%)', maxWidth: 560, maxHeight: '70vh',
-            borderRadius: 'var(--radius-lg)',
-            overflow: 'hidden', position: 'relative',
-            boxShadow: 'var(--shadow-lg)',
-          }}>
-            <Suspense fallback={<div style={{ padding: 24, background: 'var(--bg-surface)', color: 'var(--fg-muted)' }}>Loading…</div>}>
-              <SequenceBin />
-            </Suspense>
-          </div>
-        </div>
-      )}
+      {/* Command Palette removed in this branch */}
 
       {showExportPanel && (
         <div
@@ -835,11 +502,10 @@ export function EditorPage() {
             position: 'fixed', inset: 0, zIndex: 1000,
             background: 'rgba(0,0,0,0.6)', display: 'flex',
             alignItems: 'center', justifyContent: 'center',
-            padding: 16,
           }}
         >
           <div style={{
-            width: 'min(680px, 100%)', maxWidth: 680, height: 'min(85vh, 720px)', maxHeight: 720,
+            width: '90%', maxWidth: 680, height: '85vh', maxHeight: 720,
             borderRadius: 'var(--radius-lg)',
             overflow: 'hidden', position: 'relative',
             boxShadow: 'var(--shadow-lg)',
@@ -860,6 +526,11 @@ export function EditorPage() {
         </div>
       )}
 
+      {/* Share / Deliver slide-out panel */}
+      {showSharePanel && (
+        <SharePanel onClose={toggleSharePanel} />
+      )}
+
       {/* User Settings modal */}
       {showSettingsPanel && (
         <UserSettingsPanel onClose={toggleSettingsPanel} />
@@ -873,8 +544,8 @@ export function EditorPage() {
       {showAlphaImportDialog && <AlphaImportDialog />}
       {showTitleTool && (
         <div style={{
-          position: 'fixed', top: 24, right: auxiliaryPanelRightInset, bottom: 24,
-          width: 'min(360px, calc(100vw - 32px))', zIndex: 900,
+          position: 'fixed', top: 40, right: showInspector ? 340 : 0, bottom: 40,
+          width: 360, zIndex: 900,
           background: 'var(--bg-surface)',
           borderLeft: '1px solid var(--border-default)',
           overflow: 'auto',
@@ -884,8 +555,8 @@ export function EditorPage() {
       )}
       {showSubtitleEditor && (
         <div style={{
-          position: 'fixed', top: 24, right: auxiliaryPanelRightInset, bottom: 24,
-          width: 'min(380px, calc(100vw - 32px))', zIndex: 900,
+          position: 'fixed', top: 40, right: showInspector ? 340 : 0, bottom: 40,
+          width: 380, zIndex: 900,
           background: 'var(--bg-surface)',
           borderLeft: '1px solid var(--border-default)',
           overflow: 'auto',

@@ -107,7 +107,7 @@ export function ScriptPanel() {
     : transcript;
 
   const linkedCueCount = useMemo(() => {
-    return scriptDocument?.lines.reduce((count, line) => count + line.linkedCueIds.length, 0) ?? 0;
+    return scriptDocument?.lines.reduce((count: number, line: ScriptDocumentLine) => count + (line.linkedCueIds?.length ?? 0), 0) ?? 0;
   }, [scriptDocument]);
 
   const providerLabel = aiSettings.transcriptionProvider === 'local-faster-whisper'
@@ -133,15 +133,8 @@ export function ScriptPanel() {
   function persistTranscriptionPreferences(language: string): void {
     updateTranscriptionSettings({
       provider: aiSettings.transcriptionProvider,
-      translationProvider: aiSettings.translationProvider,
-      preferredLanguage: aiSettings.transcriptionLanguageMode === 'manual'
-        ? aiSettings.transcriptionLanguage
-        : 'auto',
-      enableDiarization: aiSettings.enableTranscriptionDiarization,
-      enableSpeakerIdentification: aiSettings.enableSpeakerIdentification,
-      translateToEnglish: normalizeLanguage(aiSettings.transcriptionTargetLanguage) === 'en'
-        && normalizeLanguage(language) !== 'en',
-    });
+      language,
+    } as any);
   }
 
   function toggleCueSelection(cueId: string): void {
@@ -201,7 +194,7 @@ export function ScriptPanel() {
   }
 
   function resolveLineCues(line: ScriptDocumentLine): TranscriptCue[] {
-    return line.linkedCueIds
+    return (line.linkedCueIds ?? [])
       .map((cueId) => transcript.find((cue) => cue.id === cueId))
       .filter((cue): cue is TranscriptCue => Boolean(cue));
   }
@@ -542,8 +535,8 @@ export function ScriptPanel() {
               return (
                 <div key={line.id} className="scriptsync-script-line">
                   <div className="scriptsync-script-line-meta">
-                    <span>L{line.lineNumber}</span>
-                    <span>{line.linkedCueIds.length > 0 ? `${line.linkedCueIds.length} linked cue${line.linkedCueIds.length === 1 ? '' : 's'}` : 'Unlinked'}</span>
+                    <span>L{line.lineNumber ?? '?'}</span>
+                    <span>{(line.linkedCueIds?.length ?? 0) > 0 ? `${line.linkedCueIds!.length} linked cue${line.linkedCueIds!.length === 1 ? '' : 's'}` : 'Unlinked'}</span>
                   </div>
                   <div className="scriptsync-script-line-text">
                     {line.speaker ? `${line.speaker}: ` : ''}

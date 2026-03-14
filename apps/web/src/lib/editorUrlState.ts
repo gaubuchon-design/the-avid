@@ -1,8 +1,8 @@
 import type { WorkspacePreset } from '../App';
 import type { EditorPage } from '../components/PageNavigation/PageNavigation';
 
-const VALID_EDITOR_PAGES: ReadonlySet<EditorPage> = new Set<EditorPage>(['media', 'cut', 'edit', 'vfx', 'color', 'protools', 'deliver']);
-const VALID_WORKSPACES: ReadonlySet<WorkspacePreset> = new Set<WorkspacePreset>(['filmtv']);
+const VALID_EDITOR_PAGES: ReadonlySet<EditorPage> = new Set<EditorPage>(['media', 'cut', 'edit', 'vfx', 'color', 'protools']);
+const VALID_WORKSPACES: ReadonlySet<WorkspacePreset> = new Set<WorkspacePreset>(['default']);
 
 export function isLegacyExportPageParam(param: string | null): boolean {
   return param === 'export';
@@ -13,5 +13,5 @@ export function resolveEditorPageParam(param: string | null): EditorPage {
 }
 
 export function resolveWorkspaceParam(param: string | null): WorkspacePreset {
-  return param && VALID_WORKSPACES.has(param as WorkspacePreset) ? (param as WorkspacePreset) : 'filmtv';
+  return param && VALID_WORKSPACES.has(param as WorkspacePreset) ? (param as WorkspacePreset) : 'default';
 }

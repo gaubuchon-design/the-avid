@@ -1,50 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useEditorStore } from '../../store/editor.store';
-import { useUserSettingsStore } from '../../store/userSettings.store';
 import { usePlayerStore } from '../../store/player.store';
 import { useTitleStore } from '../../store/title.store';
-import { TrimStatusOverlay } from '../Editor/TrimStatusOverlay';
-import { DesktopAudioPreviewDiagnostics } from '../Diagnostics/DesktopAudioPreviewDiagnostics';
-import { PlaybackFallbackDiagnostics } from '../Diagnostics/PlaybackFallbackDiagnostics';
-import { buildPlaybackSnapshot } from '../../engine/PlaybackSnapshot';
 import {
-  buildPlaybackSnapshotRenderRevision,
-  getCachedPlaybackSnapshotCanvas,
-  renderPlaybackSnapshotFrame,
-  renderPlaybackSnapshotFrameAsync,
-} from '../../engine/playbackSnapshotFrame';
-import {
+  compositeRecordFrame,
   findActiveClip,
-  inspectPlaybackVideoLayerAvailability,
+  getSourceTime,
   syncVideoPlayback,
   pauseVideoSource,
   tryLoadClipSource,
 } from '../../engine/compositeRecordFrame';
-import {
-  activateRecordMonitor,
-  activateSourceMonitor,
-  clearMarksForActiveMonitor,
-  markClipForActiveMonitor,
-  matchFrameAtPlayhead,
-} from '../../lib/editorMonitorActions';
-import { videoSourceManager } from '../../engine/VideoSourceManager';
-import {
-  findTimelineMonitorMediaSource,
-  previewMonitorAudioOutput,
-  releaseMonitorAudioOutput,
-  reviewMonitorAudioOutput,
-  syncMonitorAudioOutput,
-} from '../../lib/monitorPlayback';
-import { usePointerScrub } from '../../hooks/usePointerScrub';
-import { useDesktopParityMonitorPlayback } from '../../hooks/useDesktopParityMonitorPlayback';
-import { useMonitorTransportState } from '../../hooks/useMonitorTransportState';
-import {
-  useTrimMonitorPreview,
-  type TrimPreviewSide,
-} from '../../lib/trimMonitorPreview';
-import { resolveTrimAudioPreviewRoute } from '../../lib/trimAudioPreview';
-import { requestTrimWorkspace } from '../../lib/trimWorkspace';
-import { trimEngine } from '../../engine/TrimEngine';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -62,131 +27,152 @@ function timeToTimecode(sec: number, fps = 24): string {
   );
 }
 
-function formatTrimFrames(value: number): string {
-  if (value === 0) {
-    return '0f';
-  }
+// ─── Avid-style SVG Icons ────────────────────────────────────────────────────
 
-  return `${value > 0 ? '+' : ''}${value}f`;
+const AVID_RED = '#e53935';
+const AVID_YELLOW = '#fdd835';
+
+function IconStepBack() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <rect x="2" y="3" width="2" height="10" rx="0.5" />
+      <polygon points="13 3 6 8 13 13" />
+    </svg>
+  );
 }
 
-function updateCachedCanvasFrame(
-  sourceCanvas: HTMLCanvasElement,
-  cacheRef: React.MutableRefObject<HTMLCanvasElement | null>,
-): void {
-  if (typeof document === 'undefined') {
-    return;
-  }
-
-  const cachedFrame = cacheRef.current ?? document.createElement('canvas');
-  cachedFrame.width = sourceCanvas.width;
-  cachedFrame.height = sourceCanvas.height;
-  const cachedCtx = cachedFrame.getContext('2d');
-  if (!cachedCtx) {
-    return;
-  }
-
-  cachedCtx.clearRect(0, 0, cachedFrame.width, cachedFrame.height);
-  cachedCtx.drawImage(sourceCanvas, 0, 0, cachedFrame.width, cachedFrame.height);
-  cacheRef.current = cachedFrame;
+function IconPlayReverse() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <polygon points="9 3 2 8 9 13" />
+      <polygon points="15 3 8 8 15 13" />
+    </svg>
+  );
 }
 
-function drawCanvasFrame(
-  targetCanvas: HTMLCanvasElement,
-  sourceCanvas: HTMLCanvasElement,
-): boolean {
-  const ctx = targetCanvas.getContext('2d');
-  if (!ctx) {
-    return false;
-  }
-
-  ctx.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
-  ctx.drawImage(sourceCanvas, 0, 0, targetCanvas.width, targetCanvas.height);
-  return true;
+function IconStop() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <rect x="3" y="3" width="10" height="10" rx="1" />
+    </svg>
+  );
 }
 
-function drawTrimPreviewPlaceholder(
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  preview: TrimPreviewSide,
-  fps: number,
-): void {
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, width, height);
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
-  ctx.font = '700 28px system-ui, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(preview.role === 'A' ? 'A-SIDE' : 'B-SIDE', width / 2, height / 2 - 18);
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.24)';
-  ctx.font = '500 13px monospace';
-  ctx.fillText(timeToTimecode(preview.sourceTime, fps), width / 2, height / 2 + 12);
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
-  ctx.font = '400 11px system-ui';
-  ctx.fillText(`${preview.trackName} · ${preview.clipName}`, width / 2, height / 2 + 32);
+function IconPlayForward() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <polygon points="3 3 11 8 3 13" />
+    </svg>
+  );
 }
 
-function renderTrimPreviewFrame(
-  canvas: HTMLCanvasElement,
-  preview: TrimPreviewSide,
-  bins: ReturnType<typeof useEditorStore.getState>['bins'],
-  fps: number,
-  cacheRef: React.MutableRefObject<HTMLCanvasElement | null>,
-): boolean {
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    return false;
-  }
-
-  if (!preview.assetId || !preview.playable) {
-    drawTrimPreviewPlaceholder(ctx, canvas.width, canvas.height, preview, fps);
-    updateCachedCanvasFrame(canvas, cacheRef);
-    return true;
-  }
-
-  tryLoadClipSource(preview.assetId, bins as any);
-  const source = videoSourceManager.getSource(preview.assetId);
-  const video = source?.element;
-  if (!video || !source.ready || video.readyState < 2) {
-    return false;
-  }
-
-  const frameTolerance = fps > 0 ? 0.5 / fps : 0.02;
-  if (!video.paused) {
-    video.pause();
-  }
-
-  if (!video.seeking && Math.abs(video.currentTime - preview.sourceTime) > frameTolerance) {
-    video.currentTime = Math.max(0, preview.sourceTime);
-  }
-
-  if (video.seeking || video.readyState < 2) {
-    return false;
-  }
-
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  const videoAR = video.videoWidth / video.videoHeight;
-  const canvasAR = canvas.width / canvas.height;
-  let drawWidth = canvas.width;
-  let drawHeight = canvas.height;
-  let drawX = 0;
-  let drawY = 0;
-
-  if (videoAR > canvasAR) {
-    drawHeight = Math.floor(canvas.width / videoAR);
-    drawY = Math.floor((canvas.height - drawHeight) / 2);
-  } else if (videoAR < canvasAR) {
-    drawWidth = Math.floor(canvas.height * videoAR);
-    drawX = Math.floor((canvas.width - drawWidth) / 2);
-  }
-
-  ctx.drawImage(video, drawX, drawY, drawWidth, drawHeight);
-  updateCachedCanvasFrame(canvas, cacheRef);
-  return true;
+function IconStepForward() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <polygon points="3 3 10 8 3 13" />
+      <rect x="12" y="3" width="2" height="10" rx="0.5" />
+    </svg>
+  );
 }
+
+function IconMarkIn({ color }: { color: string }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M6 2H4v12h2v-1H5V3h1V2z" fill={color} />
+    </svg>
+  );
+}
+
+function IconMarkOut({ color }: { color: string }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M10 2h2v12h-2v-1h1V3h-1V2z" fill={color} />
+    </svg>
+  );
+}
+
+function IconGoToIn({ color }: { color: string }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="2" y="2" width="2" height="12" rx="0.5" fill={color} />
+      <path d="M6 2H5v12h1v-1H5.5V3H6V2z" fill={color} opacity="0.7" />
+      <polygon points="7 8 13 4 13 12" fill={color} />
+    </svg>
+  );
+}
+
+function IconGoToOut({ color }: { color: string }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="12" y="2" width="2" height="12" rx="0.5" fill={color} />
+      <path d="M10 2h1v12h-1v-1h.5V3H10V2z" fill={color} opacity="0.7" />
+      <polygon points="9 8 3 4 3 12" fill={color} />
+    </svg>
+  );
+}
+
+function IconMatchFrame() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <rect x="1" y="2" width="6" height="12" rx="1" opacity="0.6" />
+      <rect x="9" y="2" width="6" height="12" rx="1" />
+      <line x1="4" y1="8" x2="12" y2="8" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+function IconLift() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="4" y="8" width="8" height="6" rx="0.5" fill="currentColor" opacity="0.4" />
+      <rect x="4" y="2" width="8" height="5" rx="0.5" stroke="currentColor" strokeWidth="1.2" strokeDasharray="2 1" />
+      <line x1="8" y1="8" x2="8" y2="3" stroke="currentColor" strokeWidth="1.2" />
+      <polyline points="6 5 8 3 10 5" fill="none" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
+function IconExtract() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="2" y="8" width="5" height="6" rx="0.5" fill="currentColor" opacity="0.4" />
+      <rect x="9" y="8" width="5" height="6" rx="0.5" fill="currentColor" opacity="0.4" />
+      <line x1="7.5" y1="8" x2="8.5" y2="8" stroke="currentColor" strokeWidth="1" strokeDasharray="1 1" />
+      <rect x="4" y="2" width="8" height="5" rx="0.5" stroke="currentColor" strokeWidth="1.2" strokeDasharray="2 1" />
+      <line x1="8" y1="8" x2="8" y2="3" stroke="currentColor" strokeWidth="1.2" />
+      <polyline points="6 5 8 3 10 5" fill="none" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
+// ─── Avid Transport Button Style ─────────────────────────────────────────────
+
+const avidBtnStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 26,
+  height: 22,
+  padding: 0,
+  border: '1px solid rgba(255,255,255,0.08)',
+  borderRadius: 2,
+  background: 'rgba(255,255,255,0.04)',
+  color: 'var(--text-secondary)',
+  cursor: 'pointer',
+  transition: 'background 0.1s, color 0.1s',
+  flexShrink: 0,
+};
+
+const avidBtnHoverProps = {
+  onMouseEnter: (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.currentTarget.style.background = 'rgba(255,255,255,0.12)';
+    e.currentTarget.style.color = 'var(--text-primary)';
+  },
+  onMouseLeave: (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+    e.currentTarget.style.color = '';
+  },
+};
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -198,70 +184,18 @@ export function RecordMonitor() {
   const fps = useEditorStore((s) => s.sequenceSettings.fps);
   const inPoint = useEditorStore((s) => s.inPoint);
   const outPoint = useEditorStore((s) => s.outPoint);
-  const setInToPlayhead = useEditorStore((s) => s.setInToPlayhead);
-  const setOutToPlayhead = useEditorStore((s) => s.setOutToPlayhead);
-  const liftEdit = useEditorStore((s) => s.liftEdit);
-  const extractEdit = useEditorStore((s) => s.extractEdit);
-  const trimSelectionLabel = useEditorStore((s) => s.trimSelectionLabel);
-  const trimActive = useEditorStore((s) => s.trimActive);
-  const trimMode = useEditorStore((s) => s.trimMode);
-  const trimBSideFrames = useEditorStore((s) => s.trimBSideFrames);
-  const trimViewMode = useEditorStore((s) => s.trimViewMode);
-  const trimLoopPlaybackActive = useEditorStore((s) => s.trimLoopPlaybackActive);
-  const trimLoopPlaybackDirection = useEditorStore((s) => s.trimLoopPlaybackDirection);
-  const trimLoopPlaybackRate = useEditorStore((s) => s.trimLoopPlaybackRate);
-  const showTrimCountersInMonitorHeaders = useUserSettingsStore((s) => s.settings.showTrimCountersInMonitorHeaders);
-  const trimLoopOffsetFrames = useEditorStore((s) => s.trimLoopOffsetFrames);
-  const toggleTrimLoopPlayback = useEditorStore((s) => s.toggleTrimLoopPlayback);
-  const toggleTrimViewMode = useEditorStore((s) => s.toggleTrimViewMode);
-  const tracks = useEditorStore((s) => s.tracks);
-  const bins = useEditorStore((s) => s.bins);
-  const selectedTrackId = useEditorStore((s) => s.selectedTrackId);
-  const enabledTrackIds = useEditorStore((s) => s.enabledTrackIds);
-  const videoMonitorTrackId = useEditorStore((s) => s.videoMonitorTrackId);
-  const projectFrameRate = useEditorStore((s) => s.projectSettings.frameRate);
+  const setInPoint = useEditorStore((s) => s.setInPoint);
+  const setOutPoint = useEditorStore((s) => s.setOutPoint);
+  const liftSelection = useEditorStore((s) => s.liftSelection);
+  const extractSelection = useEditorStore((s) => s.extractSelection);
 
-  const { setActiveMonitor, activeMonitor } = usePlayerStore();
-  const audioScrubEnabled = useEditorStore((s) => s.audioScrubEnabled);
-  const monitorTransport = useMonitorTransportState(playheadTime, editorIsPlaying);
-  const trimPreview = useTrimMonitorPreview({
-    tracks,
-    bins,
-    selectedTrackId,
-    enabledTrackIds,
-    videoMonitorTrackId,
-    sequenceSettings: { fps },
-    projectSettings: { frameRate: projectFrameRate },
-    trimLoopPlaybackActive,
-    trimLoopOffsetFrames,
-  });
-  const trimPreviewSide = useMemo(() => {
-    return trimPreview.recordMonitor ?? trimPreview.bSide ?? trimPreview.aSide;
-  }, [trimPreview.aSide, trimPreview.bSide, trimPreview.recordMonitor]);
-  const trimAudioRoute = useMemo(() => (
-    resolveTrimAudioPreviewRoute(trimPreview, activeMonitor)
-  ), [activeMonitor, trimPreview]);
-  const trimPreviewActive = Boolean(trimPreview.active && trimPreviewSide);
-  const trimSessionActive = trimActive || trimPreview.active;
-  const activeTrimMode = trimPreview.active ? trimEngine.getCurrentMode().toLowerCase() : trimMode;
-  const trimSupportsSideSelection = activeTrimMode !== 'slip' && activeTrimMode !== 'slide';
+  const { setActiveMonitor } = usePlayerStore();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const scrubRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>();
-  const activeAssetIdsRef = useRef<Set<string>>(new Set());
-  const cachedFrameRef = useRef<HTMLCanvasElement | null>(null);
-  const inFlightFrameRevisionRef = useRef<string | null>(null);
-  const requestedFrameRevisionRef = useRef<string | null>(null);
+  const lastClipIdRef = useRef<string | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 480, h: 270 });
-  const [sourceRevision, setSourceRevision] = useState(0);
-  const desktopParityPlaybackActive = useDesktopParityMonitorPlayback({
-    consumer: 'record-monitor',
-    canvasRef,
-    canvasSize,
-    disabled: trimSessionActive,
-  });
 
   // Responsive canvas sizing
   useEffect(() => {
@@ -287,191 +221,54 @@ export function RecordMonitor() {
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => {
-    return videoSourceManager.subscribe(() => {
-      setSourceRevision((revision) => revision + 1);
-    });
-  }, []);
-
   // ── Continuous RAF render loop ──────────────────────────────────────────────
-  // Uses the shared compositing pipeline for full compositing:
-  // intrinsic transforms + effects + titles + subtitles + safe zones.
   useEffect(() => {
-    if (desktopParityPlaybackActive) {
-      return;
-    }
-
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const render = () => {
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { rafRef.current = requestAnimationFrame(render); return; }
+
       const { w, h } = canvasSize;
-      const renderWidth = Math.max(1, Math.round(w * monitorTransport.renderScale));
-      const renderHeight = Math.max(1, Math.round(h * monitorTransport.renderScale));
-      if (canvas.width !== renderWidth) {
-        canvas.width = renderWidth;
-      }
-      if (canvas.height !== renderHeight) {
-        canvas.height = renderHeight;
-      }
+      canvas.width = w;
+      canvas.height = h;
 
-      if (trimPreviewSide) {
-        for (const previousAssetId of activeAssetIdsRef.current) {
-          pauseVideoSource(previousAssetId);
-        }
-        activeAssetIdsRef.current.clear();
-
-        const renderedTrimPreview = renderTrimPreviewFrame(
-          canvas,
-          trimPreviewSide,
-          bins,
-          fps,
-          cachedFrameRef,
-        );
-
-        if (!renderedTrimPreview && cachedFrameRef.current) {
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.clearRect(0, 0, renderWidth, renderHeight);
-            ctx.drawImage(cachedFrameRef.current, 0, 0, renderWidth, renderHeight);
-          }
-        } else if (!renderedTrimPreview) {
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            drawTrimPreviewPlaceholder(ctx, renderWidth, renderHeight, trimPreviewSide, fps);
-          }
-        }
-
-        rafRef.current = requestAnimationFrame(render);
-        return;
-      }
-
-      // Read latest state (non-reactive inside RAF)
       const state = useEditorStore.getState();
-      const playerState = usePlayerStore.getState();
       const titleState = useTitleStore.getState();
-      const snapshot = buildPlaybackSnapshot({
-        tracks: state.tracks,
-        subtitleTracks: state.subtitleTracks,
-        titleClips: state.titleClips,
+
+      const activeClip = findActiveClip(state.tracks, state.playheadTime);
+
+      if (activeClip?.assetId !== lastClipIdRef.current) {
+        if (lastClipIdRef.current) {
+          pauseVideoSource(lastClipIdRef.current);
+        }
+        lastClipIdRef.current = activeClip?.assetId ?? null;
+      }
+
+      if (activeClip) {
+        syncVideoPlayback(activeClip, state.isPlaying, state.playheadTime, state.sequenceSettings.fps);
+      }
+
+      if (activeClip?.assetId) {
+        tryLoadClipSource(activeClip.assetId, state.bins as any);
+      }
+
+      compositeRecordFrame({
+        ctx,
+        canvasW: w,
+        canvasH: h,
         playheadTime: state.playheadTime,
-        duration: state.duration,
-        isPlaying: state.isPlaying,
+        tracks: state.tracks,
+        fps: state.sequenceSettings.fps,
+        aspectRatio: 16 / 9,
         showSafeZones: state.showSafeZones,
-        activeMonitor: 'record',
-        activeScope: playerState.activeScope,
-        sequenceSettings: state.sequenceSettings,
-        projectSettings: state.projectSettings,
-      }, 'record-monitor');
-
-      const nextAssetIds = new Set<string>();
-      for (const layer of snapshot.videoLayers) {
-        if (!layer.assetId) {
-          continue;
-        }
-        nextAssetIds.add(layer.assetId);
-        if (!activeAssetIdsRef.current.has(layer.assetId)) {
-          tryLoadClipSource(layer.assetId, state.bins as any);
-        }
-        syncVideoPlayback(layer.clip, state.isPlaying, state.playheadTime, state.sequenceSettings.fps);
-      }
-
-      for (const previousAssetId of activeAssetIdsRef.current) {
-        if (!nextAssetIds.has(previousAssetId)) {
-          pauseVideoSource(previousAssetId);
-        }
-      }
-      activeAssetIdsRef.current = nextAssetIds;
-
-      const layerAvailability = inspectPlaybackVideoLayerAvailability(snapshot);
-      const canHoldPreviousFrame = layerAvailability.totalVideoLayers > 0
-        && layerAvailability.pendingVideoLayers > 0
-        && cachedFrameRef.current;
-
-      const fullQualityFrameRevision = buildPlaybackSnapshotRenderRevision({
-        snapshot,
-        width: renderWidth,
-        height: renderHeight,
+        isPlaying: state.isPlaying,
+        titleClips: state.titleClips,
+        subtitleTracks: state.subtitleTracks,
         currentTitle: titleState.currentTitle,
         isTitleEditing: titleState.isEditing,
-        colorProcessing: 'post',
-        effectQuality: 'preview',
-        useCache: true,
       });
-      requestedFrameRevisionRef.current = fullQualityFrameRevision;
-
-      const cachedFullQualityFrame = getCachedPlaybackSnapshotCanvas(fullQualityFrameRevision);
-      if (cachedFullQualityFrame && (!canHoldPreviousFrame || layerAvailability.pendingVideoLayers === 0)) {
-        drawCanvasFrame(canvas, cachedFullQualityFrame);
-        updateCachedCanvasFrame(canvas, cachedFrameRef);
-        rafRef.current = requestAnimationFrame(render);
-        return;
-      }
-
-      if (canHoldPreviousFrame) {
-        const ctx = canvas.getContext('2d');
-        if (ctx && cachedFrameRef.current) {
-          ctx.clearRect(0, 0, renderWidth, renderHeight);
-          ctx.drawImage(cachedFrameRef.current, 0, 0, renderWidth, renderHeight);
-        }
-        rafRef.current = requestAnimationFrame(render);
-        return;
-      }
-
-      renderPlaybackSnapshotFrame({
-        snapshot,
-        width: renderWidth,
-        height: renderHeight,
-        canvas,
-        currentTitle: titleState.currentTitle,
-        isTitleEditing: titleState.isEditing,
-        colorProcessing: monitorTransport.colorProcessing,
-        effectQuality: monitorTransport.effectQuality,
-        useCache: monitorTransport.useCache,
-      });
-
-      if (layerAvailability.totalVideoLayers > 0 && layerAvailability.pendingVideoLayers === 0) {
-        updateCachedCanvasFrame(canvas, cachedFrameRef);
-      }
-
-      if (!inFlightFrameRevisionRef.current) {
-        inFlightFrameRevisionRef.current = fullQualityFrameRevision;
-        void renderPlaybackSnapshotFrameAsync({
-          snapshot,
-          width: renderWidth,
-          height: renderHeight,
-          currentTitle: titleState.currentTitle,
-          isTitleEditing: titleState.isEditing,
-          colorProcessing: 'post',
-          effectQuality: 'preview',
-          useCache: true,
-        }).then((result) => {
-          if (inFlightFrameRevisionRef.current === result.frameRevision) {
-            inFlightFrameRevisionRef.current = null;
-          }
-
-          if (
-            !result.canvas
-            || requestedFrameRevisionRef.current !== result.frameRevision
-            || layerAvailability.pendingVideoLayers > 0
-          ) {
-            return;
-          }
-
-          const visibleCanvas = canvasRef.current;
-          if (!visibleCanvas) {
-            return;
-          }
-
-          if (drawCanvasFrame(visibleCanvas, result.canvas)) {
-            updateCachedCanvasFrame(visibleCanvas, cachedFrameRef);
-          }
-        }).catch(() => {
-          if (inFlightFrameRevisionRef.current === fullQualityFrameRevision) {
-            inFlightFrameRevisionRef.current = null;
-          }
-        });
-      }
 
       rafRef.current = requestAnimationFrame(render);
     };
@@ -479,24 +276,10 @@ export function RecordMonitor() {
     rafRef.current = requestAnimationFrame(render);
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      for (const assetId of activeAssetIdsRef.current) {
-        pauseVideoSource(assetId);
-      }
-      activeAssetIdsRef.current.clear();
     };
-  }, [
-    bins,
-    canvasSize,
-    desktopParityPlaybackActive,
-    fps,
-    monitorTransport.colorProcessing,
-    monitorTransport.renderScale,
-    monitorTransport.useCache,
-    trimPreviewSide,
-  ]);
+  }, [canvasSize]);
 
-  // Auto-inspect clip at playhead (Premiere Pro behavior — Inspector shows
-  // properties for the clip currently visible in the record monitor)
+  // Auto-inspect clip at playhead
   useEffect(() => {
     const state = useEditorStore.getState();
     if (state.selectedClipIds.length === 0) {
@@ -507,94 +290,14 @@ export function RecordMonitor() {
     }
   }, [playheadTime]);
 
-  useEffect(() => {
-    if (trimSessionActive) {
-      const trimAudioPreview = trimAudioRoute.channel === 'record'
-        ? trimAudioRoute.side
-        : null;
-
-      if (!trimAudioPreview?.assetId || !trimAudioPreview.playable) {
-        releaseMonitorAudioOutput('record-monitor');
-        return;
-      }
-
-      tryLoadClipSource(trimAudioPreview.assetId, bins as any);
-      const source = videoSourceManager.getSource(trimAudioPreview.assetId);
-      if (!source?.ready) {
-        return;
-      }
-
-      reviewMonitorAudioOutput(
-        'record-monitor',
-        source.element,
-        trimAudioPreview.sourceTime,
-        {
-          active: trimLoopPlaybackActive,
-          direction: trimLoopPlaybackDirection,
-          rate: trimLoopPlaybackRate,
-          fps,
-        },
-      );
-      return;
-    }
-
-    const candidate = findTimelineMonitorMediaSource(tracks, playheadTime);
-    if (!candidate) {
-      releaseMonitorAudioOutput('record-monitor');
-      return;
-    }
-
-    tryLoadClipSource(candidate.assetId, bins as any);
-    const source = videoSourceManager.getSource(candidate.assetId);
-    if (!source?.ready) {
-      return;
-    }
-
-    syncMonitorAudioOutput(
-      'record-monitor',
-      source.element,
-      candidate.sourceTime,
-      editorIsPlaying,
-      fps,
-    );
-  }, [
-    bins,
-    editorIsPlaying,
-    fps,
-    playheadTime,
-    sourceRevision,
-    tracks,
-    trimAudioRoute,
-    trimLoopPlaybackActive,
-    trimLoopPlaybackDirection,
-    trimLoopPlaybackRate,
-    trimSessionActive,
-  ]);
-
-  useEffect(() => {
-    return () => {
-      releaseMonitorAudioOutput('record-monitor');
-    };
-  }, []);
-
   // Transport handlers
-  const nudgeTrim = useCallback((frames: number): boolean => {
-    if (!trimSessionActive) {
-      return false;
-    }
-
-    trimEngine.trimByFrames(frames, fps);
-    return true;
-  }, [fps, trimSessionActive]);
-
   const handlePlayPause = useCallback(() => {
-    if (trimSessionActive) {
-      toggleTrimLoopPlayback();
-      return;
-    }
-
     editorTogglePlay();
-  }, [editorTogglePlay, toggleTrimLoopPlayback, trimSessionActive]);
+  }, [editorTogglePlay]);
+
+  const handleStop = useCallback(() => {
+    if (editorIsPlaying) editorTogglePlay();
+  }, [editorIsPlaying, editorTogglePlay]);
 
   const handleGoToStart = useCallback(() => {
     useEditorStore.getState().setPlayhead(0);
@@ -605,423 +308,353 @@ export function RecordMonitor() {
   }, [duration]);
 
   const handlePrevFrame = useCallback(() => {
-    if (nudgeTrim(-1)) {
-      return;
-    }
     const current = useEditorStore.getState().playheadTime;
     useEditorStore.getState().setPlayhead(Math.max(0, current - 1 / fps));
-  }, [fps, nudgeTrim]);
+  }, [fps]);
 
   const handleNextFrame = useCallback(() => {
-    if (nudgeTrim(1)) {
-      return;
-    }
     const current = useEditorStore.getState().playheadTime;
-    useEditorStore.getState().setPlayhead(Math.min(duration, current + 1 / fps));
-  }, [duration, fps, nudgeTrim]);
+    useEditorStore.getState().setPlayhead(current + 1 / fps);
+  }, [fps]);
 
   const handleRewind = useCallback(() => {
-    if (nudgeTrim(-10)) {
-      return;
-    }
     const current = useEditorStore.getState().playheadTime;
     useEditorStore.getState().setPlayhead(Math.max(0, current - 2));
-  }, [nudgeTrim]);
+  }, []);
 
   const handleFastForward = useCallback(() => {
-    if (nudgeTrim(10)) {
-      return;
-    }
     const current = useEditorStore.getState().playheadTime;
-    useEditorStore.getState().setPlayhead(Math.min(duration, current + 2));
-  }, [duration, nudgeTrim]);
-
-  const handleMatchFrame = useCallback(() => {
-    matchFrameAtPlayhead();
+    useEditorStore.getState().setPlayhead(current + 2);
   }, []);
 
   const handleMarkIn = useCallback(() => {
-    setInToPlayhead();
-  }, [setInToPlayhead]);
+    setInPoint(playheadTime);
+  }, [playheadTime, setInPoint]);
 
   const handleMarkOut = useCallback(() => {
-    setOutToPlayhead();
-  }, [setOutToPlayhead]);
+    setOutPoint(playheadTime);
+  }, [playheadTime, setOutPoint]);
 
-  const handleMarkClip = useCallback(() => {
-    activateRecordMonitor();
-    markClipForActiveMonitor();
-  }, []);
+  const handleGoToIn = useCallback(() => {
+    if (inPoint !== null) useEditorStore.getState().setPlayhead(inPoint);
+  }, [inPoint]);
 
-  const handleClearMarks = useCallback(() => {
-    activateRecordMonitor();
-    clearMarksForActiveMonitor();
-  }, []);
+  const handleGoToOut = useCallback(() => {
+    if (outPoint !== null) useEditorStore.getState().setPlayhead(outPoint);
+  }, [outPoint]);
 
   const handleLift = useCallback(() => {
-    activateRecordMonitor();
-    liftEdit();
-  }, [liftEdit]);
+    liftSelection();
+  }, [liftSelection]);
 
   const handleExtract = useCallback(() => {
-    activateRecordMonitor();
-    extractEdit();
-  }, [extractEdit]);
+    extractSelection();
+  }, [extractSelection]);
 
-  const handleEnterTrim = useCallback(() => {
-    requestTrimWorkspace();
+  const handleMatchFrame = useCallback(() => {
+    const state = useEditorStore.getState();
+    const clip = findActiveClip(state.tracks, state.playheadTime);
+    if (clip?.assetId) {
+      const sourceTime = getSourceTime(clip, state.playheadTime);
+      const bin = state.bins.find((b) => b.assets.some((a) => a.id === clip.assetId));
+      const asset = bin?.assets.find((a) => a.id === clip.assetId);
+      if (asset) {
+        state.setSourceAsset(asset);
+        state.setSourcePlayhead(sourceTime);
+        state.setInspectedClip(clip.id);
+        usePlayerStore.getState().setActiveMonitor('source');
+      }
+    }
   }, []);
 
   const handleFocus = useCallback(() => {
     setActiveMonitor('record');
   }, [setActiveMonitor]);
 
-  const handleActivateSource = useCallback(() => {
-    activateSourceMonitor();
-  }, []);
-
-  const handleActivateRecord = useCallback(() => {
-    activateRecordMonitor();
-  }, []);
-
-  const handleSelectTrimASide = useCallback(() => {
-    if (trimSessionActive && trimSupportsSideSelection) {
-      trimEngine.selectASide();
-    }
-  }, [trimSessionActive, trimSupportsSideSelection]);
-
-  const handleSelectTrimBSide = useCallback(() => {
-    setActiveMonitor('record');
-    if (trimSessionActive && trimSupportsSideSelection) {
-      trimEngine.selectBSide();
-    }
-  }, [setActiveMonitor, trimSessionActive, trimSupportsSideSelection]);
-
-  const handleSelectTrimBothSides = useCallback(() => {
-    if (trimSessionActive && trimSupportsSideSelection) {
-      trimEngine.selectBothSides();
-    }
-  }, [trimSessionActive, trimSupportsSideSelection]);
-
-  const progress = duration > 0 ? (playheadTime / duration) * 100 : 0;
-  const inPos = inPoint !== null && duration > 0 ? (inPoint / duration) * 100 : null;
-  const outPos = outPoint !== null && duration > 0 ? (outPoint / duration) * 100 : null;
-  const scrubToTime = useCallback((clientX: number, previewAudio: boolean) => {
-    const bar = scrubRef.current;
-    if (!bar || duration <= 0 || trimSessionActive) {
-      return;
-    }
-
-    const rect = bar.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    const nextTime = pct * duration;
-    setActiveMonitor('record');
-    useEditorStore.getState().setPlayhead(nextTime);
-
-    if (!previewAudio || editorIsPlaying) {
-      return;
-    }
-
-    const state = useEditorStore.getState();
-    const candidate = findTimelineMonitorMediaSource(state.tracks, nextTime);
-    if (!candidate) {
-      releaseMonitorAudioOutput('record-monitor');
-      return;
-    }
-
-    tryLoadClipSource(candidate.assetId, state.bins as any);
-    const source = videoSourceManager.getSource(candidate.assetId);
-    if (!source?.ready) {
-      return;
-    }
-
-    previewMonitorAudioOutput('record-monitor', source.element, candidate.sourceTime);
-  }, [duration, editorIsPlaying, setActiveMonitor, trimSessionActive]);
-
-  const scrubBindings = usePointerScrub({
-    disabled: trimSessionActive || duration <= 0,
-    onScrub: ({ clientX, phase }) => {
-      scrubToTime(clientX, audioScrubEnabled && phase === 'end');
-    },
-  });
-
-  const handleCanvasClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    setActiveMonitor('record');
-    if (!trimSessionActive) {
-      return;
-    }
-
-    if ((event.target as HTMLElement).closest('.trim-status-overlay')) {
-      return;
-    }
-
-    if (trimSupportsSideSelection) {
-      trimEngine.selectBSide();
-    }
-  }, [setActiveMonitor, trimSessionActive, trimSupportsSideSelection]);
-
-  const tc = timeToTimecode(trimPreviewActive && trimPreviewSide ? trimPreviewSide.sourceTime : playheadTime, fps);
-  const durationTc = duration > 0 ? timeToTimecode(duration, fps) : null;
-  const isActive = activeMonitor === 'record';
-  const recordLabel = trimPreviewActive ? trimPreviewSide!.monitorLabel : 'RECORD';
-  const recordMeta = trimPreviewActive && trimPreviewSide
-    ? `${trimPreviewSide.trackName} · ${trimPreviewSide.clipName}`
-    : null;
-  const recordTrimSideActive = trimSessionActive
-    && (trimSelectionLabel === 'B' || trimSelectionLabel === 'AB' || trimSelectionLabel === 'ASYM');
-  const trimLoopStatusLabel = trimLoopPlaybackActive
-    ? `${trimLoopPlaybackDirection < 0 ? 'REV' : 'FWD'} ${trimLoopPlaybackRate}x`
-    : null;
+  const tc = timeToTimecode(playheadTime, fps);
+  const isActive = usePlayerStore((s) => s.activeMonitor === 'record');
 
   return (
     <div className={`monitor${isActive ? ' monitor-active' : ''}`} onClick={handleFocus} role="region" aria-label="Record Monitor">
       {/* Header */}
       <div className="monitor-header">
-        <button
-          type="button"
-          className={`monitor-label monitor-label-button record${trimSessionActive ? ' trim-side trim-side-b' : ''}${recordTrimSideActive ? ' trim-side-live' : ''}${trimSessionActive && !trimSupportsSideSelection ? ' monitor-label-static' : ''}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            handleSelectTrimBSide();
-          }}
-          aria-label={trimSessionActive && trimSupportsSideSelection ? 'Select B-side trim monitor' : 'Record monitor'}
-        >
-          {recordLabel}
-        </button>
-        {recordMeta && (
-          <span className="monitor-meta" title={recordMeta}>
-            {recordMeta}
-          </span>
-        )}
-        {trimSessionActive && showTrimCountersInMonitorHeaders && (
-          <>
-            <span className={`monitor-trim-indicator${recordTrimSideActive ? ' active' : ''}`}>
-              B {formatTrimFrames(trimBSideFrames)}
-            </span>
-            <span className="monitor-trim-summary">
-              {trimMode.toUpperCase()} · {trimSelectionLabel}
-            </span>
-            {trimLoopPlaybackActive && (
-              <span className="monitor-trim-indicator monitor-trim-indicator-loop">
-                {trimLoopStatusLabel}
-              </span>
-            )}
-          </>
-        )}
-        <DesktopAudioPreviewDiagnostics consumer="record-monitor" />
-        <PlaybackFallbackDiagnostics consumer="record-monitor" />
+        <span className="monitor-label record" aria-hidden="true">RECORD</span>
+        <span className="monitor-tc">{tc}</span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
+          {/* Pop Out button */}
+          <button
+            className="transport-btn"
+            onClick={() => {
+              const store = useEditorStore.getState();
+              if (store.poppedOutMonitor === 'record') {
+                store.setPoppedOutMonitor(null);
+              } else {
+                store.setPoppedOutMonitor('record');
+                window.open(
+                  window.location.href + '?monitor=record',
+                  'record-monitor',
+                  'width=960,height=540,menubar=no,toolbar=no,location=no,status=no'
+                );
+              }
+            }}
+            title="Pop Out Record Monitor"
+            aria-label="Pop out record monitor"
+            style={{ fontSize: 10 }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+              <path d="M21 14v5a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h5" />
+            </svg>
+          </button>
+          {/* Fullscreen button */}
+          <button
+            className={`transport-btn${useEditorStore.getState().fullscreenMonitor === 'record' ? ' active' : ''}`}
+            onClick={() => {
+              const store = useEditorStore.getState();
+              store.toggleFullscreenMonitor('record');
+              const canvas = canvasRef.current;
+              if (canvas && !document.fullscreenElement) {
+                canvas.requestFullscreen?.().catch(() => {});
+              } else if (document.fullscreenElement) {
+                document.exitFullscreen?.().catch(() => {});
+              }
+            }}
+            title="Fullscreen (Shift+F)"
+            aria-label="Toggle fullscreen record monitor"
+            style={{ fontSize: 10 }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
+              <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+            </svg>
+          </button>
+        </div>
       </div>
 
+      {/* Fullscreen indicator */}
+      {useEditorStore.getState().fullscreenMonitor === 'record' && (
+        <div style={{
+          position: 'absolute', top: 8, right: 8, zIndex: 10,
+          background: 'var(--brand)', color: '#fff', fontSize: 9, fontWeight: 700,
+          padding: '2px 6px', borderRadius: 3, letterSpacing: 0.5,
+        }}>FULLSCREEN</div>
+      )}
+
       {/* Canvas area */}
-      <div className="monitor-canvas" ref={containerRef} style={{ flex: 1, minHeight: 0 }} onClick={handleCanvasClick}>
+      <div className="monitor-canvas" ref={containerRef} style={{ flex: 1, minHeight: 0 }}>
         <canvas
           ref={canvasRef}
           width={canvasSize.w}
           height={canvasSize.h}
-          style={{
-            width: canvasSize.w,
-            height: canvasSize.h,
-            maxWidth: '100%',
-            maxHeight: '100%',
-            display: 'block',
-            margin: 'auto',
-          }}
+          style={{ width: '100%', height: '100%', objectFit: 'contain' }}
         />
-        <TrimStatusOverlay />
       </div>
 
-      {!trimSessionActive && (
+      {/* Footer / Avid-style Transport Bar */}
+      <div className="monitor-footer" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '3px 4px', flexWrap: 'nowrap' }}>
+        {/* Timecode Display */}
         <div
-          className="composer-scrubbar"
-          ref={scrubRef}
-          {...scrubBindings}
-          role="slider"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={progress}
-          aria-label="Record playback position"
-          tabIndex={0}
+          className="avid-tc-display"
+          style={{
+            fontFamily: 'var(--font-mono, "SF Mono", "Consolas", monospace)',
+            fontSize: 11,
+            fontWeight: 600,
+            color: 'var(--text-primary)',
+            background: 'rgba(0,0,0,0.5)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 2,
+            padding: '2px 6px',
+            minWidth: 80,
+            textAlign: 'center',
+            letterSpacing: '0.5px',
+            flexShrink: 0,
+          }}
+          role="status"
+          aria-live="polite"
+          aria-label="Record timecode"
         >
-          {inPos !== null && (
-            <div className="composer-scrubbar-mark in" style={{ left: `${inPos}%` }} title={`In: ${timeToTimecode(inPoint!, fps)}`} />
-          )}
-          {outPos !== null && (
-            <div className="composer-scrubbar-mark out" style={{ left: `${outPos}%` }} title={`Out: ${timeToTimecode(outPoint!, fps)}`} />
-          )}
-          {inPos !== null && outPos !== null && (
-            <div className="composer-scrubbar-range" style={{ left: `${inPos}%`, width: `${outPos - inPos}%` }} />
-          )}
-          <div className="composer-scrubbar-fill" style={{ width: `${progress}%` }} />
-          <div className="composer-scrubbar-head" style={{ left: `${progress}%` }} />
-        </div>
-      )}
-
-      {/* Footer / Transport */}
-      <div className="monitor-footer">
-        <div className="monitor-footer-group monitor-focus-group" role="group" aria-label="Monitor focus controls">
-          <button
-            type="button"
-            className={`transport-btn monitor-toolbar-btn is-monitor${activeMonitor === 'source' ? ' active' : ''}`}
-            onClick={handleActivateSource}
-            aria-pressed={activeMonitor === 'source'}
-            title="Activate Source Monitor"
-          >
-            SRC
-          </button>
-          <button
-            type="button"
-            className={`transport-btn monitor-toolbar-btn is-monitor${activeMonitor === 'record' ? ' active' : ''}`}
-            onClick={handleActivateRecord}
-            aria-pressed={activeMonitor === 'record'}
-            title="Activate Record Monitor"
-          >
-            REC
-          </button>
+          {tc}
         </div>
 
-        <div className="monitor-footer-group" role="group" aria-label="Record edit controls">
+        {/* Transport Controls Group */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 1, marginLeft: 4 }} role="group" aria-label="Record transport controls">
+          {/* Step Backward */}
           <button
-            className="transport-btn monitor-toolbar-btn"
-            onClick={handleMatchFrame}
-            title="Match Frame (F)"
-            disabled={trimSessionActive}
+            style={avidBtnStyle}
+            onClick={handlePrevFrame}
+            title="Step Back (Left Arrow)"
+            aria-label="Step back one frame"
+            {...avidBtnHoverProps}
           >
-            MATCH
+            <IconStepBack />
           </button>
-          <button
-            className={`transport-btn monitor-toolbar-btn is-mark${inPoint !== null ? ' active' : ''}`}
-            onClick={handleMarkIn}
-            title="Mark In (I)"
-            disabled={trimSessionActive}
-          >
-            IN
-          </button>
-          <button
-            className={`transport-btn monitor-toolbar-btn is-mark${outPoint !== null ? ' active' : ''}`}
-            onClick={handleMarkOut}
-            title="Mark Out (O)"
-            disabled={trimSessionActive}
-          >
-            OUT
-          </button>
-          <button
-            className="transport-btn monitor-toolbar-btn"
-            onClick={handleMarkClip}
-            title="Mark Clip (E)"
-            disabled={trimSessionActive}
-          >
-            CLIP
-          </button>
-          <button
-            className="transport-btn monitor-toolbar-btn"
-            onClick={handleClearMarks}
-            title="Clear Marks (D)"
-            disabled={trimSessionActive}
-          >
-            CLR
-          </button>
-          <button
-            className={`transport-btn monitor-toolbar-btn${trimSessionActive ? ' active' : ''}`}
-            onClick={trimSessionActive ? toggleTrimViewMode : handleEnterTrim}
-            title={trimSessionActive ? 'Toggle big/small trim view' : 'Enter Trim Mode'}
-          >
-            {trimSessionActive ? (trimViewMode === 'big' ? 'SMALL' : 'BIG') : 'TRIM'}
-          </button>
-        </div>
 
-        {!trimSessionActive && (
-          <div className="monitor-footer-group" role="group" aria-label="Record timeline edit controls">
-            <button
-              className="transport-btn monitor-toolbar-btn"
-              onClick={handleLift}
-              title="Lift (Z)"
-            >
-              LIFT
-            </button>
-            <button
-              className="transport-btn monitor-toolbar-btn"
-              onClick={handleExtract}
-              title="Extract (X)"
-            >
-              EXT
-            </button>
-          </div>
-        )}
-
-        <div className="monitor-footer-group transport-controls" role="group" aria-label="Record transport controls">
-          <button className="transport-btn monitor-toolbar-btn" onClick={handleGoToStart} title="Go to Start (Home)" aria-label="Go to start" disabled={trimSessionActive}>
-            |&laquo;
-          </button>
-          <button className="transport-btn monitor-toolbar-btn" onClick={handleRewind} title={trimPreviewActive ? 'Trim Left 10 Frames' : 'Rewind (J)'}>
-            &laquo;
-          </button>
-          <button className="transport-btn monitor-toolbar-btn" onClick={handlePrevFrame} title={trimPreviewActive ? 'Trim Left 1 Frame' : 'Prev Frame (Left)'}>
-            &lsaquo;
-          </button>
+          {/* Play Reverse (J) */}
           <button
-            className={`transport-btn play-btn monitor-toolbar-btn${trimLoopPlaybackActive ? ' active' : ''}`}
+            style={avidBtnStyle}
+            onClick={handleRewind}
+            title="Play Reverse (J)"
+            aria-label="Play in reverse"
+            {...avidBtnHoverProps}
+          >
+            <IconPlayReverse />
+          </button>
+
+          {/* Stop/Pause (K) */}
+          <button
+            style={{
+              ...avidBtnStyle,
+              ...(editorIsPlaying ? { background: 'rgba(255,255,255,0.15)' } : {}),
+            }}
+            onClick={handleStop}
+            title="Stop (K)"
+            aria-label="Stop playback"
+            {...avidBtnHoverProps}
+          >
+            <IconStop />
+          </button>
+
+          {/* Play Forward (L) */}
+          <button
+            style={{
+              ...avidBtnStyle,
+              ...(editorIsPlaying ? { background: 'rgba(255,255,255,0.15)', color: 'var(--text-primary)' } : {}),
+            }}
             onClick={handlePlayPause}
-            title={trimSessionActive
-              ? (trimLoopPlaybackActive ? `Stop transition play loop (${trimLoopStatusLabel})` : 'Play transition loop')
-              : 'Play/Pause (Space)'}
+            title="Play Forward (L)"
+            aria-label="Play forward"
+            {...avidBtnHoverProps}
           >
-            {trimSessionActive ? (trimLoopPlaybackActive ? '\u23F9' : '\u25B6') : (editorIsPlaying ? '\u23F8' : '\u25B6')}
+            <IconPlayForward />
           </button>
-          <button className="transport-btn monitor-toolbar-btn" onClick={handleNextFrame} title={trimPreviewActive ? 'Trim Right 1 Frame' : 'Next Frame (Right)'}>
-            &rsaquo;
-          </button>
-          <button className="transport-btn monitor-toolbar-btn" onClick={handleFastForward} title={trimPreviewActive ? 'Trim Right 10 Frames' : 'Fast Forward (L)'}>
-            &raquo;
-          </button>
-          <button className="transport-btn monitor-toolbar-btn" onClick={handleGoToEnd} title="Go to End (End)" disabled={trimSessionActive}>
-            &raquo;|
+
+          {/* Step Forward */}
+          <button
+            style={avidBtnStyle}
+            onClick={handleNextFrame}
+            title="Step Forward (Right Arrow)"
+            aria-label="Step forward one frame"
+            {...avidBtnHoverProps}
+          >
+            <IconStepForward />
           </button>
         </div>
 
-        <div className="monitor-footer-spacer" />
+        {/* Divider */}
+        <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.1)', margin: '0 3px', flexShrink: 0 }} role="separator" />
 
-        {trimSessionActive ? (
-          <div className="monitor-footer-group monitor-footer-group-trim" role="group" aria-label="Record trim selection">
-            {trimSupportsSideSelection && (
-              <>
-                <button
-                  type="button"
-                  className={`transport-btn monitor-toolbar-btn trim-side-btn${trimSelectionLabel === 'A' ? ' active' : ''}`}
-                  onClick={handleSelectTrimASide}
-                  aria-label="Select A-side trim"
-                >
-                  A
-                </button>
-                <button
-                  type="button"
-                  className={`transport-btn monitor-toolbar-btn trim-side-btn${trimSelectionLabel === 'AB' ? ' active' : ''}`}
-                  onClick={handleSelectTrimBothSides}
-                  aria-label="Select both trim sides"
-                >
-                  AB
-                </button>
-                <button
-                  type="button"
-                  className={`transport-btn monitor-toolbar-btn trim-side-btn${trimSelectionLabel === 'B' ? ' active' : ''}`}
-                  onClick={handleSelectTrimBSide}
-                  aria-label="Select B-side trim"
-                >
-                  B
-                </button>
-              </>
-            )}
-            {trimPreviewSide && (
-              <span className="monitor-toolbar-pill" aria-live="polite">
-                {trimPreviewSide.monitorContext}{trimLoopStatusLabel ? ` · ${trimLoopStatusLabel}` : ''}
-              </span>
-            )}
-          </div>
-        ) : null}
+        {/* Mark IN (Red bracket) */}
+        <button
+          style={{
+            ...avidBtnStyle,
+            color: inPoint !== null ? AVID_RED : 'var(--text-secondary)',
+          }}
+          onClick={handleMarkIn}
+          title="Mark In (I)"
+          aria-label="Mark In point"
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(229,57,53,0.2)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+        >
+          <IconMarkIn color={inPoint !== null ? AVID_RED : 'currentColor'} />
+        </button>
 
-        <div className="monitor-footer-group">
-          <div className="timecode-display monitor-footer-timecode" role="status" aria-live="polite" aria-label="Current timecode">
-            {durationTc ? `${tc} / ${durationTc}` : tc}
-          </div>
+        {/* Mark OUT (Red bracket) */}
+        <button
+          style={{
+            ...avidBtnStyle,
+            color: outPoint !== null ? AVID_RED : 'var(--text-secondary)',
+          }}
+          onClick={handleMarkOut}
+          title="Mark Out (O)"
+          aria-label="Mark Out point"
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(229,57,53,0.2)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+        >
+          <IconMarkOut color={outPoint !== null ? AVID_RED : 'currentColor'} />
+        </button>
+
+        {/* Go to IN (Yellow) */}
+        <button
+          style={{
+            ...avidBtnStyle,
+            color: AVID_YELLOW,
+            opacity: inPoint !== null ? 1 : 0.4,
+          }}
+          onClick={handleGoToIn}
+          title="Go to In (Shift+I)"
+          aria-label="Go to In point"
+          disabled={inPoint === null}
+          onMouseEnter={(e) => { if (inPoint !== null) e.currentTarget.style.background = 'rgba(253,216,53,0.2)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+        >
+          <IconGoToIn color={AVID_YELLOW} />
+        </button>
+
+        {/* Go to OUT (Yellow) */}
+        <button
+          style={{
+            ...avidBtnStyle,
+            color: AVID_YELLOW,
+            opacity: outPoint !== null ? 1 : 0.4,
+          }}
+          onClick={handleGoToOut}
+          title="Go to Out (Shift+O)"
+          aria-label="Go to Out point"
+          disabled={outPoint === null}
+          onMouseEnter={(e) => { if (outPoint !== null) e.currentTarget.style.background = 'rgba(253,216,53,0.2)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+        >
+          <IconGoToOut color={AVID_YELLOW} />
+        </button>
+
+        {/* Divider */}
+        <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.1)', margin: '0 3px', flexShrink: 0 }} role="separator" />
+
+        {/* Lift (Z) */}
+        <button
+          style={avidBtnStyle}
+          onClick={handleLift}
+          title="Lift (Z)"
+          aria-label="Lift selection"
+          {...avidBtnHoverProps}
+        >
+          <IconLift />
+        </button>
+
+        {/* Extract (X) */}
+        <button
+          style={avidBtnStyle}
+          onClick={handleExtract}
+          title="Extract (X)"
+          aria-label="Extract selection"
+          {...avidBtnHoverProps}
+        >
+          <IconExtract />
+        </button>
+
+        {/* Match Frame */}
+        <button
+          style={avidBtnStyle}
+          onClick={handleMatchFrame}
+          title="Match Frame (F)"
+          aria-label="Match Frame"
+          {...avidBtnHoverProps}
+        >
+          <IconMatchFrame />
+        </button>
+
+        <div style={{ flex: 1 }} />
+
+        {/* Duration display */}
+        <div
+          style={{
+            fontFamily: 'var(--font-mono, "SF Mono", "Consolas", monospace)',
+            fontSize: 10,
+            color: 'var(--text-muted)',
+            letterSpacing: '0.3px',
+          }}
+        >
+          DUR {timeToTimecode(duration, fps)}
         </div>
       </div>
     </div>

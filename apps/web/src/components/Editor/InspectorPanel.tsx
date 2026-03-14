@@ -938,7 +938,7 @@ function TrackContextCard({ track }: { track: Track }) {
       <ColorPickerSection
         title="Track Color"
         color={track.color}
-        palette={TRACK_COLOR_PRESETS[track.type] ?? TRACK_COLOR_PRESETS.VIDEO}
+        palette={(TRACK_COLOR_PRESETS[track.type] ?? TRACK_COLOR_PRESETS['VIDEO'])!}
         onChange={(color) => updateTrackColor(track.id, color)}
       />
     </>
@@ -1043,7 +1043,7 @@ function ContextInfoTab({
             ['Duration', asset.duration ? infoTc.secondsToTC(asset.duration) : '--'],
             ['Resolution', asset.width && asset.height ? `${asset.width}x${asset.height}` : '--'],
             ['Waveform', asset.waveformData?.length ? `${asset.waveformData.length} samples` : 'Unavailable'],
-            ['Thumbnails', asset.thumbnailFrames?.length ? `${asset.thumbnailFrames.length} frames` : asset.thumbnailUrl ? 'Poster frame ready' : 'Unavailable'],
+            ['Thumbnails', asset.thumbnailUrl ? 'Poster frame ready' : 'Unavailable'],
           ].map(([label, value]) => (
             <div key={label} className="property-row">
               <div className="property-label">{label}</div>

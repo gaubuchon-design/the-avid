@@ -102,7 +102,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   displayName: '',
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
   locale: navigator.language || 'en',
-  defaultWorkspace: 'filmtv',
+  defaultWorkspace: 'default',
 
   // Appearance
   theme: 'dark',

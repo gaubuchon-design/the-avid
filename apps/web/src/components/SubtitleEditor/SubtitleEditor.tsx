@@ -383,8 +383,13 @@ export const SubtitleEditor: React.FC = () => {
 
   // Style controls
   const [fontSize, setFontSize] = useState(24);
-  const [position, setPosition] = useState<'top' | 'bottom'>('bottom');
+  const [position, setPosition] = useState<'top' | 'center' | 'bottom'>('bottom');
   const [bgOpacity, setBgOpacity] = useState(0.6);
+  const [maxCharsPerLine, setMaxCharsPerLine] = useState(42);
+
+  // Map UI position to SubtitleCue style position
+  const cuePosition = position === 'center' ? 'custom' as const : position;
+  const cueY = position === 'center' ? 0.45 : undefined;
 
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -513,7 +518,8 @@ export const SubtitleEditor: React.FC = () => {
         speaker: seg.speaker,
         style: {
           fontSize,
-          position,
+          position: cuePosition,
+          y: cueY,
           bgOpacity,
         },
       };
@@ -542,7 +548,8 @@ export const SubtitleEditor: React.FC = () => {
     subtitleTracks,
     language,
     fontSize,
-    position,
+    cuePosition,
+    cueY,
     bgOpacity,
     addSubtitleTrack,
     addSubtitleCue,
@@ -597,6 +604,15 @@ export const SubtitleEditor: React.FC = () => {
         >
           {isGenerating ? 'Generating...' : 'Generate'}
         </button>
+        <span style={{
+          fontSize: 9,
+          color: 'var(--ai-accent)',
+          fontWeight: 600,
+          letterSpacing: '0.05em',
+          textTransform: 'uppercase' as const,
+        }}>
+          AI
+        </span>
 
         <select
           style={S.select}
@@ -811,11 +827,26 @@ export const SubtitleEditor: React.FC = () => {
             <select
               style={S.select}
               value={position}
-              onChange={(e) => setPosition(e.target.value as 'top' | 'bottom')}
+              onChange={(e) => setPosition(e.target.value as 'top' | 'center' | 'bottom')}
             >
               <option value="bottom">Bottom</option>
+              <option value="center">Center</option>
               <option value="top">Top</option>
             </select>
+          </div>
+
+          {/* Max chars per line */}
+          <div style={S.styleRow}>
+            <span style={S.styleLabel}>Max chars</span>
+            <input
+              type="number"
+              style={S.styleInput}
+              value={maxCharsPerLine}
+              min={20}
+              max={80}
+              onChange={(e) => setMaxCharsPerLine(Number(e.target.value))}
+            />
+            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>/line</span>
           </div>
 
           {/* Background opacity */}

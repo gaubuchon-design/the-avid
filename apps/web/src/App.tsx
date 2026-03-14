@@ -1,7 +1,7 @@
 import React, { lazy, Suspense } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { AuthGuard } from './components/AuthGuard';
-import { ErrorBoundary, PageErrorBoundary } from './components/ErrorBoundary';
+import { ErrorBoundary, PageErrorBoundary, PanelErrorBoundary } from './components/ErrorBoundary';
 import { OfflineBanner } from './components/OfflineBanner';
 import { useSettingsEffects } from './hooks/useSettingsEffects';
 import { KeyboardProvider } from './components/KeyboardProvider';
@@ -29,6 +29,26 @@ const EffectsPanel = lazy(() => import('./components/EffectsPanel/EffectsPanel')
 const ScriptPanel = lazy(() => import('./components/ScriptPanel/ScriptPanel').then(m => ({ default: m.ScriptPanel })));
 const ExportPanel = lazy(() => import('./components/ExportPanel/ExportPanel').then(m => ({ default: m.ExportPanel })));
 
+// ─── Lazy-loaded Panels ─────────────────────────────────────────────────────
+const MultiCamPanel = lazy(() => import('./components/MultiCamPanel/MultiCamPanel').then(m => ({ default: m.MultiCamPanel })));
+const AccessibilityPanel = lazy(() => import('./components/AccessibilityPanel/AccessibilityPanel').then(m => ({ default: m.AccessibilityPanel })));
+
+// Suspense + PanelErrorBoundary wrapper for lazy panels
+// Each panel is isolated -- one failure does not cascade to the rest of the app.
+function LazyPanel(LazyComponent: React.LazyExoticComponent<React.ComponentType>, displayName?: string): React.ComponentType {
+  function WrappedPanel() {
+    return (
+      <PanelErrorBoundary panelName="LazyPanel">
+        <Suspense fallback={<LoadingSpinner />}>
+          <LazyComponent />
+        </Suspense>
+      </PanelErrorBoundary>
+    );
+  }
+  WrappedPanel.displayName = displayName ?? 'LazyPanel';
+  return WrappedPanel;
+}
+
 // ─── Panel Registry ──────────────────────────────────────────────────────────
 // Maps panel identifiers to their component implementations.
 
@@ -42,17 +62,21 @@ export const panelRegistry: Record<string, React.ComponentType> = {
   effects: EffectsPanel,
   script: ScriptPanel,
   export: ExportPanel,
+
+  // Utility panels
+  multicam: LazyPanel(MultiCamPanel, 'MultiCamPanel'),
+  accessibility: LazyPanel(AccessibilityPanel, 'AccessibilityPanel'),
 };
 
-// ─── Workspace Presets ───────────────────────────────────────────────────────
-// Defines which panels are active for each vertical workflow.
+// ─── Default Workspace ───────────────────────────────────────────────────────
+// A single default workspace that includes all core editing panels.
 
-export type WorkspacePreset = 'filmtv';
+export type WorkspacePreset = 'default';
 
 export const workspacePresets: Record<WorkspacePreset, { label: string; panels: string[] }> = {
-  filmtv: {
-    label: 'Editorial',
-    panels: ['timeline', 'source', 'record', 'color', 'audio', 'effects', 'script', 'export'],
+  default: {
+    label: 'Edit',
+    panels: ['timeline', 'source', 'record', 'color', 'audio', 'effects'],
   },
 };
 

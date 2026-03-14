@@ -19,7 +19,7 @@ const LOCALES = [
 ];
 
 const WORKSPACES = [
-  { value: 'filmtv', label: 'Film / TV' },
+  { value: 'default', label: 'Edit' },
 ];
 
 export function GeneralSettings() {

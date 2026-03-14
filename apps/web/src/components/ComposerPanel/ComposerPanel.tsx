@@ -1,12 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useEditorStore } from '../../store/editor.store';
-import { usePlayerStore } from '../../store/player.store';
 import { SourceMonitor } from '../SourceMonitor/SourceMonitor';
 import { RecordMonitor } from '../RecordMonitor/RecordMonitor';
 import { MonitorArea } from '../Monitor/MonitorArea';
-import { MultiCamSourceView } from './MultiCamSourceView';
-import { trimEngine } from '../../engine/TrimEngine';
-import { PanelResizeHandle } from '../Layout/PanelResizeHandle';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -51,6 +47,15 @@ function RecordIcon() {
   );
 }
 
+function FullscreenIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
+      <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+    </svg>
+  );
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /** Map the store's composerLayout value to our internal mode. */
@@ -60,102 +65,107 @@ function storeToMode(storeLayout: 'source-record' | 'full-frame'): ComposerLayou
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-interface ComposerPanelProps {
-  dualMonitorSplit?: number;
-  onDualMonitorSplitChange?: (value: number) => void;
-}
-
-export function ComposerPanel({
-  dualMonitorSplit = 50,
-  onDualMonitorSplitChange,
-}: ComposerPanelProps) {
+export function ComposerPanel() {
   const composerLayout = useEditorStore((s) => s.composerLayout);
   const setComposerLayout = useEditorStore((s) => s.setComposerLayout);
-  const trimActive = useEditorStore((s) => s.trimActive);
-  const trimViewMode = useEditorStore((s) => s.trimViewMode);
-  const setTrimViewMode = useEditorStore((s) => s.setTrimViewMode);
-  const multicamActive = useEditorStore((s) => s.multicamActive);
-  const multicamDisplayMode = useEditorStore((s) => s.multicamDisplayMode);
-  const activeMonitor = usePlayerStore((s) => s.activeMonitor);
+  const fullscreenMonitor = useEditorStore((s) => s.fullscreenMonitor);
+  const poppedOutMonitor = useEditorStore((s) => s.poppedOutMonitor);
+  const toggleFullscreenMonitor = useEditorStore((s) => s.toggleFullscreenMonitor);
 
   // Local state for 'full-source' since the store only has 'source-record' | 'full-frame'
   const [sourceOnly, setSourceOnly] = useState(false);
 
   // Derive the effective layout mode
-  const mode: ComposerLayoutMode = trimActive
-    ? 'source-record'
-    : multicamActive
-      ? 'source-record'
-    : (sourceOnly ? 'full-source' : storeToMode(composerLayout));
-  const hasPreviousTrimConfiguration = trimEngine.hasPreviousConfiguration();
+  const mode: ComposerLayoutMode = sourceOnly ? 'full-source' : storeToMode(composerLayout);
 
   const isDual = mode === 'source-record';
   const isSingleSource = mode === 'full-source';
   const isSingleRecord = mode === 'full-record';
 
+  // ── Keyboard shortcut: Shift+F for fullscreen toggle ──────────────────
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.shiftKey && e.key === 'F' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        // Determine which monitor to fullscreen based on current layout
+        const activeMonitor = isDual ? 'record' : isSingleSource ? 'source' : 'record';
+        toggleFullscreenMonitor(activeMonitor);
+
+        // Use Fullscreen API
+        if (!document.fullscreenElement) {
+          const monitorSlots = document.querySelectorAll('.composer-panel-monitor-slot');
+          const target = isDual ? monitorSlots[1] : monitorSlots[0];
+          if (target) {
+            (target as HTMLElement).requestFullscreen?.().catch(() => {});
+          }
+        } else {
+          document.exitFullscreen?.().catch(() => {});
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isDual, isSingleSource, toggleFullscreenMonitor]);
+
+  // Listen for fullscreen exit events to sync state
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement && fullscreenMonitor) {
+        useEditorStore.getState().setFullscreenMonitor(null);
+      }
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, [fullscreenMonitor]);
+
   // ── Layout switching callbacks ──────────────────────────────────────────
 
   const handleSetDual = useCallback(() => {
-    if (trimActive) {
-      return;
-    }
     setSourceOnly(false);
     setComposerLayout('source-record');
-  }, [setComposerLayout, trimActive]);
+  }, [setComposerLayout]);
 
   const handleSetFullSource = useCallback(() => {
-    if (trimActive) {
-      return;
-    }
     setSourceOnly(true);
     // Keep the store in a non-source-record state so other consumers
     // know we are not in dual mode.
     setComposerLayout('full-frame');
-  }, [setComposerLayout, trimActive]);
+  }, [setComposerLayout]);
 
   const handleSetFullRecord = useCallback(() => {
-    if (trimActive) {
-      return;
-    }
     setSourceOnly(false);
     setComposerLayout('full-frame');
-  }, [setComposerLayout, trimActive]);
+  }, [setComposerLayout]);
 
-  const handleRecallPreviousTrim = useCallback(() => {
-    const nextState = trimEngine.recallPreviousConfiguration();
-    if (nextState.active && nextState.rollers.length > 0) {
-      const store = useEditorStore.getState();
-      store.setActiveTool('trim');
-      store.selectTrack(nextState.rollers[0]!.trackId);
+  // ── Fullscreen toggle handler ──────────────────────────────────────────
+
+  const handleFullscreenToggle = useCallback(() => {
+    const activeMonitor = isDual ? 'record' : isSingleSource ? 'source' : 'record';
+    toggleFullscreenMonitor(activeMonitor);
+
+    if (!document.fullscreenElement) {
+      const monitorSlots = document.querySelectorAll('.composer-panel-monitor-slot');
+      const target = isDual ? monitorSlots[1] : monitorSlots[0];
+      if (target) {
+        (target as HTMLElement).requestFullscreen?.().catch(() => {});
+      }
+    } else {
+      document.exitFullscreen?.().catch(() => {});
     }
-  }, []);
-
-  useEffect(() => {
-    if (trimActive || composerLayout !== 'full-frame') {
-      return;
-    }
-
-    setSourceOnly(activeMonitor === 'source');
-  }, [activeMonitor, composerLayout, trimActive]);
+  }, [isDual, isSingleSource, toggleFullscreenMonitor]);
 
   // ── Active monitor label ────────────────────────────────────────────────
 
-  const activeLabel = trimActive
-    ? `Trim ${trimViewMode === 'big' ? 'Big' : 'Small'} View`
-    : multicamActive
-      ? `MultiCam ${multicamDisplayMode === 'quad' ? '2x2' : multicamDisplayMode === 'nine' ? '3x3' : '4x4'}`
-    : isDual
-      ? 'Source | Record'
-      : isSingleSource
-        ? 'Source'
-        : 'Record';
+  const activeLabel = isDual
+    ? 'Source | Record'
+    : isSingleSource
+      ? 'Source'
+      : 'Record';
 
   // ── Render ──────────────────────────────────────────────────────────────
 
   return (
-    <div
-      className={`composer-panel${trimActive ? ' composer-panel-trim-active' : ''}${trimActive && trimViewMode === 'big' ? ' composer-panel-trim-big' : ''}${trimActive && trimViewMode === 'small' ? ' composer-panel-trim-small' : ''}`}
-    >
+    <div className="composer-panel">
       {/* Toolbar strip */}
       <div className="composer-panel-toolbar">
         <div className="composer-panel-toolbar-group">
@@ -164,7 +174,6 @@ export function ComposerPanel({
             onClick={handleSetDual}
             title="Dual: Source | Record"
             aria-pressed={isDual}
-            disabled={trimActive}
           >
             <DualIcon />
           </button>
@@ -173,7 +182,6 @@ export function ComposerPanel({
             onClick={handleSetFullSource}
             title="Source Only"
             aria-pressed={isSingleSource}
-            disabled={trimActive}
           >
             <SourceIcon />
           </button>
@@ -182,79 +190,110 @@ export function ComposerPanel({
             onClick={handleSetFullRecord}
             title="Record Only"
             aria-pressed={isSingleRecord}
-            disabled={trimActive}
           >
             <RecordIcon />
           </button>
+
+          {/* Separator */}
+          <div style={{ width: 1, height: 16, background: 'var(--border-subtle)', margin: '0 4px' }} />
+
+          {/* Fullscreen toggle */}
+          <button
+            className={`composer-panel-layout-btn${fullscreenMonitor ? ' active' : ''}`}
+            onClick={handleFullscreenToggle}
+            title="Fullscreen Playback (Shift+F)"
+            aria-pressed={!!fullscreenMonitor}
+            aria-label="Toggle fullscreen playback"
+          >
+            <FullscreenIcon />
+          </button>
         </div>
 
-        <span className="composer-panel-active-label">{activeLabel}</span>
-
-        <div className="composer-panel-toolbar-actions">
-          {trimActive ? (
-            <div className="composer-panel-toolbar-group composer-panel-toolbar-group-trim">
-              <button
-                type="button"
-                className={`composer-panel-layout-btn composer-panel-trim-action-btn${trimViewMode === 'small' ? ' active' : ''}`}
-                onClick={() => setTrimViewMode('small')}
-                aria-pressed={trimViewMode === 'small'}
-                title="Small Trim View"
-              >
-                Small
-              </button>
-              <button
-                type="button"
-                className={`composer-panel-layout-btn composer-panel-trim-action-btn${trimViewMode === 'big' ? ' active' : ''}`}
-                onClick={() => setTrimViewMode('big')}
-                aria-pressed={trimViewMode === 'big'}
-                title="Big Trim View"
-              >
-                Big
-              </button>
-            </div>
-          ) : hasPreviousTrimConfiguration ? (
-            <button
-              type="button"
-              className="composer-panel-trim-recall-btn"
-              onClick={handleRecallPreviousTrim}
-              title="Recall previous trim setup"
-            >
-              Recall Trim
-            </button>
-          ) : null}
-        </div>
+        <span className="composer-panel-active-label">
+          {activeLabel}
+          {fullscreenMonitor && (
+            <span style={{
+              marginLeft: 6, fontSize: 9, fontWeight: 700, color: 'var(--brand-bright)',
+              background: 'var(--accent-muted)', padding: '1px 5px', borderRadius: 3,
+              letterSpacing: 0.5, verticalAlign: 'middle',
+            }}>FULLSCREEN</span>
+          )}
+          {poppedOutMonitor && (
+            <span style={{
+              marginLeft: 6, fontSize: 9, fontWeight: 600, color: 'var(--text-muted)',
+              background: 'var(--bg-void)', padding: '1px 5px', borderRadius: 3,
+              border: '1px solid var(--border-subtle)', letterSpacing: 0.3, verticalAlign: 'middle',
+            }}>{poppedOutMonitor === 'source' ? 'SRC' : 'REC'} POPPED</span>
+          )}
+        </span>
       </div>
 
       {/* Monitor area */}
       <div
         className={`composer-panel-monitors ${isDual ? 'composer-panel-dual' : 'composer-panel-single'}`}
-        style={isDual ? {
-          gridTemplateColumns: `minmax(0, ${dualMonitorSplit}fr) var(--panel-divider-w) minmax(0, ${100 - dualMonitorSplit}fr)`,
-        } : undefined}
       >
         {isDual && (
           <>
-            <div className="composer-panel-monitor-slot">
-              {multicamActive ? <MultiCamSourceView /> : <SourceMonitor />}
-            </div>
-            <PanelResizeHandle
-              axis="horizontal"
-              ariaLabel="Resize source and record monitors"
-              value={dualMonitorSplit}
-              min={30}
-              max={70}
-              className="composer-panel-resize-handle resize-handle-h"
-              onChange={(next) => onDualMonitorSplitChange?.(next)}
-            />
-            <div className="composer-panel-monitor-slot">
-              <RecordMonitor />
-            </div>
+            {poppedOutMonitor !== 'source' && (
+              <div className="composer-panel-monitor-slot">
+                <SourceMonitor />
+              </div>
+            )}
+            {poppedOutMonitor === 'source' && (
+              <div className="composer-panel-monitor-slot" style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'var(--bg-void)', borderRadius: 'var(--radius-md)',
+                border: '1px dashed var(--border-subtle)',
+              }}>
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.4, display: 'block', margin: '0 auto 6px' }}>
+                    <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+                    <path d="M21 14v5a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h5" />
+                  </svg>
+                  Source Monitor popped out
+                  <br />
+                  <button
+                    className="tl-btn"
+                    style={{ marginTop: 6, fontSize: 10 }}
+                    onClick={() => useEditorStore.getState().setPoppedOutMonitor(null)}
+                    aria-label="Restore source monitor"
+                  >Restore</button>
+                </div>
+              </div>
+            )}
+            {poppedOutMonitor !== 'record' && (
+              <div className="composer-panel-monitor-slot">
+                <RecordMonitor />
+              </div>
+            )}
+            {poppedOutMonitor === 'record' && (
+              <div className="composer-panel-monitor-slot" style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'var(--bg-void)', borderRadius: 'var(--radius-md)',
+                border: '1px dashed var(--border-subtle)',
+              }}>
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.4, display: 'block', margin: '0 auto 6px' }}>
+                    <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+                    <path d="M21 14v5a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h5" />
+                  </svg>
+                  Record Monitor popped out
+                  <br />
+                  <button
+                    className="tl-btn"
+                    style={{ marginTop: 6, fontSize: 10 }}
+                    onClick={() => useEditorStore.getState().setPoppedOutMonitor(null)}
+                    aria-label="Restore record monitor"
+                  >Restore</button>
+                </div>
+              </div>
+            )}
           </>
         )}
 
         {isSingleSource && (
           <div className="composer-panel-monitor-slot">
-            {multicamActive ? <MultiCamSourceView /> : <SourceMonitor />}
+            <SourceMonitor />
           </div>
         )}
 

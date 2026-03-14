@@ -153,7 +153,7 @@ function toRgba(color: string, alpha: number): string {
 }
 
 function resolveClipWaveform(clip: Clip, asset: MediaAsset | null): number[] | undefined {
-  return clip.waveformData ?? asset?.waveformData ?? asset?.waveformMetadata?.peaks;
+  return clip.waveformData ?? asset?.waveformData;
 }
 
 function resolveThumbnailTiles(
@@ -165,9 +165,7 @@ function resolveThumbnailTiles(
     return [];
   }
 
-  const frames = asset.thumbnailFrames?.length
-    ? asset.thumbnailFrames
-    : [{ timeSeconds: 0, imageUrl: asset.thumbnailUrl }];
+  const frames: Array<{ timeSeconds: number; imageUrl: string }> = [{ timeSeconds: 0, imageUrl: asset.thumbnailUrl }];
   const visibleSourceDuration = Math.max(
     0.1,
     (asset.duration ?? (clip.endTime - clip.startTime)) - clip.trimStart - clip.trimEnd,

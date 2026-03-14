@@ -1,12 +1,8 @@
 import React, { useRef, useEffect, useCallback, memo } from 'react';
 import { useEditorStore } from '../../store/editor.store';
-import { useUserSettingsStore } from '../../store/userSettings.store';
 import { AddTrackCommand, RemoveTrackCommand } from '../../engine/commands';
 import type { Track, TrackType, TimelineViewMode, EditTool } from '../../store/editor.store';
 import { editEngine } from '../../engine/EditEngine';
-import { trimEngine } from '../../engine/TrimEngine';
-import { requestTrimWorkspace, scrubTimelineTimecodeTrack } from '../../lib/trimWorkspace';
-import { AvidEditorialGlyph } from '../Icons/AvidEditorialIcons';
 import { TrackHeaders } from './TrackHeaders';
 import { TrackPatchPanel } from './TrackPatchPanel';
 import { Ruler } from './Ruler';
@@ -14,20 +10,47 @@ import { TimelineCanvas } from './TimelineCanvas';
 import { ClipView } from './ClipView';
 import { Playhead } from './Playhead';
 
-function formatTimelineTimecode(seconds: number, fps = 24): string {
-  const roundedFps = Math.max(1, Math.round(fps));
-  const totalFrames = Math.max(0, Math.round(seconds * roundedFps));
-  const hours = Math.floor(totalFrames / (roundedFps * 3600));
-  const minutes = Math.floor((totalFrames % (roundedFps * 3600)) / (roundedFps * 60));
-  const secs = Math.floor((totalFrames % (roundedFps * 60)) / roundedFps);
-  const frames = totalFrames % roundedFps;
+// ─── Avid Colors ─────────────────────────────────────────────────────────────
 
-  return [
-    hours,
-    minutes,
-    secs,
-    frames,
-  ].map((value) => String(value).padStart(2, '0')).join(':');
+const AVID_RED = '#e53935';
+const AVID_YELLOW = '#fdd835';
+
+// ─── Avid-style SVG Icons for Timeline ───────────────────────────────────────
+
+function IconMarkIn({ color }: { color: string }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M6 2H4v12h2v-1H5V3h1V2z" fill={color} />
+    </svg>
+  );
+}
+
+function IconMarkOut({ color }: { color: string }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M10 2h2v12h-2v-1h1V3h-1V2z" fill={color} />
+    </svg>
+  );
+}
+
+function IconGoToIn({ color }: { color: string }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="2" y="2" width="2" height="12" rx="0.5" fill={color} />
+      <path d="M6 2H5v12h1v-1H5.5V3H6V2z" fill={color} opacity="0.7" />
+      <polygon points="7 8 13 4 13 12" fill={color} />
+    </svg>
+  );
+}
+
+function IconGoToOut({ color }: { color: string }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="12" y="2" width="2" height="12" rx="0.5" fill={color} />
+      <path d="M10 2h1v12h-1v-1h.5V3H10V2z" fill={color} opacity="0.7" />
+      <polygon points="9 8 3 4 3 12" fill={color} />
+    </svg>
+  );
 }
 
 // ─── TrackLane ───────────────────────────────────────────────────────────────
@@ -76,6 +99,114 @@ function useKeyboardShortcuts() {
   // No-op — all keyboard dispatch is in hooks/useGlobalKeyboard.ts
 }
 
+// ─── Smart Tool Quadrant Widget ──────────────────────────────────────────────
+
+function SmartToolWidget() {
+  const smartToolLiftOverwrite = useEditorStore((s) => s.smartToolLiftOverwrite);
+  const smartToolExtractSplice = useEditorStore((s) => s.smartToolExtractSplice);
+  const smartToolOverwriteTrim = useEditorStore((s) => s.smartToolOverwriteTrim);
+  const smartToolRippleTrim = useEditorStore((s) => s.smartToolRippleTrim);
+  const toggleSmartToolLiftOverwrite = useEditorStore((s) => s.toggleSmartToolLiftOverwrite);
+  const toggleSmartToolExtractSplice = useEditorStore((s) => s.toggleSmartToolExtractSplice);
+  const toggleSmartToolOverwriteTrim = useEditorStore((s) => s.toggleSmartToolOverwriteTrim);
+  const toggleSmartToolRippleTrim = useEditorStore((s) => s.toggleSmartToolRippleTrim);
+
+  const quadrants = [
+    { active: smartToolLiftOverwrite, toggle: toggleSmartToolLiftOverwrite, label: 'Lift/Overwrite', title: 'Smart Tool: Lift/Overwrite' },
+    { active: smartToolExtractSplice, toggle: toggleSmartToolExtractSplice, label: 'Extract/Splice', title: 'Smart Tool: Extract/Splice' },
+    { active: smartToolOverwriteTrim, toggle: toggleSmartToolOverwriteTrim, label: 'Overwrite Trim', title: 'Smart Tool: Overwrite Trim' },
+    { active: smartToolRippleTrim, toggle: toggleSmartToolRippleTrim, label: 'Ripple Trim', title: 'Smart Tool: Ripple Trim' },
+  ];
+
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '12px 12px',
+        gridTemplateRows: '12px 12px',
+        gap: 1,
+        cursor: 'pointer',
+      }}
+      role="group"
+      aria-label="Smart Tool quadrants"
+    >
+      {quadrants.map((q, i) => (
+        <div
+          key={i}
+          onClick={q.toggle}
+          title={q.title}
+          aria-label={q.label}
+          aria-pressed={q.active}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); q.toggle(); } }}
+          style={{
+            width: 12,
+            height: 12,
+            borderRadius: 1,
+            background: q.active ? 'var(--brand, #5b6af5)' : 'rgba(255,255,255,0.08)',
+            border: '1px solid ' + (q.active ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.06)'),
+            transition: 'background 0.15s',
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ─── Trim Mode Indicator ─────────────────────────────────────────────────────
+
+const TRIM_MODE_LABELS: Record<string, string> = {
+  off: 'No Trim',
+  roll: 'Roll',
+  ripple: 'Ripple',
+  slip: 'Slip',
+  slide: 'Slide',
+  asymmetric: 'Asym',
+};
+
+const TRIM_MODE_COLORS: Record<string, string> = {
+  off: 'var(--text-muted)',
+  roll: '#4fc3f7',
+  ripple: '#81c784',
+  slip: '#ffb74d',
+  slide: '#ce93d8',
+  asymmetric: '#ef9a9a',
+};
+
+function TrimModeIndicator() {
+  const trimMode = useEditorStore((s) => s.trimMode);
+  const setTrimMode = useEditorStore((s) => s.setTrimMode);
+
+  const modes = ['off', 'roll', 'ripple', 'slip', 'slide'] as const;
+
+  const handleCycle = useCallback(() => {
+    const idx = modes.indexOf(trimMode as any);
+    const next = modes[(idx + 1) % modes.length]!;
+    setTrimMode(next);
+  }, [trimMode, setTrimMode]);
+
+  return (
+    <button
+      onClick={handleCycle}
+      title={`Trim Mode: ${TRIM_MODE_LABELS[trimMode] ?? trimMode} (click to cycle)`}
+      aria-label={`Trim mode: ${TRIM_MODE_LABELS[trimMode] ?? trimMode}`}
+      className="tl-btn"
+      style={{
+        fontSize: 9,
+        fontWeight: 700,
+        color: TRIM_MODE_COLORS[trimMode] ?? 'var(--text-muted)',
+        letterSpacing: '0.3px',
+        padding: '2px 6px',
+        minWidth: 40,
+        textAlign: 'center',
+      }}
+    >
+      {TRIM_MODE_LABELS[trimMode] ?? trimMode}
+    </button>
+  );
+}
+
 // ─── TimelinePanel ───────────────────────────────────────────────────────────
 
 export function TimelinePanel() {
@@ -98,13 +229,6 @@ export function TimelinePanel() {
     togglePlay,
     timelineViewMode,
     setTimelineViewMode,
-    activeTool,
-    setActiveTool,
-    trimActive,
-    trimMode,
-    trimSelectionLabel,
-    trimCounterFrames,
-    selectedTrimEditPoints,
     selectedClipIds,
     splitClip,
     showIndex,
@@ -113,54 +237,9 @@ export function TimelinePanel() {
     setOutPoint,
     inPoint,
     outPoint,
-    smartToolLiftOverwrite,
-    smartToolExtractSplice,
-    smartToolOverwriteTrim,
-    smartToolRippleTrim,
-    toggleSmartToolLiftOverwrite,
-    toggleSmartToolExtractSplice,
-    toggleSmartToolOverwriteTrim,
-    toggleSmartToolRippleTrim,
-    setTrimEditPointSide,
-    clearTrimEditPoints,
-    addAdjustmentLayerClip,
   } = useEditorStore();
   const fps = useEditorStore((s) => s.sequenceSettings.fps);
-  const useAvidEditorialIcons = useUserSettingsStore((s) => (
-    s.settings.preferAvidEditorialIcons && s.settings.editorialIconStyle === 'avid'
-  ));
   const frameDuration = 1 / (fps || 24);
-  const trimSelectionSummary = React.useMemo(() => {
-    if (selectedTrimEditPoints.length === 0) {
-      return null;
-    }
-
-    const anchorEditPointTime = selectedTrimEditPoints[selectedTrimEditPoints.length - 1]!.editPointTime;
-    const sides = new Set(selectedTrimEditPoints.map((selection) => selection.side));
-    const distinctEditPointTimes = selectedTrimEditPoints.reduce<number[]>((times, selection) => {
-      if (times.some((time) => Math.abs(time - selection.editPointTime) <= frameDuration)) {
-        return times;
-      }
-
-      times.push(selection.editPointTime);
-      return times;
-    }, []);
-    const selectionLabel = sides.size > 1
-      ? 'ASYM'
-      : sides.has('A_SIDE')
-        ? 'A'
-        : sides.has('B_SIDE')
-          ? 'B'
-          : 'AB';
-
-    return {
-      count: selectedTrimEditPoints.length,
-      anchorEditPointTime,
-      distinctEditPointCount: distinctEditPointTimes.length,
-      hasMultipleEditPoints: distinctEditPointTimes.length > 1,
-      selectionLabel,
-    };
-  }, [frameDuration, selectedTrimEditPoints]);
 
   const contentRef = useRef<HTMLDivElement>(null);
   const totalWidth = Math.max(duration * zoom + 200, 800);
@@ -221,253 +300,68 @@ export function TimelinePanel() {
     }
   }, [tracks]);
 
-  const handleEnterTrim = useCallback(() => {
-    requestTrimWorkspace();
-  }, []);
+  // Go to In/Out handlers
+  const handleGoToIn = useCallback(() => {
+    if (inPoint !== null) setPlayhead(inPoint);
+  }, [inPoint, setPlayhead]);
 
-  const handleExitTrim = useCallback(() => {
-    trimEngine.exitTrimMode();
-  }, []);
-
-  const handleTrimNudge = useCallback((frames: number) => {
-    const state = useEditorStore.getState();
-    const activeFps = state.sequenceSettings.fps || 24;
-    trimEngine.trimByFrames(frames, activeFps);
-  }, []);
-
-  const handleSelectTrimASide = useCallback(() => {
-    trimEngine.selectASide();
-  }, []);
-
-  const handleSelectTrimBSide = useCallback(() => {
-    trimEngine.selectBSide();
-  }, []);
-
-  const handleSelectTrimBothSides = useCallback(() => {
-    trimEngine.selectBothSides();
-  }, []);
-
-  const handleSelectTrimCutASide = useCallback(() => {
-    setTrimEditPointSide('A_SIDE');
-  }, [setTrimEditPointSide]);
-
-  const handleSelectTrimCutBSide = useCallback(() => {
-    setTrimEditPointSide('B_SIDE');
-  }, [setTrimEditPointSide]);
-
-  const handleSelectTrimCutBothSides = useCallback(() => {
-    setTrimEditPointSide('BOTH');
-  }, [setTrimEditPointSide]);
+  const handleGoToOut = useCallback(() => {
+    if (outPoint !== null) setPlayhead(outPoint);
+  }, [outPoint, setPlayhead]);
 
   return (
     <div className="timeline-panel" role="region" aria-label="Timeline Editor">
-      {/* Toolbar -- Figma layout: Index | View modes | Scissors | Transport | Mark | Zoom */}
+      {/* Toolbar -- Avid MC style layout */}
       <div className="timeline-toolbar" role="toolbar" aria-label="Timeline Controls">
-        <div className="timeline-toolbar-section tl-tool-cluster" role="group" aria-label="Edit tools">
+
+        {/* Left Section: Index + Smart Tool + View modes */}
+        <button
+          className={`tl-btn tl-btn-labeled${showIndex ? ' active' : ''}`}
+          title="Index"
+          aria-label="Toggle Index Panel"
+          aria-pressed={showIndex}
+          onClick={toggleIndex}
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" />
+          </svg>
+          <span>Index</span>
+        </button>
+
+        <div className="tl-divider" role="separator" />
+
+        {/* Smart Tool quadrant indicators */}
+        <SmartToolWidget />
+
+        <div className="tl-divider" role="separator" />
+
+        {/* View mode toggles */}
+        <div className="tl-group" role="radiogroup" aria-label="Timeline View Mode">
           {([
-            { id: 'select' as EditTool, label: 'Sel', title: 'Selection Tool' },
-            { id: 'trim' as EditTool, label: 'Trim', title: trimActive ? 'Toggle Big/Small Trim View' : 'Enter Trim Mode' },
-            { id: 'razor' as EditTool, label: 'Add Edit', title: 'Add Edit / Split Tool' },
-            { id: 'slip' as EditTool, label: 'Slip', title: 'Slip Tool' },
-            { id: 'slide' as EditTool, label: 'Slide', title: 'Slide Tool' },
-          ]).map((tool) => (
+            { mode: 'list' as TimelineViewMode, title: 'List View', icon: <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" /></svg> },
+            { mode: 'timeline' as TimelineViewMode, title: 'Timeline View', icon: <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></svg> },
+            { mode: 'waveform' as TimelineViewMode, title: 'Waveform View', icon: <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg> },
+          ]).map(v => (
             <button
-              key={tool.id}
-              className={`tl-btn tl-btn-labeled tl-tool-btn${activeTool === tool.id ? ' active' : ''}`}
-              title={tool.title}
-              aria-label={tool.title}
-              aria-pressed={activeTool === tool.id}
-              onClick={() => setActiveTool(tool.id)}
+              key={v.mode}
+              className={`tl-btn${timelineViewMode === v.mode ? ' active' : ''}`}
+              title={v.title}
+              aria-label={v.title}
+              role="radio"
+              aria-checked={timelineViewMode === v.mode}
+              onClick={() => setTimelineViewMode(v.mode)}
             >
-              {tool.label}
+              {v.icon}
             </button>
           ))}
         </div>
 
         <div className="tl-divider" role="separator" />
 
-        <div className="timeline-toolbar-section tl-trim-deck" role="group" aria-label="Trim controls">
-          <button
-            className={`tl-btn tl-btn-labeled tl-trim-entry${trimActive ? ' active' : ''}`}
-            title={trimSelectionSummary
-              ? `Enter trim from ${trimSelectionSummary.count} selected cut${trimSelectionSummary.count > 1 ? 's' : ''}${trimSelectionSummary.hasMultipleEditPoints ? ` across ${trimSelectionSummary.distinctEditPointCount} edit points` : ''}`
-              : 'Enter Trim Mode'}
-            aria-label={trimActive
-              ? 'Trim mode is active'
-              : trimSelectionSummary
-                ? 'Enter trim mode from the selected cut points'
-                : 'Enter trim mode at the selected cut'}
-            aria-pressed={trimActive}
-            onClick={handleEnterTrim}
-          >
-            {trimActive
-              ? `${trimMode.toUpperCase()} ${trimSelectionLabel}`
-              : trimSelectionSummary
-                ? `${trimSelectionSummary.count} CUT${trimSelectionSummary.count > 1 ? 'S' : ''}`
-                : 'Trim'}
-          </button>
+        {/* Center Section: Transport + Trim + Marks */}
 
-          {(trimActive || trimSelectionSummary) && (
-            <>
-              <button
-                className={`tl-btn tl-btn-labeled${(trimActive ? trimSelectionLabel : trimSelectionSummary?.selectionLabel) === 'A' ? ' active' : ''}`}
-                title="Select A-side trim"
-                aria-label="Select A-side trim"
-                onClick={trimActive ? handleSelectTrimASide : handleSelectTrimCutASide}
-              >
-                A
-              </button>
-              <button
-                className={`tl-btn tl-btn-labeled${(trimActive ? trimSelectionLabel : trimSelectionSummary?.selectionLabel) === 'AB' ? ' active' : ''}`}
-                title="Select both trim sides"
-                aria-label="Select both trim sides"
-                onClick={trimActive ? handleSelectTrimBothSides : handleSelectTrimCutBothSides}
-              >
-                AB
-              </button>
-              <button
-                className={`tl-btn tl-btn-labeled${(trimActive ? trimSelectionLabel : trimSelectionSummary?.selectionLabel) === 'B' ? ' active' : ''}`}
-                title="Select B-side trim"
-                aria-label="Select B-side trim"
-                onClick={trimActive ? handleSelectTrimBSide : handleSelectTrimCutBSide}
-              >
-                B
-              </button>
-              {trimActive ? (
-                <>
-                  <button className="tl-btn tl-btn-labeled" title="Trim left ten frames" aria-label="Trim left ten frames" onClick={() => handleTrimNudge(-10)}>-10</button>
-                  <button className="tl-btn tl-btn-labeled" title="Trim left one frame" aria-label="Trim left one frame" onClick={() => handleTrimNudge(-1)}>-1</button>
-                  <button className="tl-btn tl-btn-labeled" title="Trim right one frame" aria-label="Trim right one frame" onClick={() => handleTrimNudge(1)}>+1</button>
-                  <button className="tl-btn tl-btn-labeled" title="Trim right ten frames" aria-label="Trim right ten frames" onClick={() => handleTrimNudge(10)}>+10</button>
-                  <span className="timeline-toolbar-pill" aria-live="polite">
-                    {trimCounterFrames > 0 ? '+' : ''}{trimCounterFrames}f
-                  </span>
-                  <button className="tl-btn tl-btn-labeled" title="Exit trim mode" aria-label="Exit trim mode" onClick={handleExitTrim}>Exit</button>
-                </>
-              ) : trimSelectionSummary ? (
-                <>
-                  {trimSelectionSummary.selectionLabel === 'ASYM' && (
-                    <span className="timeline-toolbar-pill" aria-live="polite">
-                      ASYM
-                    </span>
-                  )}
-                  {trimSelectionSummary.hasMultipleEditPoints && (
-                    <span className="timeline-toolbar-pill" aria-live="polite">
-                      {trimSelectionSummary.distinctEditPointCount} PTS
-                    </span>
-                  )}
-                  <span className="timeline-toolbar-pill timeline-toolbar-pill-emphasis" aria-live="polite">
-                    {formatTimelineTimecode(trimSelectionSummary.anchorEditPointTime, fps)}
-                  </span>
-                  <button
-                    className="tl-btn tl-btn-labeled"
-                    title="Clear selected cut points"
-                    aria-label="Clear selected cut points"
-                    onClick={clearTrimEditPoints}
-                  >
-                    Clear
-                  </button>
-                </>
-              ) : null}
-            </>
-          )}
-        </div>
-
-        <div className="tl-divider" role="separator" />
-
-        <div className="timeline-toolbar-section" role="group" aria-label="Timeline editing tools">
-          <button
-            className={`tl-btn tl-btn-labeled${showIndex ? ' active' : ''}`}
-            title="Index"
-            aria-label="Toggle Index Panel"
-            aria-pressed={showIndex}
-            onClick={toggleIndex}
-          >
-            Index
-          </button>
-          <button
-            className="tl-btn"
-            title="Add Edit at Playhead"
-            aria-label="Add edit at playhead"
-            onClick={() => {
-              if (selectedClipIds.length > 0) splitClip(selectedClipIds[0]!, playheadTime);
-            }}
-          >
-            {useAvidEditorialIcons ? (
-              <AvidEditorialGlyph name="add-edit" title="Add Edit" />
-            ) : (
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" />
-                <line x1="20" y1="4" x2="8.12" y2="15.88" /><line x1="14.47" y1="14.48" x2="20" y2="20" />
-                <line x1="8.12" y1="8.12" x2="12" y2="12" />
-              </svg>
-            )}
-          </button>
-          <button className="tl-btn" title="Add Track" aria-label="Add video track" onClick={handleAddTrack}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
-          <button
-            className="tl-btn tl-btn-labeled"
-            title="Create adjustment layer on an effect track"
-            aria-label="Create adjustment layer"
-            onClick={() => {
-              addAdjustmentLayerClip();
-            }}
-          >
-            FX Layer
-          </button>
-          <button className="tl-btn" title="Remove Track" aria-label="Remove selected track" onClick={handleRemoveTrack}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
-          <button
-            className={`tl-btn tl-btn-labeled tl-btn-editorial${smartToolLiftOverwrite ? ' active' : ''}`}
-            title="Toggle Lift/Overwrite Segment (Shift+A)"
-            aria-label="Toggle lift or overwrite segment mode"
-            aria-pressed={smartToolLiftOverwrite}
-            onClick={toggleSmartToolLiftOverwrite}
-          >
-            {useAvidEditorialIcons ? <AvidEditorialGlyph name="lift-overwrite" title="Lift/Overwrite Segment" /> : null}
-            <span className="tl-btn-icon-label">OW</span>
-          </button>
-          <button
-            className={`tl-btn tl-btn-labeled tl-btn-editorial${smartToolExtractSplice ? ' active' : ''}`}
-            title="Toggle Extract/Splice-In Segment (Shift+S)"
-            aria-label="Toggle extract or splice segment mode"
-            aria-pressed={smartToolExtractSplice}
-            onClick={toggleSmartToolExtractSplice}
-          >
-            {useAvidEditorialIcons ? <AvidEditorialGlyph name="extract-splice" title="Extract/Splice Segment" /> : null}
-            <span className="tl-btn-icon-label">SP</span>
-          </button>
-          <button
-            className={`tl-btn tl-btn-labeled tl-btn-editorial${smartToolOverwriteTrim ? ' active' : ''}`}
-            title="Toggle Overwrite Trim (Shift+D)"
-            aria-label="Toggle overwrite trim mode"
-            aria-pressed={smartToolOverwriteTrim}
-            onClick={toggleSmartToolOverwriteTrim}
-          >
-            {useAvidEditorialIcons ? <AvidEditorialGlyph name="overwrite-trim" title="Overwrite Trim" /> : null}
-            <span className="tl-btn-icon-label">OT</span>
-          </button>
-          <button
-            className={`tl-btn tl-btn-labeled tl-btn-editorial${smartToolRippleTrim ? ' active' : ''}`}
-            title="Toggle Ripple Trim (Shift+F)"
-            aria-label="Toggle ripple trim mode"
-            aria-pressed={smartToolRippleTrim}
-            onClick={toggleSmartToolRippleTrim}
-          >
-            {useAvidEditorialIcons ? <AvidEditorialGlyph name="ripple-trim" title="Ripple Trim" /> : null}
-            <span className="tl-btn-icon-label">RT</span>
-          </button>
-        </div>
-
-        <div className="tl-divider" role="separator" />
-
-        <div className="timeline-toolbar-section tl-group" role="group" aria-label="Transport Controls">
+        {/* Transport controls */}
+        <div className="tl-group" role="group" aria-label="Transport Controls">
           <button className="tl-btn" title="Step Back (Left Arrow)" aria-label="Step back one frame" onClick={() => setPlayhead(Math.max(0, playheadTime - frameDuration))}>
             <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <rect x="4" y="5" width="3" height="14" rx="1" /><polygon points="20 5 10 12 20 19" />
@@ -499,48 +393,111 @@ export function TimelinePanel() {
 
         <div className="tl-divider" role="separator" />
 
-        <div className="timeline-toolbar-section tl-group" role="group" aria-label="In/Out Points">
+        {/* Trim Mode Indicator */}
+        <TrimModeIndicator />
+
+        <div className="tl-divider" role="separator" />
+
+        {/* Mark In/Out (Avid Red SVG brackets) */}
+        <div className="tl-group" role="group" aria-label="In/Out Points">
           <button
             className={`tl-btn${inPoint !== null ? ' active' : ''}`}
-            title={`Set In (I)${inPoint !== null ? ` -- ${inPoint.toFixed(2)}s` : ''}`}
-            aria-label={`Set In Point${inPoint !== null ? ` (currently ${inPoint.toFixed(2)}s)` : ''}`}
+            title={`Mark In (I)${inPoint !== null ? ` -- ${inPoint.toFixed(2)}s` : ''}`}
+            aria-label={`Mark In Point${inPoint !== null ? ` (currently ${inPoint.toFixed(2)}s)` : ''}`}
             aria-pressed={inPoint !== null}
-            style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 10 }}
+            style={{ color: inPoint !== null ? AVID_RED : undefined }}
             onClick={() => setInPoint(playheadTime)}
-          >I</button>
+          >
+            <IconMarkIn color={inPoint !== null ? AVID_RED : 'currentColor'} />
+          </button>
           <button
             className={`tl-btn${outPoint !== null ? ' active' : ''}`}
-            title={`Set Out (O)${outPoint !== null ? ` -- ${outPoint.toFixed(2)}s` : ''}`}
-            aria-label={`Set Out Point${outPoint !== null ? ` (currently ${outPoint.toFixed(2)}s)` : ''}`}
+            title={`Mark Out (O)${outPoint !== null ? ` -- ${outPoint.toFixed(2)}s` : ''}`}
+            aria-label={`Mark Out Point${outPoint !== null ? ` (currently ${outPoint.toFixed(2)}s)` : ''}`}
             aria-pressed={outPoint !== null}
-            style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 10 }}
+            style={{ color: outPoint !== null ? AVID_RED : undefined }}
             onClick={() => setOutPoint(playheadTime)}
-          >O</button>
+          >
+            <IconMarkOut color={outPoint !== null ? AVID_RED : 'currentColor'} />
+          </button>
+
+          {/* Go to IN (Yellow) */}
+          <button
+            className="tl-btn"
+            title="Go to In (Shift+I)"
+            aria-label="Go to In point"
+            style={{ color: AVID_YELLOW, opacity: inPoint !== null ? 1 : 0.4 }}
+            onClick={handleGoToIn}
+            disabled={inPoint === null}
+          >
+            <IconGoToIn color={AVID_YELLOW} />
+          </button>
+
+          {/* Go to OUT (Yellow) */}
+          <button
+            className="tl-btn"
+            title="Go to Out (Shift+O)"
+            aria-label="Go to Out point"
+            style={{ color: AVID_YELLOW, opacity: outPoint !== null ? 1 : 0.4 }}
+            onClick={handleGoToOut}
+            disabled={outPoint === null}
+          >
+            <IconGoToOut color={AVID_YELLOW} />
+          </button>
         </div>
 
-        <div className="timeline-toolbar-spacer" />
+        <div className="tl-divider" role="separator" />
 
-        <div className="timeline-toolbar-section tl-group" role="radiogroup" aria-label="Timeline View Mode">
-          {([
-            { mode: 'list' as TimelineViewMode, title: 'List View', icon: <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" /></svg> },
-            { mode: 'timeline' as TimelineViewMode, title: 'Timeline View', icon: <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></svg> },
-            { mode: 'waveform' as TimelineViewMode, title: 'Waveform View', icon: <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg> },
-          ]).map((view) => (
-            <button
-              key={view.mode}
-              className={`tl-btn${timelineViewMode === view.mode ? ' active' : ''}`}
-              title={view.title}
-              aria-label={view.title}
-              role="radio"
-              aria-checked={timelineViewMode === view.mode}
-              onClick={() => setTimelineViewMode(view.mode)}
-            >
-              {view.icon}
-            </button>
-          ))}
-        </div>
+        {/* Scissors / Cut tool */}
+        <button
+          className="tl-btn"
+          title="Split Clip (S)"
+          aria-label="Split selected clip at playhead"
+          onClick={() => {
+            if (selectedClipIds.length > 0) splitClip(selectedClipIds[0]!, playheadTime);
+          }}
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" />
+            <line x1="20" y1="4" x2="8.12" y2="15.88" /><line x1="14.47" y1="14.48" x2="20" y2="20" />
+            <line x1="8.12" y1="8.12" x2="12" y2="12" />
+          </svg>
+        </button>
 
-        <div className="timeline-toolbar-section tl-group" role="group" aria-label="Zoom Controls">
+        {/* Title Tool */}
+        <button
+          className="tl-btn"
+          title="Title Tool (Ctrl+T)"
+          aria-label="Open Title Tool"
+          onClick={() => useEditorStore.getState().toggleTitleTool()}
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline points="4 7 4 4 20 4 20 7" />
+            <line x1="9" y1="20" x2="15" y2="20" />
+            <line x1="12" y1="4" x2="12" y2="20" />
+          </svg>
+        </button>
+
+        <div style={{ flex: 1 }} />
+
+        {/* Right Section: Track tools + Zoom */}
+
+        {/* Add / Remove track */}
+        <button className="tl-btn" title="Add Track" aria-label="Add video track" onClick={handleAddTrack}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </button>
+        <button className="tl-btn" title="Remove Track" aria-label="Remove selected track" onClick={handleRemoveTrack}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </button>
+
+        <div className="tl-divider" role="separator" />
+
+        {/* Zoom controls */}
+        <div className="tl-group" role="group" aria-label="Zoom Controls">
           <span className="zoom-label" aria-live="polite">{Math.round(zoom)}px/s</span>
           <button className="tl-btn" onClick={() => setZoom(Math.max(10, zoom / 1.5))} title="Zoom Out" aria-label="Zoom out timeline">
             <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12" /></svg>
@@ -590,7 +547,7 @@ export function TimelinePanel() {
               zoom={zoom}
               scrollLeft={scrollLeft}
               duration={duration}
-              onScrub={scrubTimelineTimecodeTrack}
+              onScrub={setPlayhead}
             />
 
             {tracks.map((track) => (

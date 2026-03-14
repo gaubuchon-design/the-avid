@@ -203,7 +203,7 @@ function SequenceRow({
   onDragStart: (e: React.DragEvent) => void;
 }) {
   const [hovered, setHovered] = useState(false);
-  const tc = new Timecode({ fps: seq.fps, dropFrame: seq.dropFrame });
+  const tc = new Timecode({ fps: seq.settings.fps, dropFrame: seq.settings.dropFrame });
   const durationTC = tc.secondsToTC(seq.duration);
   const trackCount = seq.tracks.length;
   const videoTracks = seq.tracks.filter((t) => t.type === 'VIDEO').length;
@@ -357,7 +357,17 @@ export function SequenceBin() {
 
   const handleCreate = useCallback(() => {
     const nextNum = sequences.length + 1;
-    createSequence(`Sequence ${nextNum}`);
+    createSequence({
+      name: `Sequence ${nextNum}`,
+      fps: 24,
+      dropFrame: false,
+      startTC: 0,
+      width: 1920,
+      height: 1080,
+      sampleRate: 48000,
+      colorSpace: 'rec709',
+      displayTransform: 'sdr-rec709',
+    });
   }, [sequences.length, createSequence]);
 
   const handleContextMenu = useCallback(
