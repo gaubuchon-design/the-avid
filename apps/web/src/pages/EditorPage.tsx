@@ -181,7 +181,7 @@ function QuickExportTab() {
       }}>
         Export Presets
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240, 1fr))', gap: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 8 }}>
         {presets.map((preset) => (
           <button
             key={preset.id}
@@ -245,7 +245,7 @@ function PublishTab() {
       }}>
         Publish Destinations
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200, 1fr))', gap: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
         {destinations.map((dest) => (
           <div
             key={dest.id}
@@ -297,11 +297,9 @@ function PublishTab() {
 
 export function EditorPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const showAIPanel = useEditorStore((s) => s.showAIPanel);
   const showExportPanel = useEditorStore((s) => s.showExportPanel);
   const showSharePanel = useEditorStore((s) => s.showSharePanel);
   const showSettingsPanel = useEditorStore((s) => s.showSettingsPanel);
-  const showTranscriptPanel = useEditorStore((s) => s.showTranscriptPanel);
   const showInspector = useEditorStore((s) => s.showInspector);
   const showNewProjectDialog = useEditorStore((s) => s.showNewProjectDialog);
   const showSequenceDialog = useEditorStore((s) => s.showSequenceDialog);
@@ -388,7 +386,6 @@ export function EditorPage() {
         setShowTracker(prev => !prev);
       }
       // Shift+1-6 to switch pages (Resolve-style)
-      // On US keyboard, Shift+1='!', Shift+2='@', Shift+3='#', Shift+4='$', Shift+5='%', Shift+6='^'
       if (e.shiftKey && !e.metaKey && !e.ctrlKey) {
         const pageMap: Record<string, PageId> = {
           '!': 'media',
@@ -406,48 +403,62 @@ export function EditorPage() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  // Whether we are on the edit page (needs workspace + timeline rows)
+  const isEditPage = activePage === 'edit';
+
   return (
     <div className="editor-shell" onContextMenu={e => e.preventDefault()}>
       <Toolbar />
 
-      {/* Page-specific content */}
+      {/* Non-edit pages: wrapped in page-content-area to span grid rows 3-4 */}
       {activePage === 'media' && (
-        <ErrorBoundary resetKeys={[activePage]}>
-          <MediaPage />
-        </ErrorBoundary>
+        <div className="page-content-area">
+          <ErrorBoundary resetKeys={[activePage]}>
+            <MediaPage />
+          </ErrorBoundary>
+        </div>
       )}
       {activePage === 'cut' && (
-        <ErrorBoundary resetKeys={[activePage]}>
-          <CutPage />
-        </ErrorBoundary>
+        <div className="page-content-area">
+          <ErrorBoundary resetKeys={[activePage]}>
+            <CutPage />
+          </ErrorBoundary>
+        </div>
       )}
       {activePage === 'color' && (
-        <ErrorBoundary resetKeys={[activePage]}>
-          <div style={{ gridRow: '2 / 5', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>Color Page</div>
-        </ErrorBoundary>
+        <div className="page-content-area">
+          <ErrorBoundary resetKeys={[activePage]}>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>Color Page</div>
+          </ErrorBoundary>
+        </div>
       )}
       {activePage === 'vfx' && (
-        <ErrorBoundary resetKeys={[activePage]}>
-          <Suspense fallback={<LoadingSpinner />}>
-            <VFXPage />
-          </Suspense>
-        </ErrorBoundary>
+        <div className="page-content-area">
+          <ErrorBoundary resetKeys={[activePage]}>
+            <Suspense fallback={<LoadingSpinner />}>
+              <VFXPage />
+            </Suspense>
+          </ErrorBoundary>
+        </div>
       )}
       {activePage === 'protools' && (
-        <ErrorBoundary resetKeys={[activePage]}>
-          <Suspense fallback={<LoadingSpinner />}>
-            <ProToolsPage />
-          </Suspense>
-        </ErrorBoundary>
+        <div className="page-content-area">
+          <ErrorBoundary resetKeys={[activePage]}>
+            <Suspense fallback={<LoadingSpinner />}>
+              <ProToolsPage />
+            </Suspense>
+          </ErrorBoundary>
+        </div>
       )}
-      {activePage === 'edit' && (
+
+      {/* Edit page: workspace (row 3) + timeline (row 4) */}
+      {isEditPage && (
         <>
           <div className={`workspace${showInspector ? '' : ' no-inspector'}`}>
             <div className="left-panels">
               <PanelErrorBoundary panelName="BinPanel">
                 <BinPanel />
               </PanelErrorBoundary>
-              {/* TranscriptPanel removed in this branch */}
             </div>
             <div className="canvas-area" style={{ position: 'relative' }}>
               <PanelErrorBoundary panelName="ComposerPanel">
@@ -465,7 +476,6 @@ export function EditorPage() {
                   <TrackingOverlay width={1920} height={1080} />
                 </PanelErrorBoundary>
               )}
-              {/* AIPanel removed in this branch */}
             </div>
             {/* Planar tracker side panel */}
             {showTracker && (
@@ -487,8 +497,6 @@ export function EditorPage() {
 
       <PageNavigation activePage={activePage} onPageChange={setActivePage} />
       <StatusBar />
-
-      {/* Command Palette removed in this branch */}
 
       {showExportPanel && (
         <div
@@ -544,7 +552,8 @@ export function EditorPage() {
       {showAlphaImportDialog && <AlphaImportDialog />}
       {showTitleTool && (
         <div style={{
-          position: 'fixed', top: 40, right: showInspector ? 340 : 0, bottom: 40,
+          position: 'fixed', top: 'var(--toolbar-h)', right: showInspector ? 'calc(var(--inspector-w) + 60px)' : 0,
+          bottom: 'calc(var(--statusbar-h) + 28px)',
           width: 360, zIndex: 900,
           background: 'var(--bg-surface)',
           borderLeft: '1px solid var(--border-default)',
@@ -555,7 +564,8 @@ export function EditorPage() {
       )}
       {showSubtitleEditor && (
         <div style={{
-          position: 'fixed', top: 40, right: showInspector ? 340 : 0, bottom: 40,
+          position: 'fixed', top: 'var(--toolbar-h)', right: showInspector ? 'calc(var(--inspector-w) + 60px)' : 0,
+          bottom: 'calc(var(--statusbar-h) + 28px)',
           width: 380, zIndex: 900,
           background: 'var(--bg-surface)',
           borderLeft: '1px solid var(--border-default)',
