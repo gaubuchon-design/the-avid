@@ -12,187 +12,6 @@ import { TimelinePanel } from '../components/TimelinePanel/TimelinePanel';
 import { BinPanel } from '../components/Bins/BinPanel';
 import { useEditorStore } from '../store/editor.store';
 
-// ─── Styles ─────────────────────────────────────────────────────────────────
-
-const S = {
-  root: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column' as const,
-    overflow: 'hidden',
-  } as React.CSSProperties,
-  topArea: {
-    flex: 1,
-    display: 'flex',
-    overflow: 'hidden',
-    minHeight: 0,
-  } as React.CSSProperties,
-  binStrip: {
-    width: 200,
-    flexShrink: 0,
-    borderRight: '1px solid var(--border-default)',
-    display: 'flex',
-    flexDirection: 'column' as const,
-    overflow: 'hidden',
-  } as React.CSSProperties,
-  monitorArea: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column' as const,
-    minWidth: 0,
-    overflow: 'hidden',
-  } as React.CSSProperties,
-  monitors: {
-    flex: 1,
-    display: 'flex',
-    overflow: 'hidden',
-    minHeight: 0,
-  } as React.CSSProperties,
-  // Source Tape Bar
-  sourceTapeBar: {
-    height: 56,
-    flexShrink: 0,
-    borderBottom: '1px solid var(--border-default)',
-    background: 'var(--bg-raised)',
-    display: 'flex',
-    alignItems: 'center',
-    padding: '0 8px',
-    gap: 4,
-    overflow: 'hidden',
-  } as React.CSSProperties,
-  sourceTapeThumb: (isActive: boolean) => ({
-    width: 72,
-    height: 42,
-    flexShrink: 0,
-    borderRadius: 3,
-    border: `2px solid ${isActive ? 'var(--brand)' : 'transparent'}`,
-    background: 'var(--bg-void)',
-    cursor: 'pointer',
-    position: 'relative' as const,
-    overflow: 'hidden',
-    transition: 'border-color 100ms',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  }),
-  sourceTapeLabel: {
-    fontSize: 7,
-    color: 'rgba(255,255,255,0.6)',
-    fontWeight: 600,
-    textAlign: 'center' as const,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap' as const,
-    maxWidth: 68,
-  } as React.CSSProperties,
-  // Quick Actions Bar
-  quickBar: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '4px 8px',
-    borderBottom: '1px solid var(--border-subtle)',
-    background: 'var(--bg-surface)',
-    flexShrink: 0,
-  } as React.CSSProperties,
-  quickBtn: (variant: 'primary' | 'secondary' | 'accent') => ({
-    padding: '4px 10px',
-    fontSize: 9,
-    fontWeight: 700,
-    letterSpacing: '0.04em',
-    textTransform: 'uppercase' as const,
-    border: 'none',
-    borderRadius: 4,
-    cursor: 'pointer',
-    transition: 'all 100ms',
-    background: variant === 'primary'
-      ? 'var(--brand)'
-      : variant === 'accent'
-        ? 'rgba(34,197,94,0.15)'
-        : 'rgba(255,255,255,0.08)',
-    color: variant === 'primary'
-      ? '#fff'
-      : variant === 'accent'
-        ? '#22c55e'
-        : 'var(--text-secondary)',
-  }),
-  // Duration Overlay
-  durationOverlay: {
-    position: 'absolute' as const,
-    top: 8,
-    right: 8,
-    background: 'rgba(0,0,0,0.7)',
-    backdropFilter: 'blur(8px)',
-    borderRadius: 6,
-    padding: '6px 12px',
-    display: 'flex',
-    flexDirection: 'column' as const,
-    alignItems: 'flex-end',
-    gap: 2,
-    zIndex: 5,
-    border: '1px solid rgba(255,255,255,0.08)',
-  } as React.CSSProperties,
-  durationLabel: {
-    fontSize: 8,
-    fontWeight: 700,
-    letterSpacing: '0.08em',
-    textTransform: 'uppercase' as const,
-    color: 'var(--text-muted)',
-  } as React.CSSProperties,
-  durationValue: {
-    fontFamily: 'var(--font-mono)',
-    fontSize: 16,
-    fontWeight: 700,
-    color: 'var(--text-primary)',
-    letterSpacing: '0.02em',
-  } as React.CSSProperties,
-  // Quick Transition Buttons
-  transitionBar: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    padding: '4px 0',
-    borderBottom: '1px solid var(--border-subtle)',
-    background: 'var(--bg-surface)',
-    flexShrink: 0,
-  } as React.CSSProperties,
-  transitionBtn: (isActive: boolean) => ({
-    padding: '3px 12px',
-    fontSize: 9,
-    fontWeight: 600,
-    letterSpacing: '0.03em',
-    border: `1px solid ${isActive ? 'var(--brand)' : 'var(--border-subtle)'}`,
-    borderRadius: 4,
-    cursor: 'pointer',
-    background: isActive ? 'var(--brand-dim)' : 'transparent',
-    color: isActive ? 'var(--brand-bright)' : 'var(--text-muted)',
-    transition: 'all 100ms',
-  }),
-  // Compact Timeline
-  compactTimeline: {
-    height: 160,
-    flexShrink: 0,
-    borderTop: '1px solid var(--border-default)',
-    position: 'relative' as const,
-    overflow: 'hidden',
-  } as React.CSSProperties,
-  // Source Tape Mode Badge
-  modeBadge: (active: boolean) => ({
-    padding: '3px 8px',
-    fontSize: 8,
-    fontWeight: 700,
-    letterSpacing: '0.06em',
-    textTransform: 'uppercase' as const,
-    borderRadius: 4,
-    background: active ? 'rgba(91,106,245,0.15)' : 'rgba(255,255,255,0.06)',
-    color: active ? 'var(--brand-bright)' : 'var(--text-muted)',
-    border: `1px solid ${active ? 'var(--brand)' : 'transparent'}`,
-    cursor: 'pointer',
-    transition: 'all 150ms',
-  }),
-};
-
 // ─── Source Tape (Filmstrip of all media concatenated) ──────────────────────
 
 interface SourceTapeItem {
@@ -214,7 +33,7 @@ const SourceTape = memo(function SourceTape({
 
   useEffect(() => {
     if (scrollRef.current) {
-      const activeEl = scrollRef.current.children[activeIndex] as HTMLElement | undefined;
+      const activeEl = scrollRef.current.children[activeIndex + 1] as HTMLElement | undefined;
       if (activeEl) {
         activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
       }
@@ -224,21 +43,15 @@ const SourceTape = memo(function SourceTape({
   return (
     <div
       ref={scrollRef}
-      style={S.sourceTapeBar}
+      className="cut-page__source-tape"
       role="listbox"
       aria-label="Source tape - all media clips"
     >
-      <span style={{
-        fontSize: 8, fontWeight: 700, letterSpacing: '0.06em',
-        textTransform: 'uppercase', color: 'var(--text-muted)',
-        marginRight: 4, flexShrink: 0,
-      }}>
-        TAPE
-      </span>
+      <span className="cut-page__source-tape-label">TAPE</span>
       {items.map((item, i) => (
         <div
           key={item.id}
-          style={S.sourceTapeThumb(i === activeIndex)}
+          className={`cut-page__tape-thumb${i === activeIndex ? ' is-active' : ''}`}
           onClick={() => onSelect(i)}
           role="option"
           aria-selected={i === activeIndex}
@@ -251,7 +64,7 @@ const SourceTape = memo(function SourceTape({
             background: 'linear-gradient(transparent, rgba(0,0,0,0.8))',
             padding: '2px 3px',
           }}>
-            <span style={S.sourceTapeLabel}>{item.name}</span>
+            <span className="cut-page__tape-thumb-label">{item.name}</span>
           </div>
           {/* Color accent bar */}
           <div style={{
@@ -283,20 +96,20 @@ function formatDuration(seconds: number): string {
 
 function CutPageSkeleton() {
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }} aria-hidden="true">
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
-        <div style={{ width: 200, flexShrink: 0, borderRight: '1px solid var(--border-default)', background: 'var(--bg-surface)' }}>
+    <div className="cut-page" aria-hidden="true">
+      <div className="cut-page__top">
+        <div className="cut-page__bin-strip" style={{ background: 'var(--bg-surface)' }}>
           <div style={{ padding: 12 }}>
             {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} style={{ height: 12, background: 'var(--bg-elevated)', borderRadius: 3, marginBottom: 8, width: `${60 + Math.random() * 40}%` }} />
+              <div key={i} className="skeleton" style={{ height: 12, marginBottom: 8, width: `${60 + Math.random() * 40}%` }} />
             ))}
           </div>
         </div>
         <div style={{ flex: 1, background: 'var(--bg-void)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ width: 48, height: 48, borderRadius: '50%', border: '2px solid var(--border-subtle)', borderTopColor: 'var(--brand)', animation: 'spin 0.8s linear infinite' }} />
+          <div className="loading-spinner-ring" />
         </div>
       </div>
-      <div style={{ height: 160, flexShrink: 0, borderTop: '1px solid var(--border-default)', background: 'var(--bg-surface)' }} />
+      <div className="cut-page__timeline" style={{ background: 'var(--bg-surface)' }} />
     </div>
   );
 }
@@ -352,8 +165,6 @@ export function CutPage() {
 
   // Smart Insert: auto-detect best insert point (demo: insert at playhead)
   const handleSmartInsert = useCallback(() => {
-    // In production, this would analyze the timeline for the optimal cut point
-    // For now, it just triggers an insert at the playhead position
     console.log('[CutPage] Smart Insert at', playheadTime);
   }, [playheadTime]);
 
@@ -365,19 +176,19 @@ export function CutPage() {
 
   return (
     <div
-      style={S.root}
+      className="cut-page"
       role="region"
       aria-label="Cut Page - Speed-focused editing"
     >
       {/* Top: Source Tape + Monitors */}
-      <div style={S.topArea}>
+      <div className="cut-page__top">
         {/* Compact bin strip */}
-        <div style={S.binStrip}>
+        <div className="cut-page__bin-strip">
           <BinPanel />
         </div>
 
         {/* Monitor + Controls area */}
-        <div style={S.monitorArea}>
+        <div className="cut-page__monitor-area">
           {/* Source Tape filmstrip */}
           {sourceTapeMode && (
             <SourceTape
@@ -388,9 +199,9 @@ export function CutPage() {
           )}
 
           {/* Quick Actions Bar */}
-          <div style={S.quickBar}>
+          <div className="cut-page__quick-bar">
             <div
-              style={S.modeBadge(sourceTapeMode)}
+              className={`cut-page__mode-badge${sourceTapeMode ? ' is-active' : ''}`}
               onClick={() => setSourceTapeMode((p) => !p)}
               role="switch"
               aria-checked={sourceTapeMode}
@@ -404,7 +215,7 @@ export function CutPage() {
             <div style={{ width: 1, height: 16, background: 'var(--border-subtle)' }} />
 
             <button
-              style={S.quickBtn(fastReviewActive ? 'accent' : 'secondary')}
+              className={`cut-page__quick-btn ${fastReviewActive ? 'cut-page__quick-btn--accent' : 'cut-page__quick-btn--secondary'}`}
               onClick={handleFastReview}
               title="Fast Review (2x playback)"
               aria-label="Fast Review"
@@ -414,7 +225,7 @@ export function CutPage() {
             </button>
 
             <button
-              style={S.quickBtn('primary')}
+              className="cut-page__quick-btn cut-page__quick-btn--primary"
               onClick={handleSmartInsert}
               title="Smart Insert at optimal cut point"
               aria-label="Smart Insert"
@@ -422,42 +233,30 @@ export function CutPage() {
               Smart Insert
             </button>
 
-            <div style={{ flex: 1 }} />
+            <div className="cut-page__quick-spacer" />
 
             {/* Duration Readout (compact) */}
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-              <span style={{ fontSize: 8, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                DUR
-              </span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
-                {formatDuration(safeDuration)}
-              </span>
+            <div className="cut-page__dur-readout">
+              <span className="cut-page__dur-label">DUR</span>
+              <span className="cut-page__dur-value">{formatDuration(safeDuration)}</span>
             </div>
           </div>
 
           {/* Dual Monitors */}
-          <div style={S.monitors}>
+          <div className="cut-page__monitors">
             {/* Source Monitor */}
-            <div
-              style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, borderRight: '1px solid var(--border-subtle)', position: 'relative' }}
-              role="region"
-              aria-label="Source monitor"
-            >
+            <div className="cut-page__monitor-slot" role="region" aria-label="Source monitor">
               <SourceMonitor />
             </div>
 
             {/* Record Monitor */}
-            <div
-              style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, position: 'relative' }}
-              role="region"
-              aria-label="Record monitor"
-            >
+            <div className="cut-page__monitor-slot" role="region" aria-label="Record monitor">
               <RecordMonitor />
               {/* Duration Overlay on Record Monitor */}
-              <div style={S.durationOverlay}>
-                <span style={S.durationLabel}>Sequence</span>
-                <span style={S.durationValue}>{formatDuration(safeDuration)}</span>
-                <span style={{ ...S.durationLabel, color: 'var(--brand-bright)', marginTop: 2 }}>
+              <div className="cut-page__duration-overlay">
+                <span className="cut-page__duration-overlay-label">Sequence</span>
+                <span className="cut-page__duration-overlay-value">{formatDuration(safeDuration)}</span>
+                <span className="cut-page__duration-overlay-frames">
                   {Math.ceil(safeDuration * 24)} frames
                 </span>
               </div>
@@ -467,7 +266,7 @@ export function CutPage() {
       </div>
 
       {/* Quick Transition Buttons */}
-      <div style={S.transitionBar} role="radiogroup" aria-label="Quick transition type">
+      <div className="cut-page__transition-bar" role="radiogroup" aria-label="Quick transition type">
         {[
           { id: 'cut' as const, label: 'Straight Cut', icon: '|' },
           { id: 'dissolve' as const, label: 'Dissolve', icon: 'X' },
@@ -475,7 +274,7 @@ export function CutPage() {
         ].map((t) => (
           <button
             key={t.id}
-            style={S.transitionBtn(activeTransition === t.id)}
+            className={`cut-page__transition-btn${activeTransition === t.id ? ' is-active' : ''}`}
             onClick={() => setActiveTransition(t.id)}
             role="radio"
             aria-checked={activeTransition === t.id}
@@ -489,32 +288,20 @@ export function CutPage() {
         <div style={{ width: 1, height: 16, background: 'var(--border-subtle)', margin: '0 4px' }} />
 
         {/* Transition duration */}
-        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, color: 'var(--text-muted)' }}>
-          <span style={{ fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Dur:</span>
-          <select
-            style={{
-              background: 'var(--bg-void)', border: '1px solid var(--border-default)',
-              borderRadius: 3, color: 'var(--text-primary)', fontSize: 9,
-              padding: '2px 4px', fontFamily: 'var(--font-mono)',
-            }}
-            aria-label="Transition duration"
-            defaultValue="15"
-          >
+        <div className="cut-page__transition-dur">
+          <span className="cut-page__transition-dur-label">Dur:</span>
+          <select aria-label="Transition duration" defaultValue="15">
             <option value="6">6f</option>
             <option value="10">10f</option>
             <option value="15">15f</option>
             <option value="24">1s</option>
             <option value="48">2s</option>
           </select>
-        </label>
+        </div>
       </div>
 
       {/* Compact Timeline (no view mode toggles, no zoom slider) */}
-      <div
-        style={S.compactTimeline}
-        role="region"
-        aria-label="Cut page compact timeline"
-      >
+      <div className="cut-page__timeline" role="region" aria-label="Cut page compact timeline">
         <TimelinePanel />
       </div>
     </div>

@@ -22,8 +22,6 @@ export function Toolbar() {
     ? tracks.flatMap(t => t.clips).find(c => c.id === selectedClipIds[0])
     : null;
 
-  // Undo/Redo now handled by global KeyboardEngine via EditorPage registrations
-
   return (
     <div className="toolbar-wrapper" role="banner">
       {/* Main toolbar row */}
@@ -49,7 +47,7 @@ export function Toolbar() {
 
         <div className="toolbar-divider" />
 
-        {/* Media / Effects tabs -- Figma style */}
+        {/* Media / Effects tabs */}
         <div className="toolbar-nav-tabs" role="tablist" aria-label="Content tabs">
           <button
             className={`toolbar-nav-tab${toolbarTab === 'media' ? ' active' : ''}`}
@@ -154,7 +152,7 @@ export function Toolbar() {
           </svg>
         </button>
 
-        {/* Inspector toggle — purple when active */}
+        {/* Inspector toggle */}
         <button
           className={`toolbar-inspector-toggle${showInspector ? ' active' : ''}`}
           onClick={toggleInspector}
@@ -164,7 +162,7 @@ export function Toolbar() {
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <rect x="2" y="3" width="20" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
           </svg>
-          Inspector
+          <span>Inspector</span>
         </button>
 
         {/* Settings */}
