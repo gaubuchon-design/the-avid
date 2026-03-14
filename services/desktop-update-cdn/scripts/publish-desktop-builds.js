@@ -305,6 +305,7 @@ async function uploadFile(blobPathname, filePath, dryRun) {
     token,
     access: 'public',
     addRandomSuffix: false,
+    allowOverwrite: true,
     contentType,
     cacheControlMaxAge: maxAge,
   });
