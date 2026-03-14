@@ -199,11 +199,63 @@ export interface TranscriptCue {
   id: string;
   assetId?: string;
   speaker: string;
+  speakerId?: string;
   text: string;
   startTime: number;
   endTime: number;
   source: 'SCRIPT' | 'TRANSCRIPT';
+  confidence?: number;
+  language?: string;
+  translation?: string;
+  provider?: string;
+  linkedScriptLineIds?: string[];
+  words?: Array<{ text: string; startTime: number; endTime: number; confidence?: number }>;
 }
+
+export interface TranscriptSpeaker {
+  id: string;
+  name?: string;
+  label?: string;
+  color?: string;
+  confidence?: number;
+  identified?: boolean;
+}
+
+export interface ScriptDocumentLine {
+  id: string;
+  text: string;
+  lineNumber?: number;
+  speaker?: string;
+  linkedCueIds?: string[];
+}
+
+export interface ScriptDocument {
+  id?: string;
+  title: string;
+  source: 'IMPORTED' | 'GENERATED' | 'MANUAL';
+  language?: string;
+  text?: string;
+  lines: ScriptDocumentLine[];
+  createdAt?: string;
+  updatedAt: string;
+}
+
+export type DesktopMonitorConsumer = 'record-monitor' | 'program-monitor';
+
+export interface DesktopMonitorAudioPreviewStatus {
+  bufferedPreviewActive: boolean;
+  previewRenderArtifacts: string[];
+  offlinePrintRenderRequired: boolean;
+}
+
+export interface TrimEditPointSelection {
+  trackId: string;
+  editPointTime: number;
+  side: 'A_SIDE' | 'B_SIDE' | 'BOTH';
+}
+
+export type TrimViewMode = 'big' | 'small';
+export type TrimLoopDurationPreset = 'short' | 'medium' | 'long' | 'custom';
 
 export interface ReviewComment {
   id: string;
@@ -523,6 +575,52 @@ interface EditorState {
   recentSearches: string[];
   searchScope: 'current' | 'all';
   searchFilterChips: SearchFilterChip[];
+
+  // Trim extended state (for trim overlay / loop playback)
+  trimSelectionLabel: 'OFF' | 'A' | 'B' | 'AB' | 'ASYM';
+  trimCounterFrames: number;
+  trimASideFrames: number;
+  trimBSideFrames: number;
+  trimViewMode: TrimViewMode;
+  trimLoopPlaybackActive: boolean;
+  trimLoopPlaybackDirection: number;
+  trimLoopPlaybackRate: number;
+  trimLoopDurationPreset: TrimLoopDurationPreset;
+  trimLoopPreRollFrames: number;
+  trimLoopPostRollFrames: number;
+  trimLoopOffsetFrames: number;
+  selectedTrimEditPoints: TrimEditPointSelection[];
+
+  // Video monitor track
+  videoMonitorTrackId: string | null;
+  trackPatchLabels: string[];
+
+  // Desktop monitor audio preview
+  desktopMonitorAudioPreview: Record<DesktopMonitorConsumer, DesktopMonitorAudioPreviewStatus | null>;
+
+  // Project persistence extended fields
+  projectTemplate: string;
+  projectDescription: string;
+  projectTags: string[];
+  projectSchemaVersion: number;
+  projectCreatedAt: string | null;
+
+  // Transcript extended
+  transcriptSpeakers: TranscriptSpeaker[];
+  scriptDocument: ScriptDocument | null;
+  transcriptionSettings: {
+    language: string;
+    provider: string;
+    autoTranscribe: boolean;
+  };
+
+  // Version history
+  versionHistoryRetentionPreference: 'manual' | 'session';
+  versionHistoryCompareMode: 'summary' | 'details';
+
+  // Sequence source
+  sourceSequenceId: string | null;
+  showSequenceBin: boolean;
 }
 
 export type BinSortField = 'name' | 'date-modified' | 'date-created' | 'size' | 'type' | 'duration';
@@ -805,6 +903,50 @@ interface EditorActions {
   addRecentSearch: (search: string) => void;
   setSearchScope: (scope: 'current' | 'all') => void;
   toggleSearchFilterChip: (type: SearchFilterChip['type'], value: string) => void;
+
+  // Trim extended actions
+  toggleTrimViewMode: () => void;
+  setTrimViewMode: (mode: TrimViewMode) => void;
+  toggleTrimLoopPlayback: () => void;
+  setTrimLoopDurationPreset: (preset: TrimLoopDurationPreset) => void;
+  setTrimLoopRollFrames: (pre: number, post: number) => void;
+  setTrimLoopOffsetFrames: (frames: number) => void;
+  setTrimLoopPlaybackActive: (active: boolean) => void;
+  selectTrimEditPoint: (selection: TrimEditPointSelection, multi?: boolean) => void;
+  clearTrimEditPoints: () => void;
+
+  // Video monitor track
+  setVideoMonitorTrack: (trackId: string | null) => void;
+
+  // Track color
+  updateTrackColor: (trackId: string, color: string) => void;
+  updateBinColor: (binId: string, color: string) => void;
+
+  // Desktop monitor audio preview
+  setDesktopMonitorAudioPreview: (consumer: DesktopMonitorConsumer, status: DesktopMonitorAudioPreviewStatus) => void;
+  clearDesktopMonitorAudioPreview: (consumer: DesktopMonitorConsumer) => void;
+
+  // Transcript extended actions
+  updateTranscriptCue: (cueId: string, patch: Partial<TranscriptCue>) => void;
+  replaceTranscript: (cues: TranscriptCue[], speakers?: TranscriptSpeaker[]) => void;
+  setScriptDocument: (doc: ScriptDocument | null) => void;
+  updateScriptDocumentText: (lineIdOrText: string, text?: string) => void;
+  syncScriptDocumentToTranscript: () => void;
+  updateTranscriptionSettings: (patch: Record<string, unknown>) => void;
+  buildTranscriptTitleEffects: (options?: Record<string, unknown>) => number;
+
+  // Lift / Extract edits (Avid-style)
+  liftEdit: () => void;
+  extractEdit: () => void;
+
+  // Sequence source
+  loadSequenceInSource: (seqId: string) => void;
+  setActiveSequence: (seqId: string) => void;
+  editSourceToRecord: (mode?: 'insert' | 'overwrite') => void;
+  toggleSequenceBin: () => void;
+
+  // Version history / persistence
+  restoreProjectSnapshot: (snapshot: unknown) => void;
 }
 
 // Waveform generator (random for demo)
@@ -911,6 +1053,19 @@ function getPreferredTrack(state: Pick<EditorState, 'tracks' | 'selectedTrackId'
 // Functions are not compatible with Immer proxies, so we store
 // the resolve callback outside of the store state.
 let _alphaDialogResolve: ((mode: AlphaMode) => void) | null = null;
+
+export const BIN_COLOR_PRESETS: string[] = [
+  '#5b6af5', '#e04e4e', '#e0a44e', '#4eb5e0', '#4ee07a',
+  '#a44ee0', '#e04eb5', '#999999', '#ffffff', '#333333',
+];
+
+export const TRACK_COLOR_PRESETS: Record<string, string[]> = {
+  VIDEO: ['#5b6af5', '#4eb5e0', '#4ee07a', '#e0a44e', '#e04e4e', '#a44ee0'],
+  AUDIO: ['#e04eb5', '#4eb5e0', '#4ee07a', '#e0a44e', '#e04e4e', '#5b6af5'],
+  GRAPHIC: ['#a44ee0', '#5b6af5', '#4ee07a', '#e0a44e', '#e04e4e', '#4eb5e0'],
+  EFFECT: ['#e0a44e', '#5b6af5', '#4ee07a', '#4eb5e0', '#e04e4e', '#a44ee0'],
+  SUBTITLE: ['#999999', '#5b6af5', '#4eb5e0', '#4ee07a', '#e0a44e', '#e04e4e'],
+};
 
 const DEMO_BINS: Bin[] = [];
 
@@ -1078,6 +1233,55 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       { type: 'type', value: 'IMAGE', active: false },
       { type: 'favorite', value: 'true', active: false },
     ] as SearchFilterChip[],
+
+    // Trim extended state
+    trimSelectionLabel: 'OFF' as EditorState['trimSelectionLabel'],
+    trimCounterFrames: 0,
+    trimASideFrames: 0,
+    trimBSideFrames: 0,
+    trimViewMode: 'small' as TrimViewMode,
+    trimLoopPlaybackActive: false,
+    trimLoopPlaybackDirection: 1,
+    trimLoopPlaybackRate: 1,
+    trimLoopDurationPreset: 'medium' as TrimLoopDurationPreset,
+    trimLoopPreRollFrames: 12,
+    trimLoopPostRollFrames: 12,
+    trimLoopOffsetFrames: 0,
+    selectedTrimEditPoints: [] as TrimEditPointSelection[],
+
+    // Video monitor track
+    videoMonitorTrackId: null as string | null,
+    trackPatchLabels: [] as string[],
+
+    // Desktop monitor audio preview
+    desktopMonitorAudioPreview: {
+      'record-monitor': null,
+      'program-monitor': null,
+    } as Record<DesktopMonitorConsumer, DesktopMonitorAudioPreviewStatus | null>,
+
+    // Project persistence extended fields
+    projectTemplate: 'default' as string,
+    projectDescription: '' as string,
+    projectTags: [] as string[],
+    projectSchemaVersion: 1,
+    projectCreatedAt: null as string | null,
+
+    // Transcript extended
+    transcriptSpeakers: [] as TranscriptSpeaker[],
+    scriptDocument: null as ScriptDocument | null,
+    transcriptionSettings: {
+      language: 'en',
+      provider: 'browser',
+      autoTranscribe: false,
+    },
+
+    // Version history
+    versionHistoryRetentionPreference: 'session' as 'manual' | 'session',
+    versionHistoryCompareMode: 'summary' as 'summary' | 'details',
+
+    // Sequence source
+    sourceSequenceId: null as string | null,
+    showSequenceBin: false,
 
     // Actions
     setPlayhead: (t) => set((s) => { s.playheadTime = Math.max(0, Math.min(t, s.duration)); }),
@@ -2692,6 +2896,111 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         s.searchFilterChips.push({ type, value, active: true });
       }
     }),
+
+    // Trim extended actions
+    toggleTrimViewMode: () => set((s) => {
+      s.trimViewMode = s.trimViewMode === 'big' ? 'small' : 'big';
+    }),
+    setTrimViewMode: (mode) => set((s) => { s.trimViewMode = mode; }),
+    toggleTrimLoopPlayback: () => set((s) => {
+      s.trimLoopPlaybackActive = !s.trimLoopPlaybackActive;
+    }),
+    setTrimLoopDurationPreset: (preset) => set((s) => {
+      s.trimLoopDurationPreset = preset;
+      if (preset === 'short') { s.trimLoopPreRollFrames = 6; s.trimLoopPostRollFrames = 6; }
+      else if (preset === 'medium') { s.trimLoopPreRollFrames = 12; s.trimLoopPostRollFrames = 12; }
+      else if (preset === 'long') { s.trimLoopPreRollFrames = 24; s.trimLoopPostRollFrames = 24; }
+    }),
+    setTrimLoopRollFrames: (pre, post) => set((s) => {
+      s.trimLoopPreRollFrames = pre;
+      s.trimLoopPostRollFrames = post;
+      s.trimLoopDurationPreset = 'custom';
+    }),
+    setTrimLoopOffsetFrames: (frames) => set((s) => { s.trimLoopOffsetFrames = frames; }),
+    setTrimLoopPlaybackActive: (active) => set((s) => { s.trimLoopPlaybackActive = active; }),
+    selectTrimEditPoint: (selection, multi) => set((s) => {
+      if (multi) {
+        s.selectedTrimEditPoints.push(selection);
+      } else {
+        s.selectedTrimEditPoints = [selection];
+      }
+    }),
+    clearTrimEditPoints: () => set((s) => { s.selectedTrimEditPoints = []; }),
+
+    // Video monitor track
+    setVideoMonitorTrack: (trackId) => set((s) => { s.videoMonitorTrackId = trackId; }),
+
+    // Track color
+    updateTrackColor: (trackId, color) => set((s) => {
+      const track = s.tracks.find((t) => t.id === trackId);
+      if (track) track.color = color;
+    }),
+    updateBinColor: (binId, color) => set((s) => {
+      const findAndColor = (bins: Bin[]) => {
+        for (const bin of bins) {
+          if (bin.id === binId) { bin.color = color; return; }
+          findAndColor(bin.children);
+        }
+      };
+      findAndColor(s.bins);
+    }),
+
+    // Desktop monitor audio preview
+    setDesktopMonitorAudioPreview: (consumer, status) => set((s) => {
+      s.desktopMonitorAudioPreview[consumer] = status;
+    }),
+    clearDesktopMonitorAudioPreview: (consumer) => set((s) => {
+      s.desktopMonitorAudioPreview[consumer] = null;
+    }),
+
+    // Transcript extended actions
+    updateTranscriptCue: (cueId, patch) => set((s) => {
+      const cue = s.transcript.find((c) => c.id === cueId);
+      if (cue) Object.assign(cue, patch);
+    }),
+    replaceTranscript: (cues, speakers) => set((s) => {
+      s.transcript = cues as any;
+      if (speakers) s.transcriptSpeakers = speakers as any;
+    }),
+    setScriptDocument: (doc) => set((s) => { s.scriptDocument = doc as any; }),
+    updateScriptDocumentText: (lineIdOrText, text) => set((s) => {
+      if (s.scriptDocument) {
+        if (text !== undefined) {
+          // Two-arg form: updateScriptDocumentText(lineId, text)
+          const line = s.scriptDocument.lines.find((l) => l.id === lineIdOrText);
+          if (line) line.text = text;
+        } else {
+          // Single-arg form: replace entire script document text
+          const { buildScriptDocumentFromText } = require('../lib/transcriptWorkbench');
+          const nextDoc = buildScriptDocumentFromText(lineIdOrText, s.scriptDocument);
+          Object.assign(s.scriptDocument, nextDoc);
+        }
+      }
+    }),
+    syncScriptDocumentToTranscript: () => { /* no-op stub */ },
+    updateTranscriptionSettings: (patch) => set((s) => {
+      Object.assign(s.transcriptionSettings, patch);
+    }),
+    buildTranscriptTitleEffects: (_options) => { return 0; },
+
+    // Lift / Extract edits
+    liftEdit: () => {
+      const state = get();
+      state.liftSelection();
+    },
+    extractEdit: () => {
+      const state = get();
+      state.extractSelection();
+    },
+
+    // Sequence source
+    loadSequenceInSource: (seqId) => set((s) => { s.sourceSequenceId = seqId; }),
+    setActiveSequence: (seqId) => set((s) => { s.activeSequenceId = seqId; }),
+    editSourceToRecord: (_mode) => { /* no-op stub */ },
+    toggleSequenceBin: () => set((s) => { s.showSequenceBin = !s.showSequenceBin; }),
+
+    // Version history / persistence
+    restoreProjectSnapshot: (_snapshot) => { /* no-op stub */ },
   }))
 );
 

@@ -60,7 +60,8 @@ export class SRTOutput {
    */
   async loadModule(): Promise<boolean> {
     try {
-      this.srtModule = await import('@eyevinn/srt') as unknown as SRTModule;
+      const moduleId = '@eyevinn/srt';
+      this.srtModule = (await import(/* @vite-ignore */ moduleId)) as unknown as SRTModule;
       return true;
     } catch {
       console.warn('[SRT] @eyevinn/srt module not available — SRT output disabled');
@@ -110,7 +111,9 @@ export class SRTOutput {
       await this.srt.listen(listenSocket, 1);
       this.socket = await this.srt.accept(listenSocket);
       // Close the listener socket; we only need the accepted data socket
-      await this.srt.close(listenSocket).catch(() => { /* ignore */ });
+      await this.srt.close(listenSocket).catch(() => {
+        /* ignore */
+      });
     } else {
       // Rendezvous mode
       await this.srt.bind(this.socket, '0.0.0.0', config.port);

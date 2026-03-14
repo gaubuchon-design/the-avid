@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { keyboardEngine, type KeyModifier } from '../engine/KeyboardEngine';
+import { isKeyboardProviderDispatchSuspended } from '../lib/keyboardProviderGate';
 import { useUserSettingsStore } from '../store/userSettings.store';
 
 /**
@@ -13,13 +14,20 @@ import { useUserSettingsStore } from '../store/userSettings.store';
 export function KeyboardProvider({ children }: { children: React.ReactNode }) {
   const keyboardLayoutId = useUserSettingsStore((s) => s.settings.keyboardLayoutId);
   const customKeyBindings = useUserSettingsStore((s) => s.settings.customKeyBindings);
+  const updateSettings = useUserSettingsStore((s) => s.updateSettings);
 
   // Load keyboard layout on mount and when layout changes
   useEffect(() => {
     const layouts = keyboardEngine.getAvailableLayouts();
-    const layout = layouts.find((l) => l.id === keyboardLayoutId);
+    const layout = layouts.find((l) => l.id === keyboardLayoutId) ?? layouts[0];
     if (layout) {
       keyboardEngine.loadLayout(layout);
+      if (layout.id !== keyboardLayoutId) {
+        updateSettings({
+          keyboardLayoutId: layout.id,
+          customKeyBindings: [],
+        });
+      }
     }
 
     // Apply custom bindings on top
@@ -30,16 +38,22 @@ export function KeyboardProvider({ children }: { children: React.ReactNode }) {
         binding.action,
       );
     }
-  }, [keyboardLayoutId, customKeyBindings]);
+  }, [customKeyBindings, keyboardLayoutId, updateSettings]);
 
   // Global keydown/keyup delegation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isKeyboardProviderDispatchSuspended()) {
+        return;
+      }
       if (keyboardEngine.handleKeyDown(e)) {
         e.preventDefault();
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
+      if (isKeyboardProviderDispatchSuspended()) {
+        return;
+      }
       keyboardEngine.handleKeyUp(e);
     };
 

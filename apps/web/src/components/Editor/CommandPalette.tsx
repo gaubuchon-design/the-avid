@@ -19,7 +19,6 @@ export function CommandPalette() {
     isCommandPaletteOpen,
     toggleCommandPalette,
     setActivePanel,
-    toggleAIPanel,
     addMarkerAtPlayhead,
     razorAtPlayhead,
     matchFrame,
@@ -34,7 +33,6 @@ export function CommandPalette() {
       { id: 'cmd-workspace-script', category: 'Command', title: 'Switch to Script workspace', subtitle: 'Transcript-driven editing', action: () => setActivePanel('script') },
       { id: 'cmd-workspace-review', category: 'Command', title: 'Switch to Review workspace', subtitle: 'Approvals and timeline comments', action: () => setActivePanel('review') },
       { id: 'cmd-workspace-publish', category: 'Command', title: 'Switch to Publish workspace', subtitle: 'Export and delivery queue', action: () => setActivePanel('publish') },
-      { id: 'cmd-ai', category: 'Command', title: 'Toggle AI Assistant', subtitle: 'Open or close the Gemini-style assistant panel', action: () => toggleAIPanel() },
       { id: 'cmd-marker', category: 'Command', title: 'Add marker at playhead', subtitle: 'Create a timeline marker on the current frame', action: () => addMarkerAtPlayhead('Command palette marker') },
       { id: 'cmd-razor', category: 'Command', title: 'Razor at playhead', subtitle: 'Split every unlocked clip under the playhead', action: () => razorAtPlayhead() },
       { id: 'cmd-match-frame', category: 'Command', title: 'Match frame', subtitle: 'Load the source clip for the current frame', action: () => matchFrame() },
@@ -77,7 +75,6 @@ export function CommandPalette() {
     setActivePanel,
     setPlayhead,
     setSourceAsset,
-    toggleAIPanel,
     transcript,
   ]);
 
@@ -132,7 +129,7 @@ export function CommandPalette() {
           className="command-palette-input"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search commands, media, transcripts, and workspaces…"
+          placeholder="Search commands, media, and transcripts…"
         />
 
         <div className="command-palette-results">

@@ -91,6 +91,17 @@ export function applyCDL(
  *  Temperature: negative=warm (lower K), positive=cool (higher K)
  *  Tint: negative=green, positive=magenta  */
 export function temperatureTintToRGB(temperature: number, tint: number): RGB {
+  const reference = resolveWhiteBalanceRGB(0, 0);
+  const adjusted = resolveWhiteBalanceRGB(temperature, tint);
+
+  return {
+    r: adjusted.r / reference.r,
+    g: adjusted.g / reference.g,
+    b: adjusted.b / reference.b,
+  };
+}
+
+function resolveWhiteBalanceRGB(temperature: number, tint: number): RGB {
   // Map temperature -100..100 to roughly 3200K..7500K, centered at 5500K
   const kelvin = 5500 + temperature * 20;
   // Approximate CIE xy from temperature (Hernandez-Andres 1999 fit)

@@ -576,6 +576,9 @@ export function TimelinePanel() {
               time={playheadTime}
               zoom={zoom}
               scrollLeft={scrollLeft}
+              duration={duration}
+              viewportRef={contentRef}
+              onScrub={setPlayhead}
             />
           </div>
         </div>

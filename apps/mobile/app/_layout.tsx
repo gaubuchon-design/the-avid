@@ -164,8 +164,8 @@ const AuthContext = createContext<AuthContextValue>({
   user: null,
   isAuthenticated: false,
   isLoading: true,
-  signInDemo: () => {},
-  signOut: () => {},
+  signInDemo: () => undefined,
+  signOut: () => undefined,
 });
 
 /** Hook to access the current auth state. */

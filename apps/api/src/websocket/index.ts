@@ -1,6 +1,8 @@
 import { Server as SocketServer, Socket } from 'socket.io';
 import { Server as HttpServer } from 'http';
 import jwt from 'jsonwebtoken';
+import { parseWorkerToCoordinatorMessage, renderJobSubmissionSchema } from '@mcua/media-backend';
+import { WebSocketServer, type WebSocket } from 'ws';
 import { db } from '../db/client';
 import { config } from '../config';
 import { logger } from '../utils/logger';
@@ -90,6 +92,130 @@ export function initWebSocket(httpServer: HttpServer) {
       maxDisconnectionDuration: 2 * 60 * 1000, // 2 minutes
     },
   });
+  const agentWss = new WebSocketServer({ noServer: true });
+
+  httpServer.on('upgrade', (request, socket, head) => {
+    const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
+    if (requestUrl.pathname !== '/render' && requestUrl.pathname !== '/render-agent') {
+      return;
+    }
+
+    agentWss.handleUpgrade(request, socket, head, (wsSocket) => {
+      agentWss.emit('connection', wsSocket, request);
+    });
+  });
+
+  agentWss.on('connection', (socket: WebSocket) => {
+    let nodeId: string | null = null;
+
+    socket.on('message', (raw) => {
+      try {
+        const message = parseWorkerToCoordinatorMessage(JSON.parse(String(raw)));
+        switch (message.type) {
+          case 'register': {
+            const node = renderFarmService.registerWorker({
+              hostname: message.node.hostname,
+              ip: '0.0.0.0',
+              port: 0,
+              workerTypes: message.node.enabledWorkerTypes,
+              capabilities: {
+                gpuVendor: message.node.gpuVendor,
+                gpuName: message.node.gpuName,
+                vramMB: message.node.vramMB,
+                cpuCores: message.node.cpuCores,
+                memoryGB: message.node.memoryGB,
+                ffmpegVersion: 'unknown',
+                maxConcurrentJobs: Math.max(1, message.node.enabledWorkerTypes.length),
+                workerKinds: message.node.enabledWorkerTypes,
+              },
+            }, socket);
+            nodeId = node.id;
+            break;
+          }
+          case 'unregister':
+            if (nodeId) {
+              renderFarmService.removeWorker(nodeId);
+              nodeId = null;
+            }
+            break;
+          case 'health':
+            if (nodeId) {
+              renderFarmService.handleAgentHeartbeat(nodeId, message.healthy ? 'idle' : 'error', undefined, {
+                cpuUtilization: message.resources?.cpuPercent ?? 0,
+                gpuUtilization: 0,
+                diskFreeGB: message.resources?.freeDiskBytes ? Math.round(message.resources.freeDiskBytes / (1024 ** 3)) : 0,
+              });
+            }
+            break;
+          case 'pong':
+            if (nodeId) {
+              renderFarmService.handleAgentHeartbeat(nodeId, message.status, message.progress, {
+                cpuUtilization: message.resources?.cpuPercent ?? 0,
+                gpuUtilization: 0,
+                diskFreeGB: message.resources?.freeDiskBytes ? Math.round(message.resources.freeDiskBytes / (1024 ** 3)) : 0,
+              });
+            }
+            break;
+          case 'job:started':
+            if (nodeId) {
+              renderFarmService.handleAgentHeartbeat(nodeId, 'busy', 0);
+            }
+            break;
+          case 'job:progress':
+            renderFarmService.handleJobProgress(message.jobId, undefined, message.progress);
+            break;
+          case 'job:complete': {
+            const result = message.result;
+            const resultRecord = result && typeof result === 'object'
+              ? result as Record<string, unknown>
+              : null;
+            const outputPath = typeof resultRecord?.['outputPath'] === 'string'
+              ? resultRecord['outputPath']
+              : `${message.jobId}.mov`;
+            const outputSize = typeof resultRecord?.['outputSize'] === 'number'
+              ? resultRecord['outputSize']
+              : typeof resultRecord?.['sizeBytes'] === 'number'
+                ? resultRecord['sizeBytes']
+                : undefined;
+            renderFarmService.handleJobComplete(message.jobId, outputPath, outputSize);
+            if (nodeId) {
+              renderFarmService.handleAgentHeartbeat(nodeId, 'idle', 0);
+            }
+            break;
+          }
+          case 'job:failed':
+          case 'job:cancelled':
+          case 'job:reject':
+            renderFarmService.handleJobFailed(message.jobId, 'error' in message ? message.error : message.reason);
+            if (nodeId) {
+              renderFarmService.handleAgentHeartbeat(nodeId, 'idle', 0);
+            }
+            break;
+          case 'job:queued':
+          case 'job:retrying':
+            if (nodeId) {
+              renderFarmService.handleAgentHeartbeat(nodeId, 'busy', 0);
+            }
+            break;
+        }
+      } catch (error) {
+        logger.error('Render agent websocket message failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
+
+    socket.on('close', () => {
+      if (nodeId) {
+        try {
+          renderFarmService.removeWorker(nodeId);
+        } catch {
+          // Worker may already be removed during an explicit unregister path.
+        }
+        nodeId = null;
+      }
+    });
+  });
 
   // ─── Auth middleware ─────────────────────────────────────────────────────────
   io.use(async (socket, next) => {
@@ -115,7 +241,7 @@ export function initWebSocket(httpServer: HttpServer) {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- attaching user to socket for downstream handlers
       (socket as any).user = user;
-      socketUsers.set(socket.id, user);
+      socketUsers.set(socket.id, { userId: user.id, displayName: user.displayName });
       next();
     } catch (err: unknown) {
       logger.error('WebSocket auth failed', { error: (err as Error).message, socketId: socket.id });
@@ -284,7 +410,13 @@ export function initWebSocket(httpServer: HttpServer) {
     });
 
     socket.on('render:job:submit', (payload) => {
-      const job = renderFarmService.submitJob(payload);
+      const parsed = renderJobSubmissionSchema.safeParse(payload);
+      if (!parsed.success) {
+        socket.emit('error', { message: 'Invalid render job payload', code: 'INVALID_PAYLOAD' });
+        return;
+      }
+
+      const job = renderFarmService.submitJob(parsed.data);
       socket.emit('render:job:queued', { job });
     });
 
@@ -356,6 +488,7 @@ export function initWebSocket(httpServer: HttpServer) {
   // ─── Utility: broadcast to project ──────────────────────────────────────────
   return {
     io,
+    agentWss,
 
     /**
      * Broadcast an event to all connected clients in a project room.

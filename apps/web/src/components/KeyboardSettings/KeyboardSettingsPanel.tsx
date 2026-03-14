@@ -108,12 +108,13 @@ export function KeyboardSettingsPanel() {
     // Check for conflicts
     const existingAction = keyboardEngine.getActionForKey(capturedKey.key, capturedKey.modifiers);
     if (existingAction && existingAction !== binding.action) {
-      const conflicting = layout.bindings.find((b) => b.action === existingAction);
-      setConflictInfo({
-        action: existingAction,
-        description: conflicting?.description || existingAction,
-      });
-      // Still apply — the user can see and decide
+      if (settings.keyboardConflictPolicy === 'warn') {
+        const conflicting = layout.bindings.find((b) => b.action === existingAction);
+        setConflictInfo({
+          action: existingAction,
+          description: conflicting?.description || existingAction,
+        });
+      }
     }
 
     // Apply the new binding
@@ -121,7 +122,7 @@ export function KeyboardSettingsPanel() {
     persistBindings();
     setEditingBindingId(null);
     keyboardEngine.enable();
-  }, [capturedKey, editingBindingId, layout.bindings, persistBindings]);
+  }, [capturedKey, editingBindingId, layout.bindings, persistBindings, settings.keyboardConflictPolicy]);
 
   // Handle reset individual binding
   const handleResetBinding = (binding: KeyBinding) => {
@@ -203,6 +204,31 @@ export function KeyboardSettingsPanel() {
             <option key={l.id} value={l.id}>{l.name}</option>
           ))}
         </select>
+      </div>
+
+      <div style={styles['preferenceGrid']}>
+        <label style={styles['preferenceCard']}>
+          <span style={styles['preferenceLabel']}>Conflict Handling</span>
+          <select
+            value={settings.keyboardConflictPolicy}
+            onChange={(event) => updateSetting('keyboardConflictPolicy', event.target.value as typeof settings.keyboardConflictPolicy)}
+            style={styles['layoutSelect']}
+          >
+            <option value="warn">Warn Before Replace</option>
+            <option value="replace">Replace Directly</option>
+          </select>
+        </label>
+        <label style={styles['preferenceCard']}>
+          <span style={styles['preferenceLabel']}>Button Mapping Mode</span>
+          <select
+            value={settings.buttonAssignmentMode}
+            onChange={(event) => updateSetting('buttonAssignmentMode', event.target.value as typeof settings.buttonAssignmentMode)}
+            style={styles['layoutSelect']}
+          >
+            <option value="button-to-button">Button-To-Button</option>
+            <option value="menu-to-button">Menu-To-Button</option>
+          </select>
+        </label>
       </div>
 
       {/* Action buttons */}
@@ -328,6 +354,27 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 6,
     marginBottom: 12,
   },
+  preferenceGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: 8,
+    marginBottom: 12,
+  },
+  preferenceCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    padding: 10,
+    borderRadius: 'var(--radius-md, 6px)',
+    border: '1px solid var(--border-default, rgba(255,255,255,0.08))',
+    background: 'rgba(255,255,255,0.02)',
+  },
+  preferenceLabel: {
+    fontSize: 11,
+    color: 'var(--text-muted, #6a6a7a)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+  },
   actionBtn: {
     padding: '5px 10px',
     borderRadius: 'var(--radius-sm, 4px)',
@@ -404,8 +451,8 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 9,
     padding: '1px 5px',
     borderRadius: 3,
-    background: 'rgba(109, 76, 250, 0.2)',
-    color: 'var(--brand-bright, #9b7dff)',
+    background: 'rgba(0, 200, 150, 0.2)',
+    color: 'var(--brand-bright, #00d4aa)',
     fontWeight: 600,
     textTransform: 'uppercase',
     letterSpacing: '0.04em',
@@ -417,7 +464,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   captureHint: {
     fontSize: 11,
-    color: 'var(--brand-bright, #9b7dff)',
+    color: 'var(--brand-bright, #00d4aa)',
     fontStyle: 'italic',
     animation: 'pulse 1.5s infinite',
   },

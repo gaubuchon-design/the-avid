@@ -2,17 +2,26 @@
   "name": "@mcua/desktop",
   "version": "0.1.0",
   "private": true,
+  "description": "The Avid desktop editorial workstation",
+  "author": "The Avid, Inc.",
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "pack": "electron-vite build && electron-builder --dir",
-    "dist": "electron-vite build && electron-builder",
-    "dist:mac": "electron-vite build && electron-builder --mac",
-    "dist:win": "electron-vite build && electron-builder --win",
-    "dist:linux": "electron-vite build && electron-builder --linux",
-    "postinstall": "electron-builder install-app-deps",
+    "sync:version": "node scripts/sync-version.js",
+    "sync:version:auto": "node scripts/sync-version.js --auto",
+    "prepare:packaging": "node scripts/prepare-packaging.js",
+    "pack": "npm run sync:version && npm run prepare:packaging -- current && electron-vite build && electron-builder --config electron-builder.config.cjs --dir --publish never",
+    "dist": "npm run sync:version && npm run prepare:packaging -- current && electron-vite build && electron-builder --config electron-builder.config.cjs --publish never",
+    "dist:refresh": "node scripts/rebuild-installers.js",
+    "dist:refresh:mac": "node scripts/rebuild-installers.js --targets=mac",
+    "dist:refresh:win": "node scripts/rebuild-installers.js --targets=win",
+    "dist:mac": "npm run sync:version && npm run prepare:packaging -- mac && electron-vite build && electron-builder --config electron-builder.config.cjs --mac --arm64 --publish never",
+    "dist:mac:x64": "npm run sync:version && npm run prepare:packaging -- darwin-x64 && electron-vite build && electron-builder --config electron-builder.config.cjs --mac --x64 --publish never",
+    "dist:win": "npm run sync:version && npm run prepare:packaging -- win32-x64 && electron-vite build && electron-builder --config electron-builder.config.cjs --win nsis portable --x64 --publish never",
+    "dist:linux": "npm run sync:version && npm run prepare:packaging -- linux-x64 && electron-vite build && electron-builder --config electron-builder.config.cjs --linux --x64 --publish never",
+    "postinstall": "node scripts/postinstall.js",
     "lint": "eslint src --ext .ts,.tsx",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
@@ -24,29 +33,33 @@
   "dependencies": {
     "@mcua/core": "*",
     "@mcua/ui": "*",
-    "@eyevinn/srt": "^0.8.3",
     "electron-updater": "^6.2.0",
-    "grandiose": "^0.0.4",
     "immer": "^10.1.0",
-    "macadam": "^2.0.18",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-router-dom": "^6.24.0",
-    "serialport": "^12.0.0",
     "zustand": "^4.5.0"
+  },
+  "optionalDependencies": {
+    "@eyevinn/srt": "^0.8.3",
+    "grandiose": "^0.0.4",
+    "macadam": "^2.0.18",
+    "serialport": "^12.0.0"
   },
   "devDependencies": {
     "@electron/notarize": "^2.3.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
-    "electron": "^31.0.0",
+    "electron": "31.7.7",
     "electron-builder": "^24.13.0",
     "electron-vite": "^2.3.0",
     "typescript": "^5.4.0",
     "vitest": "^2.0.0"
   },
   "build": {
+    "electronVersion": "31.7.7",
+    "npmRebuild": false,
     "appId": "com.theavid.app",
     "productName": "The Avid",
     "copyright": "Copyright 2026 The Avid, Inc.",
@@ -64,7 +77,9 @@
       {
         "from": "resources/bin/${os}",
         "to": "bin",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "asarUnpack": [
@@ -79,23 +94,34 @@
       "category": "public.app-category.video",
       "icon": "resources/icon.icns",
       "hardenedRuntime": true,
-      "gatekeeperAssess": false,
+      "gatekeeperAssess": true,
       "entitlements": "resources/entitlements.mac.plist",
       "entitlementsInherit": "resources/entitlements.mac.inherit.plist",
+      "signIgnore": ["resources/bin"],
       "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] },
-        { "target": "zip", "arch": ["x64", "arm64"] }
+        "dmg",
+        "zip"
       ],
       "darkModeSupport": true,
-      "minimumSystemVersion": "12.0"
+      "minimumSystemVersion": "12.0",
+      "notarize": true
     },
     "dmg": {
       "background": "resources/dmg-background.png",
       "icon": "resources/icon.icns",
       "iconSize": 128,
       "contents": [
-        { "x": 380, "y": 170, "type": "link", "path": "/Applications" },
-        { "x": 130, "y": 170, "type": "file" }
+        {
+          "x": 380,
+          "y": 170,
+          "type": "link",
+          "path": "/Applications"
+        },
+        {
+          "x": 130,
+          "y": 170,
+          "type": "file"
+        }
       ],
       "window": {
         "width": 540,
@@ -105,8 +131,8 @@
     "win": {
       "icon": "resources/icon.ico",
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        "nsis",
+        "portable"
       ],
       "publisherName": "The Avid, Inc."
     },
@@ -128,10 +154,16 @@
       "icon": "resources/icons",
       "category": "AudioVideo",
       "target": [
-        { "target": "AppImage", "arch": ["x64"] },
-        { "target": "deb", "arch": ["x64"] }
+        "AppImage",
+        "deb"
       ],
-      "mimeTypes": ["video/mp4", "video/quicktime", "video/x-msvideo", "audio/mpeg", "audio/wav"]
+      "mimeTypes": [
+        "video/mp4",
+        "video/quicktime",
+        "video/x-msvideo",
+        "audio/mpeg",
+        "audio/wav"
+      ]
     },
     "fileAssociations": [
       {
@@ -156,10 +188,9 @@
     ],
     "publish": [
       {
-        "provider": "github",
-        "owner": "the-avid",
-        "repo": "the-avid",
-        "releaseType": "release"
+        "provider": "generic",
+        "url": "https://the-avid-desktop-updates.vercel.app/desktop-updates/stable",
+        "channel": "stable"
       }
     ],
     "afterSign": "scripts/notarize.js"

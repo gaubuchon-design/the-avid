@@ -1,4 +1,8 @@
 import { z, ZodSchema } from 'zod';
+import {
+  renderJobSubmissionSchema,
+  workerRegistrationSchema,
+} from '@mcua/media-backend';
 import { Request, Response, NextFunction } from 'express';
 import { BadRequestError } from './errors';
 
@@ -996,24 +1000,9 @@ export const schemas = {
   }),
 
   // ── Render Farm ───────────────────────────────────────────────────────
-  registerRenderWorker: z.object({
-    hostname: z.string().min(1, 'hostname is required').max(500),
-    ip: z.string().max(50).optional(),
-    port: z.number().int().min(0).max(65535).optional(),
-    workerTypes: z.array(z.string().max(50)).default(['render']),
-    capabilities: z.record(z.unknown()).optional(),
-  }),
+  registerRenderWorker: workerRegistrationSchema,
 
-  submitRenderJob: z.object({
-    name: z.string().min(1, 'name is required').max(200),
-    presetId: z.string().min(1, 'presetId is required').max(200),
-    sourceTimelineId: z.string().min(1, 'sourceTimelineId is required'),
-    totalFrames: z.number().int().positive('totalFrames must be a positive number'),
-    priority: z.number().int().min(1).max(10).optional(),
-    templateId: z.string().max(200).optional(),
-    exportSettings: z.record(z.unknown()).optional(),
-    segmentCount: z.number().int().positive().optional(),
-  }),
+  submitRenderJob: renderJobSubmissionSchema,
 
   reorderRenderQueue: z.object({
     jobId: z.string().min(1, 'jobId is required'),

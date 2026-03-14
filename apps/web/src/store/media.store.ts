@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
+import { getStoreDevtoolsOptions } from '../lib/runtimeEnvironment';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -253,116 +254,244 @@ export const useMediaStore = create<MediaState & MediaActions>()(
       // Initial state
       ...INITIAL_MEDIA_STATE,
 
-    // Actions - AAF
-    setAAFExportFormat: (format) => set((s) => { s.aafExportFormat = format; }),
-    setAAFExportStatus: (status) => set((s) => { s.aafExportStatus = status; }),
-    setAAFExportProgress: (progress) => set((s) => { s.aafExportProgress = progress; }),
-    setAAFExportError: (error) => set((s) => { s.aafExportError = error; }),
-    toggleAAFMarkers: () => set((s) => { s.aafIncludeMarkers = !s.aafIncludeMarkers; }),
-    toggleAAFEffects: () => set((s) => { s.aafIncludeEffects = !s.aafIncludeEffects; }),
-    toggleAAFEmbedMedia: () => set((s) => { s.aafEmbedMedia = !s.aafEmbedMedia; }),
+      // Actions - AAF
+      setAAFExportFormat: (format) =>
+        set((s) => {
+          s.aafExportFormat = format;
+        }),
+      setAAFExportStatus: (status) =>
+        set((s) => {
+          s.aafExportStatus = status;
+        }),
+      setAAFExportProgress: (progress) =>
+        set((s) => {
+          s.aafExportProgress = progress;
+        }),
+      setAAFExportError: (error) =>
+        set((s) => {
+          s.aafExportError = error;
+        }),
+      toggleAAFMarkers: () =>
+        set((s) => {
+          s.aafIncludeMarkers = !s.aafIncludeMarkers;
+        }),
+      toggleAAFEffects: () =>
+        set((s) => {
+          s.aafIncludeEffects = !s.aafIncludeEffects;
+        }),
+      toggleAAFEmbedMedia: () =>
+        set((s) => {
+          s.aafEmbedMedia = !s.aafEmbedMedia;
+        }),
 
-    // Actions - EDL/ALE/CSV
-    setInterchangeFormat: (format) => set((s) => { s.interchangeFormat = format; }),
-    setInterchangeTimecodeMode: (mode) => set((s) => { s.interchangeTimecodeMode = mode; }),
-    setInterchangeExportResult: (result) => set((s) => { s.interchangeExportResult = result; }),
+      // Actions - EDL/ALE/CSV
+      setInterchangeFormat: (format) =>
+        set((s) => {
+          s.interchangeFormat = format;
+        }),
+      setInterchangeTimecodeMode: (mode) =>
+        set((s) => {
+          s.interchangeTimecodeMode = mode;
+        }),
+      setInterchangeExportResult: (result) =>
+        set((s) => {
+          s.interchangeExportResult = result;
+        }),
 
-    // Actions - Relink
-    setRelinkStatus: (status) => set((s) => { s.relinkStatus = status; }),
-    setRelinkProposals: (proposals) => set((s) => { s.relinkProposals = proposals; }),
-    setRelinkProgress: (progress) => set((s) => { s.relinkProgress = progress; }),
-    setRelinkError: (error) => set((s) => { s.relinkError = error; }),
-    setOfflineAssetCount: (count) => set((s) => { s.offlineAssetCount = count; }),
-    confirmRelinkProposal: (assetId, candidateIndex) => set((s) => {
-      const proposal = s.relinkProposals.find((p) => p.assetId === assetId);
-      if (proposal) {
-        proposal.selectedIndex = candidateIndex;
-        proposal.confirmed = true;
-      }
-    }),
-    confirmAllRelinkProposals: () => set((s) => {
-      for (const proposal of s.relinkProposals) {
-        if (proposal.candidateCount > 0 && proposal.topMatchConfidence >= 0.85) {
-          proposal.selectedIndex = 0;
-          proposal.confirmed = true;
-        }
-      }
-    }),
+      // Actions - Relink
+      setRelinkStatus: (status) =>
+        set((s) => {
+          s.relinkStatus = status;
+        }),
+      setRelinkProposals: (proposals) =>
+        set((s) => {
+          s.relinkProposals = proposals;
+        }),
+      setRelinkProgress: (progress) =>
+        set((s) => {
+          s.relinkProgress = progress;
+        }),
+      setRelinkError: (error) =>
+        set((s) => {
+          s.relinkError = error;
+        }),
+      setOfflineAssetCount: (count) =>
+        set((s) => {
+          s.offlineAssetCount = count;
+        }),
+      confirmRelinkProposal: (assetId, candidateIndex) =>
+        set((s) => {
+          const proposal = s.relinkProposals.find((p) => p.assetId === assetId);
+          if (proposal) {
+            proposal.selectedIndex = candidateIndex;
+            proposal.confirmed = true;
+          }
+        }),
+      confirmAllRelinkProposals: () =>
+        set((s) => {
+          for (const proposal of s.relinkProposals) {
+            if (proposal.candidateCount > 0 && proposal.topMatchConfidence >= 0.85) {
+              proposal.selectedIndex = 0;
+              proposal.confirmed = true;
+            }
+          }
+        }),
 
-    // Actions - Multi-Cam
-    setMultiCamGroups: (groups) => set((s) => { s.multiCamGroups = groups; }),
-    setActiveMultiCamGroup: (groupId) => set((s) => { s.activeMultiCamGroupId = groupId; }),
-    setMultiCamViewMode: (mode) => set((s) => { s.multiCamViewMode = mode; }),
-    toggleMultiCamAudioFollowsVideo: () => set((s) => { s.multiCamAudioFollowsVideo = !s.multiCamAudioFollowsVideo; }),
-    updateMultiCamGroup: (groupId, update) => set((s) => {
-      const group = s.multiCamGroups.find((g) => g.id === groupId);
-      if (group) Object.assign(group, update);
-    }),
+      // Actions - Multi-Cam
+      setMultiCamGroups: (groups) =>
+        set((s) => {
+          s.multiCamGroups = groups;
+        }),
+      setActiveMultiCamGroup: (groupId) =>
+        set((s) => {
+          s.activeMultiCamGroupId = groupId;
+        }),
+      setMultiCamViewMode: (mode) =>
+        set((s) => {
+          s.multiCamViewMode = mode;
+        }),
+      toggleMultiCamAudioFollowsVideo: () =>
+        set((s) => {
+          s.multiCamAudioFollowsVideo = !s.multiCamAudioFollowsVideo;
+        }),
+      updateMultiCamGroup: (groupId, update) =>
+        set((s) => {
+          const group = s.multiCamGroups.find((g) => g.id === groupId);
+          if (group) Object.assign(group, update);
+        }),
 
-    // Actions - Stem Export
-    setStems: (stems) => set((s) => { s.stems = stems; }),
-    toggleStemEnabled: (stemId) => set((s) => {
-      const stem = s.stems.find((st) => st.id === stemId);
-      if (stem) stem.enabled = !stem.enabled;
-    }),
-    setStemExportStatus: (status) => set((s) => { s.stemExportStatus = status; }),
-    setStemExportProgress: (progress) => set((s) => { s.stemExportProgress = progress; }),
-    setStemPresetName: (name) => set((s) => { s.stemPresetName = name; }),
-    setStemFormat: (format) => set((s) => { s.stemFormat = format; }),
-    setStemBitDepth: (depth) => set((s) => { s.stemBitDepth = depth; }),
-    setStemSampleRate: (rate) => set((s) => { s.stemSampleRate = rate; }),
+      // Actions - Stem Export
+      setStems: (stems) =>
+        set((s) => {
+          s.stems = stems;
+        }),
+      toggleStemEnabled: (stemId) =>
+        set((s) => {
+          const stem = s.stems.find((st) => st.id === stemId);
+          if (stem) stem.enabled = !stem.enabled;
+        }),
+      setStemExportStatus: (status) =>
+        set((s) => {
+          s.stemExportStatus = status;
+        }),
+      setStemExportProgress: (progress) =>
+        set((s) => {
+          s.stemExportProgress = progress;
+        }),
+      setStemPresetName: (name) =>
+        set((s) => {
+          s.stemPresetName = name;
+        }),
+      setStemFormat: (format) =>
+        set((s) => {
+          s.stemFormat = format;
+        }),
+      setStemBitDepth: (depth) =>
+        set((s) => {
+          s.stemBitDepth = depth;
+        }),
+      setStemSampleRate: (rate) =>
+        set((s) => {
+          s.stemSampleRate = rate;
+        }),
 
-    // Actions - Bin Locking
-    setBinLocks: (locks) => set((s) => { s.binLocks = locks; }),
-    addBinLock: (lock) => set((s) => {
-      const existing = s.binLocks.findIndex((l) => l.binId === lock.binId);
-      if (existing >= 0) {
-        s.binLocks[existing] = lock;
-      } else {
-        s.binLocks.push(lock);
-      }
-    }),
-    removeBinLock: (binId) => set((s) => {
-      s.binLocks = s.binLocks.filter((l) => l.binId !== binId);
-    }),
+      // Actions - Bin Locking
+      setBinLocks: (locks) =>
+        set((s) => {
+          s.binLocks = locks;
+        }),
+      addBinLock: (lock) =>
+        set((s) => {
+          const existing = s.binLocks.findIndex((l) => l.binId === lock.binId);
+          if (existing >= 0) {
+            s.binLocks[existing] = lock;
+          } else {
+            s.binLocks.push(lock);
+          }
+        }),
+      removeBinLock: (binId) =>
+        set((s) => {
+          s.binLocks = s.binLocks.filter((l) => l.binId !== binId);
+        }),
 
-    // Actions - Sequence Compare
-    setIsComparing: (comparing) => set((s) => { s.isComparing = comparing; }),
-    setComparisonResult: (result) => set((s) => { s.comparisonResult = result; }),
+      // Actions - Sequence Compare
+      setIsComparing: (comparing) =>
+        set((s) => {
+          s.isComparing = comparing;
+        }),
+      setComparisonResult: (result) =>
+        set((s) => {
+          s.comparisonResult = result;
+        }),
 
-    // Actions - Frame Rate
-    setFrameRateWarnings: (warnings) => set((s) => { s.frameRateWarnings = warnings; }),
-    toggleFrameRateIndicators: () => set((s) => { s.showFrameRateIndicators = !s.showFrameRateIndicators; }),
+      // Actions - Frame Rate
+      setFrameRateWarnings: (warnings) =>
+        set((s) => {
+          s.frameRateWarnings = warnings;
+        }),
+      toggleFrameRateIndicators: () =>
+        set((s) => {
+          s.showFrameRateIndicators = !s.showFrameRateIndicators;
+        }),
 
-    // Actions - UI Panels
-    toggleExportDialog: () => set((s) => { s.showExportDialog = !s.showExportDialog; }),
-    toggleRelinkDialog: () => set((s) => { s.showRelinkDialog = !s.showRelinkDialog; }),
-    toggleMultiCamViewer: () => set((s) => { s.showMultiCamViewer = !s.showMultiCamViewer; }),
-    toggleStemExportDialog: () => set((s) => { s.showStemExportDialog = !s.showStemExportDialog; }),
-    toggleSequenceCompare: () => set((s) => { s.showSequenceCompare = !s.showSequenceCompare; }),
-    setActiveExportTab: (tab) => set((s) => { s.activeExportTab = tab; }),
+      // Actions - UI Panels
+      toggleExportDialog: () =>
+        set((s) => {
+          s.showExportDialog = !s.showExportDialog;
+        }),
+      toggleRelinkDialog: () =>
+        set((s) => {
+          s.showRelinkDialog = !s.showRelinkDialog;
+        }),
+      toggleMultiCamViewer: () =>
+        set((s) => {
+          s.showMultiCamViewer = !s.showMultiCamViewer;
+        }),
+      toggleStemExportDialog: () =>
+        set((s) => {
+          s.showStemExportDialog = !s.showStemExportDialog;
+        }),
+      toggleSequenceCompare: () =>
+        set((s) => {
+          s.showSequenceCompare = !s.showSequenceCompare;
+        }),
+      setActiveExportTab: (tab) =>
+        set((s) => {
+          s.activeExportTab = tab;
+        }),
 
-    // Reset
-    resetExportState: () => set((s) => {
-      s.aafExportStatus = 'idle';
-      s.aafExportProgress = 0;
-      s.aafExportError = null;
-      s.interchangeExportResult = null;
-      s.stemExportStatus = 'idle';
-      s.stemExportProgress = 0;
-    }),
-    resetRelinkState: () => set((s) => {
-      s.relinkStatus = 'idle';
-      s.relinkProposals = [];
-      s.relinkProgress = 0;
-      s.relinkError = null;
-    }, false, 'media/resetRelinkState'),
+      // Reset
+      resetExportState: () =>
+        set((s) => {
+          s.aafExportStatus = 'idle';
+          s.aafExportProgress = 0;
+          s.aafExportError = null;
+          s.interchangeExportResult = null;
+          s.stemExportStatus = 'idle';
+          s.stemExportProgress = 0;
+        }),
+      resetRelinkState: () =>
+        set(
+          (s) => {
+            s.relinkStatus = 'idle';
+            s.relinkProposals = [];
+            s.relinkProgress = 0;
+            s.relinkError = null;
+          },
+          false,
+          'media/resetRelinkState'
+        ),
 
-    resetStore: () => set(() => ({
-      ...INITIAL_MEDIA_STATE,
-    }), true, 'media/resetStore'),
-  })),
-  { name: 'MediaStore', enabled: import.meta.env.DEV },
+      resetStore: () =>
+        set(
+          () => ({
+            ...INITIAL_MEDIA_STATE,
+          }),
+          true,
+          'media/resetStore'
+        ),
+    })),
+    getStoreDevtoolsOptions('MediaStore')
   )
 );
 
@@ -399,5 +528,4 @@ export const selectConfirmedRelinkCount = (state: MediaStoreState) =>
   state.relinkProposals.filter((p) => p.confirmed).length;
 export const selectActiveMultiCamGroup = (state: MediaStoreState) =>
   state.multiCamGroups.find((g) => g.id === state.activeMultiCamGroupId) ?? null;
-export const selectEnabledStems = (state: MediaStoreState) =>
-  state.stems.filter((s) => s.enabled);
+export const selectEnabledStems = (state: MediaStoreState) => state.stems.filter((s) => s.enabled);

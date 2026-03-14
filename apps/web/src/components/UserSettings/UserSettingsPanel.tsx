@@ -5,6 +5,7 @@ import { AppearanceSettings } from './sections/AppearanceSettings';
 import { TimelineSettings } from './sections/TimelineSettings';
 import { AudioSettings } from './sections/AudioSettings';
 import { KeyboardSettings } from './sections/KeyboardSettings';
+import { EditorialSettings } from './sections/EditorialSettings';
 import { AISettings } from './sections/AISettings';
 import { AccountSettings } from './sections/AccountSettings';
 
@@ -18,6 +19,7 @@ const SECTIONS: Record<SettingsSection, React.ComponentType> = {
   timeline: TimelineSettings,
   audio: AudioSettings,
   keyboard: KeyboardSettings,
+  editorial: EditorialSettings,
   ai: AISettings,
   account: AccountSettings,
 };

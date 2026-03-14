@@ -4,6 +4,8 @@
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
+import type { EditorProject } from '@mcua/core';
+
 export interface CollabUser {
   id: string;
   name: string;
@@ -11,6 +13,7 @@ export interface CollabUser {
   color: string;
   cursorFrame: number;
   cursorTrackId: string | null;
+  playheadTime?: number;
   isOnline: boolean;
 }
 
@@ -40,10 +43,62 @@ export interface ProjectVersion {
   name: string;
   createdAt: number;
   createdBy: string;
+  createdByProfile?: CollabVersionAuthorProfile;
   description: string;
+  kind: 'demo' | 'restore-point';
+  isRestorePoint?: boolean;
+  retentionPolicy: 'fixture' | 'manual' | 'session';
+  snapshotSummary: ProjectVersionSnapshotSummary | null;
+  compareSummary: ProjectVersionCompareSummary | null;
+  compareBaselineName: string | null;
+  compareMetrics: ProjectVersionCompareMetric[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- snapshot is an opaque serialized project blob
   snapshotData: any;
 }
+
+export interface CollabVersionAuthorProfile {
+  userId?: string;
+  displayName: string;
+  avatarUrl?: string;
+  color?: string;
+}
+
+export interface ProjectVersionSnapshotSummary {
+  trackCount: number;
+  clipCount: number;
+  binCount: number;
+  duration: number;
+}
+
+export interface ProjectVersionCompareSummary {
+  trackDelta: number;
+  clipDelta: number;
+  binDelta: number;
+  durationDelta: number;
+}
+
+export interface ProjectVersionCompareMetric {
+  label: string;
+  previousValue: string;
+  currentValue: string;
+}
+
+export type VersionRetentionPreset = 'keep-all' | 'last-10' | 'last-25' | 'last-50';
+
+export interface VersionRetentionPreferences {
+  preset: VersionRetentionPreset;
+  autoPrune: boolean;
+}
+
+export interface CollabIdentityProfile {
+  name?: string;
+  avatar?: string;
+}
+
+export const DEFAULT_VERSION_RETENTION_PREFERENCES: VersionRetentionPreferences = {
+  preset: 'last-25',
+  autoPrune: true,
+};
 
 type Subscriber = () => void;
 
@@ -53,9 +108,10 @@ const DEMO_USERS: CollabUser[] = [
   {
     id: 'u1',
     name: 'Sarah K.',
-    color: '#7c5cfc',
+    color: '#00d4aa',
     cursorFrame: 120,
     cursorTrackId: 't1',
+    playheadTime: 5.005,
     isOnline: true,
   },
   {
@@ -64,6 +120,7 @@ const DEMO_USERS: CollabUser[] = [
     color: '#2bb672',
     cursorFrame: 456,
     cursorTrackId: 't3',
+    playheadTime: 19.019,
     isOnline: true,
   },
 ];
@@ -136,7 +193,23 @@ const DEMO_VERSIONS: ProjectVersion[] = [
     name: 'First Assembly',
     createdAt: now - 86400000 * 2, // 2 days ago
     createdBy: 'Sarah K.',
+    createdByProfile: {
+      userId: 'u1',
+      displayName: 'Sarah K.',
+      color: '#7c5cfc',
+    },
     description: 'Initial rough cut with all scenes assembled in order.',
+    kind: 'demo',
+    retentionPolicy: 'fixture',
+    snapshotSummary: {
+      trackCount: 6,
+      clipCount: 8,
+      binCount: 0,
+      duration: 34,
+    },
+    compareSummary: null,
+    compareBaselineName: null,
+    compareMetrics: [],
     snapshotData: { tracks: 6, clips: 8, duration: 34 },
   },
   {
@@ -144,10 +217,249 @@ const DEMO_VERSIONS: ProjectVersion[] = [
     name: 'Director\'s Review Cut',
     createdAt: now - 86400000, // 1 day ago
     createdBy: 'Marcus T.',
+    createdByProfile: {
+      userId: 'u2',
+      displayName: 'Marcus T.',
+      color: '#2bb672',
+    },
     description: 'Tightened edit after director feedback. Removed 8s of dead air, added B-roll transitions.',
+    kind: 'demo',
+    retentionPolicy: 'fixture',
+    snapshotSummary: {
+      trackCount: 6,
+      clipCount: 10,
+      binCount: 0,
+      duration: 28,
+    },
+    compareSummary: {
+      trackDelta: 0,
+      clipDelta: 2,
+      binDelta: 0,
+      durationDelta: -6,
+    },
+    compareBaselineName: 'First Assembly',
+    compareMetrics: [
+      { label: 'Tracks', previousValue: '6', currentValue: '6' },
+      { label: 'Clips', previousValue: '8', currentValue: '10' },
+      { label: 'Bins', previousValue: '0', currentValue: '0' },
+      { label: 'Duration', previousValue: '34s', currentValue: '28s' },
+    ],
     snapshotData: { tracks: 6, clips: 10, duration: 28 },
   },
 ];
+
+function countBins(bins: unknown): number {
+  if (!Array.isArray(bins)) {
+    return 0;
+  }
+
+  return bins.reduce((count, bin) => {
+    if (!bin || typeof bin !== 'object') {
+      return count;
+    }
+
+    const candidate = bin as { children?: unknown };
+    return count + 1 + countBins(candidate.children);
+  }, 0);
+}
+
+function summarizeProjectVersionSnapshot(snapshotData: unknown): ProjectVersionSnapshotSummary | null {
+  if (!snapshotData || typeof snapshotData !== 'object') {
+    return null;
+  }
+
+  const candidate = snapshotData as {
+    tracks?: unknown;
+    bins?: unknown;
+    duration?: unknown;
+    clips?: unknown;
+  };
+
+  if (Array.isArray(candidate.tracks)) {
+    const clipCount = candidate.tracks.reduce((count, track) => {
+      if (!track || typeof track !== 'object') {
+        return count;
+      }
+
+      const clipCandidate = track as { clips?: unknown[] };
+      return count + (Array.isArray(clipCandidate.clips) ? clipCandidate.clips.length : 0);
+    }, 0);
+    const durationFromTracks = candidate.tracks.reduce((maxDuration, track) => {
+      if (!track || typeof track !== 'object') {
+        return maxDuration;
+      }
+
+      const clipCandidate = track as {
+        clips?: Array<{ endTime?: unknown }>;
+      };
+      const trackEnd = Array.isArray(clipCandidate.clips)
+        ? clipCandidate.clips.reduce((maxClipEnd, clip) => {
+          return typeof clip?.endTime === 'number' ? Math.max(maxClipEnd, clip.endTime) : maxClipEnd;
+        }, 0)
+        : 0;
+
+      return Math.max(maxDuration, trackEnd);
+    }, 0);
+
+    return {
+      trackCount: candidate.tracks.length,
+      clipCount,
+      binCount: countBins(candidate.bins),
+      duration: typeof candidate.duration === 'number' ? candidate.duration : durationFromTracks,
+    };
+  }
+
+  if (
+    typeof candidate.tracks === 'number'
+    && typeof candidate.clips === 'number'
+    && typeof candidate.duration === 'number'
+  ) {
+    return {
+      trackCount: candidate.tracks,
+      clipCount: candidate.clips,
+      binCount: 0,
+      duration: candidate.duration,
+    };
+  }
+
+  return null;
+}
+
+function buildVersionCompareSummary(
+  snapshotSummary: ProjectVersionSnapshotSummary | null,
+  previousSummary: ProjectVersionSnapshotSummary | null,
+): ProjectVersionCompareSummary | null {
+  if (!snapshotSummary || !previousSummary) {
+    return null;
+  }
+
+  return {
+    trackDelta: snapshotSummary.trackCount - previousSummary.trackCount,
+    clipDelta: snapshotSummary.clipCount - previousSummary.clipCount,
+    binDelta: snapshotSummary.binCount - previousSummary.binCount,
+    durationDelta: snapshotSummary.duration - previousSummary.duration,
+  };
+}
+
+function formatDurationMetric(duration: number): string {
+  return Number.isInteger(duration) ? `${duration}s` : `${duration.toFixed(2)}s`;
+}
+
+function isEditorProjectSnapshot(snapshotData: unknown): snapshotData is Pick<
+  EditorProject,
+  'tracks' | 'bins' | 'editorialState' | 'workstationState'
+> {
+  if (!snapshotData || typeof snapshotData !== 'object') {
+    return false;
+  }
+
+  const candidate = snapshotData as Partial<EditorProject>;
+  return (
+    Array.isArray(candidate.tracks)
+    && Array.isArray(candidate.bins)
+    && typeof candidate.editorialState === 'object'
+    && candidate.editorialState !== null
+    && typeof candidate.workstationState === 'object'
+    && candidate.workstationState !== null
+  );
+}
+
+function buildVersionCompareMetrics(
+  snapshotData: unknown,
+  previousSnapshotData: unknown,
+): ProjectVersionCompareMetric[] {
+  const snapshotSummary = summarizeProjectVersionSnapshot(snapshotData);
+  const previousSummary = summarizeProjectVersionSnapshot(previousSnapshotData);
+  const metrics: ProjectVersionCompareMetric[] = [];
+
+  if (snapshotSummary && previousSummary) {
+    metrics.push(
+      {
+        label: 'Tracks',
+        previousValue: String(previousSummary.trackCount),
+        currentValue: String(snapshotSummary.trackCount),
+      },
+      {
+        label: 'Clips',
+        previousValue: String(previousSummary.clipCount),
+        currentValue: String(snapshotSummary.clipCount),
+      },
+      {
+        label: 'Bins',
+        previousValue: String(previousSummary.binCount),
+        currentValue: String(snapshotSummary.binCount),
+      },
+      {
+        label: 'Duration',
+        previousValue: formatDurationMetric(previousSummary.duration),
+        currentValue: formatDurationMetric(snapshotSummary.duration),
+      },
+    );
+  }
+
+  if (isEditorProjectSnapshot(snapshotData) && isEditorProjectSnapshot(previousSnapshotData)) {
+    metrics.push(
+      {
+        label: 'Workspace',
+        previousValue: previousSnapshotData.workstationState.activeWorkspaceId,
+        currentValue: snapshotData.workstationState.activeWorkspaceId,
+      },
+      {
+        label: 'Composer',
+        previousValue: previousSnapshotData.workstationState.composerLayout,
+        currentValue: snapshotData.workstationState.composerLayout,
+      },
+      {
+        label: 'Selected bin',
+        previousValue: previousSnapshotData.editorialState.selectedBinId ?? 'none',
+        currentValue: snapshotData.editorialState.selectedBinId ?? 'none',
+      },
+      {
+        label: 'Target tracks',
+        previousValue: String(previousSnapshotData.editorialState.enabledTrackIds.length),
+        currentValue: String(snapshotData.editorialState.enabledTrackIds.length),
+      },
+      {
+        label: 'Sync locks',
+        previousValue: String(previousSnapshotData.editorialState.syncLockedTrackIds.length),
+        currentValue: String(snapshotData.editorialState.syncLockedTrackIds.length),
+      },
+    );
+  }
+
+  return metrics;
+}
+
+function cloneVersion(version: ProjectVersion): ProjectVersion {
+  return {
+    ...version,
+    createdByProfile: version.createdByProfile ? { ...version.createdByProfile } : undefined,
+    compareSummary: version.compareSummary ? { ...version.compareSummary } : null,
+    compareMetrics: version.compareMetrics.map((metric) => ({ ...metric })),
+    snapshotSummary: version.snapshotSummary ? { ...version.snapshotSummary } : null,
+    snapshotData: version.snapshotData ? JSON.parse(JSON.stringify(version.snapshotData)) : version.snapshotData,
+  };
+}
+
+function cloneComment(comment: CollabComment): CollabComment {
+  return {
+    ...comment,
+    replies: comment.replies.map((reply) => ({ ...reply })),
+    reactions: comment.reactions.map((reaction) => ({ ...reaction, userIds: [...reaction.userIds] })),
+  };
+}
+
+function cloneComments(comments: CollabComment[]): CollabComment[] {
+  return comments.map(cloneComment);
+}
+
+function cloneUser(user: CollabUser): CollabUser {
+  return { ...user };
+}
+
+function cloneUsers(users: Iterable<CollabUser>): CollabUser[] {
+  return Array.from(users, cloneUser);
+}
 
 // ─── Engine ─────────────────────────────────────────────────────────────────
 
@@ -159,31 +471,42 @@ export class CollabEngine {
   private currentUserName = 'You';
   private subscribers: Set<Subscriber> = new Set();
   private connected = false;
+  private versionRetentionPreferences: VersionRetentionPreferences = {
+    ...DEFAULT_VERSION_RETENTION_PREFERENCES,
+  };
 
   constructor() {
     this.users = new Map(DEMO_USERS.map(u => [u.id, { ...u }]));
-    this.comments = DEMO_COMMENTS.map(c => ({
-      ...c,
-      replies: c.replies.map(r => ({ ...r })),
-      reactions: c.reactions.map(r => ({ ...r, userIds: [...r.userIds] })),
-    }));
-    this.versions = DEMO_VERSIONS.map(v => ({ ...v }));
+    this.comments = cloneComments(DEMO_COMMENTS);
+    this.versions = DEMO_VERSIONS.map(cloneVersion);
   }
 
   // ── Connection ──────────────────────────────────────────────────────────
 
-  connect(projectId: string, userId: string): void {
+  connect(projectId: string, userId: string, profile?: CollabIdentityProfile): void {
     this.currentUserId = userId;
+    const existingUser = this.users.get(userId);
+    const resolvedName = profile?.name?.trim() || existingUser?.name || this.currentUserName || 'You';
+    this.currentUserName = resolvedName;
     this.connected = true;
 
     // Add self to users if not present
-    if (!this.users.has(userId)) {
+    if (!existingUser) {
       this.users.set(userId, {
         id: userId,
-        name: this.currentUserName,
+        name: resolvedName,
+        avatar: profile?.avatar,
         color: '#f59e0b',
         cursorFrame: 0,
         cursorTrackId: null,
+        playheadTime: 0,
+        isOnline: true,
+      });
+    } else {
+      this.users.set(userId, {
+        ...existingUser,
+        name: resolvedName,
+        avatar: profile && 'avatar' in profile ? profile.avatar : existingUser.avatar,
         isOnline: true,
       });
     }
@@ -194,7 +517,12 @@ export class CollabEngine {
   disconnect(): void {
     this.connected = false;
     const self = this.users.get(this.currentUserId);
-    if (self) self.isOnline = false;
+    if (self) {
+      this.users.set(this.currentUserId, {
+        ...self,
+        isOnline: false,
+      });
+    }
     this.notify();
   }
 
@@ -208,21 +536,37 @@ export class CollabEngine {
 
   // ── Presence ────────────────────────────────────────────────────────────
 
-  updateCursor(frame: number, trackId: string | null): void {
+  updateCursor(frame: number, trackId: string | null, playheadTime?: number): void {
     const self = this.users.get(this.currentUserId);
     if (self) {
-      self.cursorFrame = frame;
-      self.cursorTrackId = trackId;
+      this.users.set(this.currentUserId, {
+        ...self,
+        cursorFrame: frame,
+        cursorTrackId: trackId,
+        playheadTime: playheadTime ?? self.playheadTime,
+      });
       this.notify();
     }
   }
 
   getOnlineUsers(): CollabUser[] {
-    return Array.from(this.users.values()).filter(u => u.isOnline);
+    return cloneUsers(this.users.values()).filter((user) => user.isOnline);
   }
 
   getAllUsers(): CollabUser[] {
-    return Array.from(this.users.values());
+    return cloneUsers(this.users.values());
+  }
+
+  hydratePresence(users: CollabUser[]): void {
+    this.users = new Map(users.map((user) => [user.id, cloneUser(user)]));
+    const self = this.users.get(this.currentUserId);
+    if (self && this.connected) {
+      this.users.set(this.currentUserId, {
+        ...self,
+        isOnline: true,
+      });
+    }
+    this.notify();
   }
 
   // ── Comments ────────────────────────────────────────────────────────────
@@ -299,7 +643,12 @@ export class CollabEngine {
   }
 
   getComments(): CollabComment[] {
-    return [...this.comments];
+    return cloneComments(this.comments);
+  }
+
+  setComments(comments: CollabComment[]): void {
+    this.comments = cloneComments(comments);
+    this.notify();
   }
 
   getCommentsAtFrame(frame: number): CollabComment[] {
@@ -312,32 +661,72 @@ export class CollabEngine {
 
   // ── Versions ────────────────────────────────────────────────────────────
 
-  saveVersion(name: string, description: string): ProjectVersion {
+  saveVersion(
+    name: string,
+    description: string,
+    snapshotData?: unknown,
+    options?: { retentionPolicy?: 'manual' | 'session' },
+  ): ProjectVersion {
+    const effectiveSnapshot = snapshotData ?? { tracks: 6, clips: 8, duration: 34, timestamp: Date.now() };
+    const snapshotSummary = summarizeProjectVersionSnapshot(effectiveSnapshot);
+    const previousVersion = this.versions.find((version) => version.snapshotSummary) ?? null;
+    const previousSummary = previousVersion?.snapshotSummary ?? null;
     const version: ProjectVersion = {
       id: `v_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       name,
       createdAt: Date.now(),
       createdBy: this.currentUserName,
+      createdByProfile: {
+        userId: this.currentUserId,
+        displayName: this.currentUserName,
+        avatarUrl: this.users.get(this.currentUserId)?.avatar,
+        color: this.users.get(this.currentUserId)?.color,
+      },
       description,
-      snapshotData: { tracks: 6, clips: 8, duration: 34, timestamp: Date.now() },
+      kind: 'restore-point',
+      isRestorePoint: true,
+      retentionPolicy: options?.retentionPolicy ?? 'manual',
+      snapshotSummary,
+      compareSummary: buildVersionCompareSummary(snapshotSummary, previousSummary),
+      compareBaselineName: previousVersion?.name ?? null,
+      compareMetrics: buildVersionCompareMetrics(effectiveSnapshot, previousVersion?.snapshotData ?? null),
+      snapshotData: effectiveSnapshot,
     };
     this.versions.unshift(version);
+    this.applyVersionRetention();
     this.notify();
     return version;
   }
 
   getVersions(): ProjectVersion[] {
-    return [...this.versions];
+    return this.versions.map(cloneVersion);
   }
 
-  restoreVersion(versionId: string): void {
+  hydrateVersions(versions: ProjectVersion[]): void {
+    this.versions = versions.map(cloneVersion);
+    this.notify();
+  }
+
+  getVersionRetentionPreferences(): VersionRetentionPreferences {
+    return { ...this.versionRetentionPreferences };
+  }
+
+  setVersionRetentionPreferences(preferences: VersionRetentionPreferences): void {
+    this.versionRetentionPreferences = { ...preferences };
+    this.applyVersionRetention();
+    this.notify();
+  }
+
+  restoreVersion(versionId: string): ProjectVersion | null {
     const version = this.versions.find(v => v.id === versionId);
     if (version) {
-      // In production, this would restore the timeline state from the snapshot
-      // Intentional debug-level log for version restoration tracking
+      // Snapshot application happens in the editor store; the engine resolves
+      // the selected version and emits a change for the collaboration UI.
       console.debug(`[CollabEngine] Restoring version: ${version.name}`);
       this.notify();
+      return cloneVersion(version);
     }
+    return null;
   }
 
   // ── Subscriptions ───────────────────────────────────────────────────────
@@ -353,6 +742,19 @@ export class CollabEngine {
         console.error('[CollabEngine] Listener error:', err);
       }
     });
+  }
+
+  private applyVersionRetention(): void {
+    if (!this.versionRetentionPreferences.autoPrune) return;
+    const maxVersionCountByPreset: Record<Exclude<VersionRetentionPreset, 'keep-all'>, number> = {
+      'last-10': 10,
+      'last-25': 25,
+      'last-50': 50,
+    };
+    if (this.versionRetentionPreferences.preset === 'keep-all') return;
+    const maxVersionCount = maxVersionCountByPreset[this.versionRetentionPreferences.preset];
+    if (this.versions.length <= maxVersionCount) return;
+    this.versions = this.versions.slice(0, maxVersionCount);
   }
 }
 

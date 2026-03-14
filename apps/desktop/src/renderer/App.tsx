@@ -4,6 +4,7 @@ import { hydrateProject } from '@mcua/core';
 import { DashboardPage } from '../../../web/src/pages/DashboardPage';
 import { EditorPage } from '../../../web/src/pages/EditorPage';
 import { saveProjectToRepository } from '../../../web/src/lib/projectRepository';
+import { useEditorStore } from '../../../web/src/store/editor.store';
 
 // ─── Error Boundary ─────────────────────────────────────────────────────────────
 
@@ -31,14 +32,14 @@ class ErrorBoundary extends React.Component<{ children: ReactNode }, ErrorBounda
           alignItems: 'center',
           justifyContent: 'center',
           height: '100vh',
-          backgroundColor: '#0f172a',
-          color: '#f1f5f9',
+          backgroundColor: '#101013',
+          color: '#efeff2',
           fontFamily: 'system-ui, sans-serif',
           padding: 32,
           textAlign: 'center',
         }}>
           <h1 style={{ fontSize: 24, marginBottom: 16 }}>Something went wrong</h1>
-          <p style={{ color: '#94a3b8', marginBottom: 24, maxWidth: 480 }}>
+          <p style={{ color: '#9d9da7', marginBottom: 24, maxWidth: 480 }}>
             {this.state.error.message}
           </p>
           <button
@@ -47,8 +48,8 @@ class ErrorBoundary extends React.Component<{ children: ReactNode }, ErrorBounda
               window.location.hash = '/';
             }}
             style={{
-              backgroundColor: '#6366f1',
-              color: '#fff',
+              backgroundColor: '#81818d',
+              color: '#ffffff',
               border: 'none',
               borderRadius: 8,
               padding: '10px 24px',
@@ -67,131 +68,201 @@ class ErrorBoundary extends React.Component<{ children: ReactNode }, ErrorBounda
 
 // ─── Update Banner ──────────────────────────────────────────────────────────────
 
+interface DesktopUpdateBannerState {
+  currentVersion: string;
+  channel: string;
+  status: 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error';
+  availableVersion: string | null;
+  downloadPercent: number | null;
+  message: string | null;
+  error: string | null;
+  checkedAt: string | null;
+  restartScheduled: boolean;
+  autoInstallOnQuit: boolean;
+}
+
 function UpdateBanner() {
-  const [updateInfo, setUpdateInfo] = useState<{
-    version: string;
-    state: 'available' | 'downloading' | 'downloaded';
-  } | null>(null);
-  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
-  const [dismissed, setDismissed] = useState(false);
+  const [updateState, setUpdateState] = useState<DesktopUpdateBannerState | null>(null);
+  const [dismissedToken, setDismissedToken] = useState<string | null>(null);
 
   useEffect(() => {
     if (!window.electronAPI) return;
 
-    const disposeAvailable = window.electronAPI.onUpdateAvailable((info) => {
-      setUpdateInfo({ version: info.version, state: 'available' });
-      setDismissed(false);
+    void window.electronAPI.app.getUpdateState().then((info) => {
+      setUpdateState(info);
     });
-    const disposeProgress = window.electronAPI.onUpdateProgress((info) => {
-      setDownloadProgress(info.percent);
-    });
-    const disposeDownloaded = window.electronAPI.onUpdateDownloaded((info) => {
-      setUpdateInfo({ version: info.version, state: 'downloaded' });
-      setDownloadProgress(null);
-      setDismissed(false);
+
+    const disposeState = window.electronAPI.onUpdateState((info) => {
+      setUpdateState(info);
+      if (info.status !== 'error' && info.status !== 'downloaded') {
+        setDismissedToken(null);
+      }
     });
 
     return () => {
-      disposeAvailable();
-      disposeProgress();
-      disposeDownloaded();
+      disposeState();
     };
   }, []);
 
-  if (!updateInfo || dismissed) return null;
+  if (!updateState) return null;
 
-  const handleDownload = () => {
-    setUpdateInfo((prev) => prev ? { ...prev, state: 'downloading' } : prev);
-    window.electronAPI?.app.downloadUpdate();
-  };
+  if (updateState.status === 'disabled' || updateState.status === 'idle' || updateState.status === 'up-to-date') {
+    return null;
+  }
+
+  const dismissToken = updateState.status === 'error'
+    ? updateState.error
+    : updateState.status === 'downloaded' && !updateState.restartScheduled
+      ? updateState.availableVersion
+      : null;
+  if (dismissToken && dismissToken === dismissedToken) {
+    return null;
+  }
+
+  const targetVersion = updateState.availableVersion ?? updateState.currentVersion;
+  let label = updateState.message ?? `Version ${targetVersion}`;
+
+  if (updateState.status === 'checking') {
+    label = 'Checking for updates...';
+  }
+  if (updateState.status === 'available' || updateState.status === 'downloading') {
+    label = `Downloading update ${targetVersion}${updateState.downloadPercent !== null ? ` (${Math.round(updateState.downloadPercent)}%)` : '...'}`;
+  }
+  if (updateState.status === 'downloaded') {
+    label = updateState.restartScheduled
+      ? `Installing update ${targetVersion} and restarting...`
+      : `Update ${targetVersion} ready to install`;
+  }
+  if (updateState.status === 'error') {
+    label = updateState.error ?? 'Automatic update check failed.';
+  }
 
   return (
     <div style={{
       position: 'fixed',
       bottom: 16,
       right: 16,
-      backgroundColor: '#312e81',
-      border: '1px solid #6366f1',
-      borderRadius: 8,
-      padding: '12px 16px',
-      color: '#e0e7ff',
+      backgroundColor: '#232329',
+      border: '1px solid #50505a',
+      borderRadius: 12,
+      padding: '14px 16px',
+      color: '#efeff2',
       fontSize: 13,
       zIndex: 9999,
-      maxWidth: 360,
+      width: 'min(420px, calc(100vw - 24px))',
       display: 'flex',
-      alignItems: 'center',
+      alignItems: 'flex-start',
       gap: 12,
+      flexWrap: 'wrap',
+      boxShadow: '0 18px 48px rgba(0, 0, 0, 0.28)',
     }}>
-      {updateInfo.state === 'downloaded' ? (
-        <>
-          <span>Update {updateInfo.version} ready</span>
-          <button
-            onClick={() => window.electronAPI?.app.installUpdate()}
-            style={{
-              backgroundColor: '#6366f1',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 6,
-              padding: '6px 12px',
-              fontSize: 12,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            Restart to Update
-          </button>
-          <button
-            onClick={() => setDismissed(true)}
-            style={{
-              backgroundColor: 'transparent',
-              color: '#94a3b8',
-              border: 'none',
-              fontSize: 12,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            Later
-          </button>
-        </>
-      ) : updateInfo.state === 'downloading' ? (
-        <span>
-          Downloading update {updateInfo.version}
-          {downloadProgress !== null ? ` (${Math.round(downloadProgress)}%)` : '...'}
-        </span>
-      ) : (
-        <>
-          <span>Update {updateInfo.version} available</span>
-          <button
-            onClick={handleDownload}
-            style={{
-              backgroundColor: '#6366f1',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 6,
-              padding: '6px 12px',
-              fontSize: 12,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            Download
-          </button>
-          <button
-            onClick={() => setDismissed(true)}
-            style={{
-              backgroundColor: 'transparent',
-              color: '#94a3b8',
-              border: 'none',
-              fontSize: 12,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            Later
-          </button>
-        </>
-      )}
+      <div style={{
+        flex: '1 1 220px',
+        minWidth: 0,
+        lineHeight: 1.45,
+        whiteSpace: 'normal',
+        wordBreak: 'break-word',
+      }}>
+        {label}
+      </div>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        gap: 8,
+        flex: '0 1 auto',
+        flexWrap: 'wrap',
+        marginLeft: 'auto',
+      }}>
+        {updateState.status === 'downloaded' ? (
+          <>
+            {!updateState.restartScheduled ? (
+              <>
+                <button
+                  onClick={() => window.electronAPI?.app.installUpdate()}
+                  style={{
+                    backgroundColor: '#81818d',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: 6,
+                    padding: '6px 12px',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  Restart Now
+                </button>
+                <button
+                  onClick={() => setDismissedToken(updateState.availableVersion ?? 'downloaded')}
+                  style={{
+                    backgroundColor: 'transparent',
+                    color: '#9d9da7',
+                    border: 'none',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  Later
+                </button>
+              </>
+            ) : null}
+          </>
+        ) : updateState.status === 'error' ? (
+          <>
+            <button
+              onClick={() => {
+                setDismissedToken(null);
+                void window.electronAPI?.app.checkForUpdates();
+              }}
+              style={{
+                backgroundColor: '#81818d',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: 6,
+                padding: '6px 12px',
+                fontSize: 12,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Retry
+            </button>
+            <button
+              onClick={() => setDismissedToken(updateState.error ?? 'error')}
+              style={{
+                backgroundColor: 'transparent',
+                color: '#9d9da7',
+                border: 'none',
+                fontSize: 12,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Dismiss
+            </button>
+          </>
+        ) : (
+          <>
+            {updateState.status === 'checking' ? null : (
+              <button
+                onClick={() => void window.electronAPI?.app.checkForUpdates()}
+                style={{
+                  backgroundColor: 'transparent',
+                  color: '#9d9da7',
+                  border: 'none',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Check Again
+              </button>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -200,6 +271,8 @@ function UpdateBanner() {
 
 export default function App() {
   const navigate = useNavigate();
+  const setDesktopJobs = useEditorStore((state) => state.setDesktopJobs);
+  const upsertDesktopJob = useEditorStore((state) => state.upsertDesktopJob);
 
   const handleOpenProject = useCallback(async (filePath: string) => {
     try {
@@ -253,6 +326,22 @@ export default function App() {
       disposeDeepLink();
     };
   }, [navigate, handleOpenProject, handleDeepLink]);
+
+  useEffect(() => {
+    if (!window.electronAPI) {
+      return;
+    }
+
+    void window.electronAPI.listDesktopJobs().then((jobs) => {
+      setDesktopJobs(jobs);
+    }).catch((error) => {
+      console.warn('[DesktopJobs] Failed to list desktop jobs:', error);
+    });
+
+    return window.electronAPI.onDesktopJobUpdate((job) => {
+      upsertDesktopJob(job);
+    });
+  }, [setDesktopJobs, upsertDesktopJob]);
 
   return (
     <ErrorBoundary>

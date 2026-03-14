@@ -1,191 +1,118 @@
-# Packaging Notes
+# Desktop Packaging Notes
 
-Platform-specific packaging details for the Media Composer Agentic Editing system.
+This repo has a repeatable desktop packaging flow for macOS, Windows, and Linux
+through the Electron app in
+[apps/desktop](/Users/guillaumeaubuchon/GitHub/the-avid/apps/desktop).
 
-## Windows / NVIDIA
+## Commands
 
-### Desktop Application
-
-- **Installer:** Electron Builder produces an NSIS installer (`.exe`)
-- **Architecture:** x64 only (arm64 Windows not yet supported)
-- **Code signing:** Authenticode signing required for distribution; configure via `electron-builder.yml`
-
-### Native Dependencies
-
-- **FFmpeg:** Bundled via `@ffmpeg-installer/ffmpeg` at build time; included in the NSIS payload
-- **better-sqlite3:** Requires native rebuild for the Electron Node ABI. Run `npx electron-rebuild -f -w better-sqlite3` before packaging
-- **WebSocket (ws):** Pure JS, no native rebuild needed
-
-### GPU Acceleration
-
-- **NVIDIA CUDA:** TensorRT backend requires the CUDA Toolkit (12.x recommended) installed on the target machine
-- **TensorRT-LLM:** Requires the TensorRT-LLM runtime libraries; the backend probes for `libnvinfer.so` at startup
-- **ONNX Runtime:** The CUDA execution provider is auto-selected when `onnxruntime-gpu` is installed; falls back to CPU otherwise
-- **Model weights:** Not bundled with the installer. Downloaded on first use to `%APPDATA%/mcua/models/`
-
-### Service Deployment
-
-- Services can run as standalone Node.js processes behind IIS reverse proxy
-- PM2 recommended for process management: `pm2 start ecosystem.config.js`
-- Windows Firewall rules required for mesh WebSocket ports (default: 4200)
-
-## macOS / Apple Silicon
-
-### Desktop Application
-
-- **Installer:** Electron Builder produces a DMG with background image and Applications symlink
-- **Architecture:** Universal binary (x64 + arm64) recommended; arm64-only for minimum size
-- **Code signing:** Apple Developer certificate required. Notarization is mandatory for distribution outside the Mac App Store
-- **Entitlements:** See `resources/entitlements.mac.plist` for hardened runtime permissions (network, file access, GPU)
-
-### Native Dependencies
-
-- **FFmpeg:** Bundled for the target architecture (arm64 recommended for Apple Silicon)
-- **better-sqlite3:** Rebuild for the Electron ABI and target arch: `npx electron-rebuild -f -w better-sqlite3 --arch arm64`
-- **Metal framework:** Available natively on macOS 14+ (Sonoma); no additional installation needed
-
-### GPU Acceleration
-
-- **Apple MLX:** The MLX backend requires macOS 14+ and an Apple Silicon chip (M1 or later). Uses the Metal Performance Shaders framework for GPU acceleration
-- **ONNX Runtime:** The CoreML execution provider is available on macOS; auto-selected when `onnxruntime` is built with CoreML support
-- **llama.cpp:** Metal acceleration is auto-detected on Apple Silicon. The backend loads GGUF model files from `~/Library/Application Support/mcua/models/`
-
-### DMG Customization
-
-- Background: `resources/dmg-background.svg` (rendered to PNG at build time)
-- Icon: `resources/icon.svg` (converted to `.icns` by electron-builder)
-- License: `resources/license.txt` displayed in the DMG license agreement
-
-## Linux
-
-### Desktop Application
-
-- **Installer:** AppImage output from Electron Builder (portable, no installation required)
-- **Alternative formats:** `.deb` and `.rpm` available via electron-builder config
-- **Architecture:** x64 and arm64
-
-### Native Dependencies
-
-- **FFmpeg:** Bundled for the target architecture. AppImage includes all shared libraries
-- **better-sqlite3:** Rebuild for the host glibc version; may need `--build-from-source` on older distros
-- **System libraries:** `libsecret-1-dev` (for credential storage), `libxtst6`, `libx11-6`
-
-### GPU Acceleration
-
-- **NVIDIA CUDA:** Same requirements as Windows (CUDA Toolkit 12.x, TensorRT runtime)
-- **AMD ROCm:** Not yet supported; planned via ONNX Runtime ROCm EP
-- **Vulkan:** Not yet supported; planned via llama.cpp Vulkan backend
-
-### Headless Deployment
-
-For server or workstation deployments without a display:
+From the repo root:
 
 ```bash
-# Run with virtual framebuffer (if Electron shell is needed)
-xvfb-run -a npx electron .
-
-# Or run services directly (no Electron required)
-node services/agent-orchestrator/dist/server.js
-node services/knowledge-node/dist/server.js
-node services/local-ai-runtime/dist/server.js
+npm run dist:desktop:refresh:mac
+npm run dist:desktop:refresh:win
+npm run dist:desktop:linux
+npm run dist:desktop:mac
+npm run dist:desktop:win
 ```
 
-## Service Packaging
-
-### Standalone Node.js Processes
-
-All three services (`agent-orchestrator`, `knowledge-node`, `local-ai-runtime`) can run independently of the Electron desktop shell:
+From the desktop workspace directly:
 
 ```bash
-# Build TypeScript to JavaScript
-npx turbo build
-
-# Start services
-node services/agent-orchestrator/dist/server.js
-node services/knowledge-node/dist/server.js
-node services/local-ai-runtime/dist/server.js
+npm run dist:refresh -- --targets=mac
+npm run dist:refresh -- --targets=win
+npm run dist:linux
+npm run dist:mac
+npm run dist:win
 ```
 
-### Docker
+The refresh commands are the preferred entry point because they delete stale
+outputs before rebuilding fresh installers from the current code.
 
-Add a `Dockerfile` to each service directory:
+Canonical automation entry point:
 
-```dockerfile
-FROM node:20-slim
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --production
-COPY dist/ ./dist/
-EXPOSE 4100
-CMD ["node", "dist/server.js"]
-```
+- [rebuild-installers.js](/Users/guillaumeaubuchon/GitHub/the-avid/apps/desktop/scripts/rebuild-installers.js)
+  - removes stale `apps/desktop/out` and `apps/desktop/dist`
+  - rebuilds requested installer targets through the existing desktop packaging
+    scripts
 
-For the knowledge-node service, the image must include the `better-sqlite3` native module. Use a multi-stage build with build tools in the first stage:
+Detailed automation guide:
 
-```dockerfile
-FROM node:20 AS builder
-WORKDIR /app
-COPY . .
-RUN npm ci && npx turbo build --filter=@mcua/knowledge-node
+- [DESKTOP_INSTALLER_AUTOMATION.md](/Users/guillaumeaubuchon/GitHub/the-avid/docs/DESKTOP_INSTALLER_AUTOMATION.md)
+- [DESKTOP_AUTO_UPDATES.md](/Users/guillaumeaubuchon/GitHub/the-avid/docs/DESKTOP_AUTO_UPDATES.md)
+- [VERCEL_DESKTOP_UPDATE_ENDPOINT.md](/Users/guillaumeaubuchon/GitHub/the-avid/docs/VERCEL_DESKTOP_UPDATE_ENDPOINT.md)
+- [CICD_RELEASE_PIPELINE.md](/Users/guillaumeaubuchon/GitHub/the-avid/docs/CICD_RELEASE_PIPELINE.md)
 
-FROM node:20-slim
-WORKDIR /app
-COPY --from=builder /app/services/knowledge-node/dist ./dist
-COPY --from=builder /app/services/knowledge-node/node_modules ./node_modules
-EXPOSE 4200
-CMD ["node", "dist/server.js"]
-```
+## What the packaging prep does
 
-### Process Management
+Before packaging, the desktop workspace now runs:
 
-For production deployments, use PM2 or systemd:
+- [generate-icons.js](/Users/guillaumeaubuchon/GitHub/the-avid/apps/desktop/scripts/generate-icons.js)
+  - generates `icon.icns`, `icon.ico`, `icon.png`, and Linux icon sizes
+  - works with macOS native tools and does not require ImageMagick on macOS
+- [render-dmg-background.js](/Users/guillaumeaubuchon/GitHub/the-avid/apps/desktop/scripts/render-dmg-background.js)
+  - renders `dmg-background.png` from the SVG source
+- [download-ffmpeg.js](/Users/guillaumeaubuchon/GitHub/the-avid/apps/desktop/scripts/download-ffmpeg.js)
+  - downloads bundled `ffmpeg` and `ffprobe` into `resources/bin/<platform>`
+- [prepare-packaging.js](/Users/guillaumeaubuchon/GitHub/the-avid/apps/desktop/scripts/prepare-packaging.js)
+  - orchestrates the full prep step for the requested installer target
 
-**PM2:**
-```bash
-pm2 start ecosystem.config.js
-pm2 save
-pm2 startup
-```
+## Installer outputs
 
-**systemd (Linux):**
-```ini
-[Unit]
-Description=MCUA Knowledge Node
-After=network.target
+Artifacts are written to:
 
-[Service]
-Type=simple
-User=mcua
-WorkingDirectory=/opt/mcua/services/knowledge-node
-ExecStart=/usr/bin/node dist/server.js
-Restart=on-failure
-RestartSec=10
-Environment=PORT=4200
-Environment=NODE_ENV=production
+- [apps/desktop/out](/Users/guillaumeaubuchon/GitHub/the-avid/apps/desktop/out)
 
-[Install]
-WantedBy=multi-user.target
-```
+Current targets:
 
-## Model Weight Distribution
+- macOS: DMG and ZIP
+- Windows: NSIS installer and portable build
+- Linux: AppImage and deb
 
-AI model weights are not included in application packages due to size (multi-GB). They are downloaded on demand:
+## Important behavior
 
-- **Default location:** Platform-specific application data directory
-  - Windows: `%APPDATA%/mcua/models/`
-  - macOS: `~/Library/Application Support/mcua/models/`
-  - Linux: `~/.local/share/mcua/models/`
+- AJA hardware support is now treated as optional at build/package time.
+- DeckLink stays optional through `macadam`.
+- Packaging no longer assumes AJA SDK bindings are installed on the build
+  machine.
+- FFmpeg is bundled into the app payload so ingest/transcode tooling is
+  self-contained.
+- Packaged desktop builds now emit generic-provider auto-update metadata for a
+  CDN-backed update feed.
 
-- **Offline installation:** Pre-download models and place them in the models directory before first launch
+## CI packaging
 
-- **Model manifest:** The registry seed (`registry-seed.ts`) defines expected model files, sizes, and checksums for integrity verification
+There is now a dedicated GitHub Actions workflow for installers:
 
-## Build Matrix
+- [desktop-installers.yml](/Users/guillaumeaubuchon/GitHub/the-avid/.github/workflows/desktop-installers.yml)
 
-| Platform | Arch | Electron | Services | GPU Backends |
-|----------|------|----------|----------|-------------|
-| Windows 10+ | x64 | NSIS | Node.js | CUDA, TensorRT |
-| macOS 14+ | arm64 | DMG | Node.js | MLX, Metal |
-| macOS 14+ | x64 | DMG | Node.js | ONNX CPU |
-| Ubuntu 22.04+ | x64 | AppImage | Node.js, Docker | CUDA, TensorRT |
-| Ubuntu 22.04+ | arm64 | AppImage | Node.js, Docker | ONNX CPU |
+It builds:
+
+- macOS installers on `macos-14`
+- Windows installers on `windows-2022`
+
+and uploads the packaged artifacts for testing.
+
+The workflow now also supports:
+
+- manual target selection through `workflow_dispatch`
+- scheduled periodic rebuilds
+- the same clean-and-rebuild entry point used locally
+- a downstream aggregate publish step that can safely prune stale updater blobs
+  without macOS/Windows jobs racing each other
+
+When you manually rebuild only `mac` or only `win`, the workflow intentionally
+skips updater publishing. Channel cleanup is only safe when the workflow has the
+complete multi-platform artifact set.
+
+## Platform notes
+
+- macOS notarization still depends on `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`,
+  and `APPLE_TEAM_ID`.
+- Without signing credentials, macOS builds still produce testable unsigned
+  artifacts.
+- Windows signing is not configured yet; NSIS artifacts are still generated for
+  internal testing.
+- The Electron installer is self-contained, but external AI/service processes
+  are not yet embedded as bundled background services. Core editorial testing is
+  covered; local AI features still expect the configured runtime/service path.

@@ -18,6 +18,9 @@
     "test:watch": "vitest",
     "clean": "rm -rf dist"
   },
+  "dependencies": {
+    "@mcua/media-backend": "*"
+  },
   "devDependencies": {
     "@types/node": "^20.14.0",
     "typescript": "^5.4.0",

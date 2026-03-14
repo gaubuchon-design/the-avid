@@ -322,8 +322,7 @@ export class RelinkEngine {
     // Walk bins and update assets
     const updateAssetInBins = (bins: EditorBin[]): void => {
       for (const bin of bins) {
-        for (let i = 0; i < bin.assets.length; i++) {
-          const asset = bin.assets[i]!;
+        for (const [index, asset] of bin.assets.entries()) {
           const candidate = relinkMap.get(asset.id);
 
           if (candidate) {
@@ -333,7 +332,7 @@ export class RelinkEngine {
               pathHistory.push(asset.locations.originalPath);
             }
 
-            bin.assets[i]! = {
+            bin.assets[index] = {
               ...asset,
               status: 'READY',
               indexStatus: 'READY',

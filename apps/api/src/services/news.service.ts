@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { db } from '../db/client';
 import { logger } from '../utils/logger';
 import { NotFoundError, BadRequestError } from '../utils/errors';
@@ -47,7 +48,7 @@ class NewsService {
   }) {
     const { cursor, limit, order, connectionId, date } = params;
 
-    const where: Record<string, unknown> = {};
+    const where: Prisma.RundownWhereInput = {};
     if (connectionId) where['nrcsConnectionId'] = connectionId;
     if (date) {
       const d = new Date(date);
@@ -60,16 +61,19 @@ class NewsService {
       }
     }
 
-    const cursorClause = cursor ? { cursor: { id: cursor }, skip: 1 } : {};
+    const findManyArgs: Prisma.RundownFindManyArgs = {
+      where,
+      include: { stories: { orderBy: { sortOrder: 'asc' } } },
+      orderBy: { airDate: order },
+      take: limit + 1,
+    };
+    if (cursor) {
+      findManyArgs.cursor = { id: cursor };
+      findManyArgs.skip = 1;
+    }
 
     const [items, total] = await Promise.all([
-      db.rundown.findMany({
-        where,
-        include: { stories: { orderBy: { sortOrder: 'asc' } } },
-        orderBy: { airDate: order },
-        take: limit + 1,
-        ...cursorClause,
-      }),
+      db.rundown.findMany(findManyArgs),
       db.rundown.count({ where }),
     ]);
 

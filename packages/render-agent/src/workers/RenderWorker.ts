@@ -176,7 +176,7 @@ export class RenderWorker {
   private config: RenderWorkerConfig;
   private memoryCheckTimer: ReturnType<typeof setInterval> | null = null;
   /** Tracks all temp files created during rendering so they can be cleaned up on any exit path. */
-  private tempFiles: Set<string> = new Set();
+  private tempFiles: Set<string> = new Set<string>();
 
   constructor(config: Partial<RenderWorkerConfig> = {}) {
     this.config = { ...DEFAULT_RENDER_CONFIG, ...config };

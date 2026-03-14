@@ -1,4 +1,11 @@
-import type { EditorMediaAsset, EditorProject } from '@mcua/core';
+import type {
+  EditorMediaAsset,
+  EditorProject,
+  FrameRange,
+  PlaybackStreamDescriptor,
+  PlaybackTelemetry,
+  TimelineRenderSnapshot,
+} from '@mcua/core';
 
 /** File filter for open/save dialogs (mirrors Electron.FileFilter) */
 export interface FileFilter {
@@ -54,7 +61,7 @@ export interface SaveDialogResult {
   filePath?: string;
 }
 
-export type DesktopJobKind = 'INGEST' | 'EXPORT';
+export type DesktopJobKind = 'INGEST' | 'INDEX' | 'EXPORT' | 'TRANSCODE' | 'TRANSCRIPTION' | 'RENDER' | 'EFFECTS';
 export type DesktopJobStatus = 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
 
 export interface DesktopJob {
@@ -69,6 +76,8 @@ export interface DesktopJob {
   updatedAt: string;
   outputPath?: string;
   error?: string;
+  detail?: string;
+  dispatchMode?: 'LOCAL' | 'DISTRIBUTED' | 'HYBRID';
 }
 
 export interface RelinkResult {
@@ -81,6 +90,52 @@ export interface RelinkResult {
 export interface MediaToolInfo {
   ffmpeg: string | null;
   ffprobe: string | null;
+}
+
+export interface ExportTranscodeRequest {
+  jobId: string;
+  sourceArtifact: Uint8Array;
+  sourceContainer: string;
+  targetContainer: string;
+  targetVideoCodec?: string;
+  targetAudioCodec?: string;
+  fps?: number;
+  width?: number;
+  height?: number;
+}
+
+export interface ExportTranscodeResult {
+  outputPath: string;
+  outputContainer: string;
+  outputVideoCodec: string;
+  outputAudioCodec?: string;
+}
+
+export interface DesktopParityPlaybackTransportView {
+  buffer: SharedArrayBuffer;
+  width: number;
+  height: number;
+  bytesPerPixel: number;
+  slots: number;
+}
+
+export interface DesktopParityPlaybackTransportDescriptor {
+  transportHandle: string;
+  view: DesktopParityPlaybackTransportView;
+}
+
+export interface DesktopParityAudioMonitorPreviewState {
+  mixId: string;
+  handle: string;
+  previewPath: string;
+  executionPlanPath: string;
+  previewRenderArtifacts: string[];
+  bufferedPreviewActive: boolean;
+  offlinePrintRenderRequired: boolean;
+  timeRange: {
+    startSeconds: number;
+    endSeconds: number;
+  };
 }
 
 export interface DesktopBridge {
@@ -100,7 +155,7 @@ export interface DesktopBridge {
   deleteProject: (projectId: string) => Promise<boolean>;
 
   // ─── Media ────────────────────────────────────────────────────────────────
-  importMedia: (projectId: string, filePaths: string[]) => Promise<EditorMediaAsset[]>;
+  importMedia: (projectId: string, filePaths: string[], binId?: string) => Promise<EditorMediaAsset[]>;
   scanProjectMedia: (projectId: string) => Promise<EditorProject | null>;
   relinkProjectMedia: (projectId: string, searchRoots: string[]) => Promise<RelinkResult>;
 
@@ -112,10 +167,35 @@ export interface DesktopBridge {
   // ─── Jobs ─────────────────────────────────────────────────────────────────
   listDesktopJobs: () => Promise<DesktopJob[]>;
   startExportJob: (project: EditorProject) => Promise<DesktopJob>;
+  transcodeExportArtifact: (payload: ExportTranscodeRequest) => Promise<ExportTranscodeResult>;
 
   // ─── File I/O ─────────────────────────────────────────────────────────────
   readTextFile: (filePath: string) => Promise<string>;
   writeTextFile: (filePath: string, contents: string) => Promise<boolean>;
+
+  // ─── Desktop Parity Playback ──────────────────────────────────────────────
+  parityPlayback?: {
+    syncProject: (project: EditorProject) => Promise<boolean>;
+    createTransport: (request: {
+      project: EditorProject;
+      snapshot?: TimelineRenderSnapshot;
+      sequenceId?: string;
+      revisionId?: string;
+    }) => Promise<DesktopParityPlaybackTransportDescriptor>;
+    getTransportView: (transportHandle: string) => Promise<DesktopParityPlaybackTransportView>;
+    getAudioMonitorPreview: (transportHandle: string) => Promise<DesktopParityAudioMonitorPreviewState | null>;
+    attachStreams: (transportHandle: string, streams: PlaybackStreamDescriptor[]) => Promise<boolean>;
+    preroll: (transportHandle: string, range: FrameRange) => Promise<boolean>;
+    start: (transportHandle: string, frame: number) => Promise<boolean>;
+    stop: (transportHandle: string) => Promise<boolean>;
+    releaseTransport: (transportHandle: string) => Promise<boolean>;
+    play: (transportHandle: string, frame: number, playbackRate?: number) => Promise<boolean>;
+    syncFrame: (transportHandle: string, frame: number) => Promise<boolean>;
+    getTelemetry: (transportHandle: string) => Promise<PlaybackTelemetry>;
+    attachOutputDevice: (transportHandle: string, config: unknown) => Promise<boolean>;
+    detachOutputDevice: (transportHandle: string, deviceId?: string) => Promise<boolean>;
+    invalidateCaches: (projectId: string) => Promise<boolean>;
+  };
 
   // ─── IPC Events ───────────────────────────────────────────────────────────
   onNewProject: (callback: () => void) => () => void;

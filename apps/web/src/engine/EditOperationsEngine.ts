@@ -767,10 +767,8 @@ export class EditOperationsEngine {
     const affectedTrackIds: string[] = [];
     const affectedClipIds: string[] = [];
 
-    useEditorStore.setState((prev) => {
-      const tracks = [...prev.tracks];
-
-      for (const track of tracks) {
+    useEditorStore.setState((state) => {
+      for (const track of state.tracks) {
         if (track.locked || track.muted) continue;
 
         affectedTrackIds.push(track.id);
@@ -794,8 +792,6 @@ export class EditOperationsEngine {
         // Sort clips by start time
         track.clips.sort((a, b) => a.startTime - b.startTime);
       }
-
-      return { tracks };
     });
 
     this.recalcDuration();
@@ -846,10 +842,8 @@ export class EditOperationsEngine {
     const affectedTrackIds: string[] = [];
     const affectedClipIds: string[] = [];
 
-    useEditorStore.setState((prev) => {
-      const tracks = [...prev.tracks];
-
-      for (const track of tracks) {
+    useEditorStore.setState((state) => {
+      for (const track of state.tracks) {
         if (track.locked || track.muted) continue;
 
         affectedTrackIds.push(track.id);
@@ -861,8 +855,6 @@ export class EditOperationsEngine {
         // Sort clips by start time
         track.clips.sort((a, b) => a.startTime - b.startTime);
       }
-
-      return { tracks };
     });
 
     // Move playhead to the lift point
@@ -1154,14 +1146,14 @@ export class EditOperationsEngine {
       return failResult('Lift Segment: no clips specified');
     }
 
-    const state = useEditorStore.getState();
     const affectedTrackIds: string[] = [];
     const affectedClipIds: string[] = [];
 
-    useEditorStore.setState((prev) => {
-      const tracks = [...prev.tracks];
-
-      for (const track of tracks) {
+    useEditorStore.setState((state) => {
+      for (const track of state.tracks) {
+        if (track.locked) {
+          continue;
+        }
         const clipsToRemove = track.clips.filter((c) =>
           clipIds.includes(c.id),
         );
@@ -1172,8 +1164,19 @@ export class EditOperationsEngine {
         }
       }
 
-      return { tracks, selectedClipIds: [] };
+      if (affectedClipIds.length === 0) {
+        return;
+      }
+
+      state.selectedClipIds = [];
+      if (affectedClipIds.includes(state.inspectedClipId ?? '')) {
+        state.inspectedClipId = null;
+      }
     });
+
+    if (affectedClipIds.length === 0) {
+      return failResult('Lift Segment: no unlocked selected clips');
+    }
 
     return successResult(
       `Lift Segment: removed ${affectedClipIds.length} clip(s)`,
@@ -1197,10 +1200,12 @@ export class EditOperationsEngine {
     const affectedClipIds: string[] = [];
     let totalDurationChange = 0;
 
-    useEditorStore.setState((prev) => {
-      const tracks = [...prev.tracks];
+    useEditorStore.setState((state) => {
+      for (const track of state.tracks) {
+        if (track.locked) {
+          continue;
+        }
 
-      for (const track of tracks) {
         const clipsToRemove = track.clips
           .filter((c) => clipIds.includes(c.id))
           .sort((a, b) => a.startTime - b.startTime);
@@ -1231,8 +1236,19 @@ export class EditOperationsEngine {
         track.clips.sort((a, b) => a.startTime - b.startTime);
       }
 
-      return { tracks, selectedClipIds: [] };
+      if (affectedClipIds.length === 0) {
+        return;
+      }
+
+      state.selectedClipIds = [];
+      if (affectedClipIds.includes(state.inspectedClipId ?? '')) {
+        state.inspectedClipId = null;
+      }
     });
+
+    if (affectedClipIds.length === 0) {
+      return failResult('Extract Segment: no unlocked selected clips');
+    }
 
     this.recalcDuration();
 
@@ -1289,16 +1305,14 @@ export class EditOperationsEngine {
     const affectedClipIds = clipIds.slice();
 
     useEditorStore.setState((prev) => {
-      const tracks = [...prev.tracks];
-
       // Remove clips from their original tracks
-      for (const track of tracks) {
+      for (const track of prev.tracks) {
         track.clips = track.clips.filter((c) => !clipIds.includes(c.id));
       }
 
       // Find the target track in the mutable state
-      const destTrack = tracks.find((t) => t.id === targetTrackId);
-      if (!destTrack) return {};
+      const destTrack = prev.tracks.find((t) => t.id === targetTrackId);
+      if (!destTrack) return;
 
       // Place clips at the new position, clearing the region first
       for (const clip of clipsToMove) {
@@ -1322,9 +1336,10 @@ export class EditOperationsEngine {
       }
 
       destTrack.clips.sort((a, b) => a.startTime - b.startTime);
-
-      return { tracks, selectedClipIds: newClipIds };
+      prev.selectedClipIds = newClipIds;
     });
+
+    this.recalcDuration();
 
     return successResult(
       `Overwrite Segment To: moved ${clipsToMove.length} clip(s) to ${targetTrackId}`,
@@ -1382,15 +1397,13 @@ export class EditOperationsEngine {
     const affectedClipIds = clipIds.slice();
 
     useEditorStore.setState((prev) => {
-      const tracks = [...prev.tracks];
-
       // Remove clips from their original tracks
-      for (const track of tracks) {
+      for (const track of prev.tracks) {
         track.clips = track.clips.filter((c) => !clipIds.includes(c.id));
       }
 
-      const destTrack = tracks.find((t) => t.id === targetTrackId);
-      if (!destTrack) return {};
+      const destTrack = prev.tracks.find((t) => t.id === targetTrackId);
+      if (!destTrack) return;
 
       // Ripple: push existing clips right to make room
       this.rippleTrack(destTrack, targetTime, totalSpan);
@@ -1413,8 +1426,7 @@ export class EditOperationsEngine {
       }
 
       destTrack.clips.sort((a, b) => a.startTime - b.startTime);
-
-      return { tracks, selectedClipIds: newClipIds };
+      prev.selectedClipIds = newClipIds;
     });
 
     this.recalcDuration();
@@ -1864,6 +1876,785 @@ export class EditOperationsEngine {
       default:
         return { description: `Unknown edit type: ${type}`, durationChange: 0 };
     }
+  }
+
+  // ── Direct Track Operations (Avid MC / DaVinci parity) ──────────────
+
+  /**
+   * Splice-In (Insert) a clip directly onto a specified track at a given
+   * position, pushing all downstream clips to the right (ripple).
+   *
+   * This is the programmatic counterpart of Avid's splice-in that does
+   * NOT rely on mark-based three-point editing. Useful for drag-and-drop
+   * or store-action driven workflows.
+   *
+   * @param trackId   The target track ID.
+   * @param position  Timeline position (seconds) at which to insert.
+   * @param clip      Partial clip data — at minimum needs `name`, `type`, and
+   *                  a duration expressed via `startTime`/`endTime`.
+   */
+  spliceInDirect(
+    trackId: string,
+    position: number,
+    clip: Partial<Clip> & { endTime: number; startTime: number },
+  ): EditResult {
+    const state = useEditorStore.getState();
+    const track = state.tracks.find((t) => t.id === trackId);
+    if (!track) return failResult('spliceIn: track not found');
+    if (track.locked) return failResult('spliceIn: track is locked');
+
+    const insertDuration = clip.endTime - clip.startTime;
+    if (insertDuration <= 0) return failResult('spliceIn: clip duration must be positive');
+
+    const newClipId = createId('clip');
+    const affectedClipIds: string[] = [];
+
+    useEditorStore.setState((prev) => {
+      const tracks = [...prev.tracks];
+      const targetTrack = tracks.find((t) => t.id === trackId);
+      if (!targetTrack) return {};
+
+      // Ripple: push all clips at or after position to the right
+      for (const c of targetTrack.clips) {
+        if (c.startTime >= position) {
+          c.startTime += insertDuration;
+          c.endTime += insertDuration;
+          affectedClipIds.push(c.id);
+        } else if (c.startTime < position && c.endTime > position) {
+          // Split clip that straddles the insert position
+          const tailId = createId('clip');
+          const tailClip = makeClip({
+            ...c,
+            id: tailId,
+            trackId,
+            startTime: position + insertDuration,
+            endTime: c.endTime + insertDuration,
+            trimStart: c.trimStart + (position - c.startTime),
+          });
+          c.endTime = position;
+          targetTrack.clips.push(tailClip);
+          affectedClipIds.push(tailId);
+        }
+      }
+
+      // Insert the new clip
+      const newClip = makeClip({
+        id: newClipId,
+        trackId,
+        name: clip.name ?? 'Inserted Clip',
+        startTime: position,
+        endTime: position + insertDuration,
+        trimStart: clip.trimStart ?? 0,
+        trimEnd: clip.trimEnd ?? 0,
+        type: clip.type ?? 'video',
+        assetId: clip.assetId,
+        color: clip.color ?? targetTrack.color,
+        waveformData: clip.waveformData,
+      });
+      targetTrack.clips.push(newClip);
+      targetTrack.clips.sort((a, b) => a.startTime - b.startTime);
+
+      // Sync-lock compensation
+      const syncLockedIds = prev.syncLockedTrackIds ?? [];
+      for (const syncTrackId of syncLockedIds) {
+        if (syncTrackId === trackId) continue;
+        const syncTrack = tracks.find((t) => t.id === syncTrackId);
+        if (!syncTrack || syncTrack.locked) continue;
+        for (const c of syncTrack.clips) {
+          if (c.startTime >= position) {
+            c.startTime += insertDuration;
+            c.endTime += insertDuration;
+          }
+        }
+      }
+
+      return { tracks };
+    });
+
+    this.recalcDuration();
+
+    return successResult(
+      `spliceIn: inserted ${insertDuration.toFixed(2)}s at ${position.toFixed(2)}s on ${trackId}`,
+      {
+        affectedTrackIds: [trackId],
+        affectedClipIds,
+        newClipIds: [newClipId],
+        durationChange: insertDuration,
+      },
+    );
+  }
+
+  /**
+   * Overwrite (replace) content at a position on a specific track with a
+   * new clip. Existing clips in the overwritten region are removed or
+   * trimmed. No ripple — timeline duration does not change (unless the
+   * new clip extends beyond the current end).
+   *
+   * @param trackId   The target track ID.
+   * @param position  Timeline position (seconds) at which to overwrite.
+   * @param clip      Partial clip data with at least startTime/endTime.
+   */
+  overwriteDirect(
+    trackId: string,
+    position: number,
+    clip: Partial<Clip> & { endTime: number; startTime: number },
+  ): EditResult {
+    const state = useEditorStore.getState();
+    const track = state.tracks.find((t) => t.id === trackId);
+    if (!track) return failResult('overwrite: track not found');
+    if (track.locked) return failResult('overwrite: track is locked');
+
+    const duration = clip.endTime - clip.startTime;
+    if (duration <= 0) return failResult('overwrite: clip duration must be positive');
+
+    const regionStart = position;
+    const regionEnd = position + duration;
+    const newClipId = createId('clip');
+    const affectedClipIds: string[] = [];
+
+    useEditorStore.setState((prev) => {
+      const tracks = [...prev.tracks];
+      const targetTrack = tracks.find((t) => t.id === trackId);
+      if (!targetTrack) return {};
+
+      // Clear the overwrite region
+      const { removedIds } = this.clearRegion(targetTrack, regionStart, regionEnd);
+      affectedClipIds.push(...removedIds);
+
+      // Place the new clip
+      const newClip = makeClip({
+        id: newClipId,
+        trackId,
+        name: clip.name ?? 'Overwrite Clip',
+        startTime: regionStart,
+        endTime: regionEnd,
+        trimStart: clip.trimStart ?? 0,
+        trimEnd: clip.trimEnd ?? 0,
+        type: clip.type ?? 'video',
+        assetId: clip.assetId,
+        color: clip.color ?? targetTrack.color,
+        waveformData: clip.waveformData,
+      });
+      targetTrack.clips.push(newClip);
+      targetTrack.clips.sort((a, b) => a.startTime - b.startTime);
+
+      return { tracks };
+    });
+
+    this.recalcDuration();
+
+    return successResult(
+      `overwrite: replaced ${duration.toFixed(2)}s at ${position.toFixed(2)}s on ${trackId}`,
+      {
+        affectedTrackIds: [trackId],
+        affectedClipIds,
+        newClipIds: [newClipId],
+        durationChange: 0,
+      },
+    );
+  }
+
+  /**
+   * Replace a clip in-place, preserving its timeline position and duration.
+   * The clip's source reference and trim points are updated to the new data,
+   * but startTime/endTime remain unchanged.
+   *
+   * @param trackId     The track containing the clip.
+   * @param clipId      The clip to replace.
+   * @param newClipData Partial clip data to merge (assetId, name, trimStart, etc.).
+   */
+  replaceEdit(
+    trackId: string,
+    clipId: string,
+    newClipData: Partial<Clip>,
+  ): EditResult {
+    const state = useEditorStore.getState();
+    const track = state.tracks.find((t) => t.id === trackId);
+    if (!track) return failResult('replaceEdit: track not found');
+    if (track.locked) return failResult('replaceEdit: track is locked');
+
+    const existingClip = track.clips.find((c) => c.id === clipId);
+    if (!existingClip) return failResult('replaceEdit: clip not found on track');
+
+    useEditorStore.setState((prev) => {
+      const tracks = [...prev.tracks];
+      const targetTrack = tracks.find((t) => t.id === trackId);
+      if (!targetTrack) return {};
+
+      const clip = targetTrack.clips.find((c) => c.id === clipId);
+      if (!clip) return {};
+
+      // Preserve timing, update everything else
+      if (newClipData.name !== undefined) clip.name = newClipData.name;
+      if (newClipData.assetId !== undefined) clip.assetId = newClipData.assetId;
+      if (newClipData.trimStart !== undefined) clip.trimStart = newClipData.trimStart;
+      if (newClipData.trimEnd !== undefined) clip.trimEnd = newClipData.trimEnd;
+      if (newClipData.color !== undefined) clip.color = newClipData.color;
+      if (newClipData.type !== undefined) clip.type = newClipData.type;
+      if (newClipData.waveformData !== undefined) clip.waveformData = newClipData.waveformData;
+      if (newClipData.intrinsicVideo) clip.intrinsicVideo = { ...clip.intrinsicVideo, ...newClipData.intrinsicVideo };
+      if (newClipData.intrinsicAudio) clip.intrinsicAudio = { ...clip.intrinsicAudio, ...newClipData.intrinsicAudio };
+      if (newClipData.timeRemap) clip.timeRemap = { ...clip.timeRemap, ...newClipData.timeRemap };
+      if (newClipData.blendMode !== undefined) clip.blendMode = newClipData.blendMode;
+
+      return { tracks };
+    });
+
+    return successResult(
+      `replaceEdit: replaced clip ${clipId} in-place on ${trackId}`,
+      {
+        affectedTrackIds: [trackId],
+        affectedClipIds: [clipId],
+        newClipIds: [],
+        durationChange: 0,
+      },
+    );
+  }
+
+  /**
+   * Fit-to-Fill: speed-adjust a source clip to fill a specific duration
+   * at a given position on a track. Creates a time-remapped clip.
+   *
+   * @param trackId    The target track ID.
+   * @param position   Timeline start position (seconds).
+   * @param duration   Desired timeline duration (seconds).
+   * @param sourceClip Partial source clip data including original timing.
+   */
+  fitToFillDirect(
+    trackId: string,
+    position: number,
+    duration: number,
+    sourceClip: Partial<Clip> & { startTime: number; endTime: number },
+  ): EditResult {
+    const state = useEditorStore.getState();
+    const track = state.tracks.find((t) => t.id === trackId);
+    if (!track) return failResult('fitToFill: track not found');
+    if (track.locked) return failResult('fitToFill: track is locked');
+    if (duration <= 0) return failResult('fitToFill: target duration must be positive');
+
+    const sourceDuration = sourceClip.endTime - sourceClip.startTime;
+    if (sourceDuration <= 0) return failResult('fitToFill: source duration must be positive');
+
+    const speedFactor = sourceDuration / duration;
+    const newClipId = createId('clip');
+    const regionEnd = position + duration;
+    const affectedClipIds: string[] = [];
+
+    useEditorStore.setState((prev) => {
+      const tracks = [...prev.tracks];
+      const targetTrack = tracks.find((t) => t.id === trackId);
+      if (!targetTrack) return {};
+
+      // Clear the region
+      const { removedIds } = this.clearRegion(targetTrack, position, regionEnd);
+      affectedClipIds.push(...removedIds);
+
+      // Create speed-changed clip
+      const clipType = (sourceClip.type ?? (track.type === 'AUDIO' ? 'audio' : 'video')) as 'video' | 'audio';
+      const newClip = this.createClipFromSource(
+        trackId,
+        position,
+        regionEnd,
+        sourceClip.trimStart ?? 0,
+        clipType,
+        sourceClip.color ?? track.color,
+        speedFactor,
+      );
+      // Override the auto-generated name/asset
+      newClip.name = sourceClip.name ?? newClip.name;
+      if (sourceClip.assetId) newClip.assetId = sourceClip.assetId;
+
+      // Override the ID for consistency
+      (newClip as Clip).id = newClipId;
+
+      targetTrack.clips.push(newClip);
+      targetTrack.clips.sort((a, b) => a.startTime - b.startTime);
+
+      return { tracks };
+    });
+
+    this.recalcDuration();
+
+    return successResult(
+      `fitToFill: ${sourceDuration.toFixed(2)}s source fit to ${duration.toFixed(2)}s (${(speedFactor * 100).toFixed(0)}% speed)`,
+      {
+        affectedTrackIds: [trackId],
+        affectedClipIds,
+        newClipIds: [newClipId],
+        durationChange: 0,
+      },
+    );
+  }
+
+  // ── Sync Lock ──────────────────────────────────────────────────────────
+
+  /**
+   * Enable sync lock on the given tracks. When sync lock is enabled,
+   * insert/extract/ripple operations on other tracks will push or pull
+   * content on these tracks to maintain sync.
+   *
+   * @param trackIds Track IDs to sync-lock.
+   */
+  syncLockTracks(trackIds: string[]): void {
+    useEditorStore.setState((prev) => {
+      const currentLocked = new Set(prev.syncLockedTrackIds ?? []);
+      for (const id of trackIds) {
+        currentLocked.add(id);
+      }
+      return { syncLockedTrackIds: Array.from(currentLocked) };
+    });
+  }
+
+  /**
+   * Disable sync lock on the given tracks.
+   *
+   * @param trackIds Track IDs to unsync-lock.
+   */
+  unsyncLockTracks(trackIds: string[]): void {
+    useEditorStore.setState((prev) => {
+      const idsToRemove = new Set(trackIds);
+      return {
+        syncLockedTrackIds: (prev.syncLockedTrackIds ?? []).filter(
+          (id) => !idsToRemove.has(id),
+        ),
+      };
+    });
+  }
+
+  // ── Segment Mode ───────────────────────────────────────────────────────
+
+  /** Active segment editing mode. */
+  private _segmentMode: 'lift' | 'extract' | 'segment-lift' | 'segment-extract' | null = null;
+
+  /**
+   * Set the active segment editing mode.
+   *
+   * - `lift` / `segment-lift`: Remove content, leave filler (no ripple).
+   * - `extract` / `segment-extract`: Remove content, close gap (ripple).
+   *
+   * @param mode The segment mode to activate, or null to deactivate.
+   */
+  segmentMode(mode: 'lift' | 'extract' | 'segment-lift' | 'segment-extract' | null): void {
+    this._segmentMode = mode;
+  }
+
+  /** Get the current segment editing mode. */
+  getSegmentMode(): 'lift' | 'extract' | 'segment-lift' | 'segment-extract' | null {
+    return this._segmentMode;
+  }
+
+  // ── Range-based Lift / Extract ─────────────────────────────────────────
+
+  /**
+   * Lift content from a specific track within an in/out time range.
+   * Removes clips in the range but leaves a gap (filler).
+   *
+   * @param trackId  Target track.
+   * @param inTime   Start of the range (seconds).
+   * @param outTime  End of the range (seconds).
+   */
+  liftSegmentRange(trackId: string, inTime: number, outTime: number): EditResult {
+    if (outTime <= inTime) return failResult('liftSegment: outTime must be after inTime');
+
+    const state = useEditorStore.getState();
+    const track = state.tracks.find((t) => t.id === trackId);
+    if (!track) return failResult('liftSegment: track not found');
+    if (track.locked) return failResult('liftSegment: track is locked');
+
+    const affectedClipIds: string[] = [];
+
+    useEditorStore.setState((prev) => {
+      const tracks = [...prev.tracks];
+      const targetTrack = tracks.find((t) => t.id === trackId);
+      if (!targetTrack) return {};
+
+      const { removedIds } = this.clearRegion(targetTrack, inTime, outTime);
+      affectedClipIds.push(...removedIds);
+      targetTrack.clips.sort((a, b) => a.startTime - b.startTime);
+
+      return { tracks };
+    });
+
+    return successResult(
+      `liftSegment: lifted ${(outTime - inTime).toFixed(2)}s from ${trackId} (gap left)`,
+      {
+        affectedTrackIds: [trackId],
+        affectedClipIds,
+        durationChange: 0,
+      },
+    );
+  }
+
+  /**
+   * Extract content from a specific track within an in/out time range.
+   * Removes clips in the range and closes the gap (ripple).
+   *
+   * @param trackId  Target track.
+   * @param inTime   Start of the range (seconds).
+   * @param outTime  End of the range (seconds).
+   */
+  extractSegmentRange(trackId: string, inTime: number, outTime: number): EditResult {
+    if (outTime <= inTime) return failResult('extractSegment: outTime must be after inTime');
+
+    const state = useEditorStore.getState();
+    const track = state.tracks.find((t) => t.id === trackId);
+    if (!track) return failResult('extractSegment: track not found');
+    if (track.locked) return failResult('extractSegment: track is locked');
+
+    const extractDuration = outTime - inTime;
+    const affectedClipIds: string[] = [];
+
+    useEditorStore.setState((prev) => {
+      const tracks = [...prev.tracks];
+      const targetTrack = tracks.find((t) => t.id === trackId);
+      if (!targetTrack) return {};
+
+      // Remove clips in the region
+      const { removedIds } = this.clearRegion(targetTrack, inTime, outTime);
+      affectedClipIds.push(...removedIds);
+
+      // Ripple: shift everything after outTime left
+      for (const c of targetTrack.clips) {
+        if (c.startTime >= outTime) {
+          c.startTime -= extractDuration;
+          c.endTime -= extractDuration;
+        }
+      }
+      targetTrack.clips.sort((a, b) => a.startTime - b.startTime);
+
+      // Sync-lock compensation
+      const syncLockedIds = prev.syncLockedTrackIds ?? [];
+      for (const syncTrackId of syncLockedIds) {
+        if (syncTrackId === trackId) continue;
+        const syncTrack = tracks.find((t) => t.id === syncTrackId);
+        if (!syncTrack || syncTrack.locked) continue;
+        for (const c of syncTrack.clips) {
+          if (c.startTime >= outTime) {
+            c.startTime -= extractDuration;
+            c.endTime -= extractDuration;
+          }
+        }
+      }
+
+      return { tracks };
+    });
+
+    this.recalcDuration();
+
+    return successResult(
+      `extractSegment: extracted ${extractDuration.toFixed(2)}s from ${trackId} (gap closed)`,
+      {
+        affectedTrackIds: [trackId],
+        affectedClipIds,
+        durationChange: -extractDuration,
+      },
+    );
+  }
+
+  // ── Slide / Slip / Roll ────────────────────────────────────────────────
+
+  /**
+   * Slide a clip: changes the clip's source in/out points but NOT its
+   * timeline position or duration. The visible content shifts within the
+   * clip's footprint on the timeline.
+   *
+   * This is a convenience wrapper; internally it adjusts trimStart and
+   * trimEnd by the offset.
+   *
+   * @param clipId  The clip to slide.
+   * @param offset  Seconds to shift the source window (positive = later source).
+   */
+  slideClip(clipId: string, offset: number): EditResult {
+    const state = useEditorStore.getState();
+    let found = false;
+
+    useEditorStore.setState((prev) => {
+      const tracks = [...prev.tracks];
+      for (const track of tracks) {
+        if (track.locked) continue;
+        const clip = track.clips.find((c) => c.id === clipId);
+        if (clip) {
+          // Clamp offset to available handles
+          const maxForward = clip.trimEnd;
+          const maxBackward = clip.trimStart;
+          const clamped = Math.max(-maxBackward, Math.min(maxForward, offset));
+          clip.trimStart += clamped;
+          clip.trimEnd -= clamped;
+          found = true;
+          break;
+        }
+      }
+      return { tracks };
+    });
+
+    if (!found) return failResult('slideClip: clip not found or track is locked');
+
+    return successResult(`slideClip: slid clip ${clipId} by ${offset.toFixed(3)}s`, {
+      affectedClipIds: [clipId],
+      durationChange: 0,
+    });
+  }
+
+  /**
+   * Slip a clip: changes the clip's timeline position relative to its
+   * neighbors without changing its source content. The left neighbor's
+   * endTime and right neighbor's startTime adjust to compensate.
+   *
+   * @param clipId  The clip to slip.
+   * @param offset  Seconds to move the clip (positive = later on timeline).
+   */
+  slipClip(clipId: string, offset: number): EditResult {
+    const state = useEditorStore.getState();
+    let found = false;
+
+    useEditorStore.setState((prev) => {
+      const tracks = [...prev.tracks];
+      for (const track of tracks) {
+        if (track.locked) continue;
+        const sorted = [...track.clips].sort((a, b) => a.startTime - b.startTime);
+        const idx = sorted.findIndex((c) => c.id === clipId);
+        if (idx < 0) continue;
+
+        const clip = sorted[idx]!;
+        const prev_clip = idx > 0 ? sorted[idx - 1]! : null;
+        const next_clip = idx < sorted.length - 1 ? sorted[idx + 1]! : null;
+
+        // Determine clamped offset
+        let clamped = offset;
+        if (clamped < 0 && prev_clip) {
+          clamped = Math.max(clamped, -(clip.startTime - prev_clip.startTime - 0.001));
+        } else if (clamped < 0 && !prev_clip) {
+          clamped = Math.max(clamped, -clip.startTime);
+        }
+        if (clamped > 0 && next_clip) {
+          clamped = Math.min(clamped, next_clip.endTime - clip.endTime - 0.001);
+        }
+
+        // Move clip
+        const realClip = track.clips.find((c) => c.id === clipId)!;
+        realClip.startTime += clamped;
+        realClip.endTime += clamped;
+
+        // Adjust neighbors
+        if (prev_clip) {
+          const leftClip = track.clips.find((c) => c.id === prev_clip.id);
+          if (leftClip) {
+            leftClip.endTime += clamped;
+            leftClip.trimEnd = Math.max(0, leftClip.trimEnd - clamped);
+          }
+        }
+        if (next_clip) {
+          const rightClip = track.clips.find((c) => c.id === next_clip.id);
+          if (rightClip) {
+            rightClip.startTime += clamped;
+            rightClip.trimStart = Math.max(0, rightClip.trimStart + clamped);
+          }
+        }
+
+        found = true;
+        break;
+      }
+      return { tracks };
+    });
+
+    if (!found) return failResult('slipClip: clip not found or track is locked');
+
+    return successResult(`slipClip: slipped clip ${clipId} by ${offset.toFixed(3)}s`, {
+      affectedClipIds: [clipId],
+      durationChange: 0,
+    });
+  }
+
+  /**
+   * Roll edit: move the edit point between two adjacent clips. Clip A's
+   * endTime and Clip B's startTime move together. Combined duration of
+   * A + B is unchanged.
+   *
+   * @param clipIdA  The outgoing (left) clip.
+   * @param clipIdB  The incoming (right) clip.
+   * @param offset   Seconds to move the edit point (positive = later).
+   */
+  rollEdit(clipIdA: string, clipIdB: string, offset: number): EditResult {
+    const state = useEditorStore.getState();
+    let found = false;
+
+    useEditorStore.setState((prev) => {
+      const tracks = [...prev.tracks];
+      for (const track of tracks) {
+        if (track.locked) continue;
+        const clipA = track.clips.find((c) => c.id === clipIdA);
+        const clipB = track.clips.find((c) => c.id === clipIdB);
+        if (!clipA || !clipB) continue;
+
+        // Clamp by handles and minimum durations
+        const MIN_DUR = 1 / 120;
+        let clamped = offset;
+        if (clamped > 0) {
+          clamped = Math.min(clamped, clipA.trimEnd); // A's right handle
+          clamped = Math.min(clamped, (clipB.endTime - clipB.startTime) - MIN_DUR); // B min duration
+        } else {
+          clamped = Math.max(clamped, -clipB.trimStart); // B's left handle
+          clamped = Math.max(clamped, -((clipA.endTime - clipA.startTime) - MIN_DUR)); // A min duration
+        }
+
+        clipA.endTime += clamped;
+        clipA.trimEnd = Math.max(0, clipA.trimEnd - clamped);
+        clipB.startTime += clamped;
+        clipB.trimStart = Math.max(0, clipB.trimStart + clamped);
+
+        found = true;
+        break;
+      }
+      return { tracks };
+    });
+
+    if (!found) return failResult('rollEdit: clips not found or not on same unlocked track');
+
+    return successResult(`rollEdit: rolled edit point by ${offset.toFixed(3)}s`, {
+      affectedClipIds: [clipIdA, clipIdB],
+      durationChange: 0,
+    });
+  }
+
+  /**
+   * Ripple delete: remove content between inTime and outTime on a track
+   * and close the gap by shifting all downstream clips left.
+   *
+   * @param trackId  Target track.
+   * @param inTime   Start of the range.
+   * @param outTime  End of the range.
+   */
+  rippleDelete(trackId: string, inTime: number, outTime: number): EditResult {
+    if (outTime <= inTime) return failResult('rippleDelete: outTime must be after inTime');
+
+    const state = useEditorStore.getState();
+    const track = state.tracks.find((t) => t.id === trackId);
+    if (!track) return failResult('rippleDelete: track not found');
+    if (track.locked) return failResult('rippleDelete: track is locked');
+
+    const deleteDuration = outTime - inTime;
+    const affectedClipIds: string[] = [];
+
+    useEditorStore.setState((prev) => {
+      const tracks = [...prev.tracks];
+      const targetTrack = tracks.find((t) => t.id === trackId);
+      if (!targetTrack) return {};
+
+      const { removedIds } = this.clearRegion(targetTrack, inTime, outTime);
+      affectedClipIds.push(...removedIds);
+
+      // Close gap
+      for (const c of targetTrack.clips) {
+        if (c.startTime >= outTime) {
+          c.startTime -= deleteDuration;
+          c.endTime -= deleteDuration;
+        }
+      }
+      targetTrack.clips.sort((a, b) => a.startTime - b.startTime);
+
+      // Sync-lock compensation
+      const syncLockedIds = prev.syncLockedTrackIds ?? [];
+      for (const syncTrackId of syncLockedIds) {
+        if (syncTrackId === trackId) continue;
+        const syncTrack = tracks.find((t) => t.id === syncTrackId);
+        if (!syncTrack || syncTrack.locked) continue;
+        for (const c of syncTrack.clips) {
+          if (c.startTime >= outTime) {
+            c.startTime -= deleteDuration;
+            c.endTime -= deleteDuration;
+          }
+        }
+      }
+
+      return { tracks };
+    });
+
+    this.recalcDuration();
+
+    return successResult(
+      `rippleDelete: deleted ${deleteDuration.toFixed(2)}s from ${trackId} (gap closed)`,
+      {
+        affectedTrackIds: [trackId],
+        affectedClipIds,
+        durationChange: -deleteDuration,
+      },
+    );
+  }
+
+  /**
+   * Duplicate a clip, placing the copy immediately after the original.
+   *
+   * @param clipId The clip to duplicate.
+   */
+  duplicateClip(clipId: string): EditResult {
+    const state = useEditorStore.getState();
+    let newClipId = '';
+
+    useEditorStore.setState((prev) => {
+      const tracks = [...prev.tracks];
+      for (const track of tracks) {
+        const clip = track.clips.find((c) => c.id === clipId);
+        if (clip) {
+          const dur = clip.endTime - clip.startTime;
+          newClipId = createId('clip');
+          const dup = makeClip({
+            ...clip,
+            id: newClipId,
+            startTime: clip.endTime,
+            endTime: clip.endTime + dur,
+          });
+          track.clips.push(dup);
+          track.clips.sort((a, b) => a.startTime - b.startTime);
+          return { tracks, selectedClipIds: [newClipId] };
+        }
+      }
+      return {};
+    });
+
+    if (!newClipId) return failResult('duplicateClip: clip not found');
+
+    this.recalcDuration();
+
+    return successResult(`duplicateClip: duplicated ${clipId}`, {
+      affectedClipIds: [clipId],
+      newClipIds: [newClipId],
+      durationChange: 0,
+    });
+  }
+
+  // ── Clip Grouping ──────────────────────────────────────────────────────
+
+  /**
+   * Group clips across tracks. Creates a group entry in the store so
+   * grouped clips move together during segment operations.
+   *
+   * @param clipIds Array of clip IDs to group.
+   * @returns The generated group ID, or null if fewer than 2 clips.
+   */
+  groupClips(clipIds: string[]): string | null {
+    if (clipIds.length < 2) return null;
+
+    const groupId = createId('group');
+    useEditorStore.setState((prev) => {
+      const clipGroups = { ...(prev.clipGroups ?? {}) };
+      clipGroups[groupId] = [...clipIds];
+      return { clipGroups };
+    });
+
+    return groupId;
+  }
+
+  /**
+   * Ungroup clips previously grouped with `groupClips`.
+   *
+   * @param groupId The group ID to dissolve.
+   */
+  ungroupClips(groupId: string): void {
+    useEditorStore.setState((prev) => {
+      const clipGroups = { ...(prev.clipGroups ?? {}) };
+      delete clipGroups[groupId];
+      return { clipGroups };
+    });
   }
 
   // ── Internal Helpers ────────────────────────────────────────────────────

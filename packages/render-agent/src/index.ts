@@ -19,6 +19,13 @@
 
 import { EventEmitter } from 'node:events';
 import os from 'node:os';
+import {
+  parseCoordinatorToWorkerMessage,
+  type CoordinatorToWorkerMessage,
+  type MediaJob,
+  type MediaWorkerKind,
+  type WorkerCapabilityReport,
+} from '@mcua/media-backend';
 import { IngestWorker } from './workers/IngestWorker.js';
 import { TranscribeWorker } from './workers/TranscribeWorker.js';
 import { MetadataWorker } from './workers/MetadataWorker.js';
@@ -28,39 +35,9 @@ import { getAvailableDiskSpace } from './capabilities.js';
 
 // ── Types ───────────────────────────────────────────────────────
 
-export type WorkerJobType =
-  | 'ingest'
-  | 'transcode'
-  | 'transcribe'
-  | 'metadata'
-  | 'render'
-  | 'encode'
-  | 'effects';
-
-export interface WorkerJob {
-  id: string;
-  type: WorkerJobType;
-  inputUrl: string;
-  outputPath?: string;
-  outputFormat?: string;
-  codec?: string;
-  startFrame?: number;
-  endFrame?: number;
-  priority?: number;
-  params: Record<string, unknown>;
-}
-
-export interface WorkerCapabilities {
-  gpuVendor: string;
-  gpuName: string;
-  vramMB: number;
-  cpuCores: number;
-  memoryGB: number;
-  availableCodecs: string[];
-  ffmpegVersion: string;
-  maxConcurrentJobs: number;
-  hwAccel: string[];
-}
+export type WorkerJobType = MediaWorkerKind;
+export type WorkerJob = Omit<MediaJob, 'params'> & { params: Record<string, unknown> };
+export type WorkerCapabilities = WorkerCapabilityReport;
 
 export interface RenderNodeInfo {
   hostname: string;
@@ -79,12 +56,6 @@ export interface RenderNodeInfo {
 
 /** Legacy alias kept for backward compatibility. */
 export type RenderJob = WorkerJob;
-
-interface CoordinatorMessage {
-  type: string;
-  job?: WorkerJob;
-  [key: string]: unknown;
-}
 
 /** Typed progress event emitted during job execution. */
 export interface JobProgressEvent {
@@ -265,10 +236,10 @@ class WorkerRouter {
         case 'transcode':
           return await this.renderWorker.process(job, (p) => onProgress?.(p.percent, p), jobSignal);
 
-        case 'transcribe':
+        case 'transcription':
           return await this.transcribeWorker.process(job, (p) => onProgress?.(p.percent, p));
 
-        case 'metadata':
+        case 'probe':
           return await this.metadataWorker.process(job, (p) => onProgress?.(p.percent, p));
 
         case 'render':
@@ -324,7 +295,7 @@ export class RenderAgent extends EventEmitter {
   private lastResourceUsage: ResourceUsage | null = null;
 
   /** Signal handler references for cleanup. */
-  private signalHandlers: Map<string, () => void> = new Map();
+  private signalHandlers: Map<string, () => void> = new Map<string, () => void>();
 
   constructor(
     nodeInfo: Partial<RenderNodeInfo> = {},
@@ -332,7 +303,7 @@ export class RenderAgent extends EventEmitter {
     config: Partial<RenderAgentConfig> = {},
   ) {
     super();
-    const allTypes: WorkerJobType[] = ['ingest', 'transcode', 'transcribe', 'metadata', 'render', 'encode', 'effects'];
+    const allTypes: WorkerJobType[] = ['ingest', 'probe', 'transcode', 'transcription', 'render', 'encode', 'effects'];
     const workerTypes = enabledWorkerTypes ?? allTypes;
 
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -574,7 +545,7 @@ export class RenderAgent extends EventEmitter {
 
       const onMessage = (event: MessageEvent) => {
         try {
-          const msg = JSON.parse(String(event.data)) as CoordinatorMessage;
+          const msg = parseCoordinatorToWorkerMessage(JSON.parse(String(event.data)));
           this.handleMessage(msg);
         } catch (err) {
           console.error('[RenderAgent] Failed to parse message:', err);
@@ -742,16 +713,19 @@ export class RenderAgent extends EventEmitter {
     });
   }
 
-  private handleMessage(msg: CoordinatorMessage): void {
+  private handleMessage(msg: CoordinatorToWorkerMessage): void {
     switch (msg.type) {
       case 'job:assign':
         if (msg.job) {
-          void this.enqueueOrStart(msg.job);
+          void this.enqueueOrStart({
+            ...msg.job,
+            params: { ...msg.job.params },
+          });
         }
         break;
 
       case 'job:cancel': {
-        const cancelId = (msg as Record<string, unknown>)['jobId'] as string | undefined;
+        const cancelId = msg.jobId;
         if (cancelId) {
           if (this.activeJobs.has(cancelId)) {
             this.cancelJob(cancelId, 'Cancelled by coordinator');

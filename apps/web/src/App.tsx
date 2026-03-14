@@ -26,12 +26,8 @@ const RecordMonitor = lazy(() => import('./components/RecordMonitor/RecordMonito
 const ColorPanel = lazy(() => import('./components/ColorPanel/ColorPanel').then(m => ({ default: m.ColorPanel })));
 const AudioMixer = lazy(() => import('./components/AudioMixer/AudioMixer').then(m => ({ default: m.AudioMixer })));
 const EffectsPanel = lazy(() => import('./components/EffectsPanel/EffectsPanel').then(m => ({ default: m.EffectsPanel })));
-const AIAssistantPanel = lazy(() => import('./components/AIAssistant/AIAssistantPanel').then(m => ({ default: m.AIAssistantPanel })));
 const ScriptPanel = lazy(() => import('./components/ScriptPanel/ScriptPanel').then(m => ({ default: m.ScriptPanel })));
-const CollabPanel = lazy(() => import('./components/CollabPanel/CollabPanel').then(m => ({ default: m.CollabPanel })));
 const ExportPanel = lazy(() => import('./components/ExportPanel/ExportPanel').then(m => ({ default: m.ExportPanel })));
-const MarketplacePanel = lazy(() => import('./components/MarketplacePanel/MarketplacePanel').then(m => ({ default: m.MarketplacePanel })));
-const AdminDashboard = lazy(() => import('./components/AdminDashboard/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
 
 // ─── Lazy-loaded Panels ─────────────────────────────────────────────────────
 const MultiCamPanel = lazy(() => import('./components/MultiCamPanel/MultiCamPanel').then(m => ({ default: m.MultiCamPanel })));
@@ -64,12 +60,8 @@ export const panelRegistry: Record<string, React.ComponentType> = {
   color: ColorPanel,
   audio: AudioMixer,
   effects: EffectsPanel,
-  ai: AIAssistantPanel,
   script: ScriptPanel,
-  collab: CollabPanel,
   export: ExportPanel,
-  marketplace: MarketplacePanel,
-  admin: AdminDashboard,
 
   // Utility panels
   multicam: LazyPanel(MultiCamPanel, 'MultiCamPanel'),

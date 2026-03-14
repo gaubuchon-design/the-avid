@@ -1,6 +1,6 @@
 # FFmpeg Binaries
 
-This directory contains platform-specific FFmpeg and FFprobe static builds
+This directory contains platform-specific FFmpeg and FFprobe builds
 bundled with The Avid desktop application.
 
 ## Structure
@@ -29,6 +29,10 @@ node scripts/download-ffmpeg.js darwin-x64    # macOS Intel
 node scripts/download-ffmpeg.js win32-x64     # Windows 64-bit
 node scripts/download-ffmpeg.js linux-x64     # Linux 64-bit
 ```
+
+macOS and Windows binaries are fetched from GitHub release assets during packaging.
+The downloader writes a `ffmpeg-manifest.json` file alongside the binaries so stale
+or differently sourced artifacts are refreshed automatically before installers are built.
 
 ## Included Codecs
 
@@ -68,5 +72,5 @@ The bundled FFmpeg builds include support for:
 ## Licensing
 
 FFmpeg is licensed under LGPL 2.1+ / GPL 2.0+ depending on build configuration.
-The bundled static builds use GPL 2.0+ to include all codecs.
+The bundled macOS and Windows builds are pulled from GitHub-hosted GPL releases.
 See https://ffmpeg.org/legal.html for details.

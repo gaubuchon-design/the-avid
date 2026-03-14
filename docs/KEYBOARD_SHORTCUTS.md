@@ -1,65 +1,92 @@
-# The Avid -- Keyboard Shortcuts
+# The Avid -- Editorial Keyboard Shortcuts
 
-## Transport Controls
+This sheet documents the current editorial keyboard contract implemented in the app.
 
-| Shortcut | Action | Context |
-|----------|--------|---------|
-| Space | Play / Pause | Global |
-| J | Shuttle reverse (successive presses increase speed) | Source Monitor / Editor Toolbar |
-| K | Stop shuttle / Pause | Source Monitor / Editor Toolbar |
-| L | Shuttle forward (successive presses increase speed) | Source Monitor / Editor Toolbar |
-| Home | Go to start (frame 0) | Editor Toolbar / Record Monitor |
-| End | Go to end (last frame) | Editor Toolbar / Record Monitor |
-| Left Arrow | Step back one frame | Source Monitor / Record Monitor |
-| Right Arrow | Step forward one frame | Source Monitor / Record Monitor |
+It is intentionally aligned to the Avid-style bindings in:
 
-## Editing Marks
+- `/Users/guillaumeaubuchon/GitHub/the-avid/apps/web/src/engine/KeyboardEngine.ts`
+- `/Users/guillaumeaubuchon/GitHub/the-avid/apps/web/src/hooks/useGlobalKeyboard.ts`
+- `/Users/guillaumeaubuchon/GitHub/the-avid/apps/web/src/pages/EditorPage.tsx`
+
+## Transport
 
 | Shortcut | Action | Context |
 |----------|--------|---------|
-| I | Set In point at current frame | Source Monitor |
-| O | Set Out point at current frame | Source Monitor |
-| Shift+I | Go to In point | Source Monitor |
-| Shift+O | Go to Out point | Source Monitor |
-| F | Match Frame (sync source to record playhead) | Record Monitor |
+| `J` | Shuttle reverse | Monitor / Timeline |
+| `K` | Stop | Monitor / Timeline |
+| `L` | Shuttle forward | Monitor / Timeline |
+| `Space` | Play / Stop toggle | Monitor / Timeline |
+| `Left Arrow` | Step back one frame, or trim left while trim is active | Monitor / Timeline |
+| `Right Arrow` | Step forward one frame, or trim right while trim is active | Monitor / Timeline |
+| `Shift+Left Arrow` | Trim left 10 frames while trim is active | Trim |
+| `Shift+Right Arrow` | Trim right 10 frames while trim is active | Trim |
+| `Home` | Go to start | Active monitor |
+| `End` | Go to end | Active monitor |
+| `5` | Play transition / trim loop | Trim |
 
-## Undo / Redo
-
-| Shortcut | Action | Context |
-|----------|--------|---------|
-| Cmd+Z / Ctrl+Z | Undo | Global (Timeline) |
-| Cmd+Shift+Z / Ctrl+Y | Redo | Global (Timeline) |
-
-## Tool Modes
-
-| Shortcut | Action | Context |
-|----------|--------|---------|
-| V | Selection tool | Toolbar |
-| T | Trim tool | Toolbar |
-| B | Razor / Cut tool | Toolbar |
-| Y | Slip tool | Toolbar |
-| U | Slide tool | Toolbar |
-| H | Hand (pan) tool | Toolbar |
-
-## Edit Operations
+## Marks And Match Frame
 
 | Shortcut | Action | Context |
 |----------|--------|---------|
-| Z | Lift | Toolbar |
-| X | Extract | Toolbar |
-| B | Overwrite edit | Toolbar |
-| V | Splice-in (Insert) edit | Toolbar |
+| `I` | Mark IN | Active monitor |
+| `O` | Mark OUT | Active monitor |
+| `E` | Mark Clip | Active monitor |
+| `T` | Mark Clip (alternate binding) | Active monitor |
+| `D` | Clear IN and OUT | Active monitor |
+| `G` | Clear IN | Active monitor |
+| `H` | Clear OUT | Active monitor |
+| `Q` | Go to IN | Active monitor |
+| `W` | Go to OUT | Active monitor |
+| `F` | Match Frame | Record monitor |
 
-## Zoom
+## Editing
 
 | Shortcut | Action | Context |
 |----------|--------|---------|
-| + / = | Zoom in | Editor Toolbar |
-| - | Zoom out | Editor Toolbar |
-| Ctrl+Scroll / Cmd+Scroll | Zoom in/out (continuous) | Timeline Panel |
+| `V` | Splice-In (insert) | Timeline |
+| `B` | Overwrite | Timeline |
+| `Z` | Lift | Timeline |
+| `X` | Extract | Timeline |
+| `Delete` / `Backspace` | Delete selected clips | Timeline |
+| `Cmd/Ctrl+Z` | Undo | Global |
+| `Cmd/Ctrl+Shift+Z` | Redo | Global |
+| `Cmd/Ctrl+C` | Copy | Global |
+| `Cmd/Ctrl+V` | Paste | Global |
+
+## Trim
+
+| Shortcut | Action | Context |
+|----------|--------|---------|
+| `U` | Enter trim, or toggle big/small trim when already in trim | Timeline / Monitor |
+| `Alt+U` | Recall previous trim configuration | Timeline / Monitor |
+| `Shift+U` | Toggle big/small trim view | Trim |
+| `P` | Select A-side roller | Trim |
+| `[` | Select both sides | Trim |
+| `]` | Select B-side roller | Trim |
+| `M` | Trim left 1 frame | Trim |
+| `,` | Trim right 1 frame | Trim |
+| `/` | Trim left 10 frames | Trim |
+| `.` | Trim right 10 frames | Trim |
+| `Escape` | Cancel / exit trim | Trim |
+
+## Smart Tool
+
+| Shortcut | Action | Context |
+|----------|--------|---------|
+| `Shift+A` | Toggle Lift/Overwrite segment mode | Timeline |
+| `Shift+S` | Toggle Extract/Splice-In segment mode | Timeline |
+| `Shift+D` | Toggle Overwrite Trim | Timeline |
+| `Shift+F` | Toggle Ripple Trim | Timeline |
+
+## Navigation
+
+| Shortcut | Action | Context |
+|----------|--------|---------|
+| `A` | Previous edit point | Timeline |
+| `S` | Next edit point | Timeline |
 
 ## Notes
 
-- Keyboard shortcuts are suppressed when an `<input>` or `<textarea>` element has focus.
-- The J/K/L shuttle system follows the industry-standard NLE convention: successive J presses increase reverse speed (1x, 2x, 4x, 8x), successive L presses increase forward speed, and K immediately stops and resets the shuttle accumulators.
-- On macOS, `Cmd` is the modifier key. On Windows/Linux, `Ctrl` is used instead.
+- This app no longer treats unmodified `C` as a generic razor shortcut or unmodified `Y` as a generic slip shortcut, because those were not part of the Avid-style editorial map and conflicted with parity work.
+- Trim is modeled as a dedicated editorial mode. When trim exits, the editor falls back to standard source/record mode rather than leaving the UI in a half-trimmed tool state.
+- The current keyboard contract is closer to Media Composer than the older generic-NLE shortcut sheet that previously existed in this repo, but it is still not full command-palette parity with Media Composer.

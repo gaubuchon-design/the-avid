@@ -6,7 +6,8 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import type { AgentPlan } from '../ai/AgentEngine';
-import type { PhraseSearchResult } from '../ai/TranscriptEngine';
+import type { PhraseFindResult } from '../lib/transcriptWorkbench';
+import { getStoreDevtoolsOptions } from '../lib/runtimeEnvironment';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -26,7 +27,7 @@ export interface AIState {
   tokenUsedSession: number;
   activeTab: 'chat' | 'transcript' | 'tools';
   transcriptSearchQuery: string;
-  transcriptResults: PhraseSearchResult[];
+  transcriptResults: PhraseFindResult[];
   geminiApiKey: string;
   mcpServerUrl: string;
   streamingText: string;
@@ -40,7 +41,7 @@ interface AIActions {
   deductTokens: (amount: number) => void;
   setActiveTab: (tab: 'chat' | 'transcript' | 'tools') => void;
   setTranscriptSearch: (query: string) => void;
-  setTranscriptResults: (results: PhraseSearchResult[]) => void;
+  setTranscriptResults: (results: PhraseFindResult[]) => void;
   clearChat: () => void;
   setGeminiApiKey: (key: string) => void;
   setMCPServerUrl: (url: string) => void;
@@ -55,7 +56,8 @@ interface AIActions {
 const WELCOME_MESSAGE: ChatMessage = {
   id: 'welcome',
   role: 'assistant',
-  content: 'Hello! I\'m your AI editing assistant. I can help you trim clips, remove silence, generate captions, create rough cuts, and much more. What would you like to do?',
+  content:
+    "Hello! I'm your AI editing assistant. I can help you trim clips, remove silence, generate captions, create rough cuts, and much more. What would you like to do?",
   timestamp: Date.now() - 60000,
 };
 
@@ -83,91 +85,170 @@ export const useAIStore = create<AIState & AIActions>()(
       ...INITIAL_STATE,
 
       // Actions
-      addMessage: (role, content) => set((s) => {
-        s.messages.push({
-          id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          role,
-          content,
-          timestamp: Date.now(),
-        });
-        s.error = null;
-      }, false, 'ai/addMessage'),
+      addMessage: (role, content) =>
+        set(
+          (s) => {
+            s.messages.push({
+              id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              role,
+              content,
+              timestamp: Date.now(),
+            });
+            s.error = null;
+          },
+          false,
+          'ai/addMessage'
+        ),
 
-      setCurrentPlan: (plan) => set((s) => {
-        s.currentPlan = plan;
-      }, false, 'ai/setCurrentPlan'),
+      setCurrentPlan: (plan) =>
+        set(
+          (s) => {
+            s.currentPlan = plan;
+          },
+          false,
+          'ai/setCurrentPlan'
+        ),
 
-      setProcessing: (processing) => set((s) => {
-        s.isProcessing = processing;
-        if (processing) {
-          s.error = null;
-        }
-      }, false, 'ai/setProcessing'),
+      setProcessing: (processing) =>
+        set(
+          (s) => {
+            s.isProcessing = processing;
+            if (processing) {
+              s.error = null;
+            }
+          },
+          false,
+          'ai/setProcessing'
+        ),
 
-      setError: (error) => set((s) => {
-        s.error = error;
-        s.isProcessing = false;
-      }, false, 'ai/setError'),
+      setError: (error) =>
+        set(
+          (s) => {
+            s.error = error;
+            s.isProcessing = false;
+          },
+          false,
+          'ai/setError'
+        ),
 
-      deductTokens: (amount) => set((s) => {
-        s.tokenBalance = Math.max(0, s.tokenBalance - amount);
-        s.tokenUsedSession += amount;
-      }, false, 'ai/deductTokens'),
+      deductTokens: (amount) =>
+        set(
+          (s) => {
+            s.tokenBalance = Math.max(0, s.tokenBalance - amount);
+            s.tokenUsedSession += amount;
+          },
+          false,
+          'ai/deductTokens'
+        ),
 
-      setActiveTab: (tab) => set((s) => {
-        s.activeTab = tab;
-      }, false, 'ai/setActiveTab'),
+      setActiveTab: (tab) =>
+        set(
+          (s) => {
+            s.activeTab = tab;
+          },
+          false,
+          'ai/setActiveTab'
+        ),
 
-      setTranscriptSearch: (query) => set((s) => {
-        s.transcriptSearchQuery = query;
-      }, false, 'ai/setTranscriptSearch'),
+      setTranscriptSearch: (query) =>
+        set(
+          (s) => {
+            s.transcriptSearchQuery = query;
+          },
+          false,
+          'ai/setTranscriptSearch'
+        ),
 
-      setTranscriptResults: (results) => set((s) => {
-        s.transcriptResults = results;
-      }, false, 'ai/setTranscriptResults'),
+      setTranscriptResults: (results) =>
+        set(
+          (s) => {
+            s.transcriptResults = results;
+          },
+          false,
+          'ai/setTranscriptResults'
+        ),
 
-      clearChat: () => set((s) => {
-        s.messages = [{
-          id: 'welcome_cleared',
-          role: 'assistant',
-          content: 'Chat cleared. How can I help you?',
-          timestamp: Date.now(),
-        }];
-        s.currentPlan = null;
-        s.error = null;
-        s.streamingText = '';
-      }, false, 'ai/clearChat'),
+      clearChat: () =>
+        set(
+          (s) => {
+            s.messages = [
+              {
+                id: 'welcome_cleared',
+                role: 'assistant',
+                content: 'Chat cleared. How can I help you?',
+                timestamp: Date.now(),
+              },
+            ];
+            s.currentPlan = null;
+            s.error = null;
+            s.streamingText = '';
+          },
+          false,
+          'ai/clearChat'
+        ),
 
-      setGeminiApiKey: (key) => set((s) => {
-        s.geminiApiKey = key;
-      }, false, 'ai/setGeminiApiKey'),
+      setGeminiApiKey: (key) =>
+        set(
+          (s) => {
+            s.geminiApiKey = key;
+          },
+          false,
+          'ai/setGeminiApiKey'
+        ),
 
-      setMCPServerUrl: (url) => set((s) => {
-        s.mcpServerUrl = url;
-      }, false, 'ai/setMCPServerUrl'),
+      setMCPServerUrl: (url) =>
+        set(
+          (s) => {
+            s.mcpServerUrl = url;
+          },
+          false,
+          'ai/setMCPServerUrl'
+        ),
 
-      setStreamingText: (text) => set((s) => {
-        s.streamingText = text;
-      }, false, 'ai/setStreamingText'),
+      setStreamingText: (text) =>
+        set(
+          (s) => {
+            s.streamingText = text;
+          },
+          false,
+          'ai/setStreamingText'
+        ),
 
-      appendStreamingText: (chunk) => set((s) => {
-        s.streamingText += chunk;
-      }, false, 'ai/appendStreamingText'),
+      appendStreamingText: (chunk) =>
+        set(
+          (s) => {
+            s.streamingText += chunk;
+          },
+          false,
+          'ai/appendStreamingText'
+        ),
 
-      clearStreamingText: () => set((s) => {
-        s.streamingText = '';
-      }, false, 'ai/clearStreamingText'),
+      clearStreamingText: () =>
+        set(
+          (s) => {
+            s.streamingText = '';
+          },
+          false,
+          'ai/clearStreamingText'
+        ),
 
-      resetStore: () => set(() => ({
-        ...INITIAL_STATE,
-        messages: [{
-          ...WELCOME_MESSAGE,
-          id: `welcome_${Date.now()}`,
-          timestamp: Date.now(),
-        }],
-      }), true, 'ai/resetStore'),
+      resetStore: () =>
+        set(
+          () => ({
+            ...INITIAL_STATE,
+            messages: [
+              {
+                ...WELCOME_MESSAGE,
+                id: `welcome_${Date.now()}`,
+                timestamp: Date.now(),
+              },
+            ],
+          }),
+          true,
+          'ai/resetStore'
+        ),
     })),
-    { name: 'AIStore', enabled: import.meta.env.DEV },
+    getStoreDevtoolsOptions('AIStore')
   )
 );
 
@@ -180,7 +261,8 @@ export const selectAIError = (state: AIState & AIActions) => state.error;
 export const selectAITokenBalance = (state: AIState & AIActions) => state.tokenBalance;
 export const selectAITokenUsedSession = (state: AIState & AIActions) => state.tokenUsedSession;
 export const selectAIActiveTab = (state: AIState & AIActions) => state.activeTab;
-export const selectTranscriptSearchQuery = (state: AIState & AIActions) => state.transcriptSearchQuery;
+export const selectTranscriptSearchQuery = (state: AIState & AIActions) =>
+  state.transcriptSearchQuery;
 export const selectTranscriptResults = (state: AIState & AIActions) => state.transcriptResults;
 export const selectAIStreamingText = (state: AIState & AIActions) => state.streamingText;
 export const selectHasTokens = (state: AIState & AIActions) => state.tokenBalance > 0;

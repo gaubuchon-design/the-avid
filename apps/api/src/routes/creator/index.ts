@@ -148,12 +148,13 @@ router.put(
   validateAll({ params: keyParam, body: schemas.upsertAgentMemory }),
   async (req: Request, res: Response) => {
     const userId = req.user!.id;
+    const memoryKey = req.params['key']!;
     const { value, source, confidence } = req.body;
     const memory = await db.agentMemory.upsert({
-      where: { userId_key: { userId, key: req.params['key'] } },
+      where: { userId_key: { userId, key: memoryKey } },
       create: {
         userId,
-        key: req.params['key'],
+        key: memoryKey,
         value,
         source,
         confidence,
@@ -170,8 +171,9 @@ router.put(
 
 router.delete('/agent-memory/:key', validate(keyParam, 'params'), async (req: Request, res: Response) => {
   const userId = req.user!.id;
+  const memoryKey = req.params['key']!;
   await db.agentMemory.delete({
-    where: { userId_key: { userId, key: req.params['key'] } },
+    where: { userId_key: { userId, key: memoryKey } },
   });
   res.status(204).send();
 });

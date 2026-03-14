@@ -6,17 +6,15 @@ import { UnauthorizedError, ForbiddenError } from '../utils/errors';
 import { logger } from '../utils/logger';
 
 // ─── Augment Express Request ───────────────────────────────────────────────────
-declare global {
-  namespace Express {
-    interface Request {
-      user?: {
-        id: string;
-        email: string;
-        displayName: string;
-        subscriptionTier: string;
-      };
-      requestId?: string;
-    }
+declare module 'express-serve-static-core' {
+  interface Request {
+    user?: {
+      id: string;
+      email: string;
+      displayName: string;
+      subscriptionTier: string;
+    };
+    requestId?: string;
   }
 }
 

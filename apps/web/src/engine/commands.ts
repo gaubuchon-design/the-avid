@@ -1,9 +1,81 @@
 import type { Command } from './types';
+import { editOpsEngine } from './EditOperationsEngine';
 import { useEditorStore } from '../store/editor.store';
 import type { Clip, Track } from '../store/editor.store';
 
 /** Helper: read-only snapshot of current editor state. */
 const snap = () => useEditorStore.getState();
+
+export interface EditorSnapshot {
+  tracks: Track[];
+  selectedClipIds: string[];
+  selectedTrackId: string | null;
+  inspectedClipId: string | null;
+  duration: number;
+}
+
+function cloneClip(clip: Clip): Clip {
+  return {
+    ...clip,
+    waveformData: clip.waveformData ? [...clip.waveformData] : undefined,
+    intrinsicVideo: { ...clip.intrinsicVideo },
+    intrinsicAudio: { ...clip.intrinsicAudio },
+    timeRemap: {
+      ...clip.timeRemap,
+      keyframes: clip.timeRemap.keyframes.map((keyframe) => ({
+        ...keyframe,
+        bezierIn: keyframe.bezierIn ? { ...keyframe.bezierIn } : undefined,
+        bezierOut: keyframe.bezierOut ? { ...keyframe.bezierOut } : undefined,
+      })),
+    },
+  };
+}
+
+function cloneTrack(track: Track): Track {
+  return {
+    ...track,
+    clips: track.clips.map(cloneClip),
+  };
+}
+
+export function takeEditorSnapshot(): EditorSnapshot {
+  const state = snap();
+
+  return {
+    tracks: state.tracks.map(cloneTrack),
+    selectedClipIds: [...state.selectedClipIds],
+    selectedTrackId: state.selectedTrackId,
+    inspectedClipId: state.inspectedClipId,
+    duration: state.duration,
+  };
+}
+
+export function restoreEditorSnapshot(snapshot: EditorSnapshot): void {
+  useEditorStore.setState({
+    tracks: snapshot.tracks.map(cloneTrack),
+    selectedClipIds: [...snapshot.selectedClipIds],
+    selectedTrackId: snapshot.selectedTrackId,
+    inspectedClipId: snapshot.inspectedClipId,
+    duration: snapshot.duration,
+  });
+}
+
+/** Command to restore a captured editor state pair for undoable workflows. */
+export class RestoreEditorSnapshotCommand implements Command {
+  constructor(
+    private beforeSnapshot: EditorSnapshot,
+    private afterSnapshot: EditorSnapshot,
+    public readonly description = 'Apply editor snapshot',
+  ) {}
+
+  execute(): void {
+    restoreEditorSnapshot(this.afterSnapshot);
+  }
+
+  undo(): void {
+    restoreEditorSnapshot(this.beforeSnapshot);
+  }
+}
 
 // ─── 1. AddClip ──────────────────────────────────────────────────────────────
 
@@ -64,6 +136,51 @@ export class MoveClipCommand implements Command {
   }
   undo(): void {
     snap().moveClip(this.clipId, this.prevTrackId, this.prevStart);
+  }
+}
+
+/** Command to execute overwrite/splice segment moves with undo via state snapshots. */
+export class SegmentMoveCommand implements Command {
+  readonly description: string;
+  private beforeSnapshot: EditorSnapshot | null = null;
+  private afterSnapshot: EditorSnapshot | null = null;
+
+  constructor(
+    private clipIds: string[],
+    private targetTrackId: string,
+    private targetTime: number,
+    private mode: 'overwrite' | 'splice',
+  ) {
+    this.description = mode === 'overwrite'
+      ? 'Overwrite segment move'
+      : 'Splice-in segment move';
+  }
+
+  execute(): void {
+    if (this.afterSnapshot) {
+      restoreEditorSnapshot(this.afterSnapshot);
+      return;
+    }
+
+    this.beforeSnapshot = takeEditorSnapshot();
+
+    const result = this.mode === 'overwrite'
+      ? editOpsEngine.overwriteSegmentTo(this.clipIds, this.targetTrackId, this.targetTime)
+      : editOpsEngine.spliceSegmentTo(this.clipIds, this.targetTrackId, this.targetTime);
+
+    if (!result.success) {
+      throw new Error(result.description);
+    }
+
+    this.afterSnapshot = takeEditorSnapshot();
+  }
+
+  undo(): void {
+    if (!this.beforeSnapshot) {
+      return;
+    }
+
+    restoreEditorSnapshot(this.beforeSnapshot);
   }
 }
 

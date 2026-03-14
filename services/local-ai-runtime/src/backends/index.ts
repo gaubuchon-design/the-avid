@@ -14,4 +14,5 @@ export { TensorRTBackend } from './TensorRTBackend';
 export { LlamaCppBackend } from './LlamaCppBackend';
 export { MLXBackend } from './MLXBackend';
 export { CTranslate2Backend } from './CTranslate2Backend';
+export { FasterWhisperBackend } from './FasterWhisperBackend';
 export { MockBackend } from './MockBackend';

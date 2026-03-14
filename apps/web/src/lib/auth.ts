@@ -1,4 +1,4 @@
-const API_BASE = '/api';
+import { resolveApiUrl } from './runtimeEnvironment';
 
 export interface AuthTokens {
   accessToken: string;
@@ -13,8 +13,11 @@ export interface AuthUser {
   avatarUrl?: string;
 }
 
-export async function loginWithEmail(email: string, password: string): Promise<{ user: AuthUser; tokens: AuthTokens }> {
-  const res = await fetch(`${API_BASE}/auth/login`, {
+export async function loginWithEmail(
+  email: string,
+  password: string
+): Promise<{ user: AuthUser; tokens: AuthTokens }> {
+  const res = await fetch(resolveApiUrl('/auth/login'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
@@ -26,8 +29,12 @@ export async function loginWithEmail(email: string, password: string): Promise<{
   return res.json();
 }
 
-export async function registerUser(email: string, name: string, password: string): Promise<{ user: AuthUser; tokens: AuthTokens }> {
-  const res = await fetch(`${API_BASE}/auth/register`, {
+export async function registerUser(
+  email: string,
+  name: string,
+  password: string
+): Promise<{ user: AuthUser; tokens: AuthTokens }> {
+  const res = await fetch(resolveApiUrl('/auth/register'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, name, password }),
@@ -40,7 +47,7 @@ export async function registerUser(email: string, name: string, password: string
 }
 
 export async function refreshAccessToken(refreshToken: string): Promise<AuthTokens> {
-  const res = await fetch(`${API_BASE}/auth/refresh`, {
+  const res = await fetch(resolveApiUrl('/auth/refresh'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refreshToken }),

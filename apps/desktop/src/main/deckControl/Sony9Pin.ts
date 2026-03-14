@@ -55,27 +55,27 @@ interface SerialPortListResult {
 const CMD_DEVICE_TYPE_REQUEST = Buffer.from([0x00, 0x11]);
 
 /** Transport control commands (CMD1 group = 0x2x) */
-const CMD_STOP          = Buffer.from([0x20, 0x00]);
-const CMD_PLAY          = Buffer.from([0x20, 0x01]);
-const CMD_RECORD        = Buffer.from([0x20, 0x02]);
-const CMD_STANDBY_OFF   = Buffer.from([0x20, 0x04]);
-const CMD_STANDBY_ON    = Buffer.from([0x20, 0x05]);
-const CMD_EJECT         = Buffer.from([0x20, 0x0F]);
-const CMD_FAST_FORWARD  = Buffer.from([0x20, 0x10]);
-const CMD_REWIND        = Buffer.from([0x20, 0x20]);
+const CMD_STOP = Buffer.from([0x20, 0x00]);
+const CMD_PLAY = Buffer.from([0x20, 0x01]);
+const CMD_RECORD = Buffer.from([0x20, 0x02]);
+const CMD_STANDBY_OFF = Buffer.from([0x20, 0x04]);
+const CMD_STANDBY_ON = Buffer.from([0x20, 0x05]);
+const CMD_EJECT = Buffer.from([0x20, 0x0f]);
+const CMD_FAST_FORWARD = Buffer.from([0x20, 0x10]);
+const CMD_REWIND = Buffer.from([0x20, 0x20]);
 
 /** Shuttle/jog commands (CMD1 group = 0x2x with data) */
-const CMD_JOG_FORWARD   = Buffer.from([0x21, 0x11]); // + 1 speed byte
-const CMD_JOG_REVERSE   = Buffer.from([0x21, 0x12]); // + 1 speed byte
-const CMD_SHUTTLE_FWD   = Buffer.from([0x21, 0x13]); // + 1 speed byte
-const CMD_SHUTTLE_REV   = Buffer.from([0x21, 0x14]); // + 1 speed byte
+const CMD_JOG_FORWARD = Buffer.from([0x21, 0x11]); // + 1 speed byte
+const CMD_JOG_REVERSE = Buffer.from([0x21, 0x12]); // + 1 speed byte
+const CMD_SHUTTLE_FWD = Buffer.from([0x21, 0x13]); // + 1 speed byte
+const CMD_SHUTTLE_REV = Buffer.from([0x21, 0x14]); // + 1 speed byte
 
 /** Preset/cue commands */
-const CMD_CUE_UP_DATA   = Buffer.from([0x24, 0x31]); // + 4 BCD timecode bytes
+const CMD_CUE_UP_DATA = Buffer.from([0x24, 0x31]); // + 4 BCD timecode bytes
 
 /** Sense request commands (CMD1 group = 0x6x) */
-const CMD_TC_GEN_SENSE     = Buffer.from([0x61, 0x0C]); // Request current timecode
-const CMD_STATUS_SENSE     = Buffer.from([0x61, 0x20]); // Request status + TC
+const CMD_TC_GEN_SENSE = Buffer.from([0x61, 0x0c]); // Request current timecode
+const CMD_STATUS_SENSE = Buffer.from([0x61, 0x20]); // Request status + TC
 
 /** Response timeout (ms) */
 const RESPONSE_TIMEOUT = 500;
@@ -97,7 +97,10 @@ export class Sony9Pin {
    */
   async loadModule(): Promise<boolean> {
     try {
-      this.serialModule = await import('serialport') as unknown as SerialPortModule;
+      const moduleId = 'serialport';
+      this.serialModule = (await import(
+        /* @vite-ignore */ moduleId
+      )) as unknown as SerialPortModule;
       return true;
     } catch {
       console.warn('[Sony9Pin] serialport module not available — deck control disabled');
@@ -121,7 +124,10 @@ export class Sony9Pin {
 
     try {
       // SerialPort.list() is a static method
-      const mod = await import('serialport') as unknown as { SerialPort: { list(): Promise<SerialPortListResult[]> } };
+      const moduleId = 'serialport';
+      const mod = (await import(/* @vite-ignore */ moduleId)) as unknown as {
+        SerialPort: { list(): Promise<SerialPortListResult[]> };
+      };
       const ports = await mod.SerialPort.list();
       return ports.map((p) => ({
         path: p.path,
@@ -359,10 +365,10 @@ export class Sony9Pin {
    */
   private buildFrame(data: Buffer): Buffer {
     let sum = 0;
-    for (let i = 0; i < data.length; i++) {
-      sum += data[i]!;
+    for (const value of data) {
+      sum += value;
     }
-    const checksum = sum & 0xFF;
+    const checksum = sum & 0xff;
     return Buffer.concat([data, Buffer.from([checksum])]);
   }
 
@@ -418,7 +424,7 @@ export class Sony9Pin {
   private processRxBuffer(): void {
     while (this.rxBuffer.length >= 2) {
       const cmd1 = this.rxBuffer[0]!;
-      const dataCount = (cmd1 >> 4) & 0x0F;
+      const dataCount = (cmd1 >> 4) & 0x0f;
       const frameLength = 2 + dataCount + 1; // CMD1 + CMD2 + data + checksum
 
       if (this.rxBuffer.length < frameLength) break;
@@ -431,7 +437,7 @@ export class Sony9Pin {
       for (let i = 0; i < frame.length - 1; i++) {
         sum += frame[i]!;
       }
-      const expectedChecksum = sum & 0xFF;
+      const expectedChecksum = sum & 0xff;
       const actualChecksum = frame[frame.length - 1]!;
 
       if (expectedChecksum !== actualChecksum) {
@@ -462,13 +468,13 @@ export class Sony9Pin {
     }
 
     // Timecode data starts at byte 2
-    const frames  = this.decodeBCD(response[2]!);
+    const frames = this.decodeBCD(response[2]!);
     const seconds = this.decodeBCD(response[3]!);
     const minutes = this.decodeBCD(response[4]!);
-    const hours   = this.decodeBCD(response[5]!);
+    const hours = this.decodeBCD(response[5]!);
     const dropFrame = (response[2]! & 0x40) !== 0; // Bit 6 of frames byte = DF flag
 
-    return { hours, minutes, seconds, frames: frames & 0x3F, dropFrame };
+    return { hours, minutes, seconds, frames: frames & 0x3f, dropFrame };
   }
 
   /**
@@ -513,7 +519,7 @@ export class Sony9Pin {
    * BCD: high nibble = tens digit, low nibble = ones digit
    */
   private decodeBCD(byte: number): number {
-    return ((byte >> 4) & 0x0F) * 10 + (byte & 0x0F);
+    return ((byte >> 4) & 0x0f) * 10 + (byte & 0x0f);
   }
 
   /**

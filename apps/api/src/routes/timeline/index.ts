@@ -32,16 +32,17 @@ router.get('/', requireProjectAccess('VIEWER'), async (req: Request, res: Respon
 // POST /projects/:projectId/timelines
 router.post('/', requireProjectAccess('EDITOR'), validate(schemas.createTimeline), async (req: Request, res: Response) => {
   const { name, frameRate, width, height } = req.body;
+  const projectId = req.params['projectId']!;
 
   // Inherit from project settings if not provided
   const project = await db.project.findUnique({
-    where: { id: req.params['projectId'] },
+    where: { id: projectId },
     select: { frameRate: true, width: true, height: true, sampleRate: true },
   });
 
   const timeline = await db.timeline.create({
     data: {
-      projectId: req.params['projectId'],
+      project: { connect: { id: projectId } },
       name,
       frameRate: frameRate ?? project?.frameRate ?? 23.976,
       width: width ?? project?.width ?? 1920,
@@ -256,8 +257,14 @@ router.post(
   validateAll({ params: timelineAndClipParams, body: schemas.createEffect }),
   async (req: Request, res: Response) => {
     const { type, params, sortOrder } = req.body;
+    const clipId = req.params['clipId']!;
     const effect = await db.clipEffect.create({
-      data: { clipId: req.params['clipId'], type, params: params ?? {}, sortOrder: sortOrder ?? 0 },
+      data: {
+        clip: { connect: { id: clipId } },
+        type,
+        params: params ?? {},
+        sortOrder: sortOrder ?? 0,
+      },
     });
     res.status(201).json({ effect });
   }
@@ -296,9 +303,17 @@ router.post(
   requireProjectAccess('EDITOR'),
   validateAll({ params: projectIdAndTimelineIdParams, body: schemas.createMarker }),
   async (req: Request, res: Response) => {
-    const { time, label, color, type, notes } = req.body;
+    const { time, label, color, notes } = req.body;
+    const timelineId = req.params['timelineId']!;
     const marker = await db.timelineMarker.create({
-      data: { time, label, color, type, notes, timelineId: req.params['timelineId'], createdById: req.user!.id },
+      data: {
+        time,
+        label,
+        color,
+        notes,
+        timelineId,
+        createdById: req.user!.id,
+      },
     });
     res.status(201).json({ marker });
   }

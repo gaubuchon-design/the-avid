@@ -186,4 +186,16 @@ describe('AudioEngine', () => {
     audioEngine.disconnectVideoSource('nonexistent');
     expect(true).toBe(true);
   });
+
+  it('can reconnect the same media element after a track handoff', () => {
+    audioEngine.init();
+    const video = document.createElement('video');
+
+    const first = audioEngine.connectVideoSource('track_1', video);
+    audioEngine.disconnectVideoSource('track_1');
+    const second = audioEngine.connectVideoSource('track_2', video);
+
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+  });
 });

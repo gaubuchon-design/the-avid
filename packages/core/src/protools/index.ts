@@ -31,6 +31,8 @@ export {
   type AAFRenderedEffect,
   type AAFTrackDescriptor,
   type AAFExportResult,
+  type AAFValidationResult,
+  type AAFValidationSummary,
 
   // Classes & functions
   ProToolsAAFExporter,

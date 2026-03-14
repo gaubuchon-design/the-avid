@@ -46,6 +46,13 @@ export { type MarkerColor } from './MarkerEngine';
 export { audioMixerEngine } from './AudioMixerEngine';
 export { type MixerChannel, type AudioKeyframe, type AutomationMode } from './AudioMixerEngine';
 
+// Audio Punch-In Recording
+export { audioPunchInEngine } from './AudioPunchInEngine';
+export {
+  type PunchInMode, type RecordState, type InputSource,
+  type PunchInConfig, type PunchInRegion, type RecordingResult,
+} from './AudioPunchInEngine';
+
 // Effects
 export { effectsEngine } from './EffectsEngine';
 export { type EffectDefinition, type EffectInstance } from './EffectsEngine';
@@ -124,3 +131,23 @@ export { speedEffectsEngine } from './SpeedEffectsEngine';
 // Attribute Clipboard
 export { attributeClipboard } from './AttributeClipboard';
 export { type ClipAttributes } from './AttributeClipboard';
+
+// Media Pipeline
+export { mediaPipeline } from './MediaPipeline';
+export {
+  type VideoCodecId, type AudioCodecId, type ImageFormatId,
+  type ContainerFormatId, type CodecInfo, type EncodeConfig,
+  type AudioEncodeConfig, type ProxyConfig, type HWAccelInfo,
+} from './MediaPipeline';
+
+// Hardware Accelerator
+export { hardwareAccelerator } from './HardwareAccelerator';
+export {
+  type GPUVendor, type CPUArchitecture, type AccelerationBackend,
+  type GPUCapabilities, type CPUCapabilities,
+  type WorkerTask, type WorkerTaskResult, type PerformanceSnapshot,
+} from './HardwareAccelerator';
+
+// Attic (Auto-Save Backup System)
+export { atticEngine } from './AtticEngine';
+export { type AtticSnapshot, type AtticConfig, type AtticSnapshotSummary } from './AtticEngine';

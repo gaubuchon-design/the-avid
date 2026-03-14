@@ -4,6 +4,8 @@
 //  HTMLVideoElement, AudioContext, createImageBitmap, WebCodecs VideoFrame.
 // =============================================================================
 
+import { inferAudioChannelLayout, resolveAudioTrackCount } from '../lib/audioChannelLayout';
+
 export interface ExtractedMetadata {
   duration: number;
   width: number;
@@ -13,6 +15,7 @@ export interface ExtractedMetadata {
   colorSpace: string;
   hasAlpha: boolean;
   audioChannels: number;
+  audioChannelLayout: string;
   sampleRate: number;
   fileSize: number;
   startTimecode: string;
@@ -221,7 +224,7 @@ class MediaProbeEngineClass {
     return {
       duration: 0, width: 0, height: 0, fps: 0,
       codec: detectCodec(file), colorSpace: 'srgb', hasAlpha: false,
-      audioChannels: 0, sampleRate: 0, fileSize: file.size,
+      audioChannels: 0, audioChannelLayout: 'none', sampleRate: 0, fileSize: file.size,
       startTimecode: '00:00:00:00', bitDepth: 8, mimeType: mime,
     };
   }
@@ -265,8 +268,20 @@ class MediaProbeEngineClass {
 
     onProgress?.(0.9);
 
-    // Estimate audio channels (default to stereo for video)
-    const audioChannels = 2;
+    // Estimate audio channels from container hints when the browser cannot expose them directly.
+    const audioChannels = resolveAudioTrackCount({
+      codec,
+      mimeType: file.type,
+      name: file.name,
+      type: 'VIDEO',
+    });
+    const audioChannelLayout = inferAudioChannelLayout({
+      audioChannels,
+      codec,
+      mimeType: file.type,
+      name: file.name,
+      type: 'VIDEO',
+    });
     const sampleRate = 48000;
 
     // Compute start timecode (frame 0 by default)
@@ -285,6 +300,7 @@ class MediaProbeEngineClass {
       colorSpace,
       hasAlpha: await this.detectVideoAlpha(file),
       audioChannels,
+      audioChannelLayout,
       sampleRate,
       fileSize: file.size,
       startTimecode,
@@ -340,15 +356,25 @@ class MediaProbeEngineClass {
     URL.revokeObjectURL(url);
     onProgress?.(1);
 
+    const codec = detectCodec(file);
+    const audioChannelLayout = inferAudioChannelLayout({
+      audioChannels,
+      codec,
+      mimeType: file.type,
+      name: file.name,
+      type: 'AUDIO',
+    });
+
     return {
       duration,
       width: 0,
       height: 0,
       fps: 0,
-      codec: detectCodec(file),
+      codec,
       colorSpace: 'n/a',
       hasAlpha: false,
       audioChannels,
+      audioChannelLayout,
       sampleRate,
       fileSize: file.size,
       startTimecode: '00:00:00:00',
@@ -424,6 +450,7 @@ class MediaProbeEngineClass {
       colorSpace: 'srgb',
       hasAlpha,
       audioChannels: 0,
+      audioChannelLayout: 'none',
       sampleRate: 0,
       fileSize: file.size,
       startTimecode: '00:00:00:00',

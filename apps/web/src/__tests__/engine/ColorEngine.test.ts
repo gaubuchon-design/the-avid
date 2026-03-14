@@ -121,7 +121,7 @@ describe('ColorEngine', () => {
 
   // ── processFrame ──────────────────────────────────────────────────────
 
-  it('processFrame() returns input unchanged (stub)', () => {
+  it('processFrame() preserves the pixels for an identity grade', () => {
     const img = {
       data: new Uint8ClampedArray([100, 100, 100, 255]),
       width: 1,
@@ -129,7 +129,10 @@ describe('ColorEngine', () => {
       colorSpace: 'srgb',
     } as ImageData;
     const result = engine.processFrame(img);
-    expect(result).toBe(img);
+    expect(result).not.toBe(img);
+    expect(Array.from(result.data)).toEqual(Array.from(img.data));
+    expect(result.width).toBe(img.width);
+    expect(result.height).toBe(img.height);
   });
 
   // ── Looks ──────────────────────────────────────────────────────────────

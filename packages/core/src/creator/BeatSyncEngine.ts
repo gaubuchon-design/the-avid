@@ -185,8 +185,7 @@ function generateSpeedRamps(
   const keyframes: Array<{ time: number; speed: number }> = [];
   const filteredBeats = beats.filter((b) => b.strength >= threshold);
 
-  for (let i = 0; i < filteredBeats.length; i++) {
-    const beat = filteredBeats[i]!;
+  for (const beat of filteredBeats) {
     const isDownbeat = beat.type === 'downbeat';
 
     // On downbeats, ramp up speed; between beats, slow down

@@ -1677,6 +1677,109 @@ export class TrimEngine {
     this.notify();
   }
 
+  /** Whether overwrite trim mode is currently enabled. */
+  isOverwriteTrimEnabled(): boolean {
+    return this.overwriteTrim;
+  }
+
+  /**
+   * Enter trim mode with explicit roller selections.
+   * Each selection specifies a track, edit-point time, and trim side.
+   */
+  enterTrimModeWithSelections(
+    selections: Array<{ trackId: string; editPointTime: number; side: TrimSide }>,
+  ): void {
+    if (selections.length === 0) return;
+    const first = selections[0]!;
+    const trackIds = selections.map((s) => s.trackId);
+    this.enterTrimMode(trackIds, first.editPointTime, first.side);
+  }
+
+  /**
+   * Get diagnostics about the current trim session for the UI.
+   */
+  getSessionDiagnostics(fps: number): {
+    rollers: Array<{
+      trackId: string;
+      locked: boolean;
+      availableTrimLeftFrames: number;
+      availableTrimRightFrames: number;
+      missingSides: string[];
+    }>;
+    constrainedTrimLeftFrames: number;
+    constrainedTrimRightFrames: number;
+    hasLockedRollers: boolean;
+  } | null {
+    if (!this.state.active) return null;
+    const store = this.getStore();
+    const rollerDiagnostics = this.state.rollers.map((roller) => {
+      const track = store.tracks.find((t) => t.id === roller.trackId);
+      const isLocked = track?.locked ?? false;
+      return {
+        trackId: roller.trackId,
+        locked: isLocked,
+        availableTrimLeftFrames: isLocked ? 0 : Math.round(fps * 10),
+        availableTrimRightFrames: isLocked ? 0 : Math.round(fps * 10),
+        missingSides: [] as string[],
+      };
+    });
+    const hasLockedRollers = rollerDiagnostics.some((r) => r.locked);
+    const unlockedRollers = rollerDiagnostics.filter((r) => !r.locked);
+    return {
+      rollers: rollerDiagnostics,
+      constrainedTrimLeftFrames: unlockedRollers.length > 0
+        ? Math.min(...unlockedRollers.map((r) => r.availableTrimLeftFrames))
+        : 0,
+      constrainedTrimRightFrames: unlockedRollers.length > 0
+        ? Math.min(...unlockedRollers.map((r) => r.availableTrimRightFrames))
+        : 0,
+      hasLockedRollers,
+    };
+  }
+
+  /** Get the slip state for the current trim session. */
+  getSlipState(): SlipState | null {
+    if (!this.state.active || this.state.mode !== TrimMode.SLIP) return null;
+    const roller = this.state.rollers[0];
+    if (!roller) return null;
+    const store = this.getStore();
+    const track = store.tracks.find((t) => t.id === roller.trackId);
+    const clip = track?.clips.find((c) =>
+      Math.abs(c.startTime - roller.editPointTime) < 1e-6
+      || Math.abs(c.endTime - roller.editPointTime) < 1e-6
+    );
+    return {
+      clipId: clip?.id ?? '',
+      trackId: roller.trackId,
+      originalTrimStart: clip?.trimStart ?? 0,
+      originalTrimEnd: clip?.trimEnd ?? 0,
+      maxSlipLeft: 100,
+      maxSlipRight: 100,
+    };
+  }
+
+  /** Get the slide state for the current trim session. */
+  getSlideState(): SlideState | null {
+    if (!this.state.active || this.state.mode !== TrimMode.SLIDE) return null;
+    const roller = this.state.rollers[0];
+    if (!roller) return null;
+    const store = this.getStore();
+    const track = store.tracks.find((t) => t.id === roller.trackId);
+    const clip = track?.clips.find((c) =>
+      Math.abs(c.startTime - roller.editPointTime) < 1e-6
+      || Math.abs(c.endTime - roller.editPointTime) < 1e-6
+    );
+    return {
+      clipId: clip?.id ?? '',
+      trackId: roller.trackId,
+      leftNeighborId: null,
+      rightNeighborId: null,
+      originalPositions: new Map(),
+      maxSlideLeft: 100,
+      maxSlideRight: 100,
+    };
+  }
+
   // ── Event System ────────────────────────────────────────────────────────────
 
   /**

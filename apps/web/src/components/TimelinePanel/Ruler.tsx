@@ -1,4 +1,5 @@
 import React, { useRef, useCallback, useEffect, memo } from 'react';
+import { usePointerScrub } from '../../hooks/usePointerScrub';
 
 interface RulerProps {
   zoom: number;
@@ -9,6 +10,7 @@ interface RulerProps {
 
 export const Ruler = memo(function Ruler({ zoom, scrollLeft, duration, onScrub }: RulerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rulerRef = useRef<HTMLDivElement>(null);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -76,25 +78,25 @@ export const Ruler = memo(function Ruler({ zoom, scrollLeft, duration, onScrub }
     return () => obs.disconnect();
   }, [draw]);
 
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    const rect = (e.target as HTMLElement).getBoundingClientRect();
-    const scrub = (ev: MouseEvent) => {
-      const x = ev.clientX - rect.left;
-      onScrub(Math.max(0, (x + scrollLeft) / zoom));
-    };
-    scrub(e.nativeEvent);
-    const up = () => {
-      window.removeEventListener('mousemove', scrub);
-      window.removeEventListener('mouseup', up);
-    };
-    window.addEventListener('mousemove', scrub);
-    window.addEventListener('mouseup', up);
-  }, [onScrub, scrollLeft, zoom]);
+  const scrubBindings = usePointerScrub({
+    disabled: duration <= 0,
+    onScrub: ({ clientX }) => {
+      const rect = rulerRef.current?.getBoundingClientRect();
+      if (!rect || rect.width <= 0) {
+        return;
+      }
+
+      const x = clientX - rect.left;
+      const nextTime = Math.max(0, Math.min(duration, (x + scrollLeft) / zoom));
+      onScrub(nextTime);
+    },
+  });
 
   return (
     <div
       className="timeline-ruler"
-      onMouseDown={handleMouseDown}
+      ref={rulerRef}
+      {...scrubBindings}
       role="slider"
       aria-label="Timeline ruler - click to scrub"
       aria-valuemin={0}

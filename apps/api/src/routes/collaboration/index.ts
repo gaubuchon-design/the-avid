@@ -176,7 +176,7 @@ publishRouter.post(
       data: { status: 'PENDING' },
     });
 
-    publishService.enqueue(job);
+    await publishService.enqueue(job);
 
     res.status(202).json({ job, message: 'Publish job queued' });
   }

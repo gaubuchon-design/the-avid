@@ -10,6 +10,16 @@ const AI_LEVELS = [
   { value: 5 as const, label: 'Aggressive', desc: 'Continuous AI-powered suggestions' },
 ];
 
+const TRANSCRIPTION_PROVIDERS = [
+  { value: 'local-faster-whisper', label: 'Local faster-whisper' },
+  { value: 'cloud-openai-compatible', label: 'Cloud OpenAI-compatible' },
+];
+
+const TRANSLATION_PROVIDERS = [
+  { value: 'local-runtime', label: 'Local runtime' },
+  { value: 'cloud-openai-compatible', label: 'Cloud OpenAI-compatible' },
+];
+
 export function AISettings() {
   const { settings, updateSetting, resetSection } = useUserSettingsStore();
 
@@ -65,6 +75,102 @@ export function AISettings() {
           <option value="flash">Flash (Fast)</option>
           <option value="pro">Pro (Quality)</option>
         </select>
+      </div>
+
+      <div style={ss['field']}>
+        <label style={ss['label']}>Transcription Provider</label>
+        <select
+          value={settings.transcriptionProvider}
+          onChange={(e) => updateSetting('transcriptionProvider', e.target.value as typeof settings.transcriptionProvider)}
+          style={ss['select']}
+        >
+          {TRANSCRIPTION_PROVIDERS.map((provider) => (
+            <option key={provider.value} value={provider.value}>{provider.label}</option>
+          ))}
+        </select>
+      </div>
+
+      <div style={ss['field']}>
+        <label style={ss['label']}>Translation Provider</label>
+        <select
+          value={settings.translationProvider}
+          onChange={(e) => updateSetting('translationProvider', e.target.value as typeof settings.translationProvider)}
+          style={ss['select']}
+        >
+          {TRANSLATION_PROVIDERS.map((provider) => (
+            <option key={provider.value} value={provider.value}>{provider.label}</option>
+          ))}
+        </select>
+      </div>
+
+      <div style={ss['field']}>
+        <label style={ss['label']}>Transcript Language</label>
+        <div style={ss['radioGroup']}>
+          <label style={ss['radioLabel']}>
+            <input
+              type="radio"
+              name="transcriptionLanguageMode"
+              checked={settings.transcriptionLanguageMode === 'auto'}
+              onChange={() => updateSetting('transcriptionLanguageMode', 'auto')}
+              style={ss['radio']}
+            />
+            Auto-detect
+          </label>
+          <label style={ss['radioLabel']}>
+            <input
+              type="radio"
+              name="transcriptionLanguageMode"
+              checked={settings.transcriptionLanguageMode === 'manual'}
+              onChange={() => updateSetting('transcriptionLanguageMode', 'manual')}
+              style={ss['radio']}
+            />
+            Force language
+          </label>
+        </div>
+        {settings.transcriptionLanguageMode === 'manual' && (
+          <input
+            type="text"
+            value={settings.transcriptionLanguage}
+            onChange={(e) => updateSetting('transcriptionLanguage', e.target.value)}
+            placeholder="en, fr, es..."
+            style={{ ...ss['input'], marginTop: 8 }}
+          />
+        )}
+      </div>
+
+      <div style={ss['field']}>
+        <label style={ss['label']}>Translation Target</label>
+        <input
+          type="text"
+          value={settings.transcriptionTargetLanguage}
+          onChange={(e) => updateSetting('transcriptionTargetLanguage', e.target.value)}
+          placeholder="en"
+          style={ss['input']}
+        />
+      </div>
+
+      <div style={ss['field']}>
+        <label style={ss['toggleLabel']}>
+          <input
+            type="checkbox"
+            checked={settings.enableTranscriptionDiarization}
+            onChange={(e) => updateSetting('enableTranscriptionDiarization', e.target.checked)}
+            style={ss['checkbox']}
+          />
+          Enable speaker diarization in transcription jobs
+        </label>
+      </div>
+
+      <div style={ss['field']}>
+        <label style={ss['toggleLabel']}>
+          <input
+            type="checkbox"
+            checked={settings.enableSpeakerIdentification}
+            onChange={(e) => updateSetting('enableSpeakerIdentification', e.target.checked)}
+            style={ss['checkbox']}
+          />
+          Preserve speaker identification labels in transcript editing
+        </label>
       </div>
     </div>
   );

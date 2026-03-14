@@ -7,9 +7,6 @@ import { BinPanel } from '../components/Bins/BinPanel';
 import { ComposerPanel } from '../components/ComposerPanel/ComposerPanel';
 import { TimelinePanel } from '../components/TimelinePanel/TimelinePanel';
 import { InspectorPanel } from '../components/Editor/InspectorPanel';
-import { AIPanel } from '../components/AIPanel/AIPanel';
-import { TranscriptPanel } from '../components/TranscriptPanel/TranscriptPanel';
-import { CommandPalette } from '../components/AIPanel/CommandPalette';
 import { ExportPanel } from '../components/ExportPanel/ExportPanel';
 import { StatusBar } from '../components/Editor/StatusBar';
 import { NewProjectDialog } from '../components/NewProjectDialog/NewProjectDialog';
@@ -27,7 +24,6 @@ import { TrackingOverlay } from '../components/TrackerPanel/TrackingOverlay';
 import { PageNavigation, type EditorPage as PageId } from '../components/PageNavigation/PageNavigation';
 import { MediaPage } from './MediaPage';
 import { CutPage } from './CutPage';
-import { ColorPage } from './ColorPage';
 
 // Lazy-load new pages and deliver components for share panel
 const VFXPage = lazy(() => import('./VFXPage').then(m => ({ default: m.VFXPage })));
@@ -427,7 +423,7 @@ export function EditorPage() {
       )}
       {activePage === 'color' && (
         <ErrorBoundary resetKeys={[activePage]}>
-          <div style={{ gridRow: '2 / 5', overflow: 'hidden' }}><ColorPage /></div>
+          <div style={{ gridRow: '2 / 5', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>Color Page</div>
         </ErrorBoundary>
       )}
       {activePage === 'vfx' && (
@@ -451,11 +447,7 @@ export function EditorPage() {
               <PanelErrorBoundary panelName="BinPanel">
                 <BinPanel />
               </PanelErrorBoundary>
-              {showTranscriptPanel && (
-                <PanelErrorBoundary panelName="TranscriptPanel">
-                  <TranscriptPanel />
-                </PanelErrorBoundary>
-              )}
+              {/* TranscriptPanel removed in this branch */}
             </div>
             <div className="canvas-area" style={{ position: 'relative' }}>
               <PanelErrorBoundary panelName="ComposerPanel">
@@ -473,11 +465,7 @@ export function EditorPage() {
                   <TrackingOverlay width={1920} height={1080} />
                 </PanelErrorBoundary>
               )}
-              {showAIPanel && (
-                <PanelErrorBoundary panelName="AIPanel">
-                  <AIPanel />
-                </PanelErrorBoundary>
-              )}
+              {/* AIPanel removed in this branch */}
             </div>
             {/* Planar tracker side panel */}
             {showTracker && (
@@ -500,10 +488,7 @@ export function EditorPage() {
       <PageNavigation activePage={activePage} onPageChange={setActivePage} />
       <StatusBar />
 
-      {/* Command Palette */}
-      {showCommandPalette && (
-        <CommandPalette onClose={() => setShowCommandPalette(false)} />
-      )}
+      {/* Command Palette removed in this branch */}
 
       {showExportPanel && (
         <div

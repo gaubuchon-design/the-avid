@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
+  getMediaCapabilityDispositionLabel,
   getMediaAssetPlaybackUrl,
   getMediaAssetPrimaryPath,
   getMediaAssetResolutionLabel,
+  getMediaAssetSurfaceCapability,
   getMediaAssetTechnicalSummary,
 } from '../media-helpers';
 import type { EditorMediaAsset } from '../project-library';
@@ -81,6 +83,35 @@ describe('getMediaAssetPlaybackUrl', () => {
     expect(result1).toBe(result2);
     expect(result1).toBe('http://cached.mp4');
   });
+
+  it('uses canonical playback variants when present', () => {
+    const asset: PlaybackAsset & Pick<EditorMediaAsset, 'references' | 'variants'> = {
+      playbackUrl: undefined,
+      locations: { pathHistory: [] },
+      proxyMetadata: { status: 'NOT_REQUESTED' },
+      references: [
+        {
+          id: 'ref-playback',
+          role: 'playback',
+          locator: 'file-url',
+          url: 'file:///canonical/playback.mov',
+        },
+      ],
+      variants: [
+        {
+          id: 'variant-playback',
+          name: 'Playback',
+          purpose: 'playback',
+          availability: 'ready',
+          supportTier: 'normalized',
+          referenceIds: ['ref-playback'],
+          streamIds: [],
+        },
+      ],
+    };
+
+    expect(getMediaAssetPlaybackUrl(asset)).toBe('file:///canonical/playback.mov');
+  });
 });
 
 // =============================================================================
@@ -122,6 +153,34 @@ describe('getMediaAssetPrimaryPath', () => {
 
   it('returns undefined for null asset', () => {
     expect(getMediaAssetPrimaryPath(null as unknown as PathAsset)).toBeUndefined();
+  });
+
+  it('uses canonical managed/source references when present', () => {
+    const asset: PathAsset & Pick<EditorMediaAsset, 'references' | 'variants'> = {
+      locations: { pathHistory: [] },
+      proxyMetadata: { status: 'NOT_REQUESTED' },
+      references: [
+        {
+          id: 'ref-managed',
+          role: 'managed',
+          locator: 'absolute-path',
+          path: '/canonical/managed.mov',
+        },
+      ],
+      variants: [
+        {
+          id: 'variant-managed',
+          name: 'Managed',
+          purpose: 'managed',
+          availability: 'ready',
+          supportTier: 'native',
+          referenceIds: ['ref-managed'],
+          streamIds: [],
+        },
+      ],
+    };
+
+    expect(getMediaAssetPrimaryPath(asset)).toBe('/canonical/managed.mov');
   });
 });
 
@@ -261,5 +320,40 @@ describe('getMediaAssetTechnicalSummary', () => {
     };
     const summary = getMediaAssetTechnicalSummary(asset);
     expect(summary.some((s) => s.includes('ch'))).toBe(false);
+  });
+});
+
+describe('capability helpers', () => {
+  it('finds a surface capability report by target surface', () => {
+    const asset = {
+      capabilityReport: {
+        primarySurface: 'desktop',
+        primaryDisposition: 'proxy-only',
+        sourceSupportTier: 'normalized',
+        surfaces: [
+          {
+            surface: 'desktop',
+            disposition: 'proxy-only',
+            supportTier: 'normalized',
+            reasons: ['Ready proxy available.'],
+          },
+          {
+            surface: 'worker',
+            disposition: 'mezzanine-required',
+            supportTier: 'normalized',
+            reasons: ['Generate mezzanine first.'],
+          },
+        ],
+        issues: ['Generate mezzanine first.'],
+      },
+    } satisfies Pick<EditorMediaAsset, 'capabilityReport'>;
+
+    expect(getMediaAssetSurfaceCapability(asset, 'worker')?.disposition).toBe('mezzanine-required');
+  });
+
+  it('formats disposition labels for UI copy', () => {
+    expect(getMediaCapabilityDispositionLabel('proxy-only')).toBe('Proxy only');
+    expect(getMediaCapabilityDispositionLabel('mezzanine-required')).toBe('Mezzanine required');
+    expect(getMediaCapabilityDispositionLabel('native')).toBe('native');
   });
 });

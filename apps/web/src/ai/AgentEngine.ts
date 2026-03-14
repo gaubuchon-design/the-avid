@@ -244,7 +244,7 @@ const PLAN_TEMPLATES: PlanTemplate[] = [
     match: (m) => /organiz/i.test(m) || /sort\s+bin/i.test(m),
     plan: () => [
       { description: 'Scan media metadata across all bins', toolName: 'find_similar_clips', toolArgs: { referenceClipId: 'a1', similarity: 'both' } },
-      { description: 'Create organized bin structure', toolName: 'create_bin', toolArgs: { name: 'Organized', color: '#6d4cfa' } },
+      { description: 'Create organized bin structure', toolName: 'create_bin', toolArgs: { name: 'Organized', color: '#00c896' } },
       { description: 'Auto-organize media by scene', toolName: 'auto_organize_bins', toolArgs: { strategy: 'scene', rootBinId: 'b1' } },
     ],
   },

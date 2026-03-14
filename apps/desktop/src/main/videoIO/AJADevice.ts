@@ -72,9 +72,10 @@ export class AJADevice {
    */
   async init(): Promise<boolean> {
     try {
-      // Try to load the native addon
-      // This would be a compiled .node file from the AJA NTV2 SDK
-      this.native = await import('aja-ntv2') as unknown as AJANativeModule;
+      // Keep the AJA binding optional so desktop packaging works on machines
+      // that do not have the SDK addon installed.
+      const moduleId = 'aja-ntv2';
+      this.native = await import(/* @vite-ignore */ moduleId) as unknown as AJANativeModule;
       return true;
     } catch {
       console.warn('[AJA] aja-ntv2 native module not available — AJA support disabled');
