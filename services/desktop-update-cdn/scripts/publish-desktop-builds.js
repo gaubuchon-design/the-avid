@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { del, list } from '@vercel/blob';
+import { del, list, put } from '@vercel/blob';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const serviceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -297,33 +296,19 @@ async function uploadFile(blobPathname, filePath, dryRun) {
   }
 
   const isMetadata = isMetadataFileName(filePath);
-  const rwToken = requireBlobReadWriteToken({ dryRun });
+  const token = requireBlobReadWriteToken({ dryRun });
+  const maxAge = isMetadata ? 60 : 31536000;
+  const contentType = contentTypeForFileName(filePath);
+  const fileBuffer = fs.readFileSync(filePath);
 
-  execFileSync(
-    'vercel',
-    [
-      'blob',
-      'put',
-      filePath,
-      '--access',
-      'private',
-      '--pathname',
-      blobPathname,
-      '--allow-overwrite',
-      'true',
-      '--cache-control-max-age',
-      String(isMetadata ? 60 : 31536000),
-      '--content-type',
-      contentTypeForFileName(filePath),
-      '--rw-token',
-      rwToken,
-    ],
-    {
-      cwd: serviceRoot,
-      stdio: 'pipe',
-      encoding: 'utf8',
-    }
-  );
+  await put(blobPathname, fileBuffer, {
+    token,
+    access: 'public',
+    addRandomSuffix: false,
+    contentType,
+    cacheControlMaxAge: maxAge,
+  });
+
   console.log(`Uploaded ${path.basename(filePath)} -> ${blobPathname}`);
 }
 
