@@ -34,14 +34,16 @@
     "@mcua/ui": "*",
     "@eyevinn/srt": "^0.8.3",
     "electron-updater": "^6.2.0",
-    "grandiose": "^0.0.4",
     "immer": "^10.1.0",
-    "macadam": "^2.0.18",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-router-dom": "^6.24.0",
-    "serialport": "^12.0.0",
     "zustand": "^4.5.0"
+  },
+  "optionalDependencies": {
+    "grandiose": "^0.0.4",
+    "macadam": "^2.0.18",
+    "serialport": "^12.0.0"
   },
   "devDependencies": {
     "@electron/notarize": "^2.3.0",
