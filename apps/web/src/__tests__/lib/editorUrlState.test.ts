@@ -7,14 +7,23 @@ describe('editorUrlState', () => {
     expect(resolveEditorPageParam('edit')).toBe('edit');
   });
 
+  it('resolves all valid editor pages', () => {
+    expect(resolveEditorPageParam('cut')).toBe('cut');
+    expect(resolveEditorPageParam('vfx')).toBe('vfx');
+    expect(resolveEditorPageParam('color')).toBe('color');
+    expect(resolveEditorPageParam('protools')).toBe('protools');
+    expect(resolveEditorPageParam('deliver')).toBe('deliver');
+  });
+
   it('falls back to edit for unsupported pages', () => {
     expect(resolveEditorPageParam(null)).toBe('edit');
     expect(resolveEditorPageParam('admin')).toBe('edit');
-    expect(resolveEditorPageParam('deliver')).toBe('edit');
+    expect(resolveEditorPageParam('fusion')).toBe('edit');
   });
 
-  it('flags legacy deliver links for export-panel handoff', () => {
-    expect(isLegacyExportPageParam('deliver')).toBe(true);
+  it('flags legacy export links for export-panel handoff', () => {
+    expect(isLegacyExportPageParam('export')).toBe(true);
+    expect(isLegacyExportPageParam('deliver')).toBe(false);
     expect(isLegacyExportPageParam('edit')).toBe(false);
   });
 
