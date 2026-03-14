@@ -94,15 +94,17 @@
       "category": "public.app-category.video",
       "icon": "resources/icon.icns",
       "hardenedRuntime": true,
-      "gatekeeperAssess": false,
+      "gatekeeperAssess": true,
       "entitlements": "resources/entitlements.mac.plist",
       "entitlementsInherit": "resources/entitlements.mac.inherit.plist",
+      "signIgnore": ["resources/bin"],
       "target": [
         "dmg",
         "zip"
       ],
       "darkModeSupport": true,
-      "minimumSystemVersion": "12.0"
+      "minimumSystemVersion": "12.0",
+      "notarize": true
     },
     "dmg": {
       "background": "resources/dmg-background.png",
