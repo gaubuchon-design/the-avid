@@ -15,6 +15,7 @@
 
 import { RenderAgent } from './index.js';
 import { detectCapabilities } from './capabilities.js';
+import { normalizeWorkerKindList } from '@mcua/media-backend';
 import type { WorkerJobType } from './index.js';
 
 interface CLIArgs {
@@ -60,9 +61,9 @@ function parseArgs(argv: string[]): CLIArgs {
     process.exit(1);
   }
 
-  const allTypes: WorkerJobType[] = ['ingest', 'transcode', 'transcribe', 'metadata', 'render', 'encode', 'effects'];
+  const allTypes: WorkerJobType[] = ['ingest', 'probe', 'transcode', 'transcription', 'render', 'encode', 'effects'];
   const workerTypes: WorkerJobType[] = workerTypesStr
-    ? (workerTypesStr.split(',').map((s) => s.trim()) as WorkerJobType[])
+    ? normalizeWorkerKindList(workerTypesStr.split(',').map((s) => s.trim()) as (WorkerJobType | 'metadata' | 'transcribe')[]) as WorkerJobType[]
     : allTypes;
 
   return { coordinator, workerTypes, name };
@@ -77,7 +78,7 @@ Usage:
 
 Options:
   --coordinator <url>    WebSocket URL of the coordinator (required)
-  --worker-types <list>  Comma-separated: ingest,render,transcode,transcribe,metadata,encode,effects
+  --worker-types <list>  Comma-separated: ingest,render,transcode,transcription,probe,encode,effects
   --name <hostname>      Override auto-detected hostname
   --help, -h             Show this help message
 `.trim());

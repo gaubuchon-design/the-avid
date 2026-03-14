@@ -1,150 +1,97 @@
-import React, { useEffect, useRef, useState, useCallback, Suspense, lazy } from 'react';
-import { LoadingSpinner } from '../components/LoadingSpinner';
+import React, { lazy, Suspense, useEffect, useState, useCallback } from 'react';
 import { ErrorBoundary, PanelErrorBoundary } from '../components/ErrorBoundary';
 import { useParams, useSearchParams } from 'react-router-dom';
+import { trimEngine } from '../engine/TrimEngine';
+import { keyboardEngine } from '../engine/KeyboardEngine';
+import { multicamEngine } from '../engine/MulticamEngine';
+import { trackPatchingEngine } from '../engine/TrackPatchingEngine';
 import { Toolbar } from '../components/Toolbar/Toolbar';
 import { BinPanel } from '../components/Bins/BinPanel';
 import { ComposerPanel } from '../components/ComposerPanel/ComposerPanel';
 import { TimelinePanel } from '../components/TimelinePanel/TimelinePanel';
 import { InspectorPanel } from '../components/Editor/InspectorPanel';
-import { AIPanel } from '../components/AIPanel/AIPanel';
-import { TranscriptPanel } from '../components/TranscriptPanel/TranscriptPanel';
-import { CommandPalette } from '../components/AIPanel/CommandPalette';
 import { ExportPanel } from '../components/ExportPanel/ExportPanel';
 import { StatusBar } from '../components/Editor/StatusBar';
+import { EditorWorkbenchBar } from '../components/Editor/EditorWorkbenchBar';
 import { NewProjectDialog } from '../components/NewProjectDialog/NewProjectDialog';
 import { SequenceDialog } from '../components/SequenceDialog/SequenceDialog';
 import { TitleTool } from '../components/TitleTool/TitleTool';
 import { SubtitleEditor } from '../components/SubtitleEditor/SubtitleEditor';
 import { useEditorStore } from '../store/editor.store';
+import { usePlayerStore } from '../store/player.store';
 import { useGlobalKeyboard } from '../hooks/useGlobalKeyboard';
+import { useTrimLoopPlayback } from '../hooks/useTrimLoopPlayback';
 import { UserSettingsPanel } from '../components/UserSettings/UserSettingsPanel';
 import { useKeyboardAction } from '../hooks/useKeyboardAction';
 import { editEngine } from '../engine/EditEngine';
 import { AlphaImportDialog } from '../components/AlphaImportDialog/AlphaImportDialog';
 import { TrackerPanel } from '../components/TrackerPanel/TrackerPanel';
 import { TrackingOverlay } from '../components/TrackerPanel/TrackingOverlay';
-import { type WorkspacePreset, workspacePresets } from '../App';
-import { PageNavigation, type EditorPage as PageId } from '../components/PageNavigation/PageNavigation';
+import { type EditorPage as PageId } from '../components/PageNavigation/PageNavigation';
+import {
+  activateRecordMonitor,
+  activateSourceMonitor,
+  clearInForActiveMonitor,
+  clearMarksForActiveMonitor,
+  clearOutForActiveMonitor,
+  goToEndForActiveMonitor,
+  goToInForActiveMonitor,
+  goToStartForActiveMonitor,
+  goToOutForActiveMonitor,
+  matchFrameAtPlayhead,
+  markClipForActiveMonitor,
+  markInForActiveMonitor,
+  markOutForActiveMonitor,
+  playForwardForActiveMonitor,
+  playReverseForActiveMonitor,
+  stepFramesForActiveMonitor,
+  stopActiveMonitorPlayback,
+  toggleMonitorFocus,
+  togglePlayForActiveMonitor,
+} from '../lib/editorMonitorActions';
+import { buildProjectPersistenceSnapshot, getProjectPersistenceHash } from '../lib/editorProjectState';
+import { isLegacyExportPageParam, resolveEditorPageParam } from '../lib/editorUrlState';
+import { subscribeSmartToolStateToStore } from '../lib/smartToolStateBridge';
+import { subscribeTrimHistoryToEditEngine } from '../lib/trimHistoryBridge';
+import { subscribeTrimStateToStore } from '../lib/trimStateBridge';
+import { subscribeTrackPatchingStateToStore } from '../lib/trackPatchingStateBridge';
+import { requestTrimWorkspace } from '../lib/trimWorkspace';
 import { MediaPage } from './MediaPage';
 import { CutPage } from './CutPage';
-import { ColorPage } from './ColorPage';
-import { DeliverPage } from './DeliverPage';
+import { PanelResizeHandle } from '../components/Layout/PanelResizeHandle';
+import {
+  clampEditorLayoutForViewport,
+  getEditorLayoutViewportBounds,
+  readStoredEditorLayout,
+  type EditorLayoutState,
+} from '../lib/editorLayout';
 
 // DaVinci Resolve parity pages (lazy-loaded)
 const FusionPage = lazy(() => import('./FusionPage').then(m => ({ default: m.FusionPage })));
 const FairlightPage = lazy(() => import('./FairlightPage').then(m => ({ default: m.FairlightPage })));
 
-const VALID_WORKSPACES: ReadonlySet<string> = new Set<WorkspacePreset>(['filmtv', 'news', 'sports', 'creator', 'marketing']);
-
 // Lazy-loaded vertical panels
-// NOTE: These lazy imports are intentionally separate from the ones in App.tsx.
-// App.tsx uses its lazy references for the route-level panel registry, while
-// EditorPage uses its own so each code-split boundary resolves independently.
-const RundownPanel = lazy(() => import('../components/RundownPanel/RundownPanel').then(m => ({ default: m.RundownPanel })));
-const StoryScriptPanel = lazy(() => import('../components/StoryScriptPanel/StoryScriptPanel').then(m => ({ default: m.StoryScriptPanel })));
-const SportsPanel = lazy(() => import('../components/SportsPanel/SportsPanel').then(m => ({ default: m.SportsPanel })));
-const CreatorPanel = lazy(() => import('../components/CreatorPanel/CreatorPanel').then(m => ({ default: m.CreatorPanel })));
-const BrandPanel = lazy(() => import('../components/BrandPanel/BrandPanel').then(m => ({ default: m.BrandPanel })));
-const MultiCamPanel = lazy(() => import('../components/MultiCamPanel/MultiCamPanel').then(m => ({ default: m.MultiCamPanel })));
-const AccessibilityPanel = lazy(() => import('../components/AccessibilityPanel/AccessibilityPanel').then(m => ({ default: m.AccessibilityPanel })));
-const SportsWorkspace = lazy(() => import('../components/SportsWorkspace/SportsWorkspace').then(m => ({ default: m.SportsWorkspace })));
 const MarkersPanel = lazy(() => import('../components/MarkersPanel/MarkersPanel').then(m => ({ default: m.MarkersPanel })));
 const TransitionsPanel = lazy(() => import('../components/TransitionsPanel/TransitionsPanel').then(m => ({ default: m.TransitionsPanel })));
 const KeyframeEditor = lazy(() => import('../components/KeyframeEditor/KeyframeEditor').then(m => ({ default: m.KeyframeEditor })));
 const SequenceBin = lazy(() => import('../components/SequenceBin/SequenceBin').then(m => ({ default: m.SequenceBin })));
 const TimelineSearch = lazy(() => import('../components/TimelineSearch/TimelineSearch').then(m => ({ default: m.TimelineSearch })));
 
+function areViewportDimensionsEqual(
+  left: { width: number; height: number },
+  right: { width: number; height: number },
+) {
+  return left.width === right.width && left.height === right.height;
+}
+
 // Playback is driven by PlaybackEngine (RAF-based) via editor.store.ts togglePlay().
 // Keyboard dispatch is centralized in useGlobalKeyboard() — called once from EditorPage.
 
-// ─── Workspace Preset Selector ──────────────────────────────────────────────
-
-function WorkspaceSelector({
-  workspace,
-  switchWorkspace,
-  presets,
-}: {
-  workspace: WorkspacePreset;
-  switchWorkspace: (key: WorkspacePreset) => void;
-  presets: Record<WorkspacePreset, { label: string; panels: string[] }>;
-}) {
-  if (!presets) return null;
-  return (
-    <div className="workspace-selector">
-      {(Object.entries(presets) as [WorkspacePreset, { label: string; panels: string[] }][]).map(([key, preset]) => (
-        <button
-          key={key}
-          className={`ws-tab ${workspace === key ? 'ws-tab-active' : ''}`}
-          onClick={() => switchWorkspace(key)}
-          title={preset.label}
-          aria-pressed={workspace === key}
-        >
-          {preset.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// ─── Vertical Side Panel ────────────────────────────────────────────────────
-
-function VerticalSidePanel({ workspace }: { workspace: WorkspacePreset }) {
-  switch (workspace) {
-    case 'news':
-      return (
-        <PanelErrorBoundary panelName="News Vertical Panel">
-          <Suspense fallback={<LoadingSpinner />}>
-            <PanelErrorBoundary panelName="RundownPanel">
-              <RundownPanel />
-            </PanelErrorBoundary>
-            <PanelErrorBoundary panelName="StoryScriptPanel">
-              <StoryScriptPanel />
-            </PanelErrorBoundary>
-          </Suspense>
-        </PanelErrorBoundary>
-      );
-    case 'sports':
-      return (
-        <PanelErrorBoundary panelName="Sports Panel">
-          <Suspense fallback={<LoadingSpinner />}>
-            <SportsPanel />
-          </Suspense>
-        </PanelErrorBoundary>
-      );
-    case 'creator':
-      return (
-        <PanelErrorBoundary panelName="Creator Vertical Panel">
-          <Suspense fallback={<LoadingSpinner />}>
-            <PanelErrorBoundary panelName="CreatorPanel">
-              <CreatorPanel />
-            </PanelErrorBoundary>
-            <PanelErrorBoundary panelName="AccessibilityPanel">
-              <AccessibilityPanel />
-            </PanelErrorBoundary>
-          </Suspense>
-        </PanelErrorBoundary>
-      );
-    case 'marketing':
-      return (
-        <PanelErrorBoundary panelName="Brand Panel">
-          <Suspense fallback={<LoadingSpinner />}>
-            <BrandPanel />
-          </Suspense>
-        </PanelErrorBoundary>
-      );
-    default:
-      return null;
-  }
-}
-
 export function EditorPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const [searchParams] = useSearchParams();
-  const showAIPanel = useEditorStore((s) => s.showAIPanel);
+  const [searchParams, setSearchParams] = useSearchParams();
   const showExportPanel = useEditorStore((s) => s.showExportPanel);
   const showSettingsPanel = useEditorStore((s) => s.showSettingsPanel);
-  const showTranscriptPanel = useEditorStore((s) => s.showTranscriptPanel);
   const showInspector = useEditorStore((s) => s.showInspector);
   const showNewProjectDialog = useEditorStore((s) => s.showNewProjectDialog);
   const showSequenceDialog = useEditorStore((s) => s.showSequenceDialog);
@@ -156,80 +103,388 @@ export function EditorPage() {
   const toggleSettingsPanel = useEditorStore((s) => s.toggleSettingsPanel);
   const toggleSequenceBin = useEditorStore((s) => s.toggleSequenceBin);
   const loadProject = useEditorStore((s) => s.loadProject);
+  const saveProject = useEditorStore((s) => s.saveProject);
+  const tracks = useEditorStore((s) => s.tracks);
 
   const selectedClipIds = useEditorStore((s) => s.selectedClipIds);
 
   const [showTracker, setShowTracker] = useState(false);
-  const [showCommandPalette, setShowCommandPalette] = useState(false);
-  const [workspace, setWorkspace] = useState<WorkspacePreset>(() => {
-    const param = searchParams.get('workspace');
-    return param && VALID_WORKSPACES.has(param) ? (param as WorkspacePreset) : 'filmtv';
-  });
-  const [showMultiCam, setShowMultiCam] = useState(false);
   const [showMarkersPanel, setShowMarkersPanel] = useState(false);
   const [showTransitionsPanel, setShowTransitionsPanel] = useState(false);
   const [showTimelineSearch, setShowTimelineSearch] = useState(false);
-  const [activePage, setActivePage] = useState<PageId>('edit');
+  const [activePage, setActivePage] = useState<PageId>(() => resolveEditorPageParam(searchParams.get('page')));
+  const [viewport, setViewport] = useState(() => ({
+    width: typeof window === 'undefined' ? 1440 : window.innerWidth,
+    height: typeof window === 'undefined' ? 900 : window.innerHeight,
+  }));
+  const [layout, setLayout] = useState<EditorLayoutState>(() => (
+    readStoredEditorLayout(typeof window === 'undefined' ? null : window.localStorage)
+  ));
   // Centralized keyboard dispatch — routes keys based on active monitor
   useGlobalKeyboard();
+  useTrimLoopPlayback();
 
   // ─── Register core keyboard actions with the KeyboardEngine ──────────
-  const togglePlay = useEditorStore((s) => s.togglePlay);
-  const setInToPlayhead = useEditorStore((s) => s.setInToPlayhead);
-  const setOutToPlayhead = useEditorStore((s) => s.setOutToPlayhead);
-  const clearInOut = useEditorStore((s) => s.clearInOut);
-  const goToStart = useEditorStore((s) => s.goToStart);
-  const goToEnd = useEditorStore((s) => s.goToEnd);
+  const insertEdit = useEditorStore((s) => s.insertEdit);
+  const overwriteEdit = useEditorStore((s) => s.overwriteEdit);
+  const goToNextEditPoint = useEditorStore((s) => s.goToNextEditPoint);
+  const goToPrevEditPoint = useEditorStore((s) => s.goToPrevEditPoint);
   const deleteSelectedClips = useEditorStore((s) => s.deleteSelectedClips);
+  const liftEdit = useEditorStore((s) => s.liftEdit);
+  const extractEdit = useEditorStore((s) => s.extractEdit);
+  const setActiveTool = useEditorStore((s) => s.setActiveTool);
+  const toggleSmartToolLiftOverwrite = useEditorStore((s) => s.toggleSmartToolLiftOverwrite);
+  const toggleSmartToolExtractSplice = useEditorStore((s) => s.toggleSmartToolExtractSplice);
+  const toggleSmartToolOverwriteTrim = useEditorStore((s) => s.toggleSmartToolOverwriteTrim);
+  const toggleSmartToolRippleTrim = useEditorStore((s) => s.toggleSmartToolRippleTrim);
+  const toggleTrimViewMode = useEditorStore((s) => s.toggleTrimViewMode);
 
   // Read from store directly to avoid stale closures in frame-stepping callbacks
   const stepForward = useCallback(() => {
-    const { playheadTime, duration, setPlayhead } = useEditorStore.getState();
-    const safeDuration = Number.isFinite(duration) ? duration : 0;
-    const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
-    setPlayhead(Math.min(safeTime + 1 / 24, safeDuration));
+    if (trimEngine.getState().active || useEditorStore.getState().trimActive) {
+      const state = useEditorStore.getState();
+      const frameRate = state.sequenceSettings?.fps || state.projectSettings.frameRate || 24;
+      trimEngine.trimByFrames(1, frameRate);
+      return;
+    }
+
+    stepFramesForActiveMonitor(1);
   }, []);
   const stepBackward = useCallback(() => {
-    const { playheadTime, setPlayhead } = useEditorStore.getState();
-    const safeTime = Number.isFinite(playheadTime) ? playheadTime : 0;
-    setPlayhead(Math.max(safeTime - 1 / 24, 0));
+    if (trimEngine.getState().active || useEditorStore.getState().trimActive) {
+      const state = useEditorStore.getState();
+      const frameRate = state.sequenceSettings?.fps || state.projectSettings.frameRate || 24;
+      trimEngine.trimByFrames(-1, frameRate);
+      return;
+    }
+
+    stepFramesForActiveMonitor(-1);
+  }, []);
+  const enterTrimMode = useCallback(() => {
+    requestTrimWorkspace();
+  }, []);
+  const selectTrimASide = useCallback(() => {
+    trimEngine.selectASide();
+  }, []);
+  const selectTrimBSide = useCallback(() => {
+    trimEngine.selectBSide();
+  }, []);
+  const selectTrimBothSides = useCallback(() => {
+    trimEngine.selectBothSides();
+  }, []);
+  const trimByFrames = useCallback((frames: number) => {
+    const state = useEditorStore.getState();
+    const frameRate = state.sequenceSettings?.fps || state.projectSettings.frameRate || 24;
+    trimEngine.trimByFrames(frames, frameRate);
+  }, []);
+  const trimLeftOneFrame = useCallback(() => trimByFrames(-1), [trimByFrames]);
+  const trimRightOneFrame = useCallback(() => trimByFrames(1), [trimByFrames]);
+  const trimLeftTenFrames = useCallback(() => trimByFrames(-10), [trimByFrames]);
+  const trimRightTenFrames = useCallback(() => trimByFrames(10), [trimByFrames]);
+  const startTrimTransport = useCallback((direction: -1 | 1, requestedSpeed?: number) => {
+    const state = useEditorStore.getState();
+    if (!state.trimActive) {
+      const request = requestTrimWorkspace();
+      if (request.outcome === 'noop') {
+        return false;
+      }
+    }
+
+    const speed = Math.max(
+      0.25,
+      Math.min(8, requestedSpeed ?? (Math.abs(keyboardEngine.getJKLSpeed()) || 1)),
+    );
+    useEditorStore.getState().setTrimLoopPlaybackDirection(direction);
+    useEditorStore.getState().setTrimLoopPlaybackRate(speed);
+    useEditorStore.getState().setTrimLoopPlaybackActive(true);
+    return true;
+  }, []);
+  const stopTrimTransport = useCallback(() => {
+    if (trimEngine.getState().active || useEditorStore.getState().trimActive) {
+      useEditorStore.getState().setTrimLoopPlaybackActive(false);
+      return;
+    }
+
+    stopActiveMonitorPlayback();
+  }, []);
+  const toggleTrimAwarePlayback = useCallback(() => {
+    const state = useEditorStore.getState();
+    if (trimEngine.getState().active || state.trimActive) {
+      if (state.trimLoopPlaybackActive) {
+        state.setTrimLoopPlaybackActive(false);
+        return;
+      }
+
+      startTrimTransport(1, 1);
+      return;
+    }
+
+    togglePlayForActiveMonitor();
+  }, [startTrimTransport]);
+  const playTrimForward = useCallback(() => {
+    if (trimEngine.getState().active || useEditorStore.getState().trimActive) {
+      void startTrimTransport(1);
+      return;
+    }
+
+    playForwardForActiveMonitor();
+  }, [startTrimTransport]);
+  const playTrimReverse = useCallback(() => {
+    if (trimEngine.getState().active || useEditorStore.getState().trimActive) {
+      void startTrimTransport(-1);
+      return;
+    }
+
+    playReverseForActiveMonitor();
+  }, [startTrimTransport]);
+  const playTrimLoop = useCallback(() => {
+    const state = useEditorStore.getState();
+    if (state.trimLoopPlaybackActive) {
+      state.setTrimLoopPlaybackActive(false);
+      return;
+    }
+
+    startTrimTransport(1, 1);
+  }, [startTrimTransport]);
+  const recallPreviousTrimConfiguration = useCallback(() => {
+    const nextState = trimEngine.recallPreviousConfiguration();
+    if (nextState.active && nextState.rollers.length > 0) {
+      useEditorStore.getState().setActiveTool('trim');
+      useEditorStore.getState().selectTrack(nextState.rollers[0]!.trackId);
+    }
+  }, []);
+  const toggleMulticamMode = useCallback(() => {
+    if (multicamEngine.isActive()) {
+      multicamEngine.exitMulticamMode();
+      return;
+    }
+
+    const state = useEditorStore.getState();
+    const candidateAssets = state.activeBinAssets.filter((asset) => asset.type === 'VIDEO' || asset.type === 'AUDIO');
+    if (candidateAssets.length < 2) {
+      return;
+    }
+
+    const group = multicamEngine.createGroup(
+      `${state.projectName || 'Current Bin'} MultiCam`,
+      candidateAssets.map((asset) => asset.id),
+      'timecode',
+    );
+    multicamEngine.enterMulticamMode(group.id);
+    activateSourceMonitor();
+  }, []);
+  const cutToMulticamAngle = useCallback((angleIndex: number) => {
+    if (!multicamEngine.isActive()) {
+      return;
+    }
+
+    const isLiveSwitching = useEditorStore.getState().isPlaying || multicamEngine.getState().isRecording;
+    if (isLiveSwitching) {
+      multicamEngine.cutToAngle(angleIndex);
+    } else {
+      multicamEngine.setActiveAngle(angleIndex);
+    }
+
+    activateSourceMonitor();
   }, []);
 
-  useKeyboardAction('transport.playForward', togglePlay, [togglePlay]);
-  useKeyboardAction('transport.playReverse', togglePlay, [togglePlay]);
-  useKeyboardAction('transport.stop', () => useEditorStore.getState().isPlaying && togglePlay(), [togglePlay]);
-  useKeyboardAction('transport.playToggle', togglePlay, [togglePlay]);
+  useKeyboardAction('transport.playForward', playTrimForward, [playTrimForward]);
+  useKeyboardAction('transport.playReverse', playTrimReverse, [playTrimReverse]);
+  useKeyboardAction('transport.stop', stopTrimTransport, [stopTrimTransport]);
+  useKeyboardAction('transport.playStop', toggleTrimAwarePlayback, [toggleTrimAwarePlayback]);
+  useKeyboardAction('transport.playToggle', toggleTrimAwarePlayback, [toggleTrimAwarePlayback]);
   useKeyboardAction('transport.stepForward', stepForward, [stepForward]);
+  useKeyboardAction('transport.stepBack', stepBackward, [stepBackward]);
   useKeyboardAction('transport.stepBackward', stepBackward, [stepBackward]);
-  useKeyboardAction('transport.goToStart', goToStart, [goToStart]);
-  useKeyboardAction('transport.goToEnd', goToEnd, [goToEnd]);
-  useKeyboardAction('mark.in', setInToPlayhead, [setInToPlayhead]);
-  useKeyboardAction('mark.out', setOutToPlayhead, [setOutToPlayhead]);
-  useKeyboardAction('mark.clearBoth', clearInOut, [clearInOut]);
+  useKeyboardAction('transport.goToStart', goToStartForActiveMonitor, []);
+  useKeyboardAction('transport.goToEnd', goToEndForActiveMonitor, []);
+  useKeyboardAction('transport.playLoop', playTrimLoop, [playTrimLoop]);
+  useKeyboardAction('mark.in', markInForActiveMonitor, []);
+  useKeyboardAction('mark.out', markOutForActiveMonitor, []);
+  useKeyboardAction('mark.clip', markClipForActiveMonitor, []);
+  useKeyboardAction('mark.clipAlt', markClipForActiveMonitor, []);
+  useKeyboardAction('mark.clearBoth', clearMarksForActiveMonitor, []);
+  useKeyboardAction('mark.clearIn', clearInForActiveMonitor, []);
+  useKeyboardAction('mark.clearOut', clearOutForActiveMonitor, []);
+  useKeyboardAction('mark.goToIn', goToInForActiveMonitor, []);
+  useKeyboardAction('mark.goToOut', goToOutForActiveMonitor, []);
+  useKeyboardAction('monitor.matchFrame', () => {
+    if (usePlayerStore.getState().activeMonitor !== 'source') {
+      matchFrameAtPlayhead();
+    }
+  }, []);
+  useKeyboardAction('monitor.toggleSourceRecord', toggleMonitorFocus, []);
+  useKeyboardAction('monitor.activateSource', activateSourceMonitor, []);
+  useKeyboardAction('monitor.activateRecord', activateRecordMonitor, []);
+  useKeyboardAction('edit.spliceIn', insertEdit, [insertEdit]);
+  useKeyboardAction('edit.overwrite', overwriteEdit, [overwriteEdit]);
+  useKeyboardAction('edit.lift', liftEdit, [liftEdit]);
+  useKeyboardAction('edit.extract', extractEdit, [extractEdit]);
   useKeyboardAction('edit.undo', () => editEngine.undo(), []);
   useKeyboardAction('edit.redo', () => editEngine.redo(), []);
   useKeyboardAction('edit.delete', deleteSelectedClips, [deleteSelectedClips]);
+  useKeyboardAction('file.save', () => {
+    void saveProject();
+  }, [saveProject]);
+  useKeyboardAction('trim.enterMode', enterTrimMode, [enterTrimMode]);
+  useKeyboardAction('trim.selectASide', selectTrimASide, [selectTrimASide]);
+  useKeyboardAction('trim.selectBSide', selectTrimBSide, [selectTrimBSide]);
+  useKeyboardAction('trim.selectBoth', selectTrimBothSides, [selectTrimBothSides]);
+  useKeyboardAction('trim.left1', trimLeftOneFrame, [trimLeftOneFrame]);
+  useKeyboardAction('trim.right1', trimRightOneFrame, [trimRightOneFrame]);
+  useKeyboardAction('trim.left10', trimLeftTenFrames, [trimLeftTenFrames]);
+  useKeyboardAction('trim.right10', trimRightTenFrames, [trimRightTenFrames]);
+  useKeyboardAction('trim.recallPrevious', recallPreviousTrimConfiguration, [recallPreviousTrimConfiguration]);
+  useKeyboardAction('trim.toggleViewMode', toggleTrimViewMode, [toggleTrimViewMode]);
+  useKeyboardAction('nav.prevEdit', goToPrevEditPoint, [goToPrevEditPoint]);
+  useKeyboardAction('nav.nextEdit', goToNextEditPoint, [goToNextEditPoint]);
+  useKeyboardAction('file.multicameraMode', toggleMulticamMode, [toggleMulticamMode]);
+  useKeyboardAction('multicam.cut1', () => cutToMulticamAngle(0), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut2', () => cutToMulticamAngle(1), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut3', () => cutToMulticamAngle(2), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut4', () => cutToMulticamAngle(3), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut5', () => cutToMulticamAngle(4), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut6', () => cutToMulticamAngle(5), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut7', () => cutToMulticamAngle(6), [cutToMulticamAngle]);
+  useKeyboardAction('multicam.cut8', () => cutToMulticamAngle(7), [cutToMulticamAngle]);
+  useKeyboardAction('smartTool.toggleLiftOverwrite', toggleSmartToolLiftOverwrite, [toggleSmartToolLiftOverwrite]);
+  useKeyboardAction('smartTool.toggleExtractSplice', toggleSmartToolExtractSplice, [toggleSmartToolExtractSplice]);
+  useKeyboardAction('smartTool.toggleOverwriteTrim', toggleSmartToolOverwriteTrim, [toggleSmartToolOverwriteTrim]);
+  useKeyboardAction('smartTool.toggleRippleTrim', toggleSmartToolRippleTrim, [toggleSmartToolRippleTrim]);
   useKeyboardAction('view.fullScreen', () => {
     if (document.fullscreenElement) void document.exitFullscreen();
     else void document.documentElement.requestFullscreen();
   }, []);
 
   useEffect(() => {
-    if (projectId && projectId !== 'new') loadProject(projectId);
+    multicamEngine.reset();
+    useEditorStore.getState().setMulticamActive(false);
+    useEditorStore.getState().setMulticamGroupId(null);
+
+    if (projectId && projectId !== 'new') {
+      void loadProject(projectId);
+    }
   }, [projectId, loadProject]);
 
-  // ⌘K / Ctrl+K to open command palette
+  useEffect(() => {
+    let autosaveTimeout: number | null = null;
+
+    const scheduleAutosave = (state: ReturnType<typeof useEditorStore.getState>) => {
+      const snapshot = buildProjectPersistenceSnapshot(state);
+      if (!snapshot || state.saveStatus === 'saving') {
+        return;
+      }
+
+      const nextHash = getProjectPersistenceHash(snapshot);
+      const isDirty = nextHash !== state.persistedProjectHash;
+      if (state.hasUnsavedChanges !== isDirty) {
+        useEditorStore.setState({ hasUnsavedChanges: isDirty });
+      }
+
+      if (!isDirty) {
+        return;
+      }
+
+      if (autosaveTimeout !== null) {
+        window.clearTimeout(autosaveTimeout);
+      }
+
+      autosaveTimeout = window.setTimeout(() => {
+        void useEditorStore.getState().saveProject();
+      }, 800);
+    };
+
+    const unsubscribe = useEditorStore.subscribe((state) => {
+      scheduleAutosave(state);
+    });
+
+    return () => {
+      unsubscribe();
+      if (autosaveTimeout !== null) {
+        window.clearTimeout(autosaveTimeout);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (tracks.length > 0 && trackPatchingEngine.getEnabledRecordTracks().length === 0) {
+      for (const track of tracks) {
+        if (!track.locked) {
+          trackPatchingEngine.enableRecordTrack(track.id);
+        }
+      }
+    }
+
+    const monitoredTrackId = trackPatchingEngine.getVideoMonitorTrack();
+    const visibleVideoTracks = tracks
+      .filter((track) => (track.type === 'VIDEO' || track.type === 'GRAPHIC') && !track.muted)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const fallbackVideoTrack = visibleVideoTracks[0]
+      ?? tracks
+        .filter((track) => track.type === 'VIDEO' || track.type === 'GRAPHIC')
+        .sort((a, b) => a.sortOrder - b.sortOrder)[0];
+
+    const monitoredVideoTrack = tracks.find(
+      (track) =>
+        track.id === monitoredTrackId
+        && (track.type === 'VIDEO' || track.type === 'GRAPHIC'),
+    );
+
+    if (fallbackVideoTrack && (!monitoredVideoTrack || monitoredVideoTrack.muted)) {
+      trackPatchingEngine.setVideoMonitorTrack(fallbackVideoTrack.id);
+    }
+
+    return subscribeTrackPatchingStateToStore();
+  }, [tracks]);
+
+  useEffect(() => {
+    return subscribeTrimStateToStore();
+  }, []);
+
+  useEffect(() => {
+    return subscribeTrimHistoryToEditEngine();
+  }, []);
+
+  useEffect(() => {
+    return subscribeSmartToolStateToStore();
+  }, []);
+
+  const updateSearchParam = useCallback((key: string, value: string | null) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value) next.set(key, value);
+      else next.delete(key);
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const handlePageChange = useCallback((nextPage: PageId) => {
+    setActivePage(nextPage);
+    updateSearchParam('page', nextPage === 'edit' ? null : nextPage);
+  }, [updateSearchParam]);
+
+  useEffect(() => {
+    const rawPageParam = searchParams.get('page');
+    const nextPage = resolveEditorPageParam(rawPageParam);
+    if (nextPage !== activePage) {
+      setActivePage(nextPage);
+    }
+
+    if (rawPageParam && rawPageParam !== nextPage) {
+      updateSearchParam('page', nextPage === 'edit' ? null : nextPage);
+    }
+
+    if (isLegacyExportPageParam(rawPageParam) && !useEditorStore.getState().showExportPanel) {
+      useEditorStore.setState({ showExportPanel: true });
+    }
+
+    if (searchParams.has('workspace')) {
+      updateSearchParam('workspace', null);
+    }
+  }, [activePage, searchParams, updateSearchParam]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setShowCommandPalette(prev => !prev);
-      }
-      // ⌘M / Ctrl+M to toggle multicam
-      if ((e.metaKey || e.ctrlKey) && e.key === 'm') {
-        e.preventDefault();
-        setShowMultiCam(prev => !prev);
-      }
       // ⌘T / Ctrl+T to toggle planar tracker panel
       if ((e.metaKey || e.ctrlKey) && e.key === 't') {
         e.preventDefault();
@@ -249,22 +504,83 @@ export function EditorPage() {
       if (e.shiftKey && !e.metaKey && !e.ctrlKey) {
         const pageMap: Record<string, PageId> = { '!': 'media', '@': 'cut', '#': 'edit', '$': 'fusion', '%': 'color', '^': 'fairlight', '&': 'deliver' };
         const page = pageMap[e.key];
-        if (page) { e.preventDefault(); setActivePage(page); }
+        if (page) { e.preventDefault(); handlePageChange(page); }
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
+  }, [handlePageChange]);
+
+  useEffect(() => {
+    const syncViewport = () => {
+      const nextViewport = {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      };
+      setViewport((current) => (
+        areViewportDimensionsEqual(current, nextViewport) ? current : nextViewport
+      ));
+    };
+
+    syncViewport();
+    window.addEventListener('resize', syncViewport);
+    return () => window.removeEventListener('resize', syncViewport);
   }, []);
 
-  const hasVerticalPanel = workspace !== 'filmtv' && workspace !== 'sports';
-  const isSportsWorkspace = workspace === 'sports';
+  const effectiveLayout = clampEditorLayoutForViewport(layout, viewport.width, viewport.height);
+  const viewportBounds = getEditorLayoutViewportBounds(viewport.width, viewport.height);
+  const maxBinWidth = viewportBounds.maxBinWidth;
+  const maxTrackerWidth = viewportBounds.maxTrackerWidth;
+  const maxInspectorWidth = viewportBounds.maxInspectorWidth;
+  const maxTimelineHeight = viewportBounds.maxTimelineHeight;
+  const isStackedWorkspace = viewport.width < 1040;
+  const isShortViewport = viewport.height < 820;
+  const dockTracker = showTracker && viewport.width >= 1520;
+  const overlayTracker = showTracker && !dockTracker;
+  const dockInspector = showInspector && viewport.width >= 1320;
+  const overlayInspector = showInspector && !dockInspector;
+  const overlayWidthCap = Math.max(
+    260,
+    Math.min(400, Math.floor(viewport.width * (viewport.width < 1320 ? 0.42 : 0.36))),
+  );
+  const overlayTrackerWidth = Math.min(effectiveLayout.trackerWidth, overlayWidthCap);
+  const overlayInspectorWidth = Math.min(effectiveLayout.inspectorWidth, overlayWidthCap);
+  const stackedBinHeight = Math.max(
+    168,
+    Math.min(320, Math.floor(viewport.height * (isShortViewport ? 0.24 : 0.28))),
+  );
+  const workspaceColumns = [
+    `${effectiveLayout.binWidth}px`,
+    'var(--panel-divider-w)',
+    'minmax(0, 1fr)',
+    ...(dockTracker ? ['var(--panel-divider-w)', `${effectiveLayout.trackerWidth}px`] : []),
+    ...(dockInspector ? ['var(--panel-divider-w)', `${effectiveLayout.inspectorWidth}px`] : []),
+  ].join(' ');
+  const editorShellStyle = {
+    '--timeline-h': `${effectiveLayout.timelineHeight}px`,
+  } as React.CSSProperties;
+  const inspectorInsetWidth = dockInspector
+    ? effectiveLayout.inspectorWidth
+    : overlayInspector && !isStackedWorkspace
+      ? overlayInspectorWidth
+      : 0;
+  const auxiliaryPanelRightInset = showInspector ? inspectorInsetWidth + 16 : 16;
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem('the-avid.editor-layout.v1', JSON.stringify(effectiveLayout));
+  }, [effectiveLayout]);
 
   return (
-    <div className="editor-shell" onContextMenu={e => e.preventDefault()}>
+    <div className="editor-shell" style={editorShellStyle} onContextMenu={e => e.preventDefault()}>
       <Toolbar />
-      {activePage === 'edit' && (
-        <WorkspaceSelector workspace={workspace} switchWorkspace={setWorkspace} presets={workspacePresets} />
-      )}
+      <EditorWorkbenchBar
+        activePage={activePage}
+        onPageChange={handlePageChange}
+      />
 
       {/* Page-specific content */}
       {activePage === 'media' && (
@@ -274,234 +590,182 @@ export function EditorPage() {
       )}
       {activePage === 'cut' && (
         <ErrorBoundary resetKeys={[activePage]}>
-          <CutPage />
+          <Suspense fallback={<div style={{ flex: 1 }} />}>
+            <CutPage />
+          </Suspense>
         </ErrorBoundary>
       )}
       {activePage === 'fusion' && (
         <ErrorBoundary resetKeys={[activePage]}>
-          <Suspense fallback={<LoadingSpinner />}>
+          <Suspense fallback={<div style={{ flex: 1 }} />}>
             <FusionPage />
           </Suspense>
         </ErrorBoundary>
       )}
-      {activePage === 'color' && (
-        <ErrorBoundary resetKeys={[activePage]}>
-          <div style={{ gridRow: '2 / 5', overflow: 'hidden' }}><ColorPage /></div>
-        </ErrorBoundary>
-      )}
       {activePage === 'fairlight' && (
         <ErrorBoundary resetKeys={[activePage]}>
-          <Suspense fallback={<LoadingSpinner />}>
+          <Suspense fallback={<div style={{ flex: 1 }} />}>
             <FairlightPage />
           </Suspense>
         </ErrorBoundary>
       )}
-      {activePage === 'deliver' && (
-        <ErrorBoundary resetKeys={[activePage]}>
-          <DeliverPage />
-        </ErrorBoundary>
-      )}
-
       {activePage === 'edit' && (
-        isSportsWorkspace ? (
-          <Suspense fallback={<LoadingSpinner />}>
-            <SportsWorkspace />
-          </Suspense>
-        ) : (
-          <>
-            {/* Panel toggle bar for Markers and Transitions */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              padding: '2px 12px',
-              backgroundColor: 'var(--bg-raised)',
-              borderBottom: '1px solid var(--border-default)',
-              fontSize: 11,
-              flexShrink: 0,
-            }}>
-              <button
-                style={{
-                  padding: '3px 10px',
-                  borderRadius: 4,
-                  border: showMarkersPanel ? '1px solid var(--brand)' : '1px solid var(--border-default)',
-                  backgroundColor: showMarkersPanel ? 'var(--brand)' : 'var(--bg-raised)',
-                  color: showMarkersPanel ? '#fff' : 'var(--text-secondary)',
-                  fontSize: 11,
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                }}
-                onClick={() => setShowMarkersPanel(prev => !prev)}
-                title={showMarkersPanel ? 'Hide Markers Panel' : 'Show Markers Panel'}
-                aria-pressed={showMarkersPanel}
-              >
-                Markers
-              </button>
-              <button
-                style={{
-                  padding: '3px 10px',
-                  borderRadius: 4,
-                  border: showTransitionsPanel ? '1px solid var(--brand)' : '1px solid var(--border-default)',
-                  backgroundColor: showTransitionsPanel ? 'var(--brand)' : 'var(--bg-raised)',
-                  color: showTransitionsPanel ? '#fff' : 'var(--text-secondary)',
-                  fontSize: 11,
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                }}
-                onClick={() => setShowTransitionsPanel(prev => !prev)}
-                title={showTransitionsPanel ? 'Hide Transitions Panel' : 'Show Transitions Panel'}
-                aria-pressed={showTransitionsPanel}
-              >
-                Transitions
-              </button>
-              <button
-                style={{
-                  padding: '3px 10px',
-                  borderRadius: 4,
-                  border: showSequenceBin ? '1px solid var(--brand)' : '1px solid var(--border-default)',
-                  backgroundColor: showSequenceBin ? 'var(--brand)' : 'var(--bg-raised)',
-                  color: showSequenceBin ? '#fff' : 'var(--text-secondary)',
-                  fontSize: 11,
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                }}
-                onClick={toggleSequenceBin}
-                title={showSequenceBin ? 'Hide Sequence Bin (Ctrl+Shift+B)' : 'Show Sequence Bin (Ctrl+Shift+B)'}
-                aria-pressed={showSequenceBin}
-              >
-                Sequences
-              </button>
-              <button
-                style={{
-                  padding: '3px 10px',
-                  borderRadius: 4,
-                  border: showTimelineSearch ? '1px solid var(--brand)' : '1px solid var(--border-default)',
-                  backgroundColor: showTimelineSearch ? 'var(--brand)' : 'var(--bg-raised)',
-                  color: showTimelineSearch ? '#fff' : 'var(--text-secondary)',
-                  fontSize: 11,
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                }}
-                onClick={() => setShowTimelineSearch(prev => !prev)}
-                title={showTimelineSearch ? 'Hide Find (Ctrl+F)' : 'Find in Timeline (Ctrl+F)'}
-                aria-pressed={showTimelineSearch}
-              >
-                Find
-              </button>
+        <>
+          <div
+            className={`workspace${overlayTracker || overlayInspector ? ' workspace-has-overlay' : ''}${isStackedWorkspace ? ' workspace-stacked' : ''}`}
+            style={isStackedWorkspace
+              ? {
+                  gridTemplateColumns: 'minmax(0, 1fr)',
+                  gridTemplateRows: `${stackedBinHeight}px minmax(0, 1fr)`,
+                }
+              : { gridTemplateColumns: workspaceColumns }}
+          >
+            <div className="left-panels workspace-panel">
+              <PanelErrorBoundary panelName="BinPanel">
+                <BinPanel />
+              </PanelErrorBoundary>
             </div>
-            <div className={`workspace${showInspector ? '' : ' no-inspector'}`}>
-              <div className="left-panels">
-                {showSequenceBin && (
-                  <PanelErrorBoundary panelName="SequenceBin">
-                    <Suspense fallback={<LoadingSpinner />}>
-                      <SequenceBin />
-                    </Suspense>
-                  </PanelErrorBoundary>
-                )}
-                <PanelErrorBoundary panelName="BinPanel">
-                  <BinPanel />
-                </PanelErrorBoundary>
-                {showTranscriptPanel && (
-                  <PanelErrorBoundary panelName="TranscriptPanel">
-                    <TranscriptPanel />
-                  </PanelErrorBoundary>
-                )}
-              </div>
-              <div className="canvas-area" style={{ position: 'relative' }}>
-                <PanelErrorBoundary panelName="ComposerPanel">
-                  {showMultiCam ? (
-                    <Suspense fallback={<LoadingSpinner />}>
-                      <MultiCamPanel />
-                    </Suspense>
-                  ) : (
-                    <ComposerPanel />
-                  )}
-                </PanelErrorBoundary>
-                {/* Tracking ROI overlay on top of monitor canvas */}
-                {showTracker && (
-                  <PanelErrorBoundary panelName="TrackingOverlay">
-                    <TrackingOverlay width={1920} height={1080} />
-                  </PanelErrorBoundary>
-                )}
-                {showAIPanel && (
-                  <PanelErrorBoundary panelName="AIPanel">
-                    <AIPanel />
-                  </PanelErrorBoundary>
-                )}
-              </div>
-              {/* Planar tracker side panel */}
+            {!isStackedWorkspace ? (
+              <PanelResizeHandle
+                axis="horizontal"
+                ariaLabel="Resize media bin"
+                value={effectiveLayout.binWidth}
+                min={viewportBounds.minBinWidth}
+                max={maxBinWidth}
+                className="workspace-resize-handle resize-handle-h"
+                onChange={(next) => setLayout((current) => ({ ...current, binWidth: next }))}
+              />
+            ) : null}
+            <div className="canvas-area workspace-panel" style={{ position: 'relative' }}>
+              <PanelErrorBoundary panelName="ComposerPanel">
+                <ComposerPanel
+                  dualMonitorSplit={effectiveLayout.dualMonitorSplit}
+                  onDualMonitorSplitChange={(next) => setLayout((current) => ({ ...current, dualMonitorSplit: next }))}
+                />
+              </PanelErrorBoundary>
               {showTracker && (
-                <PanelErrorBoundary panelName="TrackerPanel">
-                  <TrackerPanel />
-                </PanelErrorBoundary>
-              )}
-              {/* Markers side panel */}
-              {showMarkersPanel && (
-                <PanelErrorBoundary panelName="MarkersPanel">
-                  <Suspense fallback={<LoadingSpinner />}>
-                    <div style={{ width: 480, height: '100%', flexShrink: 0 }}>
-                      <MarkersPanel />
-                    </div>
-                  </Suspense>
-                </PanelErrorBoundary>
-              )}
-              {/* Transitions side panel */}
-              {showTransitionsPanel && (
-                <PanelErrorBoundary panelName="TransitionsPanel">
-                  <Suspense fallback={<LoadingSpinner />}>
-                    <div style={{ width: 340, height: '100%', flexShrink: 0 }}>
-                      <TransitionsPanel />
-                    </div>
-                  </Suspense>
-                </PanelErrorBoundary>
-              )}
-              {showTimelineSearch && (
-                <PanelErrorBoundary panelName="TimelineSearch">
-                  <Suspense fallback={<LoadingSpinner />}>
-                    <div style={{ width: 280, height: '100%', flexShrink: 0 }}>
-                      <TimelineSearch />
-                    </div>
-                  </Suspense>
-                </PanelErrorBoundary>
-              )}
-              {hasVerticalPanel && (
-                <div className="vertical-panel" style={{
-                  width: 340,
-                  overflowY: 'auto',
-                  borderLeft: '1px solid var(--border-subtle)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                }}>
-                  <VerticalSidePanel workspace={workspace} />
-                </div>
-              )}
-              {showInspector && (
-                <PanelErrorBoundary panelName="InspectorPanel">
-                  <InspectorPanel />
+                <PanelErrorBoundary panelName="TrackingOverlay">
+                  <TrackingOverlay width={1920} height={1080} />
                 </PanelErrorBoundary>
               )}
             </div>
+            {dockTracker && (
+              <>
+                <PanelResizeHandle
+                  axis="horizontal"
+                  ariaLabel="Resize tracker panel"
+                  value={effectiveLayout.trackerWidth}
+                  min={viewportBounds.minTrackerWidth}
+                  max={maxTrackerWidth}
+                  invert
+                  className="workspace-resize-handle resize-handle-h"
+                  onChange={(next) => setLayout((current) => ({ ...current, trackerWidth: next }))}
+                />
+                <div className="workspace-panel tracker-panel-shell">
+                  <PanelErrorBoundary panelName="TrackerPanel">
+                    <TrackerPanel />
+                  </PanelErrorBoundary>
+                </div>
+              </>
+            )}
+            {dockInspector && (
+              <>
+                <PanelResizeHandle
+                  axis="horizontal"
+                  ariaLabel="Resize inspector panel"
+                  value={effectiveLayout.inspectorWidth}
+                  min={viewportBounds.minInspectorWidth}
+                  max={maxInspectorWidth}
+                  invert
+                  className="workspace-resize-handle resize-handle-h"
+                  onChange={(next) => setLayout((current) => ({ ...current, inspectorWidth: next }))}
+                />
+                <div className="workspace-panel inspector-panel-shell">
+                  <PanelErrorBoundary panelName="InspectorPanel">
+                    <InspectorPanel />
+                  </PanelErrorBoundary>
+                </div>
+              </>
+            )}
+            {(overlayTracker || overlayInspector) && (
+              <div
+                className={`workspace-overlay-rail${isStackedWorkspace ? ' workspace-overlay-rail-stacked' : ''}`}
+                aria-label="Secondary editor panels"
+              >
+                {overlayTracker && (
+                  <div
+                    className={`workspace-overlay-panel${isStackedWorkspace ? ' workspace-overlay-panel-stacked' : ''}`}
+                    style={isStackedWorkspace
+                      ? undefined
+                      : { gridTemplateColumns: `var(--panel-divider-w) ${overlayTrackerWidth}px` }}
+                  >
+                    {!isStackedWorkspace ? (
+                      <PanelResizeHandle
+                        axis="horizontal"
+                        ariaLabel="Resize tracker panel"
+                        value={effectiveLayout.trackerWidth}
+                        min={viewportBounds.minTrackerWidth}
+                        max={maxTrackerWidth}
+                        invert
+                        className="workspace-resize-handle resize-handle-h"
+                        onChange={(next) => setLayout((current) => ({ ...current, trackerWidth: next }))}
+                      />
+                    ) : null}
+                    <div className="workspace-panel tracker-panel-shell workspace-overlay-surface">
+                      <PanelErrorBoundary panelName="TrackerPanel">
+                        <TrackerPanel />
+                      </PanelErrorBoundary>
+                    </div>
+                  </div>
+                )}
+                {overlayInspector && (
+                  <div
+                    className={`workspace-overlay-panel${isStackedWorkspace ? ' workspace-overlay-panel-stacked' : ''}`}
+                    style={isStackedWorkspace
+                      ? undefined
+                      : { gridTemplateColumns: `var(--panel-divider-w) ${overlayInspectorWidth}px` }}
+                  >
+                    {!isStackedWorkspace ? (
+                      <PanelResizeHandle
+                        axis="horizontal"
+                        ariaLabel="Resize inspector panel"
+                        value={effectiveLayout.inspectorWidth}
+                        min={viewportBounds.minInspectorWidth}
+                        max={maxInspectorWidth}
+                        invert
+                        className="workspace-resize-handle resize-handle-h"
+                        onChange={(next) => setLayout((current) => ({ ...current, inspectorWidth: next }))}
+                      />
+                    ) : null}
+                    <div className="workspace-panel inspector-panel-shell workspace-overlay-surface">
+                      <PanelErrorBoundary panelName="InspectorPanel">
+                        <InspectorPanel />
+                      </PanelErrorBoundary>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="timeline-shell">
+            <PanelResizeHandle
+              axis="vertical"
+              ariaLabel="Resize timeline"
+              value={effectiveLayout.timelineHeight}
+              min={viewportBounds.minTimelineHeight}
+              max={maxTimelineHeight}
+              invert
+              className="timeline-resize-handle resize-handle-v"
+              onChange={(next) => setLayout((current) => ({ ...current, timelineHeight: next }))}
+            />
             <PanelErrorBoundary panelName="TimelinePanel">
               <TimelinePanel />
             </PanelErrorBoundary>
-            {selectedClipIds.length === 1 && (
-              <PanelErrorBoundary panelName="KeyframeEditor">
-                <Suspense fallback={<LoadingSpinner />}>
-                  <KeyframeEditor />
-                </Suspense>
-              </PanelErrorBoundary>
-            )}
-          </>
-        )
+          </div>
+        </>
       )}
 
-      <PageNavigation activePage={activePage} onPageChange={setActivePage} />
       <StatusBar />
-
-      {/* Command Palette (⌘K) */}
-      {showCommandPalette && (
-        <CommandPalette onClose={() => setShowCommandPalette(false)} />
-      )}
 
       {showExportPanel && (
         <div
@@ -515,10 +779,11 @@ export function EditorPage() {
             position: 'fixed', inset: 0, zIndex: 1000,
             background: 'rgba(0,0,0,0.6)', display: 'flex',
             alignItems: 'center', justifyContent: 'center',
+            padding: 16,
           }}
         >
           <div style={{
-            width: '90%', maxWidth: 680, height: '85vh', maxHeight: 720,
+            width: 'min(680px, 100%)', maxWidth: 680, height: 'min(85vh, 720px)', maxHeight: 720,
             borderRadius: 'var(--radius-lg)',
             overflow: 'hidden', position: 'relative',
             boxShadow: 'var(--shadow-lg)',
@@ -552,8 +817,8 @@ export function EditorPage() {
       {showAlphaImportDialog && <AlphaImportDialog />}
       {showTitleTool && (
         <div style={{
-          position: 'fixed', top: 40, right: showInspector ? 340 : 0, bottom: 40,
-          width: 360, zIndex: 900,
+          position: 'fixed', top: 24, right: auxiliaryPanelRightInset, bottom: 24,
+          width: 'min(360px, calc(100vw - 32px))', zIndex: 900,
           background: 'var(--bg-surface)',
           borderLeft: '1px solid var(--border-default)',
           overflow: 'auto',
@@ -563,8 +828,8 @@ export function EditorPage() {
       )}
       {showSubtitleEditor && (
         <div style={{
-          position: 'fixed', top: 40, right: showInspector ? 340 : 0, bottom: 40,
-          width: 380, zIndex: 900,
+          position: 'fixed', top: 24, right: auxiliaryPanelRightInset, bottom: 24,
+          width: 'min(380px, calc(100vw - 32px))', zIndex: 900,
           background: 'var(--bg-surface)',
           borderLeft: '1px solid var(--border-default)',
           overflow: 'auto',

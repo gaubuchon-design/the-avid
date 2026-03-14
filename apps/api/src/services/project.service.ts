@@ -1,3 +1,4 @@
+import { Prisma, ProjectStatus, type UserRole } from '@prisma/client';
 import { db } from '../db/client';
 import { logger } from '../utils/logger';
 import { NotFoundError, ForbiddenError, BadRequestError } from '../utils/errors';
@@ -36,11 +37,14 @@ class ProjectService {
     const { userId, cursor, limit, sort, order, search, status } = params;
 
     const safeSortBy = ProjectService.ALLOWED_SORT_FIELDS.includes(sort) ? sort : 'updatedAt';
+    const projectStatus = status && Object.values(ProjectStatus).includes(status as ProjectStatus)
+      ? (status as ProjectStatus)
+      : undefined;
 
-    const where: Record<string, unknown> = {
+    const where: Prisma.ProjectWhereInput = {
       members: { some: { userId } },
       deletedAt: null,
-      ...(status ? { status } : {}),
+      ...(projectStatus ? { status: projectStatus } : {}),
       ...(search
         ? {
             OR: [
@@ -52,32 +56,35 @@ class ProjectService {
         : {}),
     };
 
-    const cursorClause = cursor ? { cursor: { id: cursor }, skip: 1 } : {};
+    const findManyArgs: Prisma.ProjectFindManyArgs = {
+      where,
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        status: true,
+        frameRate: true,
+        width: true,
+        height: true,
+        sampleRate: true,
+        colorSpace: true,
+        tags: true,
+        createdAt: true,
+        updatedAt: true,
+        lastEditedAt: true,
+        members: { select: { userId: true, role: true } },
+        _count: { select: { bins: true, timelines: true } },
+      },
+      take: limit + 1,
+      orderBy: { [safeSortBy]: order } as Prisma.ProjectOrderByWithRelationInput,
+    };
+    if (cursor) {
+      findManyArgs.cursor = { id: cursor };
+      findManyArgs.skip = 1;
+    }
 
     const [items, total] = await Promise.all([
-      db.project.findMany({
-        where,
-        select: {
-          id: true,
-          name: true,
-          description: true,
-          status: true,
-          frameRate: true,
-          width: true,
-          height: true,
-          sampleRate: true,
-          colorSpace: true,
-          tags: true,
-          createdAt: true,
-          updatedAt: true,
-          lastEditedAt: true,
-          members: { select: { userId: true, role: true } },
-          _count: { select: { bins: true, timelines: true } },
-        },
-        take: limit + 1,
-        orderBy: { [safeSortBy]: order },
-        ...cursorClause,
-      }),
+      db.project.findMany(findManyArgs),
       db.project.count({ where }),
     ]);
 
@@ -192,7 +199,7 @@ class ProjectService {
     return project;
   }
 
-  async addMember(projectId: string, email: string, role: string) {
+  async addMember(projectId: string, email: string, role: UserRole) {
     const user = await db.user.findUnique({ where: { email: email.toLowerCase().trim() } });
     if (!user) throw new NotFoundError('User with that email');
 

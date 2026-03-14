@@ -1,6 +1,7 @@
 import React, { useState, memo, useCallback } from 'react';
 import { useEditorStore } from '../../store/editor.store';
 import type { Bin, MediaAsset, SmartBin } from '../../store/editor.store';
+import { extractDesktopDroppedPaths } from '../../lib/desktopDropPaths';
 
 function formatDuration(sec?: number): string {
   if (!sec) return '--:--';
@@ -11,6 +12,27 @@ function formatDuration(sec?: number): string {
 function formatDate(d?: Date | string): string {
   const date = d ? new Date(d) : new Date();
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function getAssetPreviewUrl(asset: MediaAsset): string | undefined {
+  return asset.thumbnailUrl ?? asset.thumbnailFrames?.[0]?.imageUrl;
+}
+
+function AssetPreview({ asset, className }: { asset: MediaAsset; className?: string }) {
+  const previewUrl = getAssetPreviewUrl(asset);
+  const typeIcon: Record<string, string> = {
+    VIDEO: '▶',
+    AUDIO: '♪',
+    IMAGE: '⬛',
+    GRAPHIC: '◫',
+    DOCUMENT: '📄',
+  };
+
+  return previewUrl ? (
+    <img className={className} src={previewUrl} alt="" loading="lazy" />
+  ) : (
+    <div className={`asset-thumb-placeholder${className ? ` ${className}` : ''}`}>{typeIcon[asset.type] ?? '📄'}</div>
+  );
 }
 
 interface BinItemProps {
@@ -67,8 +89,6 @@ const AssetCard = memo(function AssetCard({ asset }: AssetCardProps) {
   const { setSourceAsset, sourceAsset } = useEditorStore();
   const isSelected = sourceAsset?.id === asset.id;
 
-  const typeIcon: Record<string, string> = { VIDEO: '▶', AUDIO: '♪', IMAGE: '⬛', DOCUMENT: '📄' };
-
   return (
     <div
       className={`asset-card${isSelected ? ' selected' : ''}`}
@@ -86,7 +106,7 @@ const AssetCard = memo(function AssetCard({ asset }: AssetCardProps) {
         {asset.status === 'PROCESSING' ? (
           <div className="asset-status-processing">Processing…</div>
         ) : (
-          <div className="asset-thumb-placeholder">{typeIcon[asset.type] ?? '📄'}</div>
+          <AssetPreview asset={asset} className="asset-thumb-media" />
         )}
         {asset.duration && <div className="asset-duration">{formatDuration(asset.duration)}</div>}
         <div className={`asset-type-badge ${asset.type.toLowerCase()}`}>{asset.type}</div>
@@ -123,6 +143,7 @@ function AssetListView({ assets }: { assets: MediaAsset[] }) {
       {/* Column headers */}
       <div className="bin-list-header">
         <span className="bin-col-color"></span>
+        <span className="bin-col-preview">Preview</span>
         <span className="bin-col-name">Name</span>
         <span className="bin-col-duration">Duration</span>
         <span className="bin-col-fps">FPS</span>
@@ -157,6 +178,11 @@ function AssetListView({ assets }: { assets: MediaAsset[] }) {
                   asset.type === 'IMAGE' ? 'var(--track-effect)' :
                   asset.type === 'GRAPHIC' ? 'var(--track-gfx)' : 'var(--text-muted)',
               }} />
+            </span>
+            <span className="bin-col-preview">
+              <span className="bin-preview">
+                <AssetPreview asset={asset} className="bin-preview-image" />
+              </span>
             </span>
             <span className="bin-col-name truncate" title={asset.name}>
               {asset.hasAlpha && <span title="Has alpha channel" style={{ color: 'var(--warning)', marginRight: 3 }}>A</span>}
@@ -300,7 +326,18 @@ function SmartBinItem({ smartBin }: { smartBin: SmartBin }) {
 /* ─── Main BinPanel ───────────────────────────────────────────────────── */
 
 export function BinPanel() {
-  const { bins, activeBinAssets, toolbarTab, addBin, selectedBinId, smartBins, importMediaFiles, ingestProgress } = useEditorStore();
+  const {
+    bins,
+    activeBinAssets,
+    toolbarTab,
+    addBin,
+    selectedBinId,
+    smartBins,
+    importMediaFiles,
+    ingestProgress,
+    projectId,
+    loadProject,
+  } = useEditorStore();
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [tab, setTab] = useState<'bins' | 'smart' | 'search'>('bins');
@@ -331,13 +368,66 @@ export function BinPanel() {
       setIsDragOver(false);
     }
   };
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
-    if (e.dataTransfer.files?.length) {
-      importMediaFiles(e.dataTransfer.files, selectedBinId ?? undefined);
+    if (!e.dataTransfer.files?.length) {
+      return;
     }
+
+    const droppedFiles = e.dataTransfer.files;
+    const desktopPaths = extractDesktopDroppedPaths(Array.from(droppedFiles));
+
+    if (window.electronAPI && projectId && desktopPaths.length > 0) {
+      try {
+        await window.electronAPI.importMedia(projectId, desktopPaths, selectedBinId ?? undefined);
+        await loadProject(projectId);
+        return;
+      } catch (error) {
+        console.error('Desktop drag-and-drop ingest failed', error);
+      }
+    }
+
+    importMediaFiles(droppedFiles, selectedBinId ?? undefined);
   };
+
+  const openBrowserFilePicker = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.accept = 'video/*,audio/*,image/*,.svg,.exr,.dpx,.tga,.psd,.mxf,.avi,.mkv';
+    input.onchange = () => {
+      if (input.files?.length) {
+        importMediaFiles(input.files, selectedBinId ?? undefined);
+      }
+    };
+    input.click();
+  }, [importMediaFiles, selectedBinId]);
+
+  const handleImportMediaClick = useCallback(async () => {
+    if (!window.electronAPI || !projectId) {
+      openBrowserFilePicker();
+      return;
+    }
+
+    try {
+      const result = await window.electronAPI.openFile({
+        title: 'Import Media',
+        buttonLabel: 'Import',
+        properties: ['openFile', 'openDirectory', 'multiSelections'],
+      });
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return;
+      }
+
+      await window.electronAPI.importMedia(projectId, result.filePaths, selectedBinId ?? undefined);
+      await loadProject(projectId);
+    } catch (error) {
+      console.error('Desktop file-picker ingest failed', error);
+      openBrowserFilePicker();
+    }
+  }, [loadProject, openBrowserFilePicker, projectId, selectedBinId]);
 
   return (
     <div
@@ -357,7 +447,7 @@ export function BinPanel() {
           pointerEvents: 'none',
         }}>
           <div style={{ color: 'var(--brand-bright)', fontSize: 13, fontWeight: 600, textAlign: 'center' }}>
-            Drop media files to import<br />
+            Drop media files{window.electronAPI ? ' or folders' : ''} to import<br />
             <span style={{ fontSize: 11, opacity: 0.7 }}>Video, Audio, Images, Graphics</span>
           </div>
         </div>
@@ -370,17 +460,7 @@ export function BinPanel() {
             <>
               <button className="tl-btn" title="Import Media" style={{ fontSize: 12 }}
                 onClick={() => {
-                  // Trigger native file picker (mock — in production connects to media ingest pipeline)
-                  const input = document.createElement('input');
-                  input.type = 'file';
-                  input.multiple = true;
-                  input.accept = 'video/*,audio/*,image/*,.svg,.exr,.dpx,.tga,.psd,.mxf,.avi,.mkv';
-                  input.onchange = () => {
-                    if (input.files?.length) {
-                      importMediaFiles(input.files, selectedBinId ?? undefined);
-                    }
-                  };
-                  input.click();
+                  void handleImportMediaClick();
                 }}>+</button>
               <button className="tl-btn" title="New Bin"
                 onClick={() => setShowNewBinInput(true)}>

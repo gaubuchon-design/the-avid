@@ -61,6 +61,10 @@ export interface ModelInput {
   readonly sourceLanguage?: string;
   /** BCP-47 target language tag (used by translation). */
   readonly targetLanguage?: string;
+  /** Enable speaker diarization for STT requests when supported. */
+  readonly diarize?: boolean;
+  /** STT task variant. */
+  readonly task?: 'transcribe' | 'translate';
   /** Array of texts to embed (used by embedding). */
   readonly embeddingTexts?: readonly string[];
 }
@@ -103,6 +107,12 @@ export interface ModelOutput {
   readonly embeddings?: readonly number[][];
   /** Transcription segments with word-level timestamps. */
   readonly transcriptSegments?: readonly TranscriptSegmentOutput[];
+  /** Detected or declared transcript language. */
+  readonly transcriptLanguage?: TranscriptLanguageOutput;
+  /** Speaker inventory for diarized transcripts. */
+  readonly transcriptSpeakers?: readonly TranscriptSpeakerOutput[];
+  /** Non-fatal warnings produced during inference. */
+  readonly warnings?: readonly string[];
   /** Translated text. */
   readonly translatedText?: string;
   /** Structured analysis output. */
@@ -119,8 +129,26 @@ export interface TranscriptSegmentOutput {
   readonly text: string;
   /** Confidence score in [0, 1]. */
   readonly confidence: number;
+  /** Stable speaker identifier when diarization is enabled. */
+  readonly speakerId?: string;
+  /** Human-readable speaker label when available. */
+  readonly speakerName?: string;
+  /** Optional translated text for the same utterance. */
+  readonly translatedText?: string;
   /** Optional word-level detail. */
   readonly words?: readonly WordTimestamp[];
+}
+
+export interface TranscriptLanguageOutput {
+  readonly code: string;
+  readonly confidence: number;
+}
+
+export interface TranscriptSpeakerOutput {
+  readonly id: string;
+  readonly name: string;
+  readonly confidence?: number;
+  readonly identified: boolean;
 }
 
 /** Word-level timestamp within a transcript segment. */

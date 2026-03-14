@@ -1,7 +1,23 @@
-import React, { useCallback, useEffect, useRef, useState, memo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePlayerStore, ScopeType } from '../../store/player.store';
 import { useEditorStore } from '../../store/editor.store';
-import { videoSourceManager } from '../../engine/VideoSourceManager';
+import { useUserSettingsStore } from '../../store/userSettings.store';
+import {
+  attachMonitorAudioOutput,
+  previewMonitorAudioOutput,
+  releaseMonitorAudioOutput,
+  reviewMonitorAudioOutput,
+} from '../../lib/monitorPlayback';
+import {
+  activateRecordMonitor,
+  activateSourceMonitor,
+  clearMarksForActiveMonitor,
+  markClipForActiveMonitor,
+} from '../../lib/editorMonitorActions';
+import { usePointerScrub } from '../../hooks/usePointerScrub';
+import { useTrimMonitorPreview } from '../../lib/trimMonitorPreview';
+import { trimEngine } from '../../engine/TrimEngine';
+import { resolveTrimAudioPreviewRoute } from '../../lib/trimAudioPreview';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -19,6 +35,14 @@ function formatTimecode(seconds: number, fps = 24): string {
   );
 }
 
+function formatTrimFrames(value: number): string {
+  if (value === 0) {
+    return '0f';
+  }
+
+  return `${value > 0 ? '+' : ''}${value}f`;
+}
+
 const SCOPE_OPTIONS: { value: ScopeType; label: string }[] = [
   { value: 'waveform', label: 'Waveform' },
   { value: 'vectorscope', label: 'Vectorscope' },
@@ -32,17 +56,15 @@ export function SourceMonitor() {
   const {
     isPlaying,
     speed,
-    currentFrame,
     showSafeZones,
     activeScope,
     sourceClipId,
     play,
     pause,
-    stop,
-    seekFrame,
     toggleSafeZones,
     setActiveScope,
     setActiveMonitor,
+    activeMonitor,
   } = usePlayerStore();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -50,8 +72,23 @@ export function SourceMonitor() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 480, h: 270 });
   const [videoReady, setVideoReady] = useState(false);
+  const [metadataDuration, setMetadataDuration] = useState<number | null>(null);
   const rafRef = useRef<number>();
   const syncRafRef = useRef<number>();
+  const cachedFrameRef = useRef<HTMLCanvasElement | null>(null);
+  const displayedPlayheadRef = useRef(0);
+  const playbackBoundsRef = useRef({
+    duration: 0,
+    inPoint: null as number | null,
+    outPoint: null as number | null,
+  });
+  const renderStateRef = useRef({
+    assetName: '',
+    fps: 24,
+    sourceInPoint: null as number | null,
+    sourceOutPoint: null as number | null,
+    sourcePlayhead: 0,
+  });
 
   // Get the source asset from editor store (master's approach with sourceAsset + sourcePlayhead)
   // Also support looking up by sourceClipId through bins (our hardened approach)
@@ -75,7 +112,94 @@ export function SourceMonitor() {
   const sourceOutPoint = useEditorStore((s) => s.sourceOutPoint);
   const setSourceInPoint = useEditorStore((s) => s.setSourceInPoint);
   const setSourceOutPoint = useEditorStore((s) => s.setSourceOutPoint);
+  const insertEdit = useEditorStore((s) => s.insertEdit);
+  const overwriteEdit = useEditorStore((s) => s.overwriteEdit);
+  const trimSelectionLabel = useEditorStore((s) => s.trimSelectionLabel);
+  const trimActive = useEditorStore((s) => s.trimActive);
+  const trimMode = useEditorStore((s) => s.trimMode);
+  const trimASideFrames = useEditorStore((s) => s.trimASideFrames);
+  const trimLoopPlaybackActive = useEditorStore((s) => s.trimLoopPlaybackActive);
+  const trimLoopPlaybackDirection = useEditorStore((s) => s.trimLoopPlaybackDirection);
+  const trimLoopPlaybackRate = useEditorStore((s) => s.trimLoopPlaybackRate);
+  const showTrimCountersInMonitorHeaders = useUserSettingsStore((s) => s.settings.showTrimCountersInMonitorHeaders);
+  const trimLoopOffsetFrames = useEditorStore((s) => s.trimLoopOffsetFrames);
+  const toggleTrimLoopPlayback = useEditorStore((s) => s.toggleTrimLoopPlayback);
+  const tracks = useEditorStore((s) => s.tracks);
+  const bins = useEditorStore((s) => s.bins);
+  const selectedTrackId = useEditorStore((s) => s.selectedTrackId);
+  const enabledTrackIds = useEditorStore((s) => s.enabledTrackIds);
+  const videoMonitorTrackId = useEditorStore((s) => s.videoMonitorTrackId);
   const fps = useEditorStore((s) => s.sequenceSettings.fps);
+  const projectFrameRate = useEditorStore((s) => s.projectSettings.frameRate);
+  const audioScrubEnabled = useEditorStore((s) => s.audioScrubEnabled);
+  const trimPreview = useTrimMonitorPreview({
+    tracks,
+    bins,
+    selectedTrackId,
+    enabledTrackIds,
+    videoMonitorTrackId,
+    sequenceSettings: { fps },
+    projectSettings: { frameRate: projectFrameRate },
+    trimLoopPlaybackActive,
+    trimLoopOffsetFrames,
+  });
+  const trimPreviewSide = useMemo(() => {
+    return trimPreview.sourceMonitor ?? trimPreview.aSide ?? trimPreview.bSide;
+  }, [trimPreview.aSide, trimPreview.bSide, trimPreview.sourceMonitor]);
+  const trimAudioRoute = useMemo(() => (
+    resolveTrimAudioPreviewRoute(trimPreview, activeMonitor)
+  ), [activeMonitor, trimPreview]);
+  const trimPreviewActive = Boolean(trimPreview.active && trimPreviewSide);
+  const trimSessionActive = trimActive || trimPreview.active;
+  const activeTrimMode = trimPreview.active ? trimEngine.getCurrentMode().toLowerCase() : trimMode;
+  const displayedAsset = trimPreviewActive
+    ? trimPreviewSide!.asset ?? null
+    : sourceAsset;
+  const displayedPlayhead = trimPreviewActive
+    ? trimPreviewSide!.sourceTime
+    : sourcePlayhead;
+  const displayedInPoint = trimPreviewActive ? null : sourceInPoint;
+  const displayedOutPoint = trimPreviewActive ? null : sourceOutPoint;
+  const displayedDuration = Math.max(displayedAsset?.duration ?? 0, metadataDuration ?? 0);
+  const effectiveIsPlaying = trimSessionActive ? false : isPlaying;
+  const sourceTrimSideActive = trimSessionActive
+    && (trimSelectionLabel === 'A' || trimSelectionLabel === 'AB' || trimSelectionLabel === 'ASYM');
+  const trimSupportsSideSelection = activeTrimMode !== 'slip' && activeTrimMode !== 'slide';
+  const trimLoopStatusLabel = trimLoopPlaybackActive
+    ? `${trimLoopPlaybackDirection < 0 ? 'REV' : 'FWD'} ${trimLoopPlaybackRate}x`
+    : null;
+
+  useEffect(() => {
+    displayedPlayheadRef.current = displayedPlayhead;
+  }, [displayedPlayhead]);
+
+  useEffect(() => {
+    playbackBoundsRef.current = {
+      duration: displayedDuration,
+      inPoint: displayedInPoint,
+      outPoint: displayedOutPoint,
+    };
+  }, [displayedDuration, displayedInPoint, displayedOutPoint]);
+
+  useEffect(() => {
+    renderStateRef.current = {
+      assetName: trimPreviewActive && trimPreviewSide
+        ? `${trimPreviewSide.trackName} · ${trimPreviewSide.clipName}`
+        : displayedAsset?.name ?? '',
+      fps,
+      sourceInPoint: displayedInPoint,
+      sourceOutPoint: displayedOutPoint,
+      sourcePlayhead: displayedPlayhead,
+    };
+  }, [
+    displayedAsset?.name,
+    displayedInPoint,
+    displayedOutPoint,
+    displayedPlayhead,
+    fps,
+    trimPreviewActive,
+    trimPreviewSide,
+  ]);
 
   // Responsive canvas sizing
   useEffect(() => {
@@ -104,8 +228,11 @@ export function SourceMonitor() {
   // Load/update video element when source asset changes
   useEffect(() => {
     setVideoReady(false);
+    setMetadataDuration(null);
+    cachedFrameRef.current = null;
 
-    if (!sourceAsset) {
+    if (!displayedAsset || !(displayedAsset.fileHandle || displayedAsset.playbackUrl)) {
+      releaseMonitorAudioOutput('source-monitor');
       if (videoRef.current) {
         videoRef.current.pause();
         videoRef.current.src = '';
@@ -114,25 +241,62 @@ export function SourceMonitor() {
       return;
     }
 
-    // Get the video source from VideoSourceManager (already loaded by setSourceAsset)
-    const source = videoSourceManager.getSource(sourceAsset.id);
-    if (source?.ready) {
-      videoRef.current = source.element;
-      setVideoReady(true);
-      return;
-    }
+    const video = document.createElement('video');
+    video.crossOrigin = 'anonymous';
+    video.preload = 'auto';
+    video.playsInline = true;
+    video.muted = true;
 
-    // If not loaded yet, wait for it via subscription
-    const unsub = videoSourceManager.subscribe(() => {
-      const s = videoSourceManager.getSource(sourceAsset.id);
-      if (s?.ready) {
-        videoRef.current = s.element;
-        setVideoReady(true);
+    const ownedUrl = displayedAsset.fileHandle
+      ? URL.createObjectURL(displayedAsset.fileHandle)
+      : undefined;
+    video.src = ownedUrl ?? displayedAsset.playbackUrl!;
+
+    const handleLoadedMetadata = () => {
+      videoRef.current = video;
+      attachMonitorAudioOutput('source-monitor', video);
+      if (Number.isFinite(video.duration) && video.duration > 0) {
+        setMetadataDuration(video.duration);
       }
-    });
+      if (Number.isFinite(displayedPlayheadRef.current) && displayedPlayheadRef.current > 0) {
+        video.currentTime = displayedPlayheadRef.current;
+      }
+      setVideoReady(true);
+    };
 
-    return unsub;
-  }, [sourceAsset?.id]);
+    const handleError = () => {
+      setVideoReady(false);
+    };
+
+    const handleEnded = () => {
+      const playbackEnd = playbackBoundsRef.current.outPoint
+        ?? playbackBoundsRef.current.duration
+        ?? video.duration
+        ?? 0;
+      setSourcePlayhead(Math.max(0, Math.min(video.currentTime, playbackEnd)));
+      usePlayerStore.getState().pause();
+    };
+
+    video.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
+    video.addEventListener('error', handleError, { once: true });
+    video.addEventListener('ended', handleEnded);
+    video.load();
+
+    return () => {
+      releaseMonitorAudioOutput('source-monitor');
+      video.pause();
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.removeEventListener('error', handleError);
+      video.removeEventListener('ended', handleEnded);
+      video.src = '';
+      if (ownedUrl) {
+        URL.revokeObjectURL(ownedUrl);
+      }
+      if (videoRef.current === video) {
+        videoRef.current = null;
+      }
+    };
+  }, [displayedAsset?.fileHandle, displayedAsset?.id, displayedAsset?.playbackUrl, setSourcePlayhead]);
 
   // Render loop — draw video frame or placeholder
   useEffect(() => {
@@ -143,10 +307,15 @@ export function SourceMonitor() {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       const { w, h } = canvasSize;
-      canvas.width = w;
-      canvas.height = h;
+      if (canvas.width !== w) {
+        canvas.width = w;
+      }
+      if (canvas.height !== h) {
+        canvas.height = h;
+      }
 
       const video = videoRef.current;
+      const renderState = renderStateRef.current;
       if (video && videoReady && video.readyState >= 2) {
         // Draw video frame
         ctx.fillStyle = '#000';
@@ -163,11 +332,40 @@ export function SourceMonitor() {
           drawX = Math.floor((w - drawW) / 2);
         }
         ctx.drawImage(video, drawX, drawY, drawW, drawH);
+        const cachedFrame = cachedFrameRef.current ?? document.createElement('canvas');
+        cachedFrame.width = w;
+        cachedFrame.height = h;
+        const cachedCtx = cachedFrame.getContext('2d');
+        if (cachedCtx) {
+          cachedCtx.fillStyle = '#000';
+          cachedCtx.fillRect(0, 0, w, h);
+          cachedCtx.drawImage(video, drawX, drawY, drawW, drawH);
+          cachedFrameRef.current = cachedFrame;
+        }
 
         // Draw in/out markers
-        drawMarkers(ctx, w, h);
+        drawMarkers(
+          ctx,
+          w,
+          h,
+          renderState.sourceInPoint,
+          renderState.sourceOutPoint,
+          renderState.fps,
+        );
+      } else if (cachedFrameRef.current) {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(cachedFrameRef.current, 0, 0, w, h);
+        drawMarkers(
+          ctx,
+          w,
+          h,
+          renderState.sourceInPoint,
+          renderState.sourceOutPoint,
+          renderState.fps,
+        );
       } else {
-        drawPlaceholder(ctx, w, h);
+        drawPlaceholder(ctx, w, h, renderState.assetName, renderState.sourcePlayhead, renderState.sourceInPoint, renderState.sourceOutPoint, renderState.fps);
       }
 
       rafRef.current = requestAnimationFrame(render);
@@ -177,22 +375,33 @@ export function SourceMonitor() {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [canvasSize, videoReady, sourceInPoint, sourceOutPoint, sourcePlayhead]);
+  }, [canvasSize, videoReady]);
 
   // Sync video seek with source playhead (when not playing)
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !videoReady) return;
-    if (!isPlaying && isFinite(sourcePlayhead) && Math.abs(video.currentTime - sourcePlayhead) > 0.05) {
-      video.currentTime = Math.max(0, sourcePlayhead);
+    const frameTolerance = fps > 0 ? 0.5 / fps : 0.02;
+    const playbackStart = displayedInPoint ?? 0;
+    const playbackEnd = displayedOutPoint ?? displayedDuration;
+    const clampedPlayhead = Math.max(
+      playbackStart,
+      playbackEnd > 0 ? Math.min(displayedPlayhead, playbackEnd) : displayedPlayhead,
+    );
+
+    if (!effectiveIsPlaying && isFinite(clampedPlayhead) && Math.abs(video.currentTime - clampedPlayhead) > frameTolerance) {
+      video.currentTime = Math.max(0, clampedPlayhead);
     }
-  }, [sourcePlayhead, isPlaying, videoReady]);
+  }, [displayedDuration, displayedInPoint, displayedOutPoint, displayedPlayhead, effectiveIsPlaying, fps, videoReady]);
 
   // Play/pause — properly cancel previous RAF sync loop before creating new one.
   // Also applies playback rate from playerStore.speed for JKL shuttle support.
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !videoReady) return;
+    const playbackStart = displayedInPoint ?? 0;
+    const playbackEnd = displayedOutPoint ?? displayedDuration;
+    const frameTolerance = fps > 0 ? 0.5 / fps : 0.02;
 
     // Always cancel any existing sync loop first
     if (syncRafRef.current) {
@@ -200,7 +409,7 @@ export function SourceMonitor() {
       syncRafRef.current = undefined;
     }
 
-    if (isPlaying) {
+    if (effectiveIsPlaying) {
       // Apply playback rate — clamp to browser-supported range.
       // Negative speeds aren't natively supported by HTMLVideoElement,
       // so we handle reverse by manual frame stepping.
@@ -213,10 +422,10 @@ export function SourceMonitor() {
         const stepBack = () => {
           if (!videoRef.current) { syncRafRef.current = undefined; return; }
           const step = absSpeed / fps;
-          const newTime = Math.max(0, videoRef.current.currentTime - step);
+          const newTime = Math.max(playbackStart, videoRef.current.currentTime - step);
           videoRef.current.currentTime = newTime;
           setSourcePlayhead(newTime);
-          if (newTime <= 0) {
+          if (newTime <= playbackStart + frameTolerance) {
             usePlayerStore.getState().pause();
             syncRafRef.current = undefined;
             return;
@@ -233,7 +442,17 @@ export function SourceMonitor() {
             syncRafRef.current = undefined;
             return;
           }
-          setSourcePlayhead(videoRef.current.currentTime);
+          const currentTime = playbackEnd > 0
+            ? Math.min(videoRef.current.currentTime, playbackEnd)
+            : videoRef.current.currentTime;
+          setSourcePlayhead(currentTime);
+          if (playbackEnd > 0 && currentTime >= playbackEnd - frameTolerance) {
+            videoRef.current.pause();
+            videoRef.current.currentTime = playbackEnd;
+            usePlayerStore.getState().pause();
+            syncRafRef.current = undefined;
+            return;
+          }
           syncRafRef.current = requestAnimationFrame(sync);
         };
         syncRafRef.current = requestAnimationFrame(sync);
@@ -248,26 +467,84 @@ export function SourceMonitor() {
         syncRafRef.current = undefined;
       }
     };
-  }, [isPlaying, speed, videoReady, fps, setSourcePlayhead]);
+  }, [displayedDuration, displayedInPoint, displayedOutPoint, effectiveIsPlaying, speed, videoReady, fps, setSourcePlayhead]);
 
-  function drawMarkers(c: CanvasRenderingContext2D, cw: number, ch: number) {
-    if (sourceInPoint !== null) {
+  useEffect(() => {
+    return () => {
+      releaseMonitorAudioOutput('source-monitor');
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!trimSessionActive) {
+      return;
+    }
+
+    const video = videoRef.current;
+    const audioPreview = trimAudioRoute.channel === 'source'
+      ? trimAudioRoute.side
+      : null;
+
+    if (!video || !audioPreview?.playable) {
+      releaseMonitorAudioOutput('source-monitor');
+      return;
+    }
+
+    reviewMonitorAudioOutput(
+      'source-monitor',
+      video,
+      audioPreview.sourceTime,
+      {
+        active: trimLoopPlaybackActive,
+        direction: trimLoopPlaybackDirection,
+        rate: trimLoopPlaybackRate,
+        fps,
+      },
+    );
+  }, [
+    fps,
+    trimAudioRoute,
+    trimLoopPlaybackActive,
+    trimLoopPlaybackDirection,
+    trimLoopPlaybackRate,
+    trimSessionActive,
+    videoReady,
+  ]);
+
+  function drawMarkers(
+    c: CanvasRenderingContext2D,
+    cw: number,
+    ch: number,
+    activeInPoint: number | null,
+    activeOutPoint: number | null,
+    activeFps: number,
+  ) {
+    if (activeInPoint !== null) {
       c.fillStyle = 'rgba(59, 130, 246, 0.8)';
       c.font = '600 10px monospace';
       c.textAlign = 'left';
       c.textBaseline = 'alphabetic';
-      c.fillText('IN: ' + formatTimecode(sourceInPoint, fps), 10, ch - 10);
+      c.fillText('IN: ' + formatTimecode(activeInPoint, activeFps), 10, ch - 10);
     }
-    if (sourceOutPoint !== null) {
+    if (activeOutPoint !== null) {
       c.fillStyle = 'rgba(59, 130, 246, 0.8)';
       c.font = '600 10px monospace';
       c.textAlign = 'right';
       c.textBaseline = 'alphabetic';
-      c.fillText('OUT: ' + formatTimecode(sourceOutPoint, fps), cw - 10, ch - 10);
+      c.fillText('OUT: ' + formatTimecode(activeOutPoint, activeFps), cw - 10, ch - 10);
     }
   }
 
-  function drawPlaceholder(c: CanvasRenderingContext2D, cw: number, ch: number) {
+  function drawPlaceholder(
+    c: CanvasRenderingContext2D,
+    cw: number,
+    ch: number,
+    assetName: string,
+    activePlayhead: number,
+    activeInPoint: number | null,
+    activeOutPoint: number | null,
+    activeFps: number,
+  ) {
     c.fillStyle = '#000000';
     c.fillRect(0, 0, cw, ch);
     c.fillStyle = 'rgba(255, 255, 255, 0.12)';
@@ -277,20 +554,34 @@ export function SourceMonitor() {
     c.fillText('SOURCE', cw / 2, ch / 2 - 14);
     c.fillStyle = 'rgba(255, 255, 255, 0.25)';
     c.font = '500 13px monospace';
-    c.fillText(formatTimecode(sourcePlayhead, fps), cw / 2, ch / 2 + 16);
-    if (sourceAsset) {
+    c.fillText(formatTimecode(activePlayhead, activeFps), cw / 2, ch / 2 + 16);
+    if (assetName) {
       c.fillStyle = 'rgba(255, 255, 255, 0.4)';
       c.font = '400 11px system-ui';
-      c.fillText(sourceAsset.name, cw / 2, ch / 2 + 36);
+      c.fillText(assetName, cw / 2, ch / 2 + 36);
     }
-    drawMarkers(c, cw, ch);
+    drawMarkers(c, cw, ch, activeInPoint, activeOutPoint, activeFps);
   }
 
   // Transport handlers
+  const nudgeTrim = useCallback((frames: number): boolean => {
+    if (!trimSessionActive) {
+      return false;
+    }
+
+    trimEngine.trimByFrames(frames, fps);
+    return true;
+  }, [fps, trimSessionActive]);
+
   const handlePlayPause = useCallback(() => {
+    if (trimSessionActive) {
+      toggleTrimLoopPlayback();
+      return;
+    }
+
     if (isPlaying) pause();
     else play();
-  }, [isPlaying, play, pause]);
+  }, [isPlaying, pause, play, toggleTrimLoopPlayback, trimSessionActive]);
 
   const handleGoToIn = useCallback(() => {
     if (sourceInPoint !== null) setSourcePlayhead(sourceInPoint);
@@ -301,22 +592,34 @@ export function SourceMonitor() {
   }, [sourceOutPoint, setSourcePlayhead]);
 
   const handlePrevFrame = useCallback(() => {
+    if (nudgeTrim(-1)) {
+      return;
+    }
     setSourcePlayhead(Math.max(0, sourcePlayhead - 1 / fps));
-  }, [sourcePlayhead, fps, setSourcePlayhead]);
+  }, [nudgeTrim, sourcePlayhead, fps, setSourcePlayhead]);
 
   const handleNextFrame = useCallback(() => {
-    const maxDur = sourceAsset?.duration ?? 999;
+    if (nudgeTrim(1)) {
+      return;
+    }
+    const maxDur = displayedDuration || sourceAsset?.duration || 999;
     setSourcePlayhead(Math.min(maxDur, sourcePlayhead + 1 / fps));
-  }, [sourcePlayhead, fps, sourceAsset?.duration, setSourcePlayhead]);
+  }, [displayedDuration, nudgeTrim, sourcePlayhead, fps, sourceAsset?.duration, setSourcePlayhead]);
 
   const handleRewind = useCallback(() => {
+    if (nudgeTrim(-10)) {
+      return;
+    }
     setSourcePlayhead(Math.max(0, sourcePlayhead - 1));
-  }, [sourcePlayhead, setSourcePlayhead]);
+  }, [nudgeTrim, sourcePlayhead, setSourcePlayhead]);
 
   const handleFastForward = useCallback(() => {
-    const maxDur = sourceAsset?.duration ?? 999;
+    if (nudgeTrim(10)) {
+      return;
+    }
+    const maxDur = displayedDuration || sourceAsset?.duration || 999;
     setSourcePlayhead(Math.min(maxDur, sourcePlayhead + 1));
-  }, [sourcePlayhead, sourceAsset?.duration, setSourcePlayhead]);
+  }, [displayedDuration, nudgeTrim, sourcePlayhead, sourceAsset?.duration, setSourcePlayhead]);
 
   const handleMarkIn = useCallback(() => {
     setSourceInPoint(sourcePlayhead);
@@ -325,6 +628,26 @@ export function SourceMonitor() {
   const handleMarkOut = useCallback(() => {
     setSourceOutPoint(sourcePlayhead);
   }, [sourcePlayhead, setSourceOutPoint]);
+
+  const handleMarkClip = useCallback(() => {
+    activateSourceMonitor();
+    markClipForActiveMonitor();
+  }, []);
+
+  const handleClearMarks = useCallback(() => {
+    activateSourceMonitor();
+    clearMarksForActiveMonitor();
+  }, []);
+
+  const handleInsertEdit = useCallback(() => {
+    activateSourceMonitor();
+    insertEdit();
+  }, [insertEdit]);
+
+  const handleOverwriteEdit = useCallback(() => {
+    activateSourceMonitor();
+    overwriteEdit();
+  }, [overwriteEdit]);
 
   const handleScopeChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -338,65 +661,143 @@ export function SourceMonitor() {
     setActiveMonitor('source');
   }, [setActiveMonitor]);
 
+  const handleActivateSource = useCallback(() => {
+    activateSourceMonitor();
+  }, []);
+
+  const handleActivateRecord = useCallback(() => {
+    activateRecordMonitor();
+  }, []);
+
+  const handleSelectTrimASide = useCallback(() => {
+    setActiveMonitor('source');
+    if (trimSessionActive && trimSupportsSideSelection) {
+      trimEngine.selectASide();
+    }
+  }, [setActiveMonitor, trimSessionActive, trimSupportsSideSelection]);
+
+  const handleSelectTrimBSide = useCallback(() => {
+    if (trimSessionActive && trimSupportsSideSelection) {
+      trimEngine.selectBSide();
+    }
+  }, [trimSessionActive, trimSupportsSideSelection]);
+
+  const handleSelectTrimBothSides = useCallback(() => {
+    if (trimSessionActive && trimSupportsSideSelection) {
+      trimEngine.selectBothSides();
+    }
+  }, [trimSessionActive, trimSupportsSideSelection]);
+
+  const handleCanvasClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    setActiveMonitor('source');
+    if (!trimSessionActive) {
+      return;
+    }
+
+    if ((event.target as HTMLElement).closest('.trim-status-overlay')) {
+      return;
+    }
+
+    if (trimSupportsSideSelection) {
+      trimEngine.selectASide();
+    }
+  }, [setActiveMonitor, trimSessionActive, trimSupportsSideSelection]);
+
   // Keyboard shortcuts are now handled centrally by useGlobalKeyboard() in EditorPage.
   // I/O marks are routed there based on activeMonitor, along with JKL shuttle.
 
   // Scrub bar interaction
   const scrubRef = useRef<HTMLDivElement>(null);
-  const handleScrub = useCallback((e: React.MouseEvent) => {
+  const scrubToTime = useCallback((clientX: number, previewAudio: boolean) => {
     const bar = scrubRef.current;
-    if (!bar || !sourceAsset?.duration) return;
+    if (!bar || !displayedDuration || trimSessionActive) return;
     const rect = bar.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    setSourcePlayhead(pct * sourceAsset.duration);
-  }, [sourceAsset?.duration, setSourcePlayhead]);
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const nextTime = pct * displayedDuration;
+    setActiveMonitor('source');
+    setSourcePlayhead(nextTime);
 
-  const handleScrubDrag = useCallback((e: React.MouseEvent) => {
-    handleScrub(e);
-    const bar = scrubRef.current;
-    if (!bar || !sourceAsset?.duration) return;
-    const dur = sourceAsset.duration;
-    const onMove = (ev: MouseEvent) => {
-      const rect = bar.getBoundingClientRect();
-      const pct = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
-      setSourcePlayhead(pct * dur);
-    };
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  }, [sourceAsset?.duration, setSourcePlayhead, handleScrub]);
+    const video = videoRef.current;
+    const frameTolerance = fps > 0 ? 0.5 / fps : 0.02;
+    if (!isPlaying && video && Math.abs(video.currentTime - nextTime) > frameTolerance) {
+      video.currentTime = nextTime;
+    }
 
-  const tc = formatTimecode(sourcePlayhead, fps);
-  const dur = sourceAsset?.duration ?? 0;
-  const progress = dur > 0 ? (sourcePlayhead / dur) * 100 : 0;
-  const inPct = sourceInPoint !== null && dur > 0 ? (sourceInPoint / dur) * 100 : null;
-  const outPct = sourceOutPoint !== null && dur > 0 ? (sourceOutPoint / dur) * 100 : null;
+    if (!previewAudio || isPlaying || !video) {
+      return;
+    }
 
-  const isActive = usePlayerStore((s) => s.activeMonitor === 'source');
+    previewMonitorAudioOutput('source-monitor', video, nextTime);
+  }, [displayedDuration, fps, isPlaying, setActiveMonitor, setSourcePlayhead, trimSessionActive]);
+
+  const scrubBindings = usePointerScrub({
+    disabled: trimSessionActive || !displayedDuration,
+    onScrub: ({ clientX, phase }) => {
+      scrubToTime(clientX, audioScrubEnabled && phase === 'end');
+    },
+  });
+
+  const dur = displayedDuration;
+  const tc = formatTimecode(displayedPlayhead, fps);
+  const durationTc = dur > 0 ? formatTimecode(dur, fps) : null;
+  const progress = dur > 0 ? (displayedPlayhead / dur) * 100 : 0;
+  const inPct = displayedInPoint !== null && dur > 0 ? (displayedInPoint / dur) * 100 : null;
+  const outPct = displayedOutPoint !== null && dur > 0 ? (displayedOutPoint / dur) * 100 : null;
+
+  const isActive = activeMonitor === 'source';
+  const sourceLabel = trimPreviewActive ? trimPreviewSide!.monitorLabel : 'SOURCE';
+  const sourceMeta = trimPreviewActive && trimPreviewSide
+    ? `${trimPreviewSide.trackName} · ${trimPreviewSide.clipName}`
+    : displayedAsset?.name ?? null;
 
   return (
     <div className={`monitor${isActive ? ' monitor-active' : ''}`} onClick={handleFocus} role="region" aria-label="Source Monitor">
       {/* Header */}
       <div className="monitor-header">
-        <span className="monitor-label source" aria-hidden="true">SOURCE</span>
-        {sourceAsset && (
-          <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 4, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {sourceAsset.name}
+        <button
+          type="button"
+          className={`monitor-label monitor-label-button source${trimSessionActive ? ' trim-side trim-side-a' : ''}${sourceTrimSideActive ? ' trim-side-live' : ''}${trimSessionActive && !trimSupportsSideSelection ? ' monitor-label-static' : ''}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            handleSelectTrimASide();
+          }}
+          aria-label={trimSessionActive && trimSupportsSideSelection ? 'Select A-side trim monitor' : 'Source monitor'}
+        >
+          {sourceLabel}
+        </button>
+        {sourceMeta && (
+          <span className="monitor-meta" title={sourceMeta}>
+            {sourceMeta}
           </span>
         )}
-        <span className="monitor-tc">{tc}</span>
+        {trimSessionActive && showTrimCountersInMonitorHeaders && (
+          <>
+            <span className={`monitor-trim-indicator${sourceTrimSideActive ? ' active' : ''}`}>
+              A {formatTrimFrames(trimASideFrames)}
+            </span>
+            {trimLoopPlaybackActive && (
+              <span className="monitor-trim-indicator monitor-trim-indicator-loop">
+                {trimLoopStatusLabel}
+              </span>
+            )}
+          </>
+        )}
       </div>
 
       {/* Canvas area */}
-      <div className="monitor-canvas" ref={containerRef} style={{ flex: 1, minHeight: 0 }}>
+      <div className="monitor-canvas" ref={containerRef} style={{ flex: 1, minHeight: 0 }} onClick={handleCanvasClick}>
         <canvas
           ref={canvasRef}
           width={canvasSize.w}
           height={canvasSize.h}
-          style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+          style={{
+            width: canvasSize.w,
+            height: canvasSize.h,
+            maxWidth: '100%',
+            maxHeight: '100%',
+            display: 'block',
+            margin: 'auto',
+          }}
         />
         {showSafeZones && (
           <div className="safe-zone">
@@ -407,11 +808,17 @@ export function SourceMonitor() {
       </div>
 
       {/* Scrub bar */}
-      {sourceAsset && dur > 0 && (
+      {!trimSessionActive && displayedAsset && dur > 0 && (
         <div
           className="composer-scrubbar"
           ref={scrubRef}
-          onMouseDown={handleScrubDrag}
+          {...scrubBindings}
+          role="slider"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={progress}
+          aria-label="Source playback position"
+          tabIndex={0}
           style={{ height: 6, margin: '0 4px', cursor: 'pointer' }}
         >
           {inPct !== null && <div className="composer-scrubbar-mark in" style={{ left: `${inPct}%` }} />}
@@ -426,83 +833,180 @@ export function SourceMonitor() {
 
       {/* Footer / Transport */}
       <div className="monitor-footer">
-        {/* Mark In */}
-        <button
-          className="transport-btn"
-          onClick={handleMarkIn}
-          title="Mark In (I)"
-          style={{ fontSize: 10, fontWeight: 600, color: sourceInPoint !== null ? 'var(--info)' : undefined }}
-        >
-          I
-        </button>
+        <div className="monitor-footer-group monitor-focus-group" role="group" aria-label="Monitor focus controls">
+          <button
+            type="button"
+            className={`transport-btn monitor-toolbar-btn is-monitor${activeMonitor === 'source' ? ' active' : ''}`}
+            onClick={handleActivateSource}
+            aria-pressed={activeMonitor === 'source'}
+            title="Activate Source Monitor"
+          >
+            SRC
+          </button>
+          <button
+            type="button"
+            className={`transport-btn monitor-toolbar-btn is-monitor${activeMonitor === 'record' ? ' active' : ''}`}
+            onClick={handleActivateRecord}
+            aria-pressed={activeMonitor === 'record'}
+            title="Activate Record Monitor"
+          >
+            REC
+          </button>
+        </div>
 
-        {/* Transport controls */}
-        <div className="transport-controls" role="group" aria-label="Source transport controls">
-          <button className="transport-btn" onClick={handleGoToIn} title="Go to In (Shift+I)" aria-label="Go to In point">
+        <div className="monitor-footer-group" role="group" aria-label="Source mark controls">
+          <button
+            className={`transport-btn monitor-toolbar-btn is-mark${sourceInPoint !== null ? ' active' : ''}`}
+            onClick={handleMarkIn}
+            title="Mark In (I)"
+            disabled={trimSessionActive}
+          >
+            IN
+          </button>
+          <button
+            className={`transport-btn monitor-toolbar-btn is-mark${sourceOutPoint !== null ? ' active' : ''}`}
+            onClick={handleMarkOut}
+            title="Mark Out (O)"
+            disabled={trimSessionActive}
+          >
+            OUT
+          </button>
+          <button
+            className="transport-btn monitor-toolbar-btn"
+            onClick={handleMarkClip}
+            title="Mark Clip (E)"
+            disabled={trimSessionActive}
+          >
+            CLIP
+          </button>
+          <button
+            className="transport-btn monitor-toolbar-btn"
+            onClick={handleClearMarks}
+            title="Clear Marks (D)"
+            disabled={trimSessionActive}
+          >
+            CLR
+          </button>
+        </div>
+
+        <div className="monitor-footer-group" role="group" aria-label="Source edit controls">
+          <button
+            className="transport-btn monitor-toolbar-btn"
+            onClick={handleInsertEdit}
+            title="Splice-In (V)"
+            disabled={trimSessionActive}
+          >
+            INS
+          </button>
+          <button
+            className="transport-btn monitor-toolbar-btn"
+            onClick={handleOverwriteEdit}
+            title="Overwrite (B)"
+            disabled={trimSessionActive}
+          >
+            OVR
+          </button>
+        </div>
+
+        <div className="monitor-footer-group transport-controls" role="group" aria-label="Source transport controls">
+          <button className="transport-btn monitor-toolbar-btn" onClick={handleGoToIn} title="Go to In (Shift+I)" aria-label="Go to In point" disabled={trimSessionActive}>
             |&laquo;
           </button>
-          <button className="transport-btn" onClick={handleRewind} title="Rewind (J)">
+          <button className="transport-btn monitor-toolbar-btn" onClick={handleRewind} title={trimPreviewActive ? 'Trim Left 10 Frames' : 'Rewind (J)'}>
             &laquo;
           </button>
-          <button className="transport-btn" onClick={handlePrevFrame} title="Prev Frame (Left)">
+          <button className="transport-btn monitor-toolbar-btn" onClick={handlePrevFrame} title={trimPreviewActive ? 'Trim Left 1 Frame' : 'Prev Frame (Left)'}>
             &lsaquo;
           </button>
           <button
-            className="transport-btn play-btn"
+            className={`transport-btn play-btn monitor-toolbar-btn${trimLoopPlaybackActive ? ' active' : ''}`}
             onClick={handlePlayPause}
-            title="Play/Pause (Space)"
+            title={trimSessionActive
+              ? (trimLoopPlaybackActive ? `Stop transition play loop (${trimLoopStatusLabel})` : 'Play transition loop')
+              : 'Play/Pause (Space)'}
           >
-            {isPlaying ? '\u23F8' : '\u25B6'}
+            {trimSessionActive ? (trimLoopPlaybackActive ? '\u23F9' : '\u25B6') : (isPlaying ? '\u23F8' : '\u25B6')}
           </button>
-          <button className="transport-btn" onClick={handleNextFrame} title="Next Frame">&rsaquo;</button>
-          <button className="transport-btn" onClick={handleFastForward} title="Fast Forward (L)">&raquo;</button>
-          <button className="transport-btn" onClick={handleGoToOut} title="Go to Out">&raquo;|</button>
+          <button className="transport-btn monitor-toolbar-btn" onClick={handleNextFrame} title={trimPreviewActive ? 'Trim Right 1 Frame' : 'Next Frame'}>&rsaquo;</button>
+          <button className="transport-btn monitor-toolbar-btn" onClick={handleFastForward} title={trimPreviewActive ? 'Trim Right 10 Frames' : 'Fast Forward (L)'}>&raquo;</button>
+          <button className="transport-btn monitor-toolbar-btn" onClick={handleGoToOut} title="Go to Out" aria-label="Go to Out point" disabled={trimSessionActive}>&raquo;|</button>
         </div>
 
-        {/* Mark Out */}
-        <button
-          className="transport-btn"
-          onClick={handleMarkOut}
-          title="Mark Out (O)"
-          style={{ fontSize: 10, fontWeight: 600, color: sourceOutPoint !== null ? 'var(--info)' : undefined }}
-        >
-          O
-        </button>
+        <div className="monitor-footer-spacer" />
 
-        <div style={{ flex: 1 }} />
+        {trimSessionActive ? (
+          <div className="monitor-footer-group monitor-footer-group-trim" role="group" aria-label="Source trim selection">
+            {trimSupportsSideSelection && (
+              <>
+                <button
+                  type="button"
+                  className={`transport-btn monitor-toolbar-btn trim-side-btn${trimSelectionLabel === 'A' ? ' active' : ''}`}
+                  onClick={handleSelectTrimASide}
+                  aria-label="Select A-side trim"
+                >
+                  A
+                </button>
+                <button
+                  type="button"
+                  className={`transport-btn monitor-toolbar-btn trim-side-btn${trimSelectionLabel === 'AB' ? ' active' : ''}`}
+                  onClick={handleSelectTrimBothSides}
+                  aria-label="Select both trim sides"
+                >
+                  AB
+                </button>
+                <button
+                  type="button"
+                  className={`transport-btn monitor-toolbar-btn trim-side-btn${trimSelectionLabel === 'B' ? ' active' : ''}`}
+                  onClick={handleSelectTrimBSide}
+                  aria-label="Select B-side trim"
+                >
+                  B
+                </button>
+              </>
+            )}
+            {trimPreviewSide && (
+              <span className="monitor-toolbar-pill" aria-live="polite">
+                {trimPreviewSide.monitorContext}{trimLoopStatusLabel ? ` · ${trimLoopStatusLabel}` : ''}
+              </span>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="monitor-footer-group">
+              <button
+                className={`transport-btn monitor-toolbar-btn${showSafeZones ? ' active' : ''}`}
+                onClick={toggleSafeZones}
+                title="Toggle Safe Zones"
+                style={{ fontSize: 9 }}
+              >
+                SAFE
+              </button>
+            </div>
 
-        {/* Safe zones toggle */}
-        <button
-          className={`transport-btn${showSafeZones ? ' active' : ''}`}
-          onClick={toggleSafeZones}
-          title="Toggle Safe Zones"
-          style={{ fontSize: 9 }}
-        >
-          [&nbsp;]
-        </button>
+            <div className="monitor-footer-group">
+              <select
+                value={activeScope ?? ''}
+                onChange={handleScopeChange}
+                title="Video Scope"
+                disabled={trimPreviewActive}
+                className="monitor-scope-select"
+              >
+                <option value="">No Scope</option>
+                {SCOPE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
 
-        {/* Scope selector */}
-        <select
-          value={activeScope ?? ''}
-          onChange={handleScopeChange}
-          title="Video Scope"
-          style={{
-            background: 'var(--bg-void)',
-            color: 'var(--text-secondary)',
-            border: '1px solid var(--border-default)',
-            borderRadius: 'var(--radius-sm)',
-            fontSize: 10,
-            padding: '2px 4px',
-            outline: 'none',
-          }}
-        >
-          <option value="">No Scope</option>
-          {SCOPE_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+        <div className="monitor-footer-group">
+          <div className="timecode-display monitor-footer-timecode" role="status" aria-live="polite" aria-label="Current timecode">
+            {durationTc ? `${tc} / ${durationTc}` : tc}
+          </div>
+        </div>
       </div>
     </div>
   );

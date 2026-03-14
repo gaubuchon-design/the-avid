@@ -1,10 +1,29 @@
 import React, { useEffect, useState } from 'react';
-import { flattenAssets, getMediaAssetTechnicalSummary } from '@mcua/core';
+import {
+  flattenAssets,
+  getMediaAssetTechnicalSummary,
+  getMediaAssetSurfaceCapability,
+  getMediaCapabilityDispositionLabel,
+} from '@mcua/core';
 import { useEditorStore } from '../../store/editor.store';
+
+function getCapabilityBadgeClass(disposition?: string): string {
+  switch (disposition) {
+    case 'native':
+      return 'badge-success';
+    case 'proxy-only':
+      return 'badge-accent';
+    case 'unsupported':
+      return 'badge-error';
+    default:
+      return 'badge-warning';
+  }
+}
 
 export function IngestPanel() {
   const { bins, desktopJobs, projectId, watchFolders, loadProject } = useEditorStore();
   const assets = flattenAssets(bins);
+  const currentSurface = window.electronAPI ? 'desktop' : 'web';
   const videoCount = assets.filter((asset) => asset.type === 'VIDEO').length;
   const audioCount = assets.filter((asset) => asset.type === 'AUDIO').length;
   const indexedCount = assets.filter((asset) => asset.indexStatus === 'READY').length;
@@ -13,6 +32,12 @@ export function IngestPanel() {
   const waveformReadyCount = assets.filter((asset) => asset.waveformMetadata?.status === 'READY').length;
   const semanticTaggedCount = assets.filter((asset) => (asset.semanticMetadata?.tags.length ?? 0) > 0).length;
   const missingAssets = assets.filter((asset) => asset.indexStatus === 'MISSING');
+  const surfaceDispositionCounts = assets.reduce<Record<string, number>>((counts, asset) => {
+    const capability = getMediaAssetSurfaceCapability(asset, currentSurface) ?? asset.capabilityReport?.surfaces[0];
+    const key = capability?.disposition ?? 'unsupported';
+    counts[key] = (counts[key] ?? 0) + 1;
+    return counts;
+  }, {});
   const recentlyIndexed = [...assets]
     .sort((left, right) => (right.ingestMetadata?.importedAt ?? '').localeCompare(left.ingestMetadata?.importedAt ?? ''))
     .slice(0, 6);
@@ -223,6 +248,22 @@ export function IngestPanel() {
               <div className="publish-preset-title">{semanticTaggedCount}</div>
               <div className="publish-preset-meta">Semantic tags</div>
             </div>
+            <div className="ingest-stat-card">
+              <div className="publish-preset-title">{surfaceDispositionCounts['native'] ?? 0}</div>
+              <div className="publish-preset-meta">{currentSurface} native</div>
+            </div>
+            <div className="ingest-stat-card">
+              <div className="publish-preset-title">{surfaceDispositionCounts['proxy-only'] ?? 0}</div>
+              <div className="publish-preset-meta">{currentSurface} proxy-only</div>
+            </div>
+            <div className="ingest-stat-card">
+              <div className="publish-preset-title">{surfaceDispositionCounts['mezzanine-required'] ?? 0}</div>
+              <div className="publish-preset-meta">{currentSurface} mezzanine</div>
+            </div>
+            <div className="ingest-stat-card">
+              <div className="publish-preset-title">{surfaceDispositionCounts['unsupported'] ?? 0}</div>
+              <div className="publish-preset-meta">{currentSurface} unsupported</div>
+            </div>
           </div>
         </div>
 
@@ -262,16 +303,31 @@ export function IngestPanel() {
             <div className="inspector-section-title">Missing Media</div>
             <div className="publish-job-list">
               {missingAssets.slice(0, 8).map((asset) => (
-                <div key={asset.id} className="publish-job-card">
-                  <div className="ai-job-title">{asset.name}</div>
-                  <div className="ai-job-desc">
-                    {asset.locations?.originalPath ?? asset.locations?.managedPath ?? 'No known path'}
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                    <span className="badge badge-error">missing</span>
-                    {asset.relinkIdentity?.assetKey && <span className="badge badge-muted">relink key</span>}
-                  </div>
-                </div>
+                (() => {
+                  const currentCapability = getMediaAssetSurfaceCapability(asset, currentSurface) ?? asset.capabilityReport?.surfaces[0];
+                  return (
+                    <div key={asset.id} className="publish-job-card">
+                      <div className="ai-job-title">{asset.name}</div>
+                      <div className="ai-job-desc">
+                        {asset.locations?.originalPath ?? asset.locations?.managedPath ?? 'No known path'}
+                      </div>
+                      {currentCapability && (
+                        <div className="ai-job-desc" style={{ marginTop: 6 }}>
+                          {currentCapability.reasons[0] ?? 'Capability details unavailable.'}
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                        <span className="badge badge-error">missing</span>
+                        {currentCapability && (
+                          <span className={`badge ${getCapabilityBadgeClass(currentCapability.disposition)}`}>
+                            {currentSurface} {getMediaCapabilityDispositionLabel(currentCapability.disposition)}
+                          </span>
+                        )}
+                        {asset.relinkIdentity?.assetKey && <span className="badge badge-muted">relink key</span>}
+                      </div>
+                    </div>
+                  );
+                })()
               ))}
             </div>
           </div>
@@ -296,30 +352,51 @@ export function IngestPanel() {
         <div className="review-section">
           <div className="inspector-section-title">Index Health</div>
           <div className="publish-job-list">
-            {recentlyIndexed.map((asset) => (
-              <div key={asset.id} className="publish-job-card">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="ai-job-title">{asset.name}</div>
-                    <div className="ai-job-desc">
-                      {[
-                        asset.ingestMetadata?.storageMode ?? 'Seeded',
-                        ...getMediaAssetTechnicalSummary(asset).slice(0, 2),
-                      ].filter(Boolean).join(' · ')}
+            {recentlyIndexed.map((asset) => {
+              const currentCapability = getMediaAssetSurfaceCapability(asset, currentSurface) ?? asset.capabilityReport?.surfaces[0];
+              const otherSurfaceBadges = (asset.capabilityReport?.surfaces ?? []).filter((surface) => surface.surface !== currentSurface);
+
+              return (
+                <div key={asset.id} className="publish-job-card">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="ai-job-title">{asset.name}</div>
+                      <div className="ai-job-desc">
+                        {[
+                          asset.ingestMetadata?.storageMode ?? 'Seeded',
+                          ...getMediaAssetTechnicalSummary(asset).slice(0, 2),
+                        ].filter(Boolean).join(' · ')}
+                      </div>
+                      {currentCapability && (
+                        <div className="ai-job-desc" style={{ marginTop: 6 }}>
+                          {currentCapability.reasons.slice(0, 2).join(' ')}
+                        </div>
+                      )}
                     </div>
+                    <span className={`badge ${asset.indexStatus === 'READY' ? 'badge-success' : asset.indexStatus === 'ERROR' ? 'badge-error' : 'badge-warning'}`}>
+                      {(asset.indexStatus ?? 'UNSCANNED').toLowerCase()}
+                    </span>
                   </div>
-                  <span className={`badge ${asset.indexStatus === 'READY' ? 'badge-success' : asset.indexStatus === 'ERROR' ? 'badge-error' : 'badge-warning'}`}>
-                    {(asset.indexStatus ?? 'UNSCANNED').toLowerCase()}
-                  </span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                    {currentCapability && (
+                      <span className={`badge ${getCapabilityBadgeClass(currentCapability.disposition)}`}>
+                        {currentSurface} {getMediaCapabilityDispositionLabel(currentCapability.disposition)}
+                      </span>
+                    )}
+                    {otherSurfaceBadges.map((surface) => (
+                      <span key={`${asset.id}-${surface.surface}`} className="badge badge-muted">
+                        {surface.surface} {getMediaCapabilityDispositionLabel(surface.disposition)}
+                      </span>
+                    ))}
+                    {asset.supportTier && <span className="badge badge-muted">{asset.supportTier}</span>}
+                    {asset.relinkIdentity?.assetKey && <span className="badge badge-muted">Relink key</span>}
+                    {asset.proxyMetadata?.status === 'READY' && <span className="badge badge-accent">Proxy</span>}
+                    {asset.waveformMetadata?.status === 'READY' && <span className="badge badge-muted">Waveform</span>}
+                    {(asset.semanticMetadata?.tags.length ?? 0) > 0 && <span className="badge badge-muted">{asset.semanticMetadata?.tags.length} semantic tags</span>}
+                  </div>
                 </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                  {asset.relinkIdentity?.assetKey && <span className="badge badge-muted">Relink key</span>}
-                  {asset.proxyMetadata?.status === 'READY' && <span className="badge badge-accent">Proxy</span>}
-                  {asset.waveformMetadata?.status === 'READY' && <span className="badge badge-muted">Waveform</span>}
-                  {(asset.semanticMetadata?.tags.length ?? 0) > 0 && <span className="badge badge-muted">{asset.semanticMetadata?.tags.length} semantic tags</span>}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 

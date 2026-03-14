@@ -1,10 +1,41 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
+import {
+  DEFAULT_EDITORIAL_WORKSPACE_ID,
+  PROJECT_SCHEMA_VERSION,
+  hydrateMediaAsset,
+  type EditorMediaAsset,
+  type EditorMediaTechnicalMetadata,
+  type EditorProject,
+  type ProjectTemplate,
+} from '@mcua/core';
 import { mediaProbeEngine } from '../engine/MediaProbeEngine';
 import { mediaDatabaseEngine } from '../engine/MediaDatabaseEngine';
 import { videoSourceManager } from '../engine/VideoSourceManager';
 import { playbackEngine } from '../engine/PlaybackEngine';
-import { trackPatchingEngine } from '../engine/TrackPatchingEngine';
+import { smartToolEngine } from '../engine/SmartToolEngine';
+import { editOpsEngine } from '../engine/EditOperationsEngine';
+import { findActiveMediaClip, getSourceTime } from '../engine/compositeRecordFrame';
+import { resolveEditorialFocusTrackIds } from '../lib/editorialTrackFocus';
+import {
+  trackPatchingEngine,
+  type SourceTrackDescriptor,
+  type TrackPatch,
+} from '../engine/TrackPatchingEngine';
+import { editEngine } from '../engine/EditEngine';
+import {
+  buildProjectFromEditorState,
+  buildProjectPersistenceSnapshot,
+  getActiveBinAssets,
+  getProjectPersistenceHash,
+  hydrateEditorStateFromProject,
+} from '../lib/editorProjectState';
+import {
+  buildScriptDocumentFromText,
+  deriveTranscriptSpeakers,
+  syncScriptDocumentToTranscript as syncTranscriptWorkbench,
+} from '../lib/transcriptWorkbench';
+import { getProjectFromRepository, saveProjectToRepository } from '../lib/projectRepository';
 import { usePlayerStore } from './player.store';
 import type { ProjectMediaSettings } from '../engine/MediaDatabaseEngine';
 export type { ProjectMediaSettings } from '../engine/MediaDatabaseEngine';
@@ -12,13 +43,13 @@ export type { ProjectMediaSettings } from '../engine/MediaDatabaseEngine';
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 export type TrackType = 'VIDEO' | 'AUDIO' | 'EFFECT' | 'SUBTITLE' | 'GRAPHIC';
-export type PanelType = 'edit' | 'color' | 'audio' | 'effects' | 'publish' | 'timeline' | 'script' | 'review' | 'news';
+export type PanelType = 'edit' | 'color' | 'audio' | 'effects' | 'publish' | 'timeline' | 'script' | 'review';
 export type ToolbarTab = 'media' | 'effects';
 export type WorkspaceTab = 'video' | 'audio' | 'color' | 'info' | 'effects';
 export type TimelineViewMode = 'timeline' | 'list' | 'waveform';
 export type EditTool = 'select' | 'trim' | 'razor' | 'slip' | 'slide';
-export type SearchFilterType = 'semantic' | 'phonetic' | 'visual';
 export type AlphaMode = 'straight' | 'premultiplied' | 'ignore' | 'auto';
+export type TrimSelectionSide = 'A_SIDE' | 'B_SIDE' | 'BOTH';
 export type CompositeMode =
   | 'source-over' | 'multiply' | 'screen' | 'overlay'
   | 'darken' | 'lighten' | 'color-dodge' | 'color-burn'
@@ -58,6 +89,12 @@ export interface TimeRemapState {
   keyframes: TimeRemapKeyframe[];
   frameBlending: 'none' | 'frame-mix' | 'optical-flow';
   pitchCorrection: boolean; // maintain audio pitch when speed changes
+}
+
+export interface TrimEditPointSelection {
+  trackId: string;
+  editPointTime: number;
+  side: TrimSelectionSide;
 }
 
 export const DEFAULT_INTRINSIC_VIDEO: IntrinsicVideoProps = {
@@ -131,7 +168,7 @@ export interface Sequence {
   createdAt: string;
 }
 
-export interface MediaAsset {
+export interface MediaAsset extends EditorMediaAsset {
   id: string;
   name: string;
   type: 'VIDEO' | 'AUDIO' | 'IMAGE' | 'GRAPHIC' | 'DOCUMENT';
@@ -151,11 +188,13 @@ export interface MediaAsset {
   hasAlpha?: boolean;
   alphaMode?: AlphaMode;
   audioChannels?: number;
+  audioChannelLayout?: string;
   sampleRate?: number;
   fileSize?: number;
   startTimecode?: string;
   bitDepth?: number;
   mimeType?: string;
+  technicalMetadata?: EditorMediaTechnicalMetadata;
   colorLabel?: string;
   rating?: number;
   // File reference for re-probe or relink
@@ -190,22 +229,6 @@ export interface SmartBin {
   matchAll: boolean; // true = AND, false = OR
 }
 
-export interface CollabUser {
-  id: string;
-  displayName: string;
-  avatarUrl?: string;
-  color: string;
-  playheadTime?: number;
-}
-
-export interface AIJob {
-  id: string;
-  type: string;
-  status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
-  progress?: number;
-  resultSummary?: string;
-}
-
 export interface TranscriptCue {
   id: string;
   assetId?: string;
@@ -213,7 +236,57 @@ export interface TranscriptCue {
   text: string;
   startTime: number;
   endTime: number;
+  confidence?: number;
   source: 'SCRIPT' | 'TRANSCRIPT';
+  speakerId?: string;
+  language?: string;
+  translation?: string;
+  provider?: string;
+  linkedScriptLineIds?: string[];
+  words?: TranscriptWord[];
+}
+
+export interface TranscriptWord {
+  text: string;
+  startTime: number;
+  endTime: number;
+  confidence: number;
+  speakerId?: string;
+}
+
+export interface TranscriptSpeaker {
+  id: string;
+  label: string;
+  confidence?: number;
+  color?: string;
+  identified: boolean;
+}
+
+export interface ScriptDocumentLine {
+  id: string;
+  lineNumber: number;
+  text: string;
+  speaker?: string;
+  linkedCueIds: string[];
+}
+
+export interface ScriptDocument {
+  id: string;
+  title: string;
+  source: 'IMPORTED' | 'MANUAL' | 'GENERATED';
+  language: string;
+  text: string;
+  lines: ScriptDocumentLine[];
+  updatedAt: string;
+}
+
+export interface TranscriptionSettings {
+  provider: 'local-faster-whisper' | 'cloud-openai-compatible';
+  translationProvider: 'local-runtime' | 'cloud-openai-compatible';
+  preferredLanguage: 'auto' | string;
+  enableDiarization: boolean;
+  enableSpeakerIdentification: boolean;
+  translateToEnglish: boolean;
 }
 
 export interface ReviewComment {
@@ -236,10 +309,12 @@ export interface Approval {
 
 export interface DesktopJob {
   id: string;
-  kind: 'INGEST' | 'EXPORT';
+  kind: 'INGEST' | 'INDEX' | 'EXPORT' | 'TRANSCODE' | 'TRANSCRIPTION' | 'RENDER' | 'EFFECTS';
   label: string;
   status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
   progress: number;
+  detail?: string;
+  dispatchMode?: 'LOCAL' | 'DISTRIBUTED' | 'HYBRID';
 }
 
 export interface PublishJob {
@@ -270,6 +345,22 @@ export interface SequenceSettings {
   // Color management
   colorSpace: 'rec709' | 'rec2020' | 'dci-p3' | 'aces-cct';
   displayTransform: 'sdr-rec709' | 'hdr-pq' | 'hdr-hlg';
+}
+
+export type DesktopMonitorConsumer = 'record-monitor' | 'program-monitor';
+
+export interface DesktopMonitorAudioPreviewStatus {
+  mixId: string;
+  handle: string;
+  previewPath: string;
+  executionPlanPath: string;
+  previewRenderArtifacts: string[];
+  bufferedPreviewActive: boolean;
+  offlinePrintRenderRequired: boolean;
+  timeRange: {
+    startSeconds: number;
+    endSeconds: number;
+  };
 }
 
 export interface SubtitleCue {
@@ -339,6 +430,52 @@ export interface WatchFolder {
 }
 
 type SaveStatus = 'idle' | 'saved' | 'saving' | 'error';
+let loadProjectRequestSequence = 0;
+const MIN_CLIP_DURATION = 1 / 120;
+
+function getTrimDurationPresetFromFrames(
+  preRollFrames: number,
+  postRollFrames: number,
+  fps: number,
+): EditorState['trimLoopDurationPreset'] {
+  if (preRollFrames !== postRollFrames) {
+    return 'custom';
+  }
+
+  const normalizedFps = Math.max(1, fps);
+  const shortFrames = Math.max(1, Math.round(0.5 * normalizedFps));
+  const mediumFrames = Math.max(1, Math.round(1 * normalizedFps));
+  const longFrames = Math.max(1, Math.round(2 * normalizedFps));
+
+  if (preRollFrames === shortFrames) {
+    return 'short';
+  }
+
+  if (preRollFrames === mediumFrames) {
+    return 'medium';
+  }
+
+  if (preRollFrames === longFrames) {
+    return 'long';
+  }
+
+  return 'custom';
+}
+
+interface EditorialOperationSnapshot {
+  tracks: Track[];
+  selectedClipIds: string[];
+  selectedTrimEditPoints: TrimEditPointSelection[];
+  selectedTrackId: string | null;
+  inspectedClipId: string | null;
+  duration: number;
+  playheadTime: number;
+  inPoint: number | null;
+  outPoint: number | null;
+  sourceInPoint: number | null;
+  sourceOutPoint: number | null;
+  sourcePlayhead: number;
+}
 
 // ─── Store ─────────────────────────────────────────────────────────────────────
 
@@ -346,10 +483,17 @@ interface EditorState {
   // Project
   projectId: string | null;
   projectName: string;
+  projectTemplate: ProjectTemplate;
+  projectDescription: string;
+  projectTags: string[];
+  projectSchemaVersion: number;
+  projectCreatedAt: string | null;
   projectSettings: ProjectSettings;
   projectMediaSettings: ProjectMediaSettings;
   lastSavedAt: string | null;
   saveStatus: SaveStatus;
+  persistedProjectHash: string | null;
+  hasUnsavedChanges: boolean;
   ingestProgress: Record<string, number>; // assetId → 0-1 progress
 
   // Timeline
@@ -370,6 +514,7 @@ interface EditorState {
 
   // Selection
   selectedClipIds: string[];
+  selectedTrimEditPoints: TrimEditPointSelection[];
   selectedTrackId: string | null;
   inspectedClipId: string | null; // Decoupled from selection — set by match frame, auto-playhead, etc.
 
@@ -391,12 +536,14 @@ interface EditorState {
   sourceAsset: MediaAsset | null;
   inPoint: number | null;
   outPoint: number | null;
+  desktopMonitorAudioPreview: Record<DesktopMonitorConsumer, DesktopMonitorAudioPreviewStatus | null>;
   showSafeZones: boolean;
   showWaveforms: boolean;
   snapToGrid: boolean;
 
   // Dialog visibility
   showNewProjectDialog: boolean;
+  newProjectDialogTemplate: ProjectTemplate;
   showSequenceDialog: boolean;
   showTitleTool: boolean;
   showSubtitleEditor: boolean;
@@ -408,25 +555,19 @@ interface EditorState {
   activeInspectorTab: WorkspaceTab;
   toolbarTab: ToolbarTab;
   showInspector: boolean;
-  showAIPanel: boolean;
-  showTranscriptPanel: boolean;
-  showCollabPanel: boolean;
   showExportPanel: boolean;
   showSettingsPanel: boolean;
   isFullscreen: boolean;
 
-  // Collaboration
-  collabUsers: CollabUser[];
-
-  // AI
-  aiJobs: AIJob[];
   transcript: TranscriptCue[];
+  transcriptSpeakers: TranscriptSpeaker[];
+  scriptDocument: ScriptDocument | null;
+  transcriptionSettings: TranscriptionSettings;
   reviewComments: ReviewComment[];
   approvals: Approval[];
   publishJobs: PublishJob[];
   desktopJobs: DesktopJob[];
   watchFolders: WatchFolder[];
-  tokenBalance: number;
 
   // Playback
   volume: number;
@@ -443,9 +584,6 @@ interface EditorState {
 
   // Timeline index panel
   showIndex: boolean;
-
-  // AI search filter
-  searchFilterType: SearchFilterType;
   isCommandPaletteOpen: boolean;
 
   // Source/Record Monitor (Avid-style dual monitor)
@@ -458,10 +596,24 @@ interface EditorState {
   // Track Patching State
   enabledTrackIds: string[];
   syncLockedTrackIds: string[];
+  videoMonitorTrackId: string | null;
+  trackPatchLabels: string[];
 
   // Trim Mode State
   trimMode: 'off' | 'roll' | 'ripple' | 'slip' | 'slide' | 'asymmetric';
   trimActive: boolean;
+  trimCounterFrames: number;
+  trimASideFrames: number;
+  trimBSideFrames: number;
+  trimSelectionLabel: 'OFF' | 'A' | 'B' | 'AB' | 'ASYM';
+  trimViewMode: 'small' | 'big';
+  trimLoopPlaybackActive: boolean;
+  trimLoopOffsetFrames: number;
+  trimLoopPlaybackDirection: -1 | 1;
+  trimLoopPlaybackRate: number;
+  trimLoopDurationPreset: 'short' | 'medium' | 'long' | 'custom';
+  trimLoopPreRollFrames: number;
+  trimLoopPostRollFrames: number;
 
   // Smart Tool State
   smartToolLiftOverwrite: boolean;
@@ -486,6 +638,8 @@ interface EditorState {
   composerLayout: 'source-record' | 'full-frame';
   showTrackingInfo: boolean;
   trackingInfoFields: string[];
+  versionHistoryRetentionPreference: 'manual' | 'session';
+  versionHistoryCompareMode: 'summary' | 'details';
 
   // Audio (extended)
   audioScrubEnabled: boolean;
@@ -520,7 +674,7 @@ interface EditorActions {
   toggleLock: (trackId: string) => void;
   setTrackVolume: (trackId: string, v: number) => void;
   selectTrack: (id: string | null) => void;
-  updateTrack: (trackId: string, updates: Partial<Pick<Track, 'name' | 'color' | 'blendMode'>>) => void;
+  updateTrackColor: (trackId: string, color: string) => void;
 
   // Tracks (add / remove)
   addTrack: (track: Track) => void;
@@ -536,6 +690,9 @@ interface EditorActions {
   splitClipWithId: (clipId: string, time: number, newClipId: string) => void;
   slipClip: (clipId: string, delta: number) => void;
   selectClip: (clipId: string, multi?: boolean) => void;
+  selectTrimEditPoint: (selection: TrimEditPointSelection, multi?: boolean) => void;
+  setTrimEditPointSide: (side: TrimSelectionSide) => void;
+  clearTrimEditPoints: () => void;
   clearSelection: () => void;
   setInspectedClip: (clipId: string | null) => void;
 
@@ -547,6 +704,17 @@ interface EditorActions {
   selectBin: (id: string | null) => void;
   toggleBin: (id: string) => void;
   setSourceAsset: (asset: MediaAsset | null) => void;
+  setDesktopMonitorAudioPreview: (
+    consumer: DesktopMonitorConsumer,
+    status: DesktopMonitorAudioPreviewStatus | null,
+  ) => void;
+  clearDesktopMonitorAudioPreview: (consumer: DesktopMonitorConsumer) => void;
+  updateTranscriptCue: (cueId: string, patch: Partial<TranscriptCue>) => void;
+  replaceTranscript: (cues: TranscriptCue[], speakers?: TranscriptSpeaker[]) => void;
+  setScriptDocument: (document: ScriptDocument | null) => void;
+  updateScriptDocumentText: (text: string) => void;
+  syncScriptDocumentToTranscript: () => void;
+  updateTranscriptionSettings: (patch: Partial<TranscriptionSettings>) => void;
 
   // Monitor
   setInPoint: (t: number | null) => void;
@@ -560,9 +728,6 @@ interface EditorActions {
   setInspectorTab: (t: WorkspaceTab) => void;
   setToolbarTab: (t: ToolbarTab) => void;
   toggleInspector: () => void;
-  toggleAIPanel: () => void;
-  toggleTranscriptPanel: () => void;
-  toggleCollabPanel: () => void;
   toggleExportPanel: () => void;
   toggleSettingsPanel: () => void;
   toggleCommandPalette: (open?: boolean) => void;
@@ -577,7 +742,6 @@ interface EditorActions {
   // Tools
   setActiveTool: (tool: EditTool) => void;
   toggleIndex: () => void;
-  setSearchFilterType: (t: SearchFilterType) => void;
 
   // Clip operations
   deleteSelectedClips: () => void;
@@ -585,6 +749,10 @@ interface EditorActions {
   appendAssetToTimeline: (assetId: string) => void;
   overwriteEdit: () => void;
   insertEdit: () => void;
+  liftEdit: () => void;
+  extractEdit: () => void;
+  liftMarkedRange: () => void;
+  extractMarkedRange: () => void;
   razorAtPlayhead: () => void;
   matchFrame: () => void;
   addMarkerAtPlayhead: (label?: string) => void;
@@ -596,6 +764,7 @@ interface EditorActions {
 
   // Bin operations
   addBin: (name: string, parentId?: string) => void;
+  updateBinColor: (binId: string, color: string) => void;
 
   // Smart Bin operations
   addSmartBin: (name: string, rules: SmartBinRule[], matchAll?: boolean) => void;
@@ -608,6 +777,8 @@ interface EditorActions {
   setApprovalStatus: (approvalId: string, status: Approval['status'], notes?: string) => void;
   queuePublishJob: (job: Pick<PublishJob, 'label' | 'preset' | 'destination'>) => string;
   updatePublishJob: (jobId: string, patch: Partial<PublishJob>) => void;
+  setDesktopJobs: (jobs: DesktopJob[]) => void;
+  upsertDesktopJob: (job: DesktopJob) => void;
 
   // Enhanced trim operations
   rippleDelete: (clipId: string) => void;
@@ -620,7 +791,8 @@ interface EditorActions {
   importMediaFiles: (files: FileList, binId?: string) => void;
 
   // Dialogs
-  toggleNewProjectDialog: () => void;
+  openNewProjectDialog: (template?: ProjectTemplate) => void;
+  closeNewProjectDialog: () => void;
   toggleSequenceDialog: () => void;
   toggleTitleTool: () => void;
   toggleSubtitleEditor: () => void;
@@ -637,6 +809,18 @@ interface EditorActions {
   addTitleClip: (title: TitleClipData) => void;
   removeTitleClip: (titleId: string) => void;
   updateTitleClip: (titleId: string, data: Partial<TitleClipData>) => void;
+  addAdjustmentLayerClip: (options?: {
+    durationSeconds?: number;
+    startTime?: number;
+    endTime?: number;
+    trackId?: string | null;
+    name?: string;
+  }) => string | null;
+  buildTranscriptTitleEffects: (options?: {
+    trackId?: string | null;
+    useTranslations?: boolean;
+    includeSpeakerLabels?: boolean;
+  }) => number;
 
   // Intrinsic property updates
   updateIntrinsicVideo: (clipId: string, patch: Partial<IntrinsicVideoProps>) => void;
@@ -664,10 +848,20 @@ interface EditorActions {
   // Sync Lock
   toggleSyncLock: (trackId: string) => void;
   isSyncLocked: (trackId: string) => boolean;
+  setVideoMonitorTrack: (trackId: string | null) => void;
 
   // Trim Mode
   setTrimMode: (mode: EditorState['trimMode']) => void;
   setTrimActive: (active: boolean) => void;
+  setTrimViewMode: (mode: EditorState['trimViewMode']) => void;
+  toggleTrimViewMode: () => void;
+  setTrimLoopPlaybackActive: (active: boolean) => void;
+  toggleTrimLoopPlayback: () => void;
+  setTrimLoopOffsetFrames: (frames: number) => void;
+  setTrimLoopPlaybackDirection: (direction: -1 | 1) => void;
+  setTrimLoopPlaybackRate: (rate: number) => void;
+  setTrimLoopDurationPreset: (preset: EditorState['trimLoopDurationPreset']) => void;
+  setTrimLoopRollFrames: (preRollFrames: number, postRollFrames: number) => void;
 
   // Smart Tool
   toggleSmartToolLiftOverwrite: () => void;
@@ -694,6 +888,8 @@ interface EditorActions {
   // Composer
   setComposerLayout: (layout: EditorState['composerLayout']) => void;
   toggleTrackingInfo: () => void;
+  setVersionHistoryRetentionPreference: (preference: EditorState['versionHistoryRetentionPreference']) => void;
+  setVersionHistoryCompareMode: (mode: EditorState['versionHistoryCompareMode']) => void;
 
   // Audio (extended)
   toggleAudioScrub: () => void;
@@ -709,7 +905,10 @@ interface EditorActions {
   goToEnd: () => void;
 
   // Init
-  loadProject: (projectId: string) => void;
+  applyProjectSnapshot: (project: EditorProject, options?: { markDirty?: boolean; lastSavedAt?: string | null }) => void;
+  loadProject: (projectId: string) => Promise<void>;
+  saveProject: () => Promise<void>;
+  restoreProjectSnapshot: (project: EditorProject) => void;
 
   // ── Multi-Sequence Actions ──────────────────────────────────────────────
   createSequence: (name: string) => string;
@@ -768,11 +967,38 @@ export function makeClip(base: Omit<Clip, 'intrinsicVideo' | 'intrinsicAudio' | 
   };
 }
 
+export const DEFAULT_TRACK_COLORS: Record<TrackType, string> = {
+  VIDEO: '#7f8ca3',
+  AUDIO: '#6f9a86',
+  EFFECT: '#8f87a8',
+  SUBTITLE: '#7a8ea7',
+  GRAPHIC: '#9a8f7a',
+};
+
+export const TRACK_COLOR_PRESETS: Record<TrackType, string[]> = {
+  VIDEO: ['#7f8ca3', '#818cf8', '#5b6af5', '#5bbfc7', '#4f63f5'],
+  AUDIO: ['#6f9a86', '#2bb672', '#4ade80', '#22c896', '#7fa28f'],
+  EFFECT: ['#8f87a8', '#a78bfa', '#c084fc', '#e8943a', '#f59e0b'],
+  SUBTITLE: ['#7a8ea7', '#6bc5e3', '#38bdf8', '#60a5fa', '#93c5fd'],
+  GRAPHIC: ['#9a8f7a', '#fb7185', '#f97316', '#f59e0b', '#e05b8e'],
+};
+
+export const BIN_COLOR_PRESETS = [
+  '#5b6af5',
+  '#818cf8',
+  '#e05b8e',
+  '#f59e0b',
+  '#2bb672',
+  '#5bbfc7',
+  '#e8943a',
+  '#9a8f7a',
+];
+
 const INITIAL_TRACKS: Track[] = [
-  { id: 't-v1', name: 'V1', type: 'VIDEO', sortOrder: 0, muted: false, locked: false, solo: false, volume: 1, color: '#5b6af5', clips: [] },
-  { id: 't-v2', name: 'V2', type: 'VIDEO', sortOrder: 1, muted: false, locked: false, solo: false, volume: 1, color: '#818cf8', clips: [] },
-  { id: 't-a1', name: 'A1', type: 'AUDIO', sortOrder: 2, muted: false, locked: false, solo: false, volume: 0.85, color: '#e05b8e', clips: [] },
-  { id: 't-a2', name: 'A2', type: 'AUDIO', sortOrder: 3, muted: false, locked: false, solo: false, volume: 0.6, color: '#4ade80', clips: [] },
+  { id: 't-v1', name: 'V1', type: 'VIDEO', sortOrder: 0, muted: false, locked: false, solo: false, volume: 1, color: DEFAULT_TRACK_COLORS.VIDEO, clips: [] },
+  { id: 't-v2', name: 'V2', type: 'VIDEO', sortOrder: 1, muted: false, locked: false, solo: false, volume: 1, color: '#8e9bb2', clips: [] },
+  { id: 't-a1', name: 'A1', type: 'AUDIO', sortOrder: 2, muted: false, locked: false, solo: false, volume: 0.85, color: DEFAULT_TRACK_COLORS.AUDIO, clips: [] },
+  { id: 't-a2', name: 'A2', type: 'AUDIO', sortOrder: 3, muted: false, locked: false, solo: false, volume: 0.6, color: '#7fa28f', clips: [] },
 ];
 
 const INITIAL_BINS: Bin[] = [
@@ -786,6 +1012,15 @@ const INITIAL_SMART_BINS: SmartBin[] = [
 ];
 
 const INITIAL_TRANSCRIPT: TranscriptCue[] = [];
+const INITIAL_TRANSCRIPT_SPEAKERS: TranscriptSpeaker[] = [];
+const INITIAL_TRANSCRIPTION_SETTINGS: TranscriptionSettings = {
+  provider: 'local-faster-whisper',
+  translationProvider: 'local-runtime',
+  preferredLanguage: 'auto',
+  enableDiarization: true,
+  enableSpeakerIdentification: false,
+  translateToEnglish: false,
+};
 const INITIAL_APPROVALS: Approval[] = [];
 const INITIAL_REVIEW_COMMENTS: ReviewComment[] = [];
 
@@ -834,8 +1069,165 @@ function createId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function isVisualTrack(track: Pick<Track, 'type'>): boolean {
+  return track.type === 'VIDEO' || track.type === 'GRAPHIC' || track.type === 'EFFECT';
+}
+
+function normalizeTrackOrdering(tracks: Track[]): void {
+  tracks.sort((left, right) => left.sortOrder - right.sortOrder);
+  tracks.forEach((track, index) => {
+    track.sortOrder = index;
+  });
+}
+
+function nextTrackName(tracks: Track[], type: TrackType): string {
+  const prefix = type === 'VIDEO'
+    ? 'V'
+    : type === 'AUDIO'
+      ? 'A'
+      : type === 'GRAPHIC'
+        ? 'G'
+        : type === 'SUBTITLE'
+          ? 'S'
+          : 'FX';
+  const count = tracks.filter((track) => track.type === type).length;
+  return `${prefix}${count + 1}`;
+}
+
+function insertTrackAfterVisualTracks(tracks: Track[], track: Track): Track {
+  normalizeTrackOrdering(tracks);
+  const lastVisualIndex = tracks.reduce((lastIndex, currentTrack, index) => {
+    return isVisualTrack(currentTrack) ? index : lastIndex;
+  }, -1);
+  const insertIndex = Math.max(0, lastVisualIndex + 1);
+  tracks.splice(insertIndex, 0, track);
+  normalizeTrackOrdering(tracks);
+  return tracks[insertIndex] ?? track;
+}
+
+function ensureTimelineTrack(
+  tracks: Track[],
+  type: Extract<TrackType, 'EFFECT' | 'GRAPHIC'>,
+): Track {
+  const existing = tracks.find((track) => track.type === type && !track.locked);
+  if (existing) {
+    return existing;
+  }
+
+  const track: Track = {
+    id: createId('track'),
+    name: nextTrackName(tracks, type),
+    type,
+    sortOrder: tracks.length,
+    muted: false,
+    locked: false,
+    solo: false,
+    volume: 1,
+    clips: [],
+    color: DEFAULT_TRACK_COLORS[type],
+  };
+
+  return insertTrackAfterVisualTracks(tracks, track);
+}
+
+function removeAutogeneratedTranscriptTitles(state: EditorState): void {
+  const generatedTitleIds = new Set(
+    state.titleClips
+      .filter((title) => title.templateId === 'auto-transcript-subtitle')
+      .map((title) => title.id),
+  );
+
+  if (generatedTitleIds.size === 0) {
+    return;
+  }
+
+  state.titleClips = state.titleClips.filter((title) => !generatedTitleIds.has(title.id));
+  for (const track of state.tracks) {
+    if (track.type !== 'GRAPHIC') {
+      continue;
+    }
+    track.clips = track.clips.filter((clip) => !generatedTitleIds.has(clip.assetId ?? ''));
+  }
+}
+
+function areDesktopMonitorAudioPreviewStatusesEqual(
+  left: DesktopMonitorAudioPreviewStatus | null,
+  right: DesktopMonitorAudioPreviewStatus | null,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+  if (
+    left.mixId !== right.mixId
+    || left.handle !== right.handle
+    || left.previewPath !== right.previewPath
+    || left.executionPlanPath !== right.executionPlanPath
+    || left.bufferedPreviewActive !== right.bufferedPreviewActive
+    || left.offlinePrintRenderRequired !== right.offlinePrintRenderRequired
+    || left.timeRange.startSeconds !== right.timeRange.startSeconds
+    || left.timeRange.endSeconds !== right.timeRange.endSeconds
+    || left.previewRenderArtifacts.length !== right.previewRenderArtifacts.length
+  ) {
+    return false;
+  }
+
+  return left.previewRenderArtifacts.every((artifactPath, index) => artifactPath === right.previewRenderArtifacts[index]);
+}
+
+function clipDuration(clip: Clip): number {
+  return clip.endTime - clip.startTime;
+}
+
+function cloneClipForSnapshot(clip: Clip): Clip {
+  return {
+    ...clip,
+    waveformData: clip.waveformData ? [...clip.waveformData] : undefined,
+    intrinsicVideo: { ...clip.intrinsicVideo },
+    intrinsicAudio: { ...clip.intrinsicAudio },
+    timeRemap: {
+      ...clip.timeRemap,
+      keyframes: clip.timeRemap.keyframes.map((keyframe) => ({
+        ...keyframe,
+        bezierIn: keyframe.bezierIn ? { ...keyframe.bezierIn } : undefined,
+        bezierOut: keyframe.bezierOut ? { ...keyframe.bezierOut } : undefined,
+      })),
+    },
+  };
+}
+
+function cloneTrackForSnapshot(track: Track): Track {
+  return {
+    ...track,
+    clips: track.clips.map(cloneClipForSnapshot),
+  };
+}
+
 function findAssetById(bins: Bin[], assetId: string): MediaAsset | null {
   return collectAllAssets(bins).find((asset) => asset.id === assetId) ?? null;
+}
+
+function findBinByIdMutable(bins: Bin[], binId: string): Bin | null {
+  for (const bin of bins) {
+    if (bin.id === binId) {
+      return bin;
+    }
+    const nested = findBinByIdMutable(bin.children, binId);
+    if (nested) {
+      return nested;
+    }
+  }
+  return null;
+}
+
+function getAssetWaveformData(asset: MediaAsset | null | undefined): number[] | undefined {
+  if (!asset) {
+    return undefined;
+  }
+
+  return asset.waveformData ?? asset.waveformMetadata?.peaks;
 }
 
 function getClipTypeForAsset(asset: MediaAsset): Clip['type'] {
@@ -875,6 +1267,30 @@ const DEFAULT_SEQUENCE: Sequence = {
   outPoint: null,
   createdAt: new Date().toISOString(),
 };
+
+function hydrateTrackPatchingEngineFromProjectState(
+  tracks: Track[],
+  enabledTrackIds: string[],
+  syncLockedTrackIds: string[],
+  videoMonitorTrackId: string | null,
+  sourceAssetId: string | null,
+  sourceTrackDescriptors: SourceTrackDescriptor[],
+  trackPatches: TrackPatch[],
+): void {
+  trackPatchingEngine.restoreState({
+    sourceAssetId,
+    sourceTracks: sourceTrackDescriptors,
+    patches: trackPatches,
+    monitor: {
+      videoMonitorTrackId,
+      enabledRecordTracks: new Set(enabledTrackIds),
+      soloTracks: new Set(tracks.filter((track) => track.solo).map((track) => track.id)),
+      mutedTracks: new Set(tracks.filter((track) => track.muted).map((track) => track.id)),
+      syncLocks: new Set(syncLockedTrackIds),
+      lockedTracks: new Set(tracks.filter((track) => track.locked).map((track) => track.id)),
+    },
+  });
+}
 
 // Module-level holder for the alpha dialog resolve callback.
 // Functions are not compatible with Immer proxies, so we store
@@ -950,14 +1366,227 @@ const DEMO_SMART_BINS: SmartBin[] = [
 
 // ─── Store creation ────────────────────────────────────────────────────────────
 export const useEditorStore = create<EditorState & EditorActions>()(
-  immer((set, get) => ({
+  immer((set, get) => {
+    const captureEditorialOperationSnapshot = (): EditorialOperationSnapshot => {
+      const state = get();
+      return {
+        tracks: state.tracks.map(cloneTrackForSnapshot),
+        selectedClipIds: [...state.selectedClipIds],
+        selectedTrimEditPoints: state.selectedTrimEditPoints.map((selection) => ({ ...selection })),
+        selectedTrackId: state.selectedTrackId,
+        inspectedClipId: state.inspectedClipId,
+        duration: state.duration,
+        playheadTime: state.playheadTime,
+        inPoint: state.inPoint,
+        outPoint: state.outPoint,
+        sourceInPoint: state.sourceInPoint,
+        sourceOutPoint: state.sourceOutPoint,
+        sourcePlayhead: state.sourcePlayhead,
+      };
+    };
+
+    const restoreEditorialOperationSnapshot = (snapshot: EditorialOperationSnapshot): void => {
+      set((s) => {
+        s.tracks = snapshot.tracks.map(cloneTrackForSnapshot);
+        s.selectedClipIds = [...snapshot.selectedClipIds];
+        s.selectedTrimEditPoints = snapshot.selectedTrimEditPoints.map((selection) => ({ ...selection }));
+        s.selectedTrackId = snapshot.selectedTrackId;
+        s.inspectedClipId = snapshot.inspectedClipId;
+        s.duration = snapshot.duration;
+        s.playheadTime = snapshot.playheadTime;
+        s.inPoint = snapshot.inPoint;
+        s.outPoint = snapshot.outPoint;
+        s.sourceInPoint = snapshot.sourceInPoint;
+        s.sourceOutPoint = snapshot.sourceOutPoint;
+        s.sourcePlayhead = snapshot.sourcePlayhead;
+      });
+    };
+
+    const executeUndoableEditorialEdit = (
+      description: string,
+      runner: () => { success: boolean; description: string },
+    ): void => {
+      const beforeSnapshot = captureEditorialOperationSnapshot();
+      editEngine.execute({
+        description,
+        execute() {
+          restoreEditorialOperationSnapshot(beforeSnapshot);
+          const result = runner();
+          if (!result.success) {
+            restoreEditorialOperationSnapshot(beforeSnapshot);
+            throw new Error(result.description);
+          }
+        },
+        undo() {
+          restoreEditorialOperationSnapshot(beforeSnapshot);
+        },
+      });
+    };
+
+    const executeUndoableSelectionEdit = (
+      description: string,
+      runner: (selectedClipIds: string[]) => { success: boolean; description: string },
+    ): void => {
+      const selectedClipIds = [...get().selectedClipIds];
+      if (selectedClipIds.length === 0) {
+        return;
+      }
+
+      const beforeSnapshot = captureEditorialOperationSnapshot();
+      editEngine.execute({
+        description,
+        execute() {
+          restoreEditorialOperationSnapshot(beforeSnapshot);
+          const result = runner(selectedClipIds);
+          if (!result.success) {
+            restoreEditorialOperationSnapshot(beforeSnapshot);
+            throw new Error(result.description);
+          }
+          set((s) => {
+            s.inspectedClipId = null;
+          });
+        },
+        undo() {
+          restoreEditorialOperationSnapshot(beforeSnapshot);
+        },
+      });
+    };
+
+    return ({
+    applyProjectSnapshot(project: EditorProject, options?: { markDirty?: boolean; lastSavedAt?: string | null }) {
+      const hydrated = hydrateEditorStateFromProject(project);
+      playbackEngine.pause();
+      editEngine.clear();
+      usePlayerStore.setState({
+        isPlaying: false,
+        speed: 1,
+        currentFrame: 0,
+        inPoint: null,
+        outPoint: null,
+        loopPlayback: false,
+        sourceClipId: null,
+        activeMonitor: 'source',
+        showSafeZones: false,
+        activeScope: null,
+      });
+      hydrateTrackPatchingEngineFromProjectState(
+        hydrated.tracks,
+        hydrated.enabledTrackIds,
+        hydrated.syncLockedTrackIds,
+        hydrated.videoMonitorTrackId,
+        hydrated.sourceAsset?.id ?? null,
+        hydrated.sourceTrackDescriptors,
+        hydrated.trackPatches,
+      );
+
+      set((s) => {
+        s.projectId = hydrated.projectId;
+        s.projectName = hydrated.projectName;
+        s.projectTemplate = hydrated.projectTemplate;
+        s.projectDescription = hydrated.projectDescription;
+        s.projectTags = hydrated.projectTags;
+        s.projectSchemaVersion = hydrated.projectSchemaVersion;
+        s.projectCreatedAt = hydrated.projectCreatedAt;
+        s.projectSettings = hydrated.projectSettings;
+        s.lastSavedAt = options?.lastSavedAt ?? project.updatedAt;
+        s.saveStatus = 'saved';
+        s.persistedProjectHash = null;
+        s.hasUnsavedChanges = Boolean(options?.markDirty);
+        s.timelineId = hydrated.projectId;
+        s.tracks = hydrated.tracks;
+        s.markers = hydrated.markers;
+        s.playheadTime = 0;
+        s.isPlaying = false;
+        s.scrollLeft = 0;
+        s.duration = hydrated.duration;
+        s.selectedClipIds = [];
+        s.selectedTrimEditPoints = [];
+        s.selectedTrackId = null;
+        s.inspectedClipId = null;
+        s.bins = hydrated.bins;
+        s.selectedBinId = hydrated.selectedBinId;
+        s.activeBinAssets = hydrated.activeBinAssets;
+        s.sequenceSettings = hydrated.sequenceSettings;
+        s.subtitleTracks = hydrated.subtitleTracks;
+        s.titleClips = hydrated.titleClips;
+        s.sourceAsset = hydrated.sourceAsset;
+        s.inPoint = null;
+        s.outPoint = null;
+        s.desktopMonitorAudioPreview = {
+          'record-monitor': null,
+          'program-monitor': null,
+        };
+        s.transcript = hydrated.transcript;
+        s.transcriptSpeakers = hydrated.transcriptSpeakers;
+        s.scriptDocument = hydrated.scriptDocument;
+        s.transcriptionSettings = hydrated.transcriptionSettings;
+        s.reviewComments = hydrated.reviewComments;
+        s.approvals = hydrated.approvals;
+        s.publishJobs = hydrated.publishJobs;
+        s.desktopJobs = [];
+        s.watchFolders = hydrated.watchFolders;
+        s.trackHeights = hydrated.trackHeights;
+        s.clipTextDisplay = hydrated.clipTextDisplay;
+        s.composerLayout = hydrated.composerLayout;
+        s.showTrackingInfo = hydrated.showTrackingInfo;
+        s.trackingInfoFields = hydrated.trackingInfoFields;
+        s.versionHistoryRetentionPreference = hydrated.versionHistoryRetentionPreference;
+        s.versionHistoryCompareMode = hydrated.versionHistoryCompareMode;
+        s.dupeDetectionEnabled = hydrated.dupeDetectionEnabled;
+        s.activeWorkspaceId = hydrated.activeWorkspaceId;
+        s.sourceInPoint = null;
+        s.sourceOutPoint = null;
+        s.sourcePlayhead = 0;
+        s.recordInPoint = null;
+        s.recordOutPoint = null;
+        s.enabledTrackIds = hydrated.enabledTrackIds;
+        s.syncLockedTrackIds = hydrated.syncLockedTrackIds;
+        s.videoMonitorTrackId = hydrated.videoMonitorTrackId;
+        s.trackPatchLabels = [];
+        s.trimMode = 'off';
+        s.trimActive = false;
+        s.trimCounterFrames = 0;
+        s.trimASideFrames = 0;
+        s.trimBSideFrames = 0;
+        s.trimSelectionLabel = 'OFF';
+        s.trimViewMode = 'small';
+        s.trimLoopPlaybackActive = false;
+        s.trimLoopOffsetFrames = 0;
+        s.trimLoopPlaybackDirection = 1;
+        s.trimLoopPlaybackRate = 1;
+        s.trimLoopDurationPreset = 'short';
+        s.trimLoopPreRollFrames = 12;
+        s.trimLoopPostRollFrames = 12;
+      });
+
+      get().setSourceAsset(hydrated.sourceAsset);
+      usePlayerStore.getState().setActiveMonitor('record');
+
+      const snapshot = buildProjectPersistenceSnapshot(get());
+      set((s) => {
+        s.persistedProjectHash = options?.markDirty
+          ? null
+          : snapshot
+            ? getProjectPersistenceHash(snapshot)
+            : null;
+        s.hasUnsavedChanges = Boolean(options?.markDirty);
+      });
+    },
+
     // Initial state
     projectId: null,
     projectName: 'Untitled Project',
+    projectTemplate: 'film' as ProjectTemplate,
+    projectDescription: '',
+    projectTags: [],
+    projectSchemaVersion: PROJECT_SCHEMA_VERSION,
+    projectCreatedAt: null,
     projectSettings: DEFAULT_PROJECT_SETTINGS,
     projectMediaSettings: { organizationMode: 'keep-in-place', generateProxies: false, proxyResolution: '1/2' as const },
     lastSavedAt: null,
     saveStatus: 'idle' as SaveStatus,
+    persistedProjectHash: null,
+    hasUnsavedChanges: false,
     ingestProgress: {},
     timelineId: null,
     tracks: INITIAL_TRACKS,
@@ -975,6 +1604,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     showSequenceBin: false,
 
     selectedClipIds: [],
+    selectedTrimEditPoints: [],
     selectedTrackId: null,
     inspectedClipId: null,
     bins: INITIAL_BINS,
@@ -998,10 +1628,15 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     sourceAsset: null,
     inPoint: null,
     outPoint: null,
+    desktopMonitorAudioPreview: {
+      'record-monitor': null,
+      'program-monitor': null,
+    },
     showSafeZones: false,
     showWaveforms: true,
     snapToGrid: true,
     showNewProjectDialog: false,
+    newProjectDialogTemplate: 'film',
     showSequenceDialog: false,
     showTitleTool: false,
     showSubtitleEditor: false,
@@ -1011,31 +1646,24 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     activeInspectorTab: 'video',
     toolbarTab: 'media',
     showInspector: true,
-    showAIPanel: false,
-    showTranscriptPanel: false,
-    showCollabPanel: false,
     showExportPanel: false,
     showSettingsPanel: false,
     isFullscreen: false,
-    collabUsers: [
-      { id: 'u1', displayName: 'Sarah K.', color: '#00d4aa' },
-      { id: 'u2', displayName: 'Marcus T.', color: '#2bb672' },
-    ],
-    aiJobs: [],
     transcript: INITIAL_TRANSCRIPT,
+    transcriptSpeakers: INITIAL_TRANSCRIPT_SPEAKERS,
+    scriptDocument: null,
+    transcriptionSettings: INITIAL_TRANSCRIPTION_SETTINGS,
     reviewComments: INITIAL_REVIEW_COMMENTS,
     approvals: INITIAL_APPROVALS,
     publishJobs: [],
     desktopJobs: [],
     watchFolders: [],
-    tokenBalance: 487,
     volume: 0.8,
     isMuted: false,
     timelineViewMode: 'timeline' as TimelineViewMode,
     clipGroups: {},
     activeTool: 'select' as EditTool,
     showIndex: false,
-    searchFilterType: 'semantic' as SearchFilterType,
     isCommandPaletteOpen: false,
 
     // Source/Record Monitor (Avid-style dual monitor)
@@ -1048,10 +1676,24 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     // Track Patching State
     enabledTrackIds: INITIAL_TRACKS.map(t => t.id),
     syncLockedTrackIds: [],
+    videoMonitorTrackId: null,
+    trackPatchLabels: [],
 
     // Trim Mode State
     trimMode: 'off' as EditorState['trimMode'],
     trimActive: false,
+    trimCounterFrames: 0,
+    trimASideFrames: 0,
+    trimBSideFrames: 0,
+    trimSelectionLabel: 'OFF' as EditorState['trimSelectionLabel'],
+    trimViewMode: 'small' as EditorState['trimViewMode'],
+    trimLoopPlaybackActive: false,
+    trimLoopOffsetFrames: 0,
+    trimLoopPlaybackDirection: 1 as -1 | 1,
+    trimLoopPlaybackRate: 1,
+    trimLoopDurationPreset: 'short' as EditorState['trimLoopDurationPreset'],
+    trimLoopPreRollFrames: 12,
+    trimLoopPostRollFrames: 12,
 
     // Smart Tool State
     smartToolLiftOverwrite: true,
@@ -1076,13 +1718,15 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     composerLayout: 'source-record' as EditorState['composerLayout'],
     showTrackingInfo: true,
     trackingInfoFields: ['master-tc', 'duration'],
+    versionHistoryRetentionPreference: 'manual' as EditorState['versionHistoryRetentionPreference'],
+    versionHistoryCompareMode: 'summary' as EditorState['versionHistoryCompareMode'],
 
     // Audio (extended)
     audioScrubEnabled: false,
     soloSafeMode: false,
 
     // Workspace
-    activeWorkspaceId: 'source-record',
+    activeWorkspaceId: DEFAULT_EDITORIAL_WORKSPACE_ID,
 
     // NLE Parity: Additional Editorial State
     editMode: 'overwrite' as EditorState['editMode'],
@@ -1111,20 +1755,37 @@ export const useEditorStore = create<EditorState & EditorActions>()(
 
     toggleMute: (id) => set((s) => {
       const t = s.tracks.find(t => t.id === id); if (t) t.muted = !t.muted;
+      trackPatchingEngine.toggleMute(id);
     }),
     toggleSolo: (id) => set((s) => {
       const t = s.tracks.find(t => t.id === id); if (t) t.solo = !t.solo;
+      trackPatchingEngine.toggleSolo(id);
     }),
     toggleLock: (id) => set((s) => {
       const t = s.tracks.find(t => t.id === id); if (t) t.locked = !t.locked;
+      trackPatchingEngine.toggleTrackLock(id);
     }),
     setTrackVolume: (id, v) => set((s) => {
       const t = s.tracks.find(t => t.id === id); if (t) t.volume = v;
     }),
-    selectTrack: (id) => set((s) => { s.selectedTrackId = id; }),
-    updateTrack: (trackId, updates) => set((s) => {
-      const t = s.tracks.find(t => t.id === trackId);
-      if (t) Object.assign(t, updates);
+    selectTrack: (id) => set((s) => {
+      s.selectedTrackId = id;
+      s.selectedClipIds = [];
+      s.inspectedClipId = null;
+    }),
+    updateTrackColor: (trackId, color) => set((s) => {
+      const track = s.tracks.find((candidate) => candidate.id === trackId);
+      if (!track) {
+        return;
+      }
+
+      const previousColor = track.color;
+      track.color = color;
+      for (const clip of track.clips) {
+        if (!clip.color || clip.color === previousColor) {
+          clip.color = color;
+        }
+      }
     }),
 
     addTrack: (track) => set((s) => {
@@ -1216,10 +1877,17 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     }),
     slipClip: (clipId, delta) => set((s) => {
       for (const t of s.tracks) {
+        if (t.locked) {
+          continue;
+        }
         const c = t.clips.find(c => c.id === clipId);
         if (c) {
-          c.trimStart = Math.max(0, c.trimStart + delta);
-          c.trimEnd = Math.max(0, c.trimEnd - delta);
+          const clampedDelta = Math.max(-c.trimStart, Math.min(delta, c.trimEnd));
+          if (Math.abs(clampedDelta) < Number.EPSILON) {
+            return;
+          }
+          c.trimStart = Math.max(0, c.trimStart + clampedDelta);
+          c.trimEnd = Math.max(0, c.trimEnd - clampedDelta);
           return;
         }
       }
@@ -1232,14 +1900,52 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       } else {
         s.selectedClipIds = [clipId];
       }
+      s.selectedTrimEditPoints = [];
       // Clear inspected clip when user explicitly selects — selection takes precedence
       s.inspectedClipId = null;
     }),
-    clearSelection: () => set((s) => { s.selectedClipIds = []; s.inspectedClipId = null; }),
+    selectTrimEditPoint: (selection, multi = false) => set((s) => {
+      const normalizedSelection = {
+        trackId: selection.trackId,
+        editPointTime: selection.editPointTime,
+        side: selection.side,
+      };
+
+      if (!multi) {
+        s.selectedTrimEditPoints = [normalizedSelection];
+      } else {
+        s.selectedTrimEditPoints = [
+          ...s.selectedTrimEditPoints.filter((candidate) => candidate.trackId !== normalizedSelection.trackId),
+          normalizedSelection,
+        ];
+      }
+
+      s.selectedClipIds = [];
+      s.selectedTrackId = normalizedSelection.trackId;
+      s.inspectedClipId = null;
+    }),
+    setTrimEditPointSide: (side) => set((s) => {
+      s.selectedTrimEditPoints = s.selectedTrimEditPoints.map((selection) => ({
+        ...selection,
+        side,
+      }));
+    }),
+    clearTrimEditPoints: () => set((s) => {
+      s.selectedTrimEditPoints = [];
+    }),
+    clearSelection: () => set((s) => {
+      s.selectedClipIds = [];
+      s.selectedTrimEditPoints = [];
+      s.inspectedClipId = null;
+    }),
     setInspectedClip: (clipId) => set((s) => { s.inspectedClipId = clipId; }),
 
     selectBin: (id) => set((s) => {
       s.selectedBinId = id;
+      s.selectedTrackId = null;
+      s.selectedClipIds = [];
+      s.selectedTrimEditPoints = [];
+      s.inspectedClipId = null;
       const findAssets = (bins: Bin[]): MediaAsset[] => {
         for (const b of bins) {
           if (b.id === id) return b.assets;
@@ -1293,6 +1999,86 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         usePlayerStore.getState().setSourceClip(null);
       }
     },
+    setDesktopMonitorAudioPreview: (consumer, status) => set((s) => {
+      const nextStatus = status
+        ? {
+            ...status,
+            previewRenderArtifacts: [...status.previewRenderArtifacts],
+            timeRange: { ...status.timeRange },
+          }
+        : null;
+      if (areDesktopMonitorAudioPreviewStatusesEqual(s.desktopMonitorAudioPreview[consumer], nextStatus)) {
+        return;
+      }
+      s.desktopMonitorAudioPreview[consumer] = nextStatus;
+    }),
+    clearDesktopMonitorAudioPreview: (consumer) => set((s) => {
+      if (s.desktopMonitorAudioPreview[consumer] == null) {
+        return;
+      }
+      s.desktopMonitorAudioPreview[consumer] = null;
+    }),
+    updateTranscriptCue: (cueId, patch) => set((s) => {
+      const cue = s.transcript.find((entry) => entry.id === cueId);
+      if (!cue) {
+        return;
+      }
+      Object.assign(cue, patch);
+      s.transcriptSpeakers = deriveTranscriptSpeakers(s.transcript);
+      if (s.scriptDocument) {
+        const synced = syncTranscriptWorkbench(s.scriptDocument, s.transcript);
+        s.scriptDocument = synced.scriptDocument;
+        s.transcript = synced.transcript;
+      }
+    }),
+    replaceTranscript: (cues, speakers) => set((s) => {
+      s.transcript = cues.map((cue) => ({
+        ...cue,
+        linkedScriptLineIds: [...(cue.linkedScriptLineIds ?? [])],
+        words: cue.words ? cue.words.map((word) => ({ ...word })) : undefined,
+      }));
+      s.transcriptSpeakers = speakers
+        ? speakers.map((speaker) => ({ ...speaker }))
+        : deriveTranscriptSpeakers(s.transcript);
+      if (s.scriptDocument) {
+        const synced = syncTranscriptWorkbench(s.scriptDocument, s.transcript);
+        s.scriptDocument = synced.scriptDocument;
+        s.transcript = synced.transcript;
+      }
+    }),
+    setScriptDocument: (document) => set((s) => {
+      s.scriptDocument = document
+        ? {
+            ...document,
+            lines: document.lines.map((line) => ({
+              ...line,
+              linkedCueIds: [...line.linkedCueIds],
+            })),
+          }
+        : null;
+      if (s.scriptDocument) {
+        const synced = syncTranscriptWorkbench(s.scriptDocument, s.transcript);
+        s.scriptDocument = synced.scriptDocument;
+        s.transcript = synced.transcript;
+      }
+    }),
+    updateScriptDocumentText: (text) => set((s) => {
+      const nextDocument = buildScriptDocumentFromText(text, s.scriptDocument);
+      const synced = syncTranscriptWorkbench(nextDocument, s.transcript);
+      s.scriptDocument = synced.scriptDocument;
+      s.transcript = synced.transcript;
+    }),
+    syncScriptDocumentToTranscript: () => set((s) => {
+      const synced = syncTranscriptWorkbench(s.scriptDocument, s.transcript);
+      s.scriptDocument = synced.scriptDocument;
+      s.transcript = synced.transcript;
+    }),
+    updateTranscriptionSettings: (patch) => set((s) => {
+      s.transcriptionSettings = {
+        ...s.transcriptionSettings,
+        ...patch,
+      };
+    }),
     setInPoint: (t) => set((s) => { s.inPoint = t; }),
     setOutPoint: (t) => set((s) => { s.outPoint = t; }),
     toggleSafeZones: () => set((s) => { s.showSafeZones = !s.showSafeZones; }),
@@ -1302,9 +2088,6 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     setInspectorTab: (t) => set((s) => { s.activeInspectorTab = t; }),
     setToolbarTab: (t) => set((s) => { s.toolbarTab = t; }),
     toggleInspector: () => set((s) => { s.showInspector = !s.showInspector; }),
-    toggleAIPanel: () => set((s) => { s.showAIPanel = !s.showAIPanel; }),
-    toggleTranscriptPanel: () => set((s) => { s.showTranscriptPanel = !s.showTranscriptPanel; }),
-    toggleCollabPanel: () => set((s) => { s.showCollabPanel = !s.showCollabPanel; }),
     toggleExportPanel: () => set((s) => { s.showExportPanel = !s.showExportPanel; }),
     toggleSettingsPanel: () => set((s) => { s.showSettingsPanel = !s.showSettingsPanel; }),
     toggleCommandPalette: (open) => set((s) => {
@@ -1317,7 +2100,6 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     // Tools
     setActiveTool: (tool) => set((s) => { s.activeTool = tool; }),
     toggleIndex: () => set((s) => { s.showIndex = !s.showIndex; }),
-    setSearchFilterType: (t) => set((s) => { s.searchFilterType = t; }),
 
     // Clip operations
     deleteSelectedClips: () => set((s) => {
@@ -1375,7 +2157,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         type: getClipTypeForAsset(asset),
         assetId: asset.id,
         color: targetTrack.color,
-        waveformData: asset.waveformData,
+        waveformData: getAssetWaveformData(asset),
       });
       targetTrack.clips.push(clip);
       s.selectedClipIds = [clip.id];
@@ -1423,39 +2205,55 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       const newClipIds: string[] = [];
 
       for (const targetTrack of targetTracks) {
-        // Remove or trim overlapping clips in the target range
-        targetTrack.clips = targetTrack.clips.filter((c) => {
-          if (c.endTime <= startTime || c.startTime >= endTime) return true;
-          if (c.startTime >= startTime && c.endTime <= endTime) return false;
-          if (c.startTime < startTime && c.endTime > startTime && c.endTime <= endTime) {
-            c.endTime = startTime;
-            return true;
+        // Remove or trim overlapping clips in the target range.
+        // Build the next clip list explicitly so clips spanning the overwrite
+        // region can be split into preserved head/tail segments.
+        const nextClips: Clip[] = [];
+        for (const clip of targetTrack.clips) {
+          if (clip.endTime <= startTime || clip.startTime >= endTime) {
+            nextClips.push(clip);
+            continue;
           }
-          if (c.startTime >= startTime && c.startTime < endTime && c.endTime > endTime) {
-            c.trimStart += (endTime - c.startTime);
-            c.startTime = endTime;
-            return true;
+
+          if (clip.startTime >= startTime && clip.endTime <= endTime) {
+            continue;
           }
-          if (c.startTime < startTime && c.endTime > endTime) {
-            const tailClip: Clip = makeClip({
+
+          if (clip.startTime < startTime && clip.endTime > startTime && clip.endTime <= endTime) {
+            clip.endTime = startTime;
+            nextClips.push(clip);
+            continue;
+          }
+
+          if (clip.startTime >= startTime && clip.startTime < endTime && clip.endTime > endTime) {
+            clip.trimStart += (endTime - clip.startTime);
+            clip.startTime = endTime;
+            nextClips.push(clip);
+            continue;
+          }
+
+          if (clip.startTime < startTime && clip.endTime > endTime) {
+            const originalEnd = clip.endTime;
+            const originalTrimEnd = clip.trimEnd;
+
+            clip.endTime = startTime;
+            nextClips.push(clip);
+            nextClips.push(makeClip({
               id: createId('clip'),
               trackId: targetTrack.id,
-              name: c.name,
+              name: clip.name,
               startTime: endTime,
-              endTime: c.endTime,
-              trimStart: c.trimStart + (endTime - c.startTime),
-              trimEnd: c.trimEnd,
-              type: c.type,
-              assetId: c.assetId,
-              color: c.color,
-              waveformData: c.waveformData,
-            });
-            c.endTime = startTime;
-            targetTrack.clips.push(tailClip);
-            return true;
+              endTime: originalEnd,
+              trimStart: clip.trimStart + (endTime - clip.startTime),
+              trimEnd: originalTrimEnd,
+              type: clip.type,
+              assetId: clip.assetId,
+              color: clip.color,
+              waveformData: clip.waveformData,
+            }));
           }
-          return true;
-        });
+        }
+        targetTrack.clips = nextClips;
 
         // Insert the new clip
         const newClip: Clip = makeClip({
@@ -1469,7 +2267,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
           type: getClipTypeForAsset(asset),
           assetId: asset.id,
           color: targetTrack.color,
-          waveformData: asset.waveformData,
+          waveformData: getAssetWaveformData(asset),
         });
         targetTrack.clips.push(newClip);
         targetTrack.clips.sort((a, b) => a.startTime - b.startTime);
@@ -1553,7 +2351,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
           type: getClipTypeForAsset(asset),
           assetId: asset.id,
           color: targetTrack.color,
-          waveformData: asset.waveformData,
+          waveformData: getAssetWaveformData(asset),
         });
         targetTrack.clips.push(newClip);
         targetTrack.clips.sort((a, b) => a.startTime - b.startTime);
@@ -1579,6 +2377,48 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       if (maxEnd > s.duration) s.duration = maxEnd + 5;
       s.playheadTime = endTime;
     }),
+    liftEdit: () => {
+      const { inPoint, outPoint } = get();
+      const hasIn = inPoint !== null;
+      const hasOut = outPoint !== null;
+      if (hasIn || hasOut) {
+        if (hasIn && hasOut && outPoint! > inPoint!) {
+          get().liftMarkedRange();
+        }
+        return;
+      }
+
+      get().liftSelection();
+    },
+    extractEdit: () => {
+      const { inPoint, outPoint } = get();
+      const hasIn = inPoint !== null;
+      const hasOut = outPoint !== null;
+      if (hasIn || hasOut) {
+        if (hasIn && hasOut && outPoint! > inPoint!) {
+          get().extractMarkedRange();
+        }
+        return;
+      }
+
+      get().extractSelection();
+    },
+    liftMarkedRange: () => {
+      const { inPoint, outPoint } = get();
+      if (inPoint === null || outPoint === null || outPoint <= inPoint) {
+        return;
+      }
+
+      executeUndoableEditorialEdit('Lift marked range', () => editOpsEngine.lift());
+    },
+    extractMarkedRange: () => {
+      const { inPoint, outPoint } = get();
+      if (inPoint === null || outPoint === null || outPoint <= inPoint) {
+        return;
+      }
+
+      executeUndoableEditorialEdit('Extract marked range', () => editOpsEngine.extract());
+    },
 
     razorAtPlayhead: () => set((s) => {
       const splitTime = s.playheadTime;
@@ -1605,20 +2445,25 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         }
       }
     }),
-    matchFrame: () => set((s) => {
-      for (const track of s.tracks) {
-        const clip = track.clips.find((item) => item.startTime <= s.playheadTime && item.endTime >= s.playheadTime);
-        if (!clip?.assetId) {
-          continue;
-        }
-
-        const asset = findAssetById(s.bins, clip.assetId);
-        if (asset) {
-          s.sourceAsset = asset;
-        }
+    matchFrame: () => {
+      const state = get();
+      const clip = findActiveMediaClip(state.tracks, state.playheadTime);
+      if (!clip?.assetId) {
         return;
       }
-    }),
+
+      const asset = findAssetById(state.bins, clip.assetId);
+      if (!asset) {
+        return;
+      }
+
+      state.setSourceAsset(asset);
+      set((s) => {
+        s.sourcePlayhead = getSourceTime(clip, state.playheadTime);
+        s.inspectedClipId = clip.id;
+      });
+      usePlayerStore.getState().setActiveMonitor('source');
+    },
     addMarkerAtPlayhead: (label) => set((s) => {
       s.markers.push({
         id: createId('marker'),
@@ -1633,50 +2478,27 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       s.inPoint = null;
       s.outPoint = null;
     }),
-    liftSelection: () => set((s) => {
-      if (s.selectedClipIds.length === 0) {
-        return;
-      }
-      s.tracks.forEach((track) => {
-        track.clips = track.clips.filter((clip) => !s.selectedClipIds.includes(clip.id));
-      });
-      s.selectedClipIds = [];
-    }),
-    extractSelection: () => set((s) => {
-      if (s.selectedClipIds.length === 0) {
-        return;
-      }
-
-      s.tracks.forEach((track) => {
-        const removed = track.clips.filter((clip) => s.selectedClipIds.includes(clip.id));
-        if (removed.length === 0) {
-          return;
-        }
-
-        const removedDuration = removed.reduce((total, clip) => total + (clip.endTime - clip.startTime), 0);
-        const firstRemovedStart = Math.min(...removed.map((clip) => clip.startTime));
-        track.clips = track.clips
-          .filter((clip) => !s.selectedClipIds.includes(clip.id))
-          .map((clip) => {
-            if (clip.startTime <= firstRemovedStart) {
-              return clip;
-            }
-            return {
-              ...clip,
-              startTime: Math.max(firstRemovedStart, clip.startTime - removedDuration),
-              endTime: Math.max(firstRemovedStart, clip.endTime - removedDuration),
-            };
-          });
-      });
-      s.selectedClipIds = [];
-    }),
+    liftSelection: () => {
+      const clipCount = get().selectedClipIds.length;
+      executeUndoableSelectionEdit(
+        clipCount === 1 ? 'Lift selected clip' : `Lift ${clipCount} selected clips`,
+        (selectedClipIds) => editOpsEngine.liftSegment(selectedClipIds),
+      );
+    },
+    extractSelection: () => {
+      const clipCount = get().selectedClipIds.length;
+      executeUndoableSelectionEdit(
+        clipCount === 1 ? 'Extract selected clip' : `Extract ${clipCount} selected clips`,
+        (selectedClipIds) => editOpsEngine.extractSegment(selectedClipIds),
+      );
+    },
 
     // Bin operations
     addBin: (name, parentId) => set((s) => {
       const newBin: Bin = {
         id: `b_${Date.now()}`,
         name,
-        color: '#818cf8',
+        color: BIN_COLOR_PRESETS[0]!,
         isOpen: false,
         children: [],
         assets: [],
@@ -1692,6 +2514,12 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         findAndAdd(s.bins);
       } else {
         s.bins.push(newBin);
+      }
+    }),
+    updateBinColor: (binId, color) => set((s) => {
+      const bin = findBinByIdMutable(s.bins, binId);
+      if (bin) {
+        bin.color = color;
       }
     }),
 
@@ -1765,6 +2593,17 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         Object.assign(job, patch);
       }
     }),
+    setDesktopJobs: (jobs) => set((s) => {
+      s.desktopJobs = jobs.map((job) => ({ ...job }));
+    }),
+    upsertDesktopJob: (job) => set((s) => {
+      const existing = s.desktopJobs.find((entry) => entry.id === job.id);
+      if (existing) {
+        Object.assign(existing, job);
+        return;
+      }
+      s.desktopJobs.unshift({ ...job });
+    }),
 
     // Enhanced trim operations
     rippleDelete: (clipId) => set((s) => {
@@ -1791,26 +2630,47 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     }),
     slideClip: (clipId, delta) => set((s) => {
       for (const t of s.tracks) {
-        const idx = t.clips.findIndex(c => c.id === clipId);
-        if (idx >= 0) {
-          const clip = t.clips[idx];
-          // Slide adjusts content position within the clip without moving the clip itself
-          // The surrounding clips' in/out points shift to accommodate
-          const prev = idx > 0 ? t.clips[idx - 1] : null;
-          const next = idx < t.clips.length - 1 ? t.clips[idx + 1] : null;
+        if (t.locked) {
+          continue;
+        }
 
-          if (delta < 0) {
-            // Sliding left: trim prev clip shorter, next clip starts earlier
-            if (prev) prev.endTime = Math.max(prev.startTime + 0.1, prev.endTime + delta);
-            if (next) next.startTime = Math.max(clip!.endTime! + delta, clip!.endTime! - (next.endTime - next.startTime) + 0.1);
-          } else {
-            // Sliding right: trim next clip shorter, prev clip ends later
-            if (next) next.startTime = Math.min(next.endTime - 0.1, next.startTime + delta);
-            if (prev) prev.endTime = Math.min(clip!.startTime! + delta, clip!.startTime! + (prev.endTime - prev.startTime) - 0.1);
+        const orderedClips = [...t.clips].sort((a, b) => a.startTime - b.startTime);
+        const idx = orderedClips.findIndex(c => c.id === clipId);
+        if (idx >= 0) {
+          const clip = orderedClips[idx];
+          const prev = idx > 0 ? orderedClips[idx - 1] : null;
+          const next = idx < orderedClips.length - 1 ? orderedClips[idx + 1] : null;
+          if (!clip || !prev || !next) {
+            return;
           }
-          // Adjust the source offset (trim points)
-          clip!.trimStart! = Math.max(0, clip!.trimStart! + delta);
-          clip!.trimEnd! = Math.max(0, clip!.trimEnd! - delta);
+
+          const maxSlideLeft = Math.max(
+            0,
+            Math.min(
+              clip.startTime,
+              clipDuration(prev) - MIN_CLIP_DURATION,
+              next.trimStart,
+            ),
+          );
+          const maxSlideRight = Math.max(
+            0,
+            Math.min(
+              prev.trimEnd,
+              clipDuration(next) - MIN_CLIP_DURATION,
+            ),
+          );
+          const clampedDelta = Math.max(-maxSlideLeft, Math.min(delta, maxSlideRight));
+          if (Math.abs(clampedDelta) < Number.EPSILON) {
+            return;
+          }
+
+          clip.startTime += clampedDelta;
+          clip.endTime += clampedDelta;
+          prev.endTime = clip.startTime;
+          prev.trimEnd = Math.max(0, prev.trimEnd - clampedDelta);
+          next.startTime = clip.endTime;
+          next.trimStart = Math.max(0, next.trimStart + clampedDelta);
+          t.clips.sort((a, b) => a.startTime - b.startTime);
           return;
         }
       }
@@ -1873,54 +2733,142 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     // ─── Source Monitor ──────────────────────────────────────────────────────────
     setSourceInPoint: (t) => set((s) => { s.sourceInPoint = t; }),
     setSourceOutPoint: (t) => set((s) => { s.sourceOutPoint = t; }),
-    setSourcePlayhead: (t) => set((s) => { s.sourcePlayhead = isFinite(t) ? Math.max(0, t) : 0; }),
+    setSourcePlayhead: (t) => set((s) => {
+      const sourceDuration = s.sourceAsset?.duration;
+      const clampedTime = isFinite(t) ? Math.max(0, t) : 0;
+      s.sourcePlayhead = Number.isFinite(sourceDuration)
+        ? Math.min(clampedTime, Math.max(0, sourceDuration!))
+        : clampedTime;
+    }),
     setSourceInToPlayhead: () => set((s) => { s.sourceInPoint = s.sourcePlayhead; }),
     setSourceOutToPlayhead: () => set((s) => { s.sourceOutPoint = s.sourcePlayhead; }),
     clearSourceInOut: () => set((s) => { s.sourceInPoint = null; s.sourceOutPoint = null; }),
 
     // ─── Track Enable/Disable ─────────────────────────────────────────────────
     enableTrack: (trackId) => set((s) => {
-      if (!s.enabledTrackIds.includes(trackId)) {
-        s.enabledTrackIds.push(trackId);
-      }
+      trackPatchingEngine.enableRecordTrack(trackId);
+      s.enabledTrackIds = trackPatchingEngine.getEnabledRecordTracks();
     }),
     disableTrack: (trackId) => set((s) => {
-      s.enabledTrackIds = s.enabledTrackIds.filter(id => id !== trackId);
+      trackPatchingEngine.disableRecordTrack(trackId);
+      s.enabledTrackIds = trackPatchingEngine.getEnabledRecordTracks();
     }),
     toggleTrackEnabled: (trackId) => set((s) => {
-      const idx = s.enabledTrackIds.indexOf(trackId);
-      if (idx >= 0) {
-        s.enabledTrackIds.splice(idx, 1);
-      } else {
-        s.enabledTrackIds.push(trackId);
-      }
+      trackPatchingEngine.toggleRecordTrack(trackId);
+      s.enabledTrackIds = trackPatchingEngine.getEnabledRecordTracks();
     }),
     isTrackEnabled: (trackId) => {
-      return get().enabledTrackIds.includes(trackId);
+      return trackPatchingEngine.isRecordTrackEnabled(trackId);
     },
 
     // ─── Sync Lock ────────────────────────────────────────────────────────────
     toggleSyncLock: (trackId) => set((s) => {
-      const idx = s.syncLockedTrackIds.indexOf(trackId);
-      if (idx >= 0) {
-        s.syncLockedTrackIds.splice(idx, 1);
-      } else {
-        s.syncLockedTrackIds.push(trackId);
-      }
+      trackPatchingEngine.toggleSyncLock(trackId);
+      s.syncLockedTrackIds = trackPatchingEngine.getSyncLockedTracks();
     }),
     isSyncLocked: (trackId) => {
-      return get().syncLockedTrackIds.includes(trackId);
+      return trackPatchingEngine.isSyncLocked(trackId);
     },
+    setVideoMonitorTrack: (trackId) => set((s) => {
+      trackPatchingEngine.setVideoMonitorTrack(trackId);
+      s.videoMonitorTrackId = trackPatchingEngine.getVideoMonitorTrack();
+    }),
 
     // ─── Trim Mode ────────────────────────────────────────────────────────────
     setTrimMode: (mode) => set((s) => { s.trimMode = mode; }),
-    setTrimActive: (active) => set((s) => { s.trimActive = active; }),
+    setTrimActive: (active) => set((s) => {
+      s.trimActive = active;
+      if (!active) {
+        s.trimLoopPlaybackActive = false;
+        s.trimLoopOffsetFrames = 0;
+        s.trimLoopPlaybackDirection = 1;
+        s.trimLoopPlaybackRate = 1;
+      }
+    }),
+    setTrimViewMode: (mode) => set((s) => { s.trimViewMode = mode; }),
+    toggleTrimViewMode: () => set((s) => {
+      s.trimViewMode = s.trimViewMode === 'small' ? 'big' : 'small';
+    }),
+    setTrimLoopPlaybackActive: (active) => set((s) => {
+      s.trimLoopPlaybackActive = active;
+      if (!active) {
+        s.trimLoopOffsetFrames = 0;
+        s.trimLoopPlaybackDirection = 1;
+        s.trimLoopPlaybackRate = 1;
+      }
+    }),
+    toggleTrimLoopPlayback: () => set((s) => {
+      s.trimLoopPlaybackActive = !s.trimLoopPlaybackActive;
+      if (!s.trimLoopPlaybackActive) {
+        s.trimLoopOffsetFrames = 0;
+        s.trimLoopPlaybackDirection = 1;
+        s.trimLoopPlaybackRate = 1;
+      }
+    }),
+    setTrimLoopOffsetFrames: (frames) => set((s) => {
+      s.trimLoopOffsetFrames = frames;
+    }),
+    setTrimLoopPlaybackDirection: (direction) => set((s) => {
+      s.trimLoopPlaybackDirection = direction < 0 ? -1 : 1;
+    }),
+    setTrimLoopPlaybackRate: (rate) => set((s) => {
+      s.trimLoopPlaybackRate = Math.max(0.25, Math.min(8, rate || 1));
+    }),
+    setTrimLoopDurationPreset: (preset) => set((s) => {
+      const fps = Math.max(1, s.sequenceSettings.fps || s.projectSettings.frameRate || 24);
+      const seconds = preset === 'short'
+        ? 0.5
+        : preset === 'long'
+          ? 2
+          : 1;
+      const frames = Math.max(1, Math.round(seconds * fps));
+      s.trimLoopDurationPreset = preset;
+      s.trimLoopPreRollFrames = frames;
+      s.trimLoopPostRollFrames = frames;
+    }),
+    setTrimLoopRollFrames: (preRollFrames, postRollFrames) => set((s) => {
+      s.trimLoopPreRollFrames = Math.max(1, Math.round(preRollFrames));
+      s.trimLoopPostRollFrames = Math.max(1, Math.round(postRollFrames));
+      s.trimLoopDurationPreset = getTrimDurationPresetFromFrames(
+        s.trimLoopPreRollFrames,
+        s.trimLoopPostRollFrames,
+        s.sequenceSettings.fps || s.projectSettings.frameRate || 24,
+      );
+    }),
 
     // ─── Smart Tool ───────────────────────────────────────────────────────────
-    toggleSmartToolLiftOverwrite: () => set((s) => { s.smartToolLiftOverwrite = !s.smartToolLiftOverwrite; }),
-    toggleSmartToolExtractSplice: () => set((s) => { s.smartToolExtractSplice = !s.smartToolExtractSplice; }),
-    toggleSmartToolOverwriteTrim: () => set((s) => { s.smartToolOverwriteTrim = !s.smartToolOverwriteTrim; }),
-    toggleSmartToolRippleTrim: () => set((s) => { s.smartToolRippleTrim = !s.smartToolRippleTrim; }),
+    toggleSmartToolLiftOverwrite: () => set((s) => {
+      smartToolEngine.toggleLiftOverwriteSegment();
+      const state = smartToolEngine.getState();
+      s.smartToolLiftOverwrite = state.liftOverwriteSegment;
+      s.smartToolExtractSplice = state.extractSpliceSegment;
+      s.smartToolOverwriteTrim = state.overwriteTrim;
+      s.smartToolRippleTrim = state.rippleTrim;
+    }),
+    toggleSmartToolExtractSplice: () => set((s) => {
+      smartToolEngine.toggleExtractSpliceSegment();
+      const state = smartToolEngine.getState();
+      s.smartToolLiftOverwrite = state.liftOverwriteSegment;
+      s.smartToolExtractSplice = state.extractSpliceSegment;
+      s.smartToolOverwriteTrim = state.overwriteTrim;
+      s.smartToolRippleTrim = state.rippleTrim;
+    }),
+    toggleSmartToolOverwriteTrim: () => set((s) => {
+      smartToolEngine.toggleOverwriteTrim();
+      const state = smartToolEngine.getState();
+      s.smartToolLiftOverwrite = state.liftOverwriteSegment;
+      s.smartToolExtractSplice = state.extractSpliceSegment;
+      s.smartToolOverwriteTrim = state.overwriteTrim;
+      s.smartToolRippleTrim = state.rippleTrim;
+    }),
+    toggleSmartToolRippleTrim: () => set((s) => {
+      smartToolEngine.toggleRippleTrim();
+      const state = smartToolEngine.getState();
+      s.smartToolLiftOverwrite = state.liftOverwriteSegment;
+      s.smartToolExtractSplice = state.extractSpliceSegment;
+      s.smartToolOverwriteTrim = state.overwriteTrim;
+      s.smartToolRippleTrim = state.rippleTrim;
+    }),
 
     // ─── Multicam ─────────────────────────────────────────────────────────────
     setMulticamActive: (active) => set((s) => { s.multicamActive = active; }),
@@ -1949,6 +2897,12 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     // ─── Composer ─────────────────────────────────────────────────────────────
     setComposerLayout: (layout) => set((s) => { s.composerLayout = layout; }),
     toggleTrackingInfo: () => set((s) => { s.showTrackingInfo = !s.showTrackingInfo; }),
+    setVersionHistoryRetentionPreference: (preference) => set((s) => {
+      s.versionHistoryRetentionPreference = preference;
+    }),
+    setVersionHistoryCompareMode: (mode) => set((s) => {
+      s.versionHistoryCompareMode = mode;
+    }),
 
     // ─── Audio (extended) ─────────────────────────────────────────────────────
     toggleAudioScrub: () => set((s) => { s.audioScrubEnabled = !s.audioScrubEnabled; }),
@@ -1960,9 +2914,10 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     // ─── Navigation (Avid parity) ─────────────────────────────────────────────
     goToNextEditPoint: () => set((s) => {
       const current = s.playheadTime;
+      const activeTrackIds = new Set(resolveEditorialFocusTrackIds(s));
       let nearest = Infinity;
       for (const track of s.tracks) {
-        if (!s.enabledTrackIds.includes(track.id)) continue;
+        if (!activeTrackIds.has(track.id) || track.locked || track.muted) continue;
         for (const clip of track.clips) {
           if (clip.startTime > current + 0.001 && clip.startTime < nearest) {
             nearest = clip.startTime;
@@ -1978,9 +2933,10 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     }),
     goToPrevEditPoint: () => set((s) => {
       const current = s.playheadTime;
+      const activeTrackIds = new Set(resolveEditorialFocusTrackIds(s));
       let nearest = -Infinity;
       for (const track of s.tracks) {
-        if (!s.enabledTrackIds.includes(track.id)) continue;
+        if (!activeTrackIds.has(track.id) || track.locked || track.muted) continue;
         for (const clip of track.clips) {
           if (clip.startTime < current - 0.001 && clip.startTime > nearest) {
             nearest = clip.startTime;
@@ -1997,7 +2953,87 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     goToStart: () => set((s) => { s.playheadTime = 0; }),
     goToEnd: () => set((s) => { s.playheadTime = s.duration; }),
 
-    loadProject: (id) => set((s) => { s.projectId = id; }),
+    loadProject: async (id) => {
+      const requestSequence = ++loadProjectRequestSequence;
+      set((s) => {
+        s.projectId = id;
+        s.saveStatus = 'saving';
+      });
+
+      try {
+        const project = await getProjectFromRepository(id);
+        if (requestSequence !== loadProjectRequestSequence) {
+          return;
+        }
+        if (!project) {
+          set((s) => {
+            s.saveStatus = 'error';
+          });
+          return;
+        }
+        get().applyProjectSnapshot(project, { markDirty: false, lastSavedAt: project.updatedAt });
+      } catch (error) {
+        if (requestSequence !== loadProjectRequestSequence) {
+          return;
+        }
+        console.error('Failed to load project', error);
+        set((s) => {
+          s.saveStatus = 'error';
+        });
+      }
+    },
+    saveProject: async () => {
+      const snapshot = buildProjectPersistenceSnapshot(get());
+      if (!snapshot) {
+        return;
+      }
+
+      set((s) => {
+        s.saveStatus = 'saving';
+      });
+
+      try {
+        const projectToSave = buildProjectFromEditorState(snapshot);
+        const savedProject = await saveProjectToRepository(projectToSave) ?? projectToSave;
+        set((s) => {
+          s.projectId = savedProject.id;
+          s.projectName = savedProject.name;
+          s.projectTemplate = savedProject.template;
+          s.projectDescription = savedProject.description;
+          s.projectTags = [...savedProject.tags];
+          s.projectSchemaVersion = savedProject.schemaVersion;
+          s.projectCreatedAt = savedProject.createdAt;
+          s.lastSavedAt = savedProject.updatedAt;
+          s.saveStatus = 'saved';
+          s.persistedProjectHash = getProjectPersistenceHash(snapshot);
+          s.hasUnsavedChanges = false;
+        });
+      } catch (error) {
+        console.error('Failed to save project', error);
+        set((s) => {
+          s.saveStatus = 'error';
+        });
+      }
+    },
+    restoreProjectSnapshot: (project) => {
+      const state = get();
+      const restoredAt = new Date().toISOString();
+      const effectiveProject = state.projectId
+        ? {
+            ...project,
+            id: state.projectId,
+            updatedAt: restoredAt,
+          }
+        : {
+            ...project,
+            updatedAt: restoredAt,
+          };
+
+      get().applyProjectSnapshot(effectiveProject, {
+        markDirty: true,
+        lastSavedAt: state.lastSavedAt,
+      });
+    },
 
     // ─── Multi-Sequence Actions ──────────────────────────────────────────
     createSequence: (name: string) => {
@@ -2268,7 +3304,22 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     importMediaFiles: (files, binId) => {
       // Phase 1: Create placeholder assets immediately for UI feedback
       const assetIds: string[] = [];
+      let resolvedBinId = binId;
       set((s) => {
+        const createImportBin = (): Bin => {
+          const importBin: Bin = {
+            id: createId('bin'),
+            name: 'Imported Media',
+            color: '#4f63f5',
+            isOpen: true,
+            children: [],
+            assets: [],
+          };
+          s.bins.unshift(importBin);
+          s.selectedBinId = importBin.id;
+          s.activeBinAssets = importBin.assets;
+          return importBin;
+        };
         const targetBin = binId
           ? (function findBin(bins: Bin[]): Bin | null {
               for (const b of bins) {
@@ -2278,8 +3329,9 @@ export const useEditorStore = create<EditorState & EditorActions>()(
               }
               return null;
             })(s.bins)
-          : s.bins[0] ?? null;
+          : s.bins[0] ?? createImportBin();
         if (!targetBin) return;
+        resolvedBinId = targetBin.id;
 
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
@@ -2304,7 +3356,21 @@ export const useEditorStore = create<EditorState & EditorActions>()(
             tags: [],
             isFavorite: false,
             fileSize: file!.size!,
+            fileSizeBytes: file!.size!,
+            fileExtension: ext || undefined,
             mimeType: mime,
+            indexStatus: 'INDEXING',
+            ingestMetadata: {
+              importedAt: new Date().toISOString(),
+              storageMode: 'LINK',
+              importedFileName: file!.name!,
+              originalFileName: file!.name!,
+            },
+            locations: {
+              originalPath: file!.name!,
+              playbackUrl: url,
+              pathHistory: [file!.name!],
+            },
             fileHandle: file,
           };
 
@@ -2337,7 +3403,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
             objectUrl: URL.createObjectURL(file),
             metadata,
             status: 'online',
-            binId: binId ?? undefined,
+            binId: resolvedBinId,
             addedAt: Date.now(),
             lastVerified: Date.now(),
           });
@@ -2355,26 +3421,99 @@ export const useEditorStore = create<EditorState & EditorActions>()(
             }
             const asset = findAsset(s.bins);
             if (asset) {
-              asset.status = 'READY';
-              asset.duration = isFinite(metadata.duration) ? metadata.duration : 0;
-              asset.width = metadata.width;
-              asset.height = metadata.height;
-              asset.fps = metadata.fps;
-              asset.codec = metadata.codec;
-              asset.colorSpace = metadata.colorSpace;
-              asset.hasAlpha = metadata.hasAlpha;
-              // Alpha mode will be set after dialog resolves (see below)
-              asset.audioChannels = metadata.audioChannels;
-              asset.sampleRate = metadata.sampleRate;
-              asset.fileSize = metadata.fileSize;
-              asset.startTimecode = metadata.startTimecode;
-              asset.bitDepth = metadata.bitDepth;
-              asset.mimeType = metadata.mimeType;
-              asset.thumbnailUrl = metadata.thumbnailUrl;
-              if (metadata.waveformData) {
-                asset.waveformData = Array.from(metadata.waveformData);
-              }
-              asset.mediaDbId = assetId;
+              const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+              const isGraphicAsset = asset.type === 'GRAPHIC' || asset.type === 'IMAGE';
+              const technicalMetadata: EditorMediaTechnicalMetadata = {
+                container: ext || undefined,
+                videoCodec: asset.type === 'VIDEO' || asset.type === 'IMAGE' || asset.type === 'GRAPHIC' ? metadata.codec.toLowerCase() : undefined,
+                audioCodec: asset.type === 'AUDIO' ? metadata.codec.toLowerCase() : asset.type === 'VIDEO' ? undefined : undefined,
+                durationSeconds: isFinite(metadata.duration) ? metadata.duration : 0,
+                frameRate: metadata.fps || undefined,
+                width: metadata.width || undefined,
+                height: metadata.height || undefined,
+                audioChannels: metadata.audioChannels > 0 ? metadata.audioChannels : undefined,
+                audioChannelLayout: metadata.audioChannelLayout !== 'none'
+                  ? metadata.audioChannelLayout as EditorMediaTechnicalMetadata['audioChannelLayout']
+                  : undefined,
+                sampleRate: metadata.sampleRate || undefined,
+                timecodeStart: metadata.startTimecode || undefined,
+                colorDescriptor: {
+                  colorSpace: metadata.colorSpace !== 'n/a' ? metadata.colorSpace : undefined,
+                  range: 'unknown',
+                  alphaMode: metadata.hasAlpha ? 'straight' : 'none',
+                  hdrMode: 'unknown',
+                  bitDepth: metadata.bitDepth || undefined,
+                },
+                graphicDescriptor: isGraphicAsset
+                  ? {
+                      kind: asset.type === 'GRAPHIC' ? (ext === 'svg' || ext === 'pdf' ? 'vector' : 'layered-graphic') : 'bitmap',
+                      sourceFormat: ext || undefined,
+                      canvasWidth: metadata.width || undefined,
+                      canvasHeight: metadata.height || undefined,
+                      hasAlpha: metadata.hasAlpha,
+                      flatteningRequired: asset.type === 'GRAPHIC',
+                      renderStrategy: asset.type === 'GRAPHIC'
+                        ? (ext === 'svg' || ext === 'pdf' ? 'rasterize' : 'flatten')
+                        : 'direct',
+                    }
+                  : undefined,
+                sideData: [],
+                captions: [],
+                formatTags: {},
+              };
+              const hydrated = hydrateMediaAsset({
+                id: asset.id,
+                name: asset.name,
+                type: asset.type,
+                duration: isFinite(metadata.duration) ? metadata.duration : 0,
+                status: 'READY',
+                playbackUrl: asset.playbackUrl,
+                thumbnailUrl: metadata.thumbnailUrl,
+                waveformData: metadata.waveformData ? Array.from(metadata.waveformData) : undefined,
+                fileExtension: ext || undefined,
+                fileSizeBytes: metadata.fileSize,
+                indexStatus: 'READY',
+                ingestMetadata: asset.ingestMetadata,
+                locations: asset.locations,
+                technicalMetadata,
+                proxyMetadata: {
+                  status: 'NOT_REQUESTED',
+                },
+                waveformMetadata: metadata.waveformData
+                  ? {
+                      status: 'READY',
+                      peaks: Array.from(metadata.waveformData),
+                      sampleCount: metadata.waveformData.length,
+                      updatedAt: new Date().toISOString(),
+                    }
+                  : {
+                      status: 'UNAVAILABLE',
+                      peaks: [],
+                      sampleCount: 0,
+                    },
+                tags: asset.tags,
+                isFavorite: asset.isFavorite,
+              });
+
+              Object.assign(asset, hydrated, {
+                status: 'READY',
+                width: metadata.width,
+                height: metadata.height,
+                fps: metadata.fps,
+                codec: metadata.codec,
+                colorSpace: metadata.colorSpace,
+                hasAlpha: metadata.hasAlpha,
+                audioChannels: metadata.audioChannels,
+                audioChannelLayout: metadata.audioChannelLayout,
+                sampleRate: metadata.sampleRate,
+                fileSize: metadata.fileSize,
+                startTimecode: metadata.startTimecode,
+                bitDepth: metadata.bitDepth,
+                mimeType: metadata.mimeType,
+                thumbnailUrl: metadata.thumbnailUrl,
+                waveformData: metadata.waveformData ? Array.from(metadata.waveformData) : asset.waveformData,
+                mediaDbId: assetId,
+              });
             }
             delete s.ingestProgress[assetId];
 
@@ -2430,7 +3569,25 @@ export const useEditorStore = create<EditorState & EditorActions>()(
               return null;
             }
             const asset = findAsset(s.bins);
-            if (asset) asset.status = 'ERROR';
+            if (asset) {
+              const message = err instanceof Error ? err.message : 'Media probe failed';
+              asset.status = 'ERROR';
+              asset.indexStatus = 'ERROR';
+              asset.capabilityReport = {
+                primarySurface: window.electronAPI ? 'desktop' : 'web',
+                primaryDisposition: 'unsupported',
+                sourceSupportTier: asset.supportTier ?? 'unsupported',
+                preferredVariantId: asset.capabilityReport?.preferredVariantId,
+                surfaces: ['desktop', 'web', 'mobile', 'worker'].map((surface) => ({
+                  surface: surface as 'desktop' | 'web' | 'mobile' | 'worker',
+                  disposition: 'unsupported' as const,
+                  supportTier: asset.supportTier ?? 'unsupported',
+                  preferredVariantId: asset.capabilityReport?.preferredVariantId,
+                  reasons: [message],
+                })),
+                issues: [message],
+              };
+            }
             delete s.ingestProgress[assetId];
           });
         }
@@ -2438,7 +3595,11 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     },
 
     // Dialogs
-    toggleNewProjectDialog: () => set((s) => { s.showNewProjectDialog = !s.showNewProjectDialog; }),
+    openNewProjectDialog: (template) => set((s) => {
+      s.showNewProjectDialog = true;
+      s.newProjectDialogTemplate = template ?? 'film';
+    }),
+    closeNewProjectDialog: () => set((s) => { s.showNewProjectDialog = false; }),
     toggleSequenceDialog: () => set((s) => { s.showSequenceDialog = !s.showSequenceDialog; }),
     toggleTitleTool: () => set((s) => { s.showTitleTool = !s.showTitleTool; }),
     toggleSubtitleEditor: () => set((s) => { s.showSubtitleEditor = !s.showSubtitleEditor; }),
@@ -2507,6 +3668,12 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     addTitleClip: (title) => set((s) => { s.titleClips.push(title); }),
     removeTitleClip: (titleId) => set((s) => {
       s.titleClips = s.titleClips.filter((t) => t.id !== titleId);
+      for (const track of s.tracks) {
+        if (track.type !== 'GRAPHIC') {
+          continue;
+        }
+        track.clips = track.clips.filter((clip) => clip.assetId !== titleId);
+      }
     }),
     updateTitleClip: (titleId, data) => set((s) => {
       const title = s.titleClips.find((t) => t.id === titleId);
@@ -2812,7 +3979,133 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       }
       s.selectedClipIds = [];
     }),
-  }))
+
+    addAdjustmentLayerClip: (options) => {
+      let clipId: string | null = null;
+      set((s) => {
+        const startTime = options?.startTime ?? s.inPoint ?? s.playheadTime;
+        const endTime = options?.endTime
+          ?? (
+            s.outPoint !== null && s.outPoint > startTime
+              ? s.outPoint
+              : startTime + Math.max(options?.durationSeconds ?? 5, MIN_CLIP_DURATION)
+          );
+        if (endTime <= startTime) {
+          return;
+        }
+
+        const preferredTrack = options?.trackId
+          ? s.tracks.find((track) => track.id === options.trackId && track.type === 'EFFECT' && !track.locked) ?? null
+          : null;
+        const effectTrack = preferredTrack ?? ensureTimelineTrack(s.tracks, 'EFFECT');
+        const clip = makeClip({
+          id: createId('fxclip'),
+          trackId: effectTrack.id,
+          name: options?.name ?? 'Adjustment Layer',
+          startTime,
+          endTime,
+          trimStart: 0,
+          trimEnd: 0,
+          type: 'effect',
+          color: effectTrack.color,
+        });
+
+        effectTrack.clips.push(clip);
+        effectTrack.clips.sort((left, right) => left.startTime - right.startTime);
+        s.selectedTrackId = effectTrack.id;
+        s.selectedClipIds = [clip.id];
+        s.inspectedClipId = clip.id;
+        s.activeInspectorTab = 'effects';
+        if (clip.endTime > s.duration) {
+          s.duration = clip.endTime + 1;
+        }
+        clipId = clip.id;
+      });
+      return clipId;
+    },
+    buildTranscriptTitleEffects: (options) => {
+      let createdCount = 0;
+      set((s) => {
+        if (s.transcript.length === 0) {
+          return;
+        }
+
+        removeAutogeneratedTranscriptTitles(s);
+
+        const preferredTrack = options?.trackId
+          ? s.tracks.find((track) => track.id === options.trackId && track.type === 'GRAPHIC' && !track.locked) ?? null
+          : null;
+        const graphicTrack = preferredTrack ?? ensureTimelineTrack(s.tracks, 'GRAPHIC');
+        const useTranslations = options?.useTranslations ?? true;
+        const includeSpeakerLabels = options?.includeSpeakerLabels ?? false;
+
+        for (const cue of s.transcript) {
+          const textBody = useTranslations && cue.translation ? cue.translation : cue.text;
+          const text = includeSpeakerLabels && cue.speaker
+            ? `${cue.speaker}: ${textBody}`
+            : textBody;
+          const titleId = createId('title');
+          const titleClip: TitleClipData = {
+            id: titleId,
+            templateId: 'auto-transcript-subtitle',
+            text,
+            style: {
+              fontFamily: 'system-ui',
+              fontSize: 42,
+              fontWeight: 600,
+              color: '#f6f7fa',
+              outlineColor: '#000000',
+              outlineWidth: 2,
+              shadowColor: 'rgba(0, 0, 0, 0.72)',
+              shadowBlur: 8,
+              opacity: 1,
+              textAlign: 'center',
+            },
+            position: {
+              x: 0.12,
+              y: 0.78,
+              width: 0.76,
+              height: 0.14,
+            },
+            background: {
+              type: 'solid',
+              color: '#000000',
+              opacity: 0.62,
+            },
+            animation: {
+              type: 'none',
+              duration: 0,
+            },
+          };
+          const clip = makeClip({
+            id: createId('clip'),
+            trackId: graphicTrack.id,
+            name: text.slice(0, 48) || 'Transcript Title',
+            startTime: cue.startTime,
+            endTime: Math.max(cue.endTime, cue.startTime + MIN_CLIP_DURATION),
+            trimStart: 0,
+            trimEnd: 0,
+            type: 'video',
+            assetId: titleId,
+            color: graphicTrack.color,
+          });
+
+          s.titleClips.push(titleClip);
+          graphicTrack.clips.push(clip);
+          createdCount += 1;
+          if (clip.endTime > s.duration) {
+            s.duration = clip.endTime + 1;
+          }
+        }
+
+        graphicTrack.clips.sort((left, right) => left.startTime - right.startTime);
+        s.selectedTrackId = graphicTrack.id;
+        s.activeInspectorTab = 'effects';
+      });
+      return createdCount;
+    },
+    });
+  })
 );
 
 // ─── Active Sequence Sync ────────────────────────────────────────────────────

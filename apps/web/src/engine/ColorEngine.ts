@@ -419,6 +419,25 @@ export class ColorEngine {
     }
   }
 
+  /**
+   * Return a stable revision string for the enabled grading graph.
+   * Consumers use this to invalidate cached evaluated frames when the grade changes.
+   */
+  getProcessingRevision(): string {
+    const nodes = this.getAllNodes()
+      .filter((node) => node.enabled)
+      .map((node) => ({
+        id: node.id,
+        type: node.type,
+        params: node.params,
+      }));
+
+    return JSON.stringify({
+      nodes,
+      connections: this.getConnections(),
+    });
+  }
+
   /** Initialize the GPU pipeline (call once at startup). */
   async initGPU(): Promise<void> {
     await colorGradingPipeline.init();

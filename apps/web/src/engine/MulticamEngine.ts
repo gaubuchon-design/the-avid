@@ -26,7 +26,7 @@ import {
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 /** Sync method for grouping clips. */
-export type MulticamSyncMethod = 'timecode' | 'in-points' | 'aux-timecode' | 'audio-waveform';
+export type MulticamSyncMethod = 'timecode' | 'in-points' | 'aux-timecode' | 'audio-waveform' | 'slate-clap';
 
 /** A single camera angle within a group. */
 export interface CameraAngle {
@@ -68,6 +68,15 @@ export interface MulticamCut {
   angleIndex: number;      // which angle was selected
   angleId: string;
   trackId: string;         // target record track
+}
+
+export interface MulticamCutSegment {
+  index: number;
+  startTime: number;
+  endTime: number;
+  angleIndex: number;
+  angleId: string;
+  trackId: string;
 }
 
 /** Bank for paging through angles when > 4, 9, or 16. */
@@ -506,6 +515,17 @@ export class MulticamEngine {
   }
 
   /**
+   * Calculate sync by detecting the strongest clap transient in each angle.
+   *
+   * This approximates the common slate/clapper workflow used in multicam prep.
+   * If waveform data is unavailable on any angle, the engine falls back to
+   * timecode so the group still remains editable.
+   */
+  syncBySlateClap(angles: CameraAngle[]): CameraAngle[] {
+    return this.syncByWaveformFeature(angles, 'slate-clap');
+  }
+
+  /**
    * Calculate sync via audio waveform cross-correlation.
    *
    * This is the most accurate automatic sync method. It works by finding
@@ -523,24 +543,38 @@ export class MulticamEngine {
       return angles.map((a) => ({ ...a, syncOffset: 0 }));
     }
 
-    // ── Stub: in production, this would:
-    //  1. Decode audio from each clip's asset URL via OfflineAudioContext.
-    //  2. Downsample to ~8kHz mono.
-    //  3. Compute FFT-based cross-correlation between the reference (angle 0)
-    //     and every other angle.
-    //  4. The lag at peak correlation gives the sync offset in samples,
-    //     which we convert to seconds.
+    return this.syncByWaveformFeature(angles, 'audio-waveform');
+  }
 
-    // For now, simulate with a small async delay to represent processing time.
-    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+  /**
+   * Re-sync an existing multicam group with a different alignment method.
+   */
+  async resyncGroup(
+    groupId: string,
+    method?: MulticamSyncMethod,
+  ): Promise<MulticamGroup | null> {
+    const group = this.groups.get(groupId);
+    if (!group) {
+      console.warn(`[MulticamEngine] Group "${groupId}" not found.`);
+      return null;
+    }
 
-    // Use deterministic pseudo-offsets based on angle index for predictability.
-    // A real implementation would produce actual offsets from waveform analysis.
-    const reference = angles[0];
-    return angles.map((a, i) => ({
-      ...a,
-      syncOffset: i === 0 ? 0 : this.simulateWaveformOffset(reference!, a),
-    }));
+    const nextMethod = method ?? group.syncMethod;
+    group.syncMethod = nextMethod;
+    if (nextMethod === 'audio-waveform') {
+      group.angles = await this.syncByAudioWaveform(group.angles);
+    } else if (nextMethod === 'slate-clap') {
+      group.angles = this.syncBySlateClap(group.angles);
+    } else {
+      group.angles = this.applySyncMethod(group.angles, nextMethod);
+    }
+
+    this.recalculateGroupMetrics(group);
+    this.notify();
+    return {
+      ...group,
+      angles: group.angles.map((angle) => ({ ...angle })),
+    };
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -872,12 +906,72 @@ export class MulticamEngine {
   }
 
   /**
+   * Select an angle without recording a new cut.
+   *
+   * This is used when the editor is parked and wants to audition or inspect
+   * an angle in the multicam source bank without modifying the cut list.
+   */
+  setActiveAngle(angleIndex: number): void {
+    const group = this.getActiveGroup();
+    if (!group) {
+      return;
+    }
+
+    if (angleIndex < 0 || angleIndex >= group.angles.length) {
+      console.warn(
+        `[MulticamEngine] Angle index ${angleIndex} out of range (0-${group.angles.length - 1}).`,
+      );
+      return;
+    }
+
+    const previousAngle = this.state.activeAngleIndex;
+    this.state.activeAngleIndex = angleIndex;
+    this.notify();
+
+    if (previousAngle !== angleIndex) {
+      this.emitEvent('angleSwitch', previousAngle, angleIndex);
+    }
+  }
+
+  /**
+   * Highlight an angle as the current hover preview.
+   */
+  setPreviewAngle(angleIndex: number | null): void {
+    if (this.state.previewAngleIndex === angleIndex) {
+      return;
+    }
+
+    this.state.previewAngleIndex = angleIndex;
+    this.notify();
+  }
+
+  /**
    * Get all cuts made during the current or most recent recording session.
    *
    * @returns Array of MulticamCut objects sorted by time.
    */
   getCuts(): MulticamCut[] {
     return [...this.state.cuts];
+  }
+
+  /**
+   * Expand the cut list into contiguous editorial segments for refinement UI.
+   */
+  getCutSegments(): MulticamCutSegment[] {
+    const group = this.getActiveGroup();
+    if (!group) {
+      return [];
+    }
+
+    const cuts = this.getSortedCuts();
+    return cuts.map((cut, index) => ({
+      index,
+      startTime: cut.time,
+      endTime: cuts[index + 1]?.time ?? group.duration,
+      angleIndex: cut.angleIndex,
+      angleId: cut.angleId,
+      trackId: cut.trackId,
+    })).filter((segment) => segment.endTime > segment.startTime);
   }
 
   /**
@@ -1275,11 +1369,10 @@ export class MulticamEngine {
         return this.syncByTimecode(angles);
       case 'in-points':
         return this.syncByInPoints(angles);
+      case 'slate-clap':
+        return this.syncBySlateClap(angles);
       case 'audio-waveform':
-        // Audio waveform sync is async; for the synchronous createGroup path,
-        // we fall back to timecode and the caller can re-sync with the
-        // async method afterward.
-        return this.syncByTimecode(angles);
+        return this.syncByWaveformFeature(angles, 'audio-waveform');
     }
   }
 
@@ -1316,6 +1409,150 @@ export class MulticamEngine {
     }
     // Small offset in range [-0.5, 0.5] seconds.
     return (Math.abs(hash) % 1000) / 1000 - 0.5;
+  }
+
+  private syncByWaveformFeature(
+    angles: CameraAngle[],
+    method: 'audio-waveform' | 'slate-clap',
+  ): CameraAngle[] {
+    if (angles.length <= 1) {
+      return angles.map((angle) => ({ ...angle, syncOffset: 0 }));
+    }
+
+    const waveformInputs = angles.map((angle) => this.getAngleWaveformData(angle));
+    if (waveformInputs.some((waveform) => waveform === null)) {
+      return method === 'audio-waveform'
+        ? angles.map((angle, index) => ({
+          ...angle,
+          syncOffset: index === 0 ? 0 : this.simulateWaveformOffset(angles[0]!, angle),
+        }))
+        : this.syncByTimecode(angles);
+    }
+
+    const reference = waveformInputs[0]!;
+    const rawOffsets = waveformInputs.map((waveform, index) => {
+      if (index === 0) {
+        return 0;
+      }
+      const candidate = waveform!;
+      return method === 'slate-clap'
+        ? this.detectSlateClapOffset(reference, candidate)
+        : this.detectWaveformCorrelationOffset(reference, candidate);
+    });
+    const minOffset = Math.min(...rawOffsets);
+
+    return angles.map((angle, index) => ({
+      ...angle,
+      syncOffset: rawOffsets[index]! - minOffset,
+    }));
+  }
+
+  private getAngleWaveformData(angle: CameraAngle): { samples: number[]; sampleDuration: number } | null {
+    const asset = this.findAsset(useEditorStore.getState(), angle.assetId) ?? this.findAsset(useEditorStore.getState(), angle.clipId);
+    const waveform = asset?.waveformData;
+    const duration = asset?.duration ?? angle.duration;
+    if (!waveform || waveform.length === 0 || !duration || duration <= 0) {
+      return null;
+    }
+
+    const compressed = this.compressWaveform(waveform);
+    return {
+      samples: compressed,
+      sampleDuration: duration / compressed.length,
+    };
+  }
+
+  private compressWaveform(samples: number[], maxPoints = 256): number[] {
+    if (samples.length <= maxPoints) {
+      return samples.map((sample) => Math.abs(sample));
+    }
+
+    const compressed: number[] = [];
+    const bucketSize = samples.length / maxPoints;
+    for (let bucketIndex = 0; bucketIndex < maxPoints; bucketIndex += 1) {
+      const start = Math.floor(bucketIndex * bucketSize);
+      const end = Math.min(samples.length, Math.floor((bucketIndex + 1) * bucketSize));
+      let peak = 0;
+      for (let sampleIndex = start; sampleIndex < end; sampleIndex += 1) {
+        peak = Math.max(peak, Math.abs(samples[sampleIndex] ?? 0));
+      }
+      compressed.push(peak);
+    }
+
+    return compressed;
+  }
+
+  private detectWaveformCorrelationOffset(
+    reference: { samples: number[]; sampleDuration: number },
+    candidate: { samples: number[]; sampleDuration: number },
+  ): number {
+    const ref = reference.samples;
+    const target = candidate.samples;
+    const maxLag = Math.min(Math.floor(Math.min(ref.length, target.length) / 3), 80);
+    let bestLag = 0;
+    let bestScore = Number.NEGATIVE_INFINITY;
+
+    for (let lag = -maxLag; lag <= maxLag; lag += 1) {
+      let score = 0;
+      let comparisons = 0;
+      for (let index = 0; index < ref.length; index += 1) {
+        const targetIndex = index + lag;
+        if (targetIndex < 0 || targetIndex >= target.length) {
+          continue;
+        }
+        score += ref[index]! * target[targetIndex]!;
+        comparisons += 1;
+      }
+
+      if (comparisons === 0) {
+        continue;
+      }
+
+      const normalizedScore = score / comparisons;
+      if (normalizedScore > bestScore) {
+        bestScore = normalizedScore;
+        bestLag = lag;
+      }
+    }
+
+    const sampleDuration = Math.min(reference.sampleDuration, candidate.sampleDuration);
+    return bestLag * sampleDuration;
+  }
+
+  private detectSlateClapOffset(
+    reference: { samples: number[]; sampleDuration: number },
+    candidate: { samples: number[]; sampleDuration: number },
+  ): number {
+    const referencePeak = this.findSlatePeakTime(reference.samples, reference.sampleDuration);
+    const candidatePeak = this.findSlatePeakTime(candidate.samples, candidate.sampleDuration);
+    return candidatePeak - referencePeak;
+  }
+
+  private findSlatePeakTime(samples: number[], sampleDuration: number): number {
+    let bestIndex = 0;
+    let bestScore = Number.NEGATIVE_INFINITY;
+
+    for (let index = 1; index < samples.length; index += 1) {
+      const current = samples[index] ?? 0;
+      const previous = samples[index - 1] ?? 0;
+      const transient = (current - previous) * 1.6 + current;
+      if (transient > bestScore) {
+        bestScore = transient;
+        bestIndex = index;
+      }
+    }
+
+    return bestIndex * sampleDuration;
+  }
+
+  private recalculateGroupMetrics(group: MulticamGroup): void {
+    group.duration = group.angles.reduce((max, angle) => {
+      const extent = angle.syncOffset + angle.duration;
+      return extent > max ? extent : max;
+    }, 0);
+    group.masterTimecode = group.angles.reduce((min, angle) => (
+      angle.syncOffset < min ? angle.syncOffset : min
+    ), 0);
   }
 
   /**

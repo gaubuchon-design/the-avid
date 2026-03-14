@@ -209,24 +209,25 @@ describe('ModelRegistry', () => {
   describe('seedRegistry', () => {
     it('should populate the registry with all catalogue entries', () => {
       const count = seedRegistry(registry);
-      expect(count).toBe(10);
-      expect(registry.listAll()).toHaveLength(10);
+      expect(count).toBe(11);
+      expect(registry.listAll()).toHaveLength(11);
     });
 
     it('should be idempotent (no errors on double-seed)', () => {
       seedRegistry(registry);
       const secondCount = seedRegistry(registry);
       expect(secondCount).toBe(0); // All already registered
-      expect(registry.listAll()).toHaveLength(10);
+      expect(registry.listAll()).toHaveLength(11);
     });
   });
 
   describe('createSeededRegistry', () => {
     it('should return a registry pre-populated with all models', () => {
       const seeded = createSeededRegistry();
-      expect(seeded.listAll().length).toBe(10);
+      expect(seeded.listAll().length).toBe(11);
 
       // Spot-check some models
+      expect(seeded.getModel('whisper-large-v3-turbo')).toBeDefined();
       expect(seeded.getModel('whisper-large-v3')).toBeDefined();
       expect(seeded.getModel('bge-m3')).toBeDefined();
       expect(seeded.getModel('gemma-3')).toBeDefined();

@@ -32,6 +32,8 @@
       "@mcua/ui/*": ["./packages/ui/src/*"],
       "@mcua/render-agent": ["./packages/render-agent/src"],
       "@mcua/render-agent/*": ["./packages/render-agent/src/*"],
+      "@mcua/media-backend": ["./packages/media-backend/dist/index.d.ts"],
+      "@mcua/media-backend/*": ["./packages/media-backend/dist/*"],
       "@mcua/contracts": ["./libs/contracts/src"],
       "@mcua/contracts/*": ["./libs/contracts/src/*"],
       "@mcua/adapters": ["./libs/adapters/src"],

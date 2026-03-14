@@ -1,22 +1,25 @@
+import type { PublishPlatform } from '@prisma/client';
 import { db } from '../db/client';
 import { logger } from '../utils/logger';
 
 interface QueuedPublishJob {
   id: string;
   timelineId: string;
-  platform: 'YOUTUBE' | 'INSTAGRAM' | 'TIKTOK' | 'VIMEO' | 'CUSTOM';
+  platform: PublishPlatform;
   smartReframe: boolean;
   aspectRatio: string | null;
   autoCaption: boolean;
 }
 
 // Platform-specific aspect ratio defaults
-const PLATFORM_DEFAULTS: Record<string, { aspectRatio: string; maxDuration?: number }> = {
+const PLATFORM_DEFAULTS: Record<PublishPlatform, { aspectRatio: string; maxDuration?: number }> = {
   YOUTUBE: { aspectRatio: '16:9' },
   INSTAGRAM: { aspectRatio: '1:1', maxDuration: 60 },
   TIKTOK: { aspectRatio: '9:16', maxDuration: 180 },
+  TWITTER_X: { aspectRatio: '16:9', maxDuration: 140 },
+  LINKEDIN: { aspectRatio: '16:9', maxDuration: 600 },
   VIMEO: { aspectRatio: '16:9' },
-  CUSTOM: { aspectRatio: '16:9' },
+  CUSTOM_RTMP: { aspectRatio: '16:9' },
 };
 
 class PublishService {
@@ -150,9 +153,14 @@ class PublishService {
       case 'TIKTOK':
         // TikTok Content Posting API: init upload -> upload video -> publish
         return `https://tiktok.com/@user/video/placeholder_${job.id}`;
+      case 'TWITTER_X':
+        return `https://x.com/i/status/placeholder_${job.id}`;
+      case 'LINKEDIN':
+        return `https://linkedin.com/feed/update/placeholder_${job.id}`;
       case 'VIMEO':
         // Vimeo API: tus-based resumable upload
         return `https://vimeo.com/placeholder_${job.id}`;
+      case 'CUSTOM_RTMP':
       default:
         // Generic CDN export
         return `https://cdn.avid.app/exports/${job.id}.mp4`;

@@ -1,75 +1,64 @@
-# The Avid Production Readiness
+# Production Readiness
 
-## Supporting Audits
+This document is a reality check for the current repository state. It describes
+what is already strong enough to build on and what still blocks a true
+production release.
 
-- [SPEC_CONFORMANCE_AUDIT.md](./SPEC_CONFORMANCE_AUDIT.md)
-- [COMPETITIVE_ANALYSIS.md](./COMPETITIVE_ANALYSIS.md)
-- [AVID_PARITY_MATRIX.md](./AVID_PARITY_MATRIX.md)
-- [MEDIA_PIPELINE_ARCHITECTURE.md](./MEDIA_PIPELINE_ARCHITECTURE.md)
+## Supporting References
 
-## Recommendation
+- [SPEC_CONFORMANCE_AUDIT.md](SPEC_CONFORMANCE_AUDIT.md)
+- [AVID_PARITY_MATRIX.md](AVID_PARITY_MATRIX.md)
+- [MEDIA_PIPELINE_ARCHITECTURE.md](MEDIA_PIPELINE_ARCHITECTURE.md)
+- [DESKTOP_AUTO_UPDATES.md](DESKTOP_AUTO_UPDATES.md)
 
-The product should ship as:
+## What Is In Good Shape
 
-- A browser application for review, lightweight editing, collaboration, and zero-install access.
-- Dedicated macOS and Windows desktop applications for serious editorial work.
-- A mobile companion focused on review, logging, approvals, rough cuts, and AI-assisted organization instead of full desktop parity.
+- Shared schema-first project/media model across web, desktop, and mobile
+- Filesystem-backed desktop project packages and local media management
+- Desktop ingest with metadata probing, relink identity, waveform extraction,
+  poster frames, and thumbnail generation
+- Shared editor shell with timeline, bins, monitors, collaboration/version
+  history, and workspace layout behavior
+- Working monorepo build/type-check/test flows
+- Desktop packaging and generic-provider auto-update plumbing
 
-## Why Dedicated Desktop Apps Still Matter
+## Current Release Recommendation
 
-Desktop shells are justified here because the product vision depends on capabilities that browsers still handle poorly for a professional NLE:
+If this codebase were shipped in the near term, the honest positioning would be:
 
-- Native file system access for large local media volumes, project interchange, and offline workflows.
-- Better codec, proxy, and GPU pipeline control for playback, ingest, rendering, and background jobs.
-- Predictable windowing, keyboard capture, and device integration for editors working long sessions.
-- Native installers, updates, crash logging, and entitlement management for enterprise deployments.
+- desktop as the primary serious editorial surface
+- web as a companion editing/review/collaboration surface
+- mobile as a companion review/workflow client
 
-The shared React workspace should remain the primary UI layer, but macOS and Windows should be treated as first-class products, not just wrappers.
+## Release Blockers
 
-## Implemented In This Pass
+- Finishing-grade playback/compositing/export is still incomplete.
+- Collaboration persistence exists in the shared model, but a hardened
+  multi-user sync backend is not complete.
+- Professional interchange/export depth still needs more real-world validation.
+- Signing, notarization, installer trust, updater operations, and release
+  observability are not fully finished.
+- Lint debt remains high across legacy areas of the repo even though type-check
+  and test flows are in much better shape.
+- Browser-side storage/cache strategy for larger media-adjacent artifacts still
+  needs more hardening.
 
-- Added a shared project library in `@mcua/core` with seeded demo projects, import/export, summaries, and persistence.
-- Added project schema versioning in the shared model so persisted project packages have a migration anchor as the application surface expands.
-- Added local-first platform repositories:
-  - browser via IndexedDB
-  - desktop via filesystem-backed Electron project packages
-  - mobile via Expo FileSystem cache
-- Replaced the web app's hardcoded dashboard/editor data with real project loading and autosave.
-- Wired AI job state and token accounting into project state instead of component-local mock state.
-- Made bin assets insertable into the timeline so the editor flow is no longer static.
-- Moved the desktop renderer onto the richer shared web UI instead of the old placeholder pages.
-- Added desktop-native project package handling with a manifest, local media folder, and export history folder.
-- Added desktop-native media ingest from the File menu and bin panel, with imported assets copied into each local project package.
-- Added a desktop media pipeline foundation with managed originals, technical metadata capture, fingerprints, relink keys, waveform sidecars, and best-effort proxy generation.
-- Added desktop watch folders, missing-media relink actions, interchange exports (`EDL`, `OTIO`, audio turnover manifest), and a best-effort screener render in export packages.
-- Added desktop background ingest/export job tracking so desktop saves stay local while exports run asynchronously.
-- Added desktop file import/export IPC and Electron build scaffolding (`electron.vite.config.ts`, desktop `tsconfig.json`).
-- Wired the mobile app to the same shared project library so it reflects actual project data instead of empty mock lists.
-- Removed stale duplicate web/desktop code paths that conflicted with the active implementation.
+## Operational Notes
 
-## Remaining Release Blockers
-
-These still need to be finished before the product can honestly be called production-ready:
-
-- Real media engine completion: the repo now has the indexing, watch-folder, relink, and interchange foundation, but it still needs a full timeline compositor, broader codec handling, pinned packaged media tools in release builds, and finishing-grade final render/export output.
-- Backend integration: auth, project sync, collaboration, AI execution, permissions, billing.
-- Persistence hardening on web/media side: OPFS and large-asset cache layers are still missing.
-- Test and build verification: this environment did not have `node`, `npm`, or `pnpm` available, so builds and tests could not be executed.
-- Packaging assets: desktop icons, entitlements, notarization/signing, update channels, crash reporting.
-- Operational quality: CI, lint/type/test gates, observability, feature flags, migration/versioning strategy.
-
-Versioning is now anchored in the project schema, but a formal forward migration framework is still missing.
+- The desktop app now has a real packaging/update path, but production rollout
+  still depends on signing/notarization and operational monitoring.
+- The API and service layer are broad, but not every surface should be read as
+  production-hardened just because it exists in the monorepo.
+- Several roadmap/parity documents in `docs/` remain planning material rather
+  than ship criteria.
 
 ## Recommended Next Steps
 
-1. Decide on the source of truth for projects: local-first with background sync, or API-first with offline cache.
-2. Stand up a real media pipeline for ingest, proxies, thumbnails, waveform extraction, and export.
-3. Add automated typecheck/build/test pipelines and block merges on them.
-4. Harden the platform-specific persistence adapters:
-   - Browser: IndexedDB plus OPFS for media-adjacent artifacts
-   - Desktop: project packages plus local cache/proxy databases
-   - Mobile: file-backed project cache with lighter preference storage where needed
-5. Define scope boundaries clearly:
-   - Desktop: full editorial workstation
-   - Browser: collaborative editor and review
-   - Mobile: review, approvals, logging, social cutdowns
+1. Finish the media/compositor path that separates “editor prototype” from
+   “facility-safe workstation.”
+2. Harden collaboration and backend sync semantics.
+3. Reduce lint debt in the largest active packages.
+4. Complete release operations: signing, notarization, updater verification,
+   crash/health reporting.
+5. Keep live operational docs in sync with the shipping command surface and repo
+   topology.

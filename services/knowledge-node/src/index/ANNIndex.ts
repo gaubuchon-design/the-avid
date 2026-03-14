@@ -265,8 +265,7 @@ export class BruteForceIndex implements IANNIndex {
  */
 function computeNorm(v: Float32Array): number {
   let sum = 0;
-  for (let i = 0; i < v.length; i++) {
-    const val = v[i]!;
+  for (const val of v) {
     sum += val * val;
   }
   return Math.sqrt(sum);
@@ -315,7 +314,7 @@ function heapSiftDown(heap: ANNSearchResult[]): void {
   let idx = 0;
   const len = heap.length;
 
-  while (true) {
+  for (;;) {
     const left = 2 * idx + 1;
     const right = 2 * idx + 2;
     let smallest = idx;

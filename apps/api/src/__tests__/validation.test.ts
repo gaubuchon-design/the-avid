@@ -274,6 +274,50 @@ describe('paginate', () => {
   });
 });
 
+describe('render farm shared schemas', () => {
+  it('accepts canonical render worker registration payloads', () => {
+    const result = schemas.registerRenderWorker.safeParse({
+      hostname: 'render-01',
+      ip: '10.0.0.21',
+      port: 4010,
+      workerTypes: ['render', 'probe'],
+      capabilities: {
+        gpuVendor: 'NVIDIA',
+        gpuName: 'RTX 4090',
+        vramMB: 24576,
+        cpuCores: 24,
+        memoryGB: 64,
+        availableCodecs: ['h264', 'prores'],
+        ffmpegVersion: '7.1',
+        maxConcurrentJobs: 4,
+        hwAccel: ['nvenc'],
+      },
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts string render priorities and rejects legacy numeric priorities', () => {
+    const valid = schemas.submitRenderJob.safeParse({
+      name: 'Deliver Master',
+      presetId: 'stream-h264-1080p',
+      sourceTimelineId: 'timeline-main',
+      totalFrames: 1500,
+      priority: 'high',
+    });
+    const invalid = schemas.submitRenderJob.safeParse({
+      name: 'Deliver Master',
+      presetId: 'stream-h264-1080p',
+      sourceTimelineId: 'timeline-main',
+      totalFrames: 1500,
+      priority: 7,
+    });
+
+    expect(valid.success).toBe(true);
+    expect(invalid.success).toBe(false);
+  });
+});
+
 describe('cursorPaginate', () => {
   it('returns correct pagination when there are more items', () => {
     const items = Array.from({ length: 6 }, (_, i) => ({ id: `id-${i}` }));

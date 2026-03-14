@@ -1,8 +1,21 @@
 # The Avid -- API Reference
 
-Base URL: `/api/v1`
+Base path: `/api/v1`
 
-All endpoints return JSON. Authenticated endpoints require a `Bearer` token in the `Authorization` header.
+Local default:
+
+```text
+http://localhost:4000/api/v1
+```
+
+Notes:
+
+- The web app usually reaches the API through Vite proxying from
+  `http://localhost:3001`.
+- This file is a maintained repository reference, not a generated OpenAPI
+  document.
+- Most endpoints return JSON. Authenticated endpoints require a `Bearer` token
+  in the `Authorization` header.
 
 ---
 
@@ -26,13 +39,18 @@ Create a new user account.
 
 ```json
 {
-  "user": { "id": "uuid", "email": "user@example.com", "displayName": "Jane Editor" },
+  "user": {
+    "id": "uuid",
+    "email": "user@example.com",
+    "displayName": "Jane Editor"
+  },
   "accessToken": "eyJ...",
   "refreshToken": "eyJ..."
 }
 ```
 
-New accounts are provisioned with 100 AI tokens, FREE subscription tier, and default preferences.
+New accounts are provisioned with 100 AI tokens, FREE subscription tier, and
+default preferences.
 
 ---
 
@@ -67,16 +85,17 @@ Authenticate an existing user.
 
 **Errors:**
 
-| Status | Code | Description |
-|--------|------|-------------|
-| 401 | `UNAUTHORIZED` | Invalid email or password |
-| 429 | `RATE_LIMITED` | Too many auth attempts (max 20 per 15 minutes) |
+| Status | Code           | Description                                    |
+| ------ | -------------- | ---------------------------------------------- |
+| 401    | `UNAUTHORIZED` | Invalid email or password                      |
+| 429    | `RATE_LIMITED` | Too many auth attempts (max 20 per 15 minutes) |
 
 ---
 
 ### POST /auth/refresh
 
-Exchange a valid refresh token for a new access/refresh token pair. The old refresh token is revoked (rotation).
+Exchange a valid refresh token for a new access/refresh token pair. The old
+refresh token is revoked (rotation).
 
 **Body:**
 
@@ -97,9 +116,9 @@ Exchange a valid refresh token for a new access/refresh token pair. The old refr
 
 **Errors:**
 
-| Status | Code | Description |
-|--------|------|-------------|
-| 401 | `UNAUTHORIZED` | Invalid, expired, or revoked refresh token |
+| Status | Code           | Description                                |
+| ------ | -------------- | ------------------------------------------ |
+| 401    | `UNAUTHORIZED` | Invalid, expired, or revoked refresh token |
 
 ---
 
@@ -182,24 +201,25 @@ Change the authenticated user's password. Revokes all existing refresh tokens.
 
 ## AI Endpoints
 
-All AI endpoints require authentication. AI operations consume tokens from the user's balance.
+All AI endpoints require authentication. AI operations consume tokens from the
+user's balance.
 
 ### Token Costs
 
-| Job Type | Cost |
-|----------|------|
-| TRANSCRIPTION | 10 |
-| ASSEMBLY | 50 |
-| PHRASE_SEARCH | 2 |
-| SMART_REFRAME | 20 |
-| VOICE_ISOLATION | 25 |
-| OBJECT_MASK | 30 |
-| AUTO_CAPTIONS | 15 |
-| HIGHLIGHTS | 40 |
-| COMPLIANCE_SCAN | 10 |
-| SCENE_DETECTION | 15 |
-| MUSIC_BEATS | 5 |
-| SCRIPT_SYNC | 30 |
+| Job Type        | Cost |
+| --------------- | ---- |
+| TRANSCRIPTION   | 10   |
+| ASSEMBLY        | 50   |
+| PHRASE_SEARCH   | 2    |
+| SMART_REFRAME   | 20   |
+| VOICE_ISOLATION | 25   |
+| OBJECT_MASK     | 30   |
+| AUTO_CAPTIONS   | 15   |
+| HIGHLIGHTS      | 40   |
+| COMPLIANCE_SCAN | 10   |
+| SCENE_DETECTION | 15   |
+| MUSIC_BEATS     | 5    |
+| SCRIPT_SYNC     | 30   |
 
 ### POST /ai/jobs
 
@@ -238,13 +258,13 @@ List the authenticated user's AI jobs. Supports pagination and filtering.
 
 **Query Parameters:**
 
-| Param | Type | Description |
-|-------|------|-------------|
-| page | number | Page number (default 1) |
-| limit | number | Items per page (default 20) |
-| type | string | Filter by job type |
-| status | string | Filter by status (QUEUED, RUNNING, COMPLETED, FAILED, CANCELLED) |
-| projectId | string | Filter by project |
+| Param     | Type   | Description                                                      |
+| --------- | ------ | ---------------------------------------------------------------- |
+| page      | number | Page number (default 1)                                          |
+| limit     | number | Items per page (default 20)                                      |
+| type      | string | Filter by job type                                               |
+| status    | string | Filter by status (QUEUED, RUNNING, COMPLETED, FAILED, CANCELLED) |
+| projectId | string | Filter by project                                                |
 
 ### GET /ai/jobs/:id
 
@@ -252,7 +272,8 @@ Get a specific AI job by ID.
 
 ### DELETE /ai/jobs/:id
 
-Cancel a queued or running AI job. Tokens are refunded if the job was still in QUEUED status.
+Cancel a queued or running AI job. Tokens are refunded if the job was still in
+QUEUED status.
 
 ### POST /ai/transcribe
 
@@ -335,26 +356,34 @@ Get the user's current token balance and recent transactions.
 
 ---
 
-## Gemini API Integration (Frontend)
+## Frontend AI Integration
 
-The web application integrates directly with the Google Generative AI API for real-time AI assistance in the editor.
+The browser editor currently has two client-side AI extension paths:
+
+- a direct Gemini REST client in `apps/web/src/ai/GeminiClient.ts`
+- an MCP client in `apps/web/src/ai/MCPClient.ts`
+
+Server-side AI routes in `apps/api` are separately configured through
+OpenAI-compatible environment variables.
 
 ### Configuration
 
-Set the `VITE_GEMINI_API_KEY` environment variable in your `.env` file:
+Set `VITE_GEMINI_API_KEY` in your web environment if you want browser-side
+Gemini calls:
 
 ```
 VITE_GEMINI_API_KEY=your_api_key_here
 ```
 
-When no API key is configured, the AI assistant falls back to an offline stub that returns canned responses for common editing intents (trim, split, silence removal, color matching, captions, organisation, rough cut assembly).
+When no Gemini API key is configured, the web AI client falls back to a local
+stub response path for common editing intents.
 
 ### Models
 
-| Model ID | Alias | Use Case |
-|----------|-------|----------|
-| `gemini-2.5-pro-preview-05-06` | `pro` | Complex reasoning, assembly planning |
-| `gemini-2.0-flash` | `flash` | Fast responses, caption generation |
+| Model ID                       | Alias   | Current Use                                      |
+| ------------------------------ | ------- | ------------------------------------------------ |
+| `gemini-2.5-pro-preview-05-06` | `pro`   | Heavier reasoning/planning in the browser client |
+| `gemini-2.0-flash`             | `flash` | Faster browser-side responses                    |
 
 ### Client API
 
@@ -368,7 +397,12 @@ geminiClient.isConfigured();
 geminiClient.setApiKey('your_key');
 
 // Chat (non-streaming)
-const response = await geminiClient.chat(messages, tools, systemPrompt, 'flash');
+const response = await geminiClient.chat(
+  messages,
+  tools,
+  systemPrompt,
+  'flash'
+);
 
 // Chat (streaming)
 await geminiClient.streamChat(messages, tools, systemPrompt, 'pro', (chunk) => {
@@ -386,9 +420,11 @@ const captions = await geminiClient.generateCaptions(transcriptText, 'en');
 
 ## MCP Server Configuration
 
-The editor supports the Model Context Protocol (MCP) for connecting to external AI tool servers. MCP servers provide additional AI capabilities beyond the built-in Gemini integration.
+The current browser MCP client uses a WebSocket JSON-RPC transport.
 
-To configure an MCP server, the client connects via the standard MCP transport (stdio or HTTP/SSE) and discovers available tools at connection time. The discovered tools are then made available to the AgentEngine for use in edit plans.
+To configure an MCP server, add it in the client, connect over WebSocket, then
+discover tools dynamically. Those discovered tools can be surfaced into the
+editor’s agent tooling path.
 
 ---
 
@@ -408,30 +444,31 @@ Returns database connectivity status.
 
 ### API Server (`apps/api`)
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `DATABASE_URL` | Yes | -- | PostgreSQL connection string |
-| `JWT_SECRET` | No | `dev-secret-change-in-production` | JWT signing secret |
-| `JWT_EXPIRES_IN` | No | `7d` | Access token TTL |
-| `JWT_REFRESH_EXPIRES_IN` | No | `30d` | Refresh token TTL |
-| `PORT` | No | `4000` | API server port |
-| `API_BASE_URL` | No | `http://localhost:4000` | Public API URL |
-| `REDIS_URL` | No | `redis://localhost:6379` | Redis connection URL |
-| `OPENAI_API_KEY` | No | -- | OpenAI API key for server-side AI (Whisper, GPT-4o) |
-| `OPENAI_TRANSCRIPTION_MODEL` | No | `whisper-1` | Whisper model for transcription |
-| `OPENAI_ASSEMBLY_MODEL` | No | `gpt-4o` | Model for agentic assembly |
-| `AWS_REGION` | No | `us-east-1` | AWS region |
-| `S3_BUCKET_MEDIA` | No | `avid-media-assets` | S3 bucket for media assets |
-| `S3_BUCKET_PROXIES` | No | `avid-media-proxies` | S3 bucket for proxy files |
-| `S3_BUCKET_EXPORTS` | No | `avid-exports` | S3 bucket for exports |
-| `STRIPE_SECRET_KEY` | No | -- | Stripe secret key for billing |
-| `FFMPEG_PATH` | No | `ffmpeg` | Path to FFmpeg binary |
-| `ALLOWED_ORIGINS` | No | `http://localhost:3000` | Comma-separated CORS origins |
-| `RATE_LIMIT_MAX` | No | `1000` | Max requests per window |
+| Variable                     | Required | Default                           | Description                                                                       |
+| ---------------------------- | -------- | --------------------------------- | --------------------------------------------------------------------------------- |
+| `DATABASE_URL`               | Yes      | --                                | PostgreSQL connection string                                                      |
+| `JWT_SECRET`                 | No       | `dev-secret-change-in-production` | JWT signing secret                                                                |
+| `JWT_EXPIRES_IN`             | No       | `7d`                              | Access token TTL                                                                  |
+| `JWT_REFRESH_EXPIRES_IN`     | No       | `30d`                             | Refresh token TTL                                                                 |
+| `PORT`                       | No       | `4000`                            | API server port                                                                   |
+| `API_BASE_URL`               | No       | `http://localhost:4000`           | Public API URL                                                                    |
+| `REDIS_URL`                  | No       | `redis://localhost:6379`          | Redis connection URL                                                              |
+| `OPENAI_API_KEY`             | No       | --                                | OpenAI API key for server-side AI (Whisper, GPT-4o)                               |
+| `OPENAI_TRANSCRIPTION_MODEL` | No       | `whisper-1`                       | Whisper model for transcription                                                   |
+| `OPENAI_ASSEMBLY_MODEL`      | No       | `gpt-4o`                          | Model for agentic assembly                                                        |
+| `AWS_REGION`                 | No       | `us-east-1`                       | AWS region                                                                        |
+| `S3_BUCKET_MEDIA`            | No       | `avid-media-assets`               | S3 bucket for media assets                                                        |
+| `S3_BUCKET_PROXIES`          | No       | `avid-media-proxies`              | S3 bucket for proxy files                                                         |
+| `S3_BUCKET_EXPORTS`          | No       | `avid-exports`                    | S3 bucket for exports                                                             |
+| `STRIPE_SECRET_KEY`          | No       | --                                | Stripe secret key for billing                                                     |
+| `FFMPEG_PATH`                | No       | `ffmpeg`                          | Path to FFmpeg binary                                                             |
+| `ALLOWED_ORIGINS`            | No       | `http://localhost:3000`           | Comma-separated CORS origins; include `http://localhost:3001` for the Vite editor |
+| `RATE_LIMIT_MAX`             | No       | `1000`                            | Max requests per window                                                           |
 
 ### Web App (`apps/web`)
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `VITE_GEMINI_API_KEY` | No | -- | Google Gemini API key for client-side AI |
-| `VITE_API_BASE_URL` | No | `http://localhost:4000/api/v1` | Backend API URL |
+| Variable              | Required | Default                 | Description                               |
+| --------------------- | -------- | ----------------------- | ----------------------------------------- |
+| `VITE_GEMINI_API_KEY` | No       | --                      | Google Gemini API key for browser-side AI |
+| `VITE_API_BASE_URL`   | No       | `/api`                  | Base path used by runtime API helpers     |
+| `VITE_API_URL`        | No       | `http://localhost:4000` | Dev proxy target used by `vite.config.ts` |

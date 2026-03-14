@@ -1,4 +1,11 @@
-import type { EditorMediaAsset, EditorProject } from '@mcua/core';
+import type {
+  EditorMediaAsset,
+  EditorProject,
+  FrameRange,
+  PlaybackStreamDescriptor,
+  PlaybackTelemetry,
+  TimelineRenderSnapshot,
+} from '@mcua/core';
 
 // ─── Dialog Types ─────────────────────────────────────────────────────────────
 
@@ -60,7 +67,7 @@ interface SaveDialogResult {
 
 interface DesktopJob {
   id: string;
-  kind: 'INGEST' | 'EXPORT';
+  kind: 'INGEST' | 'INDEX' | 'EXPORT' | 'TRANSCODE' | 'TRANSCRIPTION' | 'RENDER' | 'EFFECTS';
   projectId: string;
   label: string;
   status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
@@ -69,6 +76,8 @@ interface DesktopJob {
   updatedAt: string;
   outputPath?: string;
   error?: string;
+  detail?: string;
+  dispatchMode?: 'LOCAL' | 'DISTRIBUTED' | 'HYBRID';
 }
 
 // ─── Media Types ──────────────────────────────────────────────────────────────
@@ -85,6 +94,25 @@ interface MediaToolInfo {
   ffprobe: string | null;
 }
 
+interface ExportTranscodeRequest {
+  jobId: string;
+  sourceArtifact: Uint8Array;
+  sourceContainer: string;
+  targetContainer: string;
+  targetVideoCodec?: string;
+  targetAudioCodec?: string;
+  fps?: number;
+  width?: number;
+  height?: number;
+}
+
+interface ExportTranscodeResult {
+  outputPath: string;
+  outputContainer: string;
+  outputVideoCodec: string;
+  outputAudioCodec?: string;
+}
+
 // ─── App Types ────────────────────────────────────────────────────────────────
 
 interface AppPaths {
@@ -92,6 +120,19 @@ interface AppPaths {
   logs: string;
   temp: string;
   documents: string;
+}
+
+interface DesktopUpdateState {
+  currentVersion: string;
+  channel: string;
+  status: 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error';
+  availableVersion: string | null;
+  downloadPercent: number | null;
+  message: string | null;
+  error: string | null;
+  checkedAt: string | null;
+  restartScheduled: boolean;
+  autoInstallOnQuit: boolean;
 }
 
 // ─── Video I/O Types ──────────────────────────────────────────────────────────
@@ -210,6 +251,33 @@ interface RenderAccelResult {
   ffmpegArgs: string[];
 }
 
+interface ParityPlaybackTransportView {
+  buffer: SharedArrayBuffer;
+  width: number;
+  height: number;
+  bytesPerPixel: number;
+  slots: number;
+}
+
+interface ParityAudioMonitorPreviewState {
+  mixId: string;
+  handle: string;
+  previewPath: string;
+  executionPlanPath: string;
+  previewRenderArtifacts: string[];
+  bufferedPreviewActive: boolean;
+  offlinePrintRenderRequired: boolean;
+  timeRange: {
+    startSeconds: number;
+    endSeconds: number;
+  };
+}
+
+interface ParityPlaybackTransportDescriptor {
+  transportHandle: string;
+  view: ParityPlaybackTransportView;
+}
+
 // ─── Desktop Bridge Interface ─────────────────────────────────────────────────
 
 interface DesktopBridge {
@@ -224,6 +292,7 @@ interface DesktopBridge {
     revealInFinder: (filePath: string) => Promise<boolean>;
     downloadUpdate: () => Promise<boolean>;
     checkForUpdates: () => Promise<unknown>;
+    getUpdateState: () => Promise<DesktopUpdateState>;
     installUpdate: () => Promise<void>;
   };
   gpu: {
@@ -243,7 +312,7 @@ interface DesktopBridge {
   getProject: (projectId: string) => Promise<EditorProject | null>;
   saveProject: (project: EditorProject) => Promise<EditorProject>;
   deleteProject: (projectId: string) => Promise<boolean>;
-  importMedia: (projectId: string, filePaths: string[]) => Promise<EditorMediaAsset[]>;
+  importMedia: (projectId: string, filePaths: string[], binId?: string) => Promise<EditorMediaAsset[]>;
   scanProjectMedia: (projectId: string) => Promise<EditorProject | null>;
   relinkProjectMedia: (projectId: string, searchRoots: string[]) => Promise<RelinkResult>;
   addWatchFolder: (projectId: string, folderPath: string) => Promise<EditorProject | null>;
@@ -253,6 +322,7 @@ interface DesktopBridge {
   // Jobs
   listDesktopJobs: () => Promise<DesktopJob[]>;
   startExportJob: (project: EditorProject) => Promise<DesktopJob>;
+  transcodeExportArtifact: (payload: ExportTranscodeRequest) => Promise<ExportTranscodeResult>;
 
   // File system
   readTextFile: (filePath: string) => Promise<string>;
@@ -291,6 +361,29 @@ interface DesktopBridge {
     deviceStatus: (deviceId: string) => Promise<IOResult>;
     getTransportBuffer: (deviceId: string) => Promise<SharedArrayBuffer | null>;
     onFrameAvailable: (cb: (info: unknown) => void) => () => void;
+  };
+
+  parityPlayback: {
+    syncProject: (project: EditorProject) => Promise<boolean>;
+    createTransport: (request: {
+      project: EditorProject;
+      snapshot?: TimelineRenderSnapshot;
+      sequenceId?: string;
+      revisionId?: string;
+    }) => Promise<ParityPlaybackTransportDescriptor>;
+    getTransportView: (transportHandle: string) => Promise<ParityPlaybackTransportView>;
+    getAudioMonitorPreview: (transportHandle: string) => Promise<ParityAudioMonitorPreviewState | null>;
+    attachStreams: (transportHandle: string, streams: PlaybackStreamDescriptor[]) => Promise<boolean>;
+    preroll: (transportHandle: string, range: FrameRange) => Promise<boolean>;
+    start: (transportHandle: string, frame: number) => Promise<boolean>;
+    stop: (transportHandle: string) => Promise<boolean>;
+    releaseTransport: (transportHandle: string) => Promise<boolean>;
+    play: (transportHandle: string, frame: number, playbackRate?: number) => Promise<boolean>;
+    syncFrame: (transportHandle: string, frame: number) => Promise<boolean>;
+    getTelemetry: (transportHandle: string) => Promise<PlaybackTelemetry>;
+    attachOutputDevice: (transportHandle: string, config: unknown) => Promise<boolean>;
+    detachOutputDevice: (transportHandle: string, deviceId?: string) => Promise<boolean>;
+    invalidateCaches: (projectId: string) => Promise<boolean>;
   };
 
   // Streaming (NDI, SRT)
@@ -371,6 +464,7 @@ interface DesktopBridge {
   onUpdateAvailable: (callback: (info: { version: string }) => void) => () => void;
   onUpdateProgress: (callback: (info: { percent: number }) => void) => () => void;
   onUpdateDownloaded: (callback: (info: { version: string }) => void) => () => void;
+  onUpdateState: (callback: (info: DesktopUpdateState) => void) => () => void;
 
   // Deep link events
   onDeepLink: (callback: (url: string) => void) => () => void;

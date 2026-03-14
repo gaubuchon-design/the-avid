@@ -251,13 +251,16 @@ export class ThumbnailDesignerEngine {
   updateDesign(id: string, updates: Partial<ThumbnailDesign>): ThumbnailDesign | null {
     const index = this.designs.findIndex((d) => d.id === id);
     if (index === -1) return null;
+    const currentDesign = this.designs[index];
+    if (!currentDesign) return null;
 
-    this.designs[index]! = {
-      ...this.designs[index]!,
+    const nextDesign: ThumbnailDesign = {
+      ...currentDesign,
       ...updates,
       updatedAt: new Date().toISOString(),
     };
-    return this.designs[index]!;
+    this.designs[index] = nextDesign;
+    return nextDesign;
   }
 
   /**

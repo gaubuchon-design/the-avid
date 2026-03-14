@@ -1,8 +1,12 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useEditorStore } from '../../store/editor.store';
+import { usePlayerStore } from '../../store/player.store';
 import { SourceMonitor } from '../SourceMonitor/SourceMonitor';
 import { RecordMonitor } from '../RecordMonitor/RecordMonitor';
 import { MonitorArea } from '../Monitor/MonitorArea';
+import { MultiCamSourceView } from './MultiCamSourceView';
+import { trimEngine } from '../../engine/TrimEngine';
+import { PanelResizeHandle } from '../Layout/PanelResizeHandle';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -56,15 +60,34 @@ function storeToMode(storeLayout: 'source-record' | 'full-frame'): ComposerLayou
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export function ComposerPanel() {
+interface ComposerPanelProps {
+  dualMonitorSplit?: number;
+  onDualMonitorSplitChange?: (value: number) => void;
+}
+
+export function ComposerPanel({
+  dualMonitorSplit = 50,
+  onDualMonitorSplitChange,
+}: ComposerPanelProps) {
   const composerLayout = useEditorStore((s) => s.composerLayout);
   const setComposerLayout = useEditorStore((s) => s.setComposerLayout);
+  const trimActive = useEditorStore((s) => s.trimActive);
+  const trimViewMode = useEditorStore((s) => s.trimViewMode);
+  const setTrimViewMode = useEditorStore((s) => s.setTrimViewMode);
+  const multicamActive = useEditorStore((s) => s.multicamActive);
+  const multicamDisplayMode = useEditorStore((s) => s.multicamDisplayMode);
+  const activeMonitor = usePlayerStore((s) => s.activeMonitor);
 
   // Local state for 'full-source' since the store only has 'source-record' | 'full-frame'
   const [sourceOnly, setSourceOnly] = useState(false);
 
   // Derive the effective layout mode
-  const mode: ComposerLayoutMode = sourceOnly ? 'full-source' : storeToMode(composerLayout);
+  const mode: ComposerLayoutMode = trimActive
+    ? 'source-record'
+    : multicamActive
+      ? 'source-record'
+    : (sourceOnly ? 'full-source' : storeToMode(composerLayout));
+  const hasPreviousTrimConfiguration = trimEngine.hasPreviousConfiguration();
 
   const isDual = mode === 'source-record';
   const isSingleSource = mode === 'full-source';
@@ -73,34 +96,66 @@ export function ComposerPanel() {
   // ── Layout switching callbacks ──────────────────────────────────────────
 
   const handleSetDual = useCallback(() => {
+    if (trimActive) {
+      return;
+    }
     setSourceOnly(false);
     setComposerLayout('source-record');
-  }, [setComposerLayout]);
+  }, [setComposerLayout, trimActive]);
 
   const handleSetFullSource = useCallback(() => {
+    if (trimActive) {
+      return;
+    }
     setSourceOnly(true);
     // Keep the store in a non-source-record state so other consumers
     // know we are not in dual mode.
     setComposerLayout('full-frame');
-  }, [setComposerLayout]);
+  }, [setComposerLayout, trimActive]);
 
   const handleSetFullRecord = useCallback(() => {
+    if (trimActive) {
+      return;
+    }
     setSourceOnly(false);
     setComposerLayout('full-frame');
-  }, [setComposerLayout]);
+  }, [setComposerLayout, trimActive]);
+
+  const handleRecallPreviousTrim = useCallback(() => {
+    const nextState = trimEngine.recallPreviousConfiguration();
+    if (nextState.active && nextState.rollers.length > 0) {
+      const store = useEditorStore.getState();
+      store.setActiveTool('trim');
+      store.selectTrack(nextState.rollers[0]!.trackId);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (trimActive || composerLayout !== 'full-frame') {
+      return;
+    }
+
+    setSourceOnly(activeMonitor === 'source');
+  }, [activeMonitor, composerLayout, trimActive]);
 
   // ── Active monitor label ────────────────────────────────────────────────
 
-  const activeLabel = isDual
-    ? 'Source | Record'
-    : isSingleSource
-      ? 'Source'
-      : 'Record';
+  const activeLabel = trimActive
+    ? `Trim ${trimViewMode === 'big' ? 'Big' : 'Small'} View`
+    : multicamActive
+      ? `MultiCam ${multicamDisplayMode === 'quad' ? '2x2' : multicamDisplayMode === 'nine' ? '3x3' : '4x4'}`
+    : isDual
+      ? 'Source | Record'
+      : isSingleSource
+        ? 'Source'
+        : 'Record';
 
   // ── Render ──────────────────────────────────────────────────────────────
 
   return (
-    <div className="composer-panel">
+    <div
+      className={`composer-panel${trimActive ? ' composer-panel-trim-active' : ''}${trimActive && trimViewMode === 'big' ? ' composer-panel-trim-big' : ''}${trimActive && trimViewMode === 'small' ? ' composer-panel-trim-small' : ''}`}
+    >
       {/* Toolbar strip */}
       <div className="composer-panel-toolbar">
         <div className="composer-panel-toolbar-group">
@@ -109,6 +164,7 @@ export function ComposerPanel() {
             onClick={handleSetDual}
             title="Dual: Source | Record"
             aria-pressed={isDual}
+            disabled={trimActive}
           >
             <DualIcon />
           </button>
@@ -117,6 +173,7 @@ export function ComposerPanel() {
             onClick={handleSetFullSource}
             title="Source Only"
             aria-pressed={isSingleSource}
+            disabled={trimActive}
           >
             <SourceIcon />
           </button>
@@ -125,23 +182,70 @@ export function ComposerPanel() {
             onClick={handleSetFullRecord}
             title="Record Only"
             aria-pressed={isSingleRecord}
+            disabled={trimActive}
           >
             <RecordIcon />
           </button>
         </div>
 
         <span className="composer-panel-active-label">{activeLabel}</span>
+
+        <div className="composer-panel-toolbar-actions">
+          {trimActive ? (
+            <div className="composer-panel-toolbar-group composer-panel-toolbar-group-trim">
+              <button
+                type="button"
+                className={`composer-panel-layout-btn composer-panel-trim-action-btn${trimViewMode === 'small' ? ' active' : ''}`}
+                onClick={() => setTrimViewMode('small')}
+                aria-pressed={trimViewMode === 'small'}
+                title="Small Trim View"
+              >
+                Small
+              </button>
+              <button
+                type="button"
+                className={`composer-panel-layout-btn composer-panel-trim-action-btn${trimViewMode === 'big' ? ' active' : ''}`}
+                onClick={() => setTrimViewMode('big')}
+                aria-pressed={trimViewMode === 'big'}
+                title="Big Trim View"
+              >
+                Big
+              </button>
+            </div>
+          ) : hasPreviousTrimConfiguration ? (
+            <button
+              type="button"
+              className="composer-panel-trim-recall-btn"
+              onClick={handleRecallPreviousTrim}
+              title="Recall previous trim setup"
+            >
+              Recall Trim
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {/* Monitor area */}
       <div
         className={`composer-panel-monitors ${isDual ? 'composer-panel-dual' : 'composer-panel-single'}`}
+        style={isDual ? {
+          gridTemplateColumns: `minmax(0, ${dualMonitorSplit}fr) var(--panel-divider-w) minmax(0, ${100 - dualMonitorSplit}fr)`,
+        } : undefined}
       >
         {isDual && (
           <>
             <div className="composer-panel-monitor-slot">
-              <SourceMonitor />
+              {multicamActive ? <MultiCamSourceView /> : <SourceMonitor />}
             </div>
+            <PanelResizeHandle
+              axis="horizontal"
+              ariaLabel="Resize source and record monitors"
+              value={dualMonitorSplit}
+              min={30}
+              max={70}
+              className="composer-panel-resize-handle resize-handle-h"
+              onChange={(next) => onDualMonitorSplitChange?.(next)}
+            />
             <div className="composer-panel-monitor-slot">
               <RecordMonitor />
             </div>
@@ -150,7 +254,7 @@ export function ComposerPanel() {
 
         {isSingleSource && (
           <div className="composer-panel-monitor-slot">
-            <SourceMonitor />
+            {multicamActive ? <MultiCamSourceView /> : <SourceMonitor />}
           </div>
         )}
 

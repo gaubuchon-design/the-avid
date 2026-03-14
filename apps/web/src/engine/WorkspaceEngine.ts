@@ -13,6 +13,7 @@
 //
 // =============================================================================
 
+import type { BuiltInEditorialWorkspaceId } from '@mcua/core';
 import { useEditorStore } from '../store/editor.store';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -54,12 +55,7 @@ export interface WorkspaceLayout {
 }
 
 /** Identifiers for the 5 built-in workspace presets. */
-export type BuiltInWorkspace =
-  | 'source-record'
-  | 'effects'
-  | 'color-correction'
-  | 'audio-mixing'
-  | 'full-screen';
+export type BuiltInWorkspace = BuiltInEditorialWorkspaceId;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

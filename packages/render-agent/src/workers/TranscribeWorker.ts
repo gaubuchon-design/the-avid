@@ -33,7 +33,7 @@ export class TranscribeWorker {
   private childProcess: ChildProcess | null = null;
   private cancelled = false;
   /** Track temp files for cleanup on any exit path. */
-  private tempFiles: Set<string> = new Set();
+  private tempFiles: Set<string> = new Set<string>();
 
   /**
    * Process a transcription job.
@@ -82,7 +82,7 @@ export class TranscribeWorker {
 
       // Step 2: Transcribe
       onProgress?.({ stage: 'transcribing', percent: 35, message: 'Running transcription...' });
-      const segments = await this.transcribe(wavPath, language);
+      const segments = await this.transcribe(job, wavPath, language);
       if (this.cancelled) {
         this.cleanupTempFiles();
         throw new Error('Transcription cancelled');
@@ -208,11 +208,57 @@ export class TranscribeWorker {
    * Transcribe audio using the Whisper API.
    * Falls back to a mock transcription if the API endpoint is not configured.
    */
-  private async transcribe(wavPath: string, language: string): Promise<TranscriptSegment[]> {
+  private async transcribe(job: WorkerJob, wavPath: string, language: string): Promise<TranscriptSegment[]> {
+    const provider = String(
+      job.params['transcriptionProvider']
+      ?? process.env['TRANSCRIPTION_PROVIDER']
+      ?? (process.env['LOCAL_AI_RUNTIME_URL'] ? 'local' : (process.env['WHISPER_API_URL'] ? 'cloud' : 'mock'))
+    );
+    const diarize = job.params['diarize'] === true;
+    const task = job.params['task'] === 'translate' ? 'translate' : 'transcribe';
+    const modelId = typeof job.params['modelId'] === 'string' ? job.params['modelId'] : undefined;
+
+    if (provider === 'local') {
+      const runtimeUrl = process.env['LOCAL_AI_RUNTIME_URL'] ?? 'http://127.0.0.1:4300';
+
+      try {
+        const response = await fetch(`${runtimeUrl.replace(/\/$/, '')}/transcribe`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            audioPath: wavPath,
+            language,
+            diarize,
+            task,
+            modelId,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Local AI runtime returned ${response.status}`);
+        }
+
+        const result = (await response.json()) as {
+          segments: { startTime: number; endTime: number; text: string }[];
+        };
+
+        return result.segments.map((seg, index) => ({
+          index: index + 1,
+          startTime: this.secondsToTimestamp(seg.startTime),
+          endTime: this.secondsToTimestamp(seg.endTime),
+          text: seg.text.trim(),
+        }));
+      } catch (err) {
+        console.warn(`Local AI runtime failed, falling back: ${(err as Error).message}`);
+      }
+    }
+
     const apiUrl = process.env['WHISPER_API_URL'];
     const apiKey = process.env['WHISPER_API_KEY'];
 
-    if (apiUrl && apiKey) {
+    if ((provider === 'cloud' || provider === 'auto') && apiUrl && apiKey) {
       try {
         const audioData = fs.readFileSync(wavPath);
         const formData = new FormData();
@@ -221,7 +267,7 @@ export class TranscribeWorker {
         const audioBlob: Blob = new (Blob as any)([audioData], { type: 'audio/wav' });
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Node FormData append with filename
         (formData as any).append('file', audioBlob, 'audio.wav');
-        formData.append('model', 'whisper-1');
+        formData.append('model', modelId ?? 'whisper-1');
         formData.append('language', language);
         formData.append('response_format', 'verbose_json');
 
@@ -236,7 +282,7 @@ export class TranscribeWorker {
         }
 
         const result = (await response.json()) as {
-          segments: Array<{ id: number; start: number; end: number; text: string }>;
+          segments: { id: number; start: number; end: number; text: string }[];
         };
 
         return result.segments.map((seg, i) => ({

@@ -238,8 +238,8 @@ function filterTracks(
   }
 
   if (params.instrumental !== undefined) {
-    // All demo tracks are instrumental
-    results = results;
+    // All demo tracks are instrumental, so a false filter excludes the demo set.
+    results = params.instrumental ? results : [];
   }
 
   // Pagination

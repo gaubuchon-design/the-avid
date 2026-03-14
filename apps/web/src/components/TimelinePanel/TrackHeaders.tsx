@@ -15,6 +15,23 @@ const TRACK_COLORS = [
   '#f59e0b', '#a855f7', '#ef4444', '#00c896', '#64748b',
 ];
 
+function getTrackRoleLabel(track: Track): string {
+  switch (track.type) {
+    case 'VIDEO':
+      return 'Picture';
+    case 'AUDIO':
+      return 'Audio';
+    case 'GRAPHIC':
+      return 'Graphic';
+    case 'SUBTITLE':
+      return 'Subtitle';
+    case 'EFFECT':
+      return 'Effect';
+    default:
+      return 'Track';
+  }
+}
+
 interface TrackHeaderProps {
   track: Track;
   trackHeight: number;
@@ -22,11 +39,21 @@ interface TrackHeaderProps {
 }
 
 const TrackHeader = memo(function TrackHeader({ track, trackHeight, onHeightChange }: TrackHeaderProps) {
-  const { selectedTrackId, selectTrack, toggleMute, toggleSolo, toggleLock } =
-    useEditorStore();
+  const {
+    selectedTrackId,
+    selectTrack,
+    toggleMute,
+    toggleSolo,
+    toggleLock,
+    videoMonitorTrackId,
+    setVideoMonitorTrack,
+  } = useEditorStore();
   const setTrackVolume = useEditorStore((s) => s.setTrackVolume);
+
   const isSelected = selectedTrackId === track.id;
-  const color = TRACK_TYPE_COLOR[track.type] ?? 'var(--text-muted)';
+  const isVideoTrack = track.type === 'VIDEO' || track.type === 'GRAPHIC';
+  const isMonitored = videoMonitorTrackId === track.id;
+  const color = track.color || TRACK_TYPE_COLOR[track.type] || 'var(--text-muted)';
 
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(track.name);
@@ -47,15 +74,15 @@ const TrackHeader = memo(function TrackHeader({ track, trackHeight, onHeightChan
     setIsRenaming(false);
     if (renameValue.trim() && renameValue !== track.name) {
       const store = useEditorStore.getState();
-      store.updateTrack?.(track.id, { name: renameValue.trim() });
+      store.updateTrackColor?.(track.id, track.color || color);
     }
-  }, [renameValue, track.id, track.name]);
+  }, [renameValue, track.id, track.name, track.color, color]);
 
   // Track color
   const handleColorSelect = useCallback((c: string) => {
     setShowColorPicker(false);
     const store = useEditorStore.getState();
-    store.updateTrack?.(track.id, { color: c });
+    store.updateTrackColor?.(track.id, c);
   }, [track.id]);
 
   // Sync lock toggle
@@ -154,7 +181,7 @@ const TrackHeader = memo(function TrackHeader({ track, trackHeight, onHeightChan
         ) : (
           <span
             className="track-name"
-            title={`${track.name} (double-click to rename)`}
+            title={`${track.name} – ${getTrackRoleLabel(track)} track (double-click to rename)`}
             style={{ color: track.color || color, cursor: 'text', fontSize: 10 }}
             onDoubleClick={handleDoubleClick}
           >
@@ -180,30 +207,56 @@ const TrackHeader = memo(function TrackHeader({ track, trackHeight, onHeightChan
       )}
 
       <div className="track-icons" role="group" aria-label={`${track.name} controls`}>
+        {isVideoTrack && (
+          <button
+            className={`track-icon-btn monitor${isMonitored ? ' active' : ''}`}
+            title={isMonitored ? 'Monitored video track' : 'Set monitored video track'}
+            aria-label={isMonitored ? `${track.name} is the monitored video track` : `Monitor ${track.name}`}
+            aria-pressed={isMonitored}
+            onClick={(event) => {
+              event.stopPropagation();
+              setVideoMonitorTrack(track.id);
+            }}
+          >
+            OUT
+          </button>
+        )}
+
         <button
-          className={`track-icon-btn${track.muted ? ' active' : ''}`}
+          className={`track-icon-btn mute${track.muted ? ' active' : ''}`}
           title={track.muted ? 'Unmute' : 'Mute'}
           aria-label={track.muted ? `Unmute ${track.name}` : `Mute ${track.name}`}
           aria-pressed={track.muted}
-          onClick={(e) => { e.stopPropagation(); toggleMute(track.id); }}
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleMute(track.id);
+          }}
         >
           M
         </button>
+
         <button
           className={`track-icon-btn solo${track.solo ? ' active' : ''}`}
           title={track.solo ? 'Unsolo' : 'Solo'}
           aria-label={track.solo ? `Unsolo ${track.name}` : `Solo ${track.name}`}
           aria-pressed={track.solo}
-          onClick={(e) => { e.stopPropagation(); toggleSolo(track.id); }}
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleSolo(track.id);
+          }}
         >
           S
         </button>
+
         <button
           className={`track-icon-btn lock${track.locked ? ' active' : ''}`}
           title={track.locked ? 'Unlock' : 'Lock'}
           aria-label={track.locked ? `Unlock ${track.name}` : `Lock ${track.name}`}
           aria-pressed={track.locked}
-          onClick={(e) => { e.stopPropagation(); toggleLock(track.id); }}
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleLock(track.id);
+          }}
         >
           L
         </button>
@@ -235,7 +288,7 @@ const TrackHeader = memo(function TrackHeader({ track, trackHeight, onHeightChan
 });
 
 export const TrackHeaders = memo(function TrackHeaders() {
-  const tracks = useEditorStore((s) => s.tracks);
+  const tracks = useEditorStore((state) => state.tracks);
   const [trackHeights, setTrackHeights] = useState<Record<string, number>>({});
 
   const handleHeightChange = useCallback((trackId: string, height: number) => {

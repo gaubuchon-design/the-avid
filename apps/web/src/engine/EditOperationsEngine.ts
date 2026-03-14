@@ -767,10 +767,8 @@ export class EditOperationsEngine {
     const affectedTrackIds: string[] = [];
     const affectedClipIds: string[] = [];
 
-    useEditorStore.setState((prev) => {
-      const tracks = [...prev.tracks];
-
-      for (const track of tracks) {
+    useEditorStore.setState((state) => {
+      for (const track of state.tracks) {
         if (track.locked || track.muted) continue;
 
         affectedTrackIds.push(track.id);
@@ -794,8 +792,6 @@ export class EditOperationsEngine {
         // Sort clips by start time
         track.clips.sort((a, b) => a.startTime - b.startTime);
       }
-
-      return { tracks };
     });
 
     this.recalcDuration();
@@ -846,10 +842,8 @@ export class EditOperationsEngine {
     const affectedTrackIds: string[] = [];
     const affectedClipIds: string[] = [];
 
-    useEditorStore.setState((prev) => {
-      const tracks = [...prev.tracks];
-
-      for (const track of tracks) {
+    useEditorStore.setState((state) => {
+      for (const track of state.tracks) {
         if (track.locked || track.muted) continue;
 
         affectedTrackIds.push(track.id);
@@ -861,8 +855,6 @@ export class EditOperationsEngine {
         // Sort clips by start time
         track.clips.sort((a, b) => a.startTime - b.startTime);
       }
-
-      return { tracks };
     });
 
     // Move playhead to the lift point
@@ -1154,14 +1146,14 @@ export class EditOperationsEngine {
       return failResult('Lift Segment: no clips specified');
     }
 
-    const state = useEditorStore.getState();
     const affectedTrackIds: string[] = [];
     const affectedClipIds: string[] = [];
 
-    useEditorStore.setState((prev) => {
-      const tracks = [...prev.tracks];
-
-      for (const track of tracks) {
+    useEditorStore.setState((state) => {
+      for (const track of state.tracks) {
+        if (track.locked) {
+          continue;
+        }
         const clipsToRemove = track.clips.filter((c) =>
           clipIds.includes(c.id),
         );
@@ -1172,8 +1164,19 @@ export class EditOperationsEngine {
         }
       }
 
-      return { tracks, selectedClipIds: [] };
+      if (affectedClipIds.length === 0) {
+        return;
+      }
+
+      state.selectedClipIds = [];
+      if (affectedClipIds.includes(state.inspectedClipId ?? '')) {
+        state.inspectedClipId = null;
+      }
     });
+
+    if (affectedClipIds.length === 0) {
+      return failResult('Lift Segment: no unlocked selected clips');
+    }
 
     return successResult(
       `Lift Segment: removed ${affectedClipIds.length} clip(s)`,
@@ -1197,10 +1200,12 @@ export class EditOperationsEngine {
     const affectedClipIds: string[] = [];
     let totalDurationChange = 0;
 
-    useEditorStore.setState((prev) => {
-      const tracks = [...prev.tracks];
+    useEditorStore.setState((state) => {
+      for (const track of state.tracks) {
+        if (track.locked) {
+          continue;
+        }
 
-      for (const track of tracks) {
         const clipsToRemove = track.clips
           .filter((c) => clipIds.includes(c.id))
           .sort((a, b) => a.startTime - b.startTime);
@@ -1231,8 +1236,19 @@ export class EditOperationsEngine {
         track.clips.sort((a, b) => a.startTime - b.startTime);
       }
 
-      return { tracks, selectedClipIds: [] };
+      if (affectedClipIds.length === 0) {
+        return;
+      }
+
+      state.selectedClipIds = [];
+      if (affectedClipIds.includes(state.inspectedClipId ?? '')) {
+        state.inspectedClipId = null;
+      }
     });
+
+    if (affectedClipIds.length === 0) {
+      return failResult('Extract Segment: no unlocked selected clips');
+    }
 
     this.recalcDuration();
 
@@ -1289,16 +1305,14 @@ export class EditOperationsEngine {
     const affectedClipIds = clipIds.slice();
 
     useEditorStore.setState((prev) => {
-      const tracks = [...prev.tracks];
-
       // Remove clips from their original tracks
-      for (const track of tracks) {
+      for (const track of prev.tracks) {
         track.clips = track.clips.filter((c) => !clipIds.includes(c.id));
       }
 
       // Find the target track in the mutable state
-      const destTrack = tracks.find((t) => t.id === targetTrackId);
-      if (!destTrack) return {};
+      const destTrack = prev.tracks.find((t) => t.id === targetTrackId);
+      if (!destTrack) return;
 
       // Place clips at the new position, clearing the region first
       for (const clip of clipsToMove) {
@@ -1322,9 +1336,10 @@ export class EditOperationsEngine {
       }
 
       destTrack.clips.sort((a, b) => a.startTime - b.startTime);
-
-      return { tracks, selectedClipIds: newClipIds };
+      prev.selectedClipIds = newClipIds;
     });
+
+    this.recalcDuration();
 
     return successResult(
       `Overwrite Segment To: moved ${clipsToMove.length} clip(s) to ${targetTrackId}`,
@@ -1382,15 +1397,13 @@ export class EditOperationsEngine {
     const affectedClipIds = clipIds.slice();
 
     useEditorStore.setState((prev) => {
-      const tracks = [...prev.tracks];
-
       // Remove clips from their original tracks
-      for (const track of tracks) {
+      for (const track of prev.tracks) {
         track.clips = track.clips.filter((c) => !clipIds.includes(c.id));
       }
 
-      const destTrack = tracks.find((t) => t.id === targetTrackId);
-      if (!destTrack) return {};
+      const destTrack = prev.tracks.find((t) => t.id === targetTrackId);
+      if (!destTrack) return;
 
       // Ripple: push existing clips right to make room
       this.rippleTrack(destTrack, targetTime, totalSpan);
@@ -1413,8 +1426,7 @@ export class EditOperationsEngine {
       }
 
       destTrack.clips.sort((a, b) => a.startTime - b.startTime);
-
-      return { tracks, selectedClipIds: newClipIds };
+      prev.selectedClipIds = newClipIds;
     });
 
     this.recalcDuration();

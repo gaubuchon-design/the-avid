@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
+import { getStoreDevtoolsOptions } from '../lib/runtimeEnvironment';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 //
@@ -68,91 +69,158 @@ export const usePlayerStore = create<PlayerState & PlayerActions>()(
 
       // Actions — pure state setters; SourceMonitor reacts via useEffect
       play: () =>
-        set((s) => {
-          s.isPlaying = true;
-        }, false, 'player/play'),
+        set(
+          (s) => {
+            s.isPlaying = true;
+          },
+          false,
+          'player/play'
+        ),
 
       pause: () =>
-        set((s) => {
-          s.isPlaying = false;
-        }, false, 'player/pause'),
+        set(
+          (s) => {
+            s.isPlaying = false;
+          },
+          false,
+          'player/pause'
+        ),
 
       stop: () =>
-        set((s) => {
-          s.isPlaying = false;
-          s.speed = 1;
-          s.currentFrame = 0;
-        }, false, 'player/stop'),
+        set(
+          (s) => {
+            s.isPlaying = false;
+            s.speed = 1;
+            s.currentFrame = 0;
+          },
+          false,
+          'player/stop'
+        ),
 
       togglePlayPause: () => {
         const isCurrentlyPlaying = usePlayerStore.getState().isPlaying;
         if (isCurrentlyPlaying) {
-          set((s) => { s.isPlaying = false; }, false, 'player/togglePlayPause');
+          set(
+            (s) => {
+              s.isPlaying = false;
+            },
+            false,
+            'player/togglePlayPause'
+          );
         } else {
-          set((s) => { s.isPlaying = true; }, false, 'player/togglePlayPause');
+          set(
+            (s) => {
+              s.isPlaying = true;
+            },
+            false,
+            'player/togglePlayPause'
+          );
         }
       },
 
       seekFrame: (frame) =>
-        set((s) => {
-          s.currentFrame = frame;
-        }, false, 'player/seekFrame'),
+        set(
+          (s) => {
+            s.currentFrame = frame;
+          },
+          false,
+          'player/seekFrame'
+        ),
 
       setSpeed: (speed) =>
-        set((s) => {
-          s.speed = Math.max(-8, Math.min(8, speed));
-        }, false, 'player/setSpeed'),
+        set(
+          (s) => {
+            s.speed = Math.max(-8, Math.min(8, speed));
+          },
+          false,
+          'player/setSpeed'
+        ),
 
       setInPoint: (frame) =>
-        set((s) => {
-          s.inPoint = frame;
-        }, false, 'player/setInPoint'),
+        set(
+          (s) => {
+            s.inPoint = frame;
+          },
+          false,
+          'player/setInPoint'
+        ),
 
       setOutPoint: (frame) =>
-        set((s) => {
-          s.outPoint = frame;
-        }, false, 'player/setOutPoint'),
+        set(
+          (s) => {
+            s.outPoint = frame;
+          },
+          false,
+          'player/setOutPoint'
+        ),
 
       clearInOut: () =>
-        set((s) => {
-          s.inPoint = null;
-          s.outPoint = null;
-        }, false, 'player/clearInOut'),
+        set(
+          (s) => {
+            s.inPoint = null;
+            s.outPoint = null;
+          },
+          false,
+          'player/clearInOut'
+        ),
 
       toggleLoop: () =>
-        set((s) => {
-          s.loopPlayback = !s.loopPlayback;
-        }, false, 'player/toggleLoop'),
+        set(
+          (s) => {
+            s.loopPlayback = !s.loopPlayback;
+          },
+          false,
+          'player/toggleLoop'
+        ),
 
       setSourceClip: (clipId) =>
-        set((s) => {
-          s.sourceClipId = clipId;
-        }, false, 'player/setSourceClip'),
+        set(
+          (s) => {
+            s.sourceClipId = clipId;
+          },
+          false,
+          'player/setSourceClip'
+        ),
 
       setActiveMonitor: (monitor) =>
-        set((s) => {
-          s.activeMonitor = monitor;
-        }, false, 'player/setActiveMonitor'),
+        set(
+          (s) => {
+            s.activeMonitor = monitor;
+          },
+          false,
+          'player/setActiveMonitor'
+        ),
 
       toggleSafeZones: () =>
-        set((s) => {
-          s.showSafeZones = !s.showSafeZones;
-        }, false, 'player/toggleSafeZones'),
+        set(
+          (s) => {
+            s.showSafeZones = !s.showSafeZones;
+          },
+          false,
+          'player/toggleSafeZones'
+        ),
 
       setActiveScope: (scope) =>
-        set((s) => {
-          s.activeScope = scope;
-        }, false, 'player/setActiveScope'),
+        set(
+          (s) => {
+            s.activeScope = scope;
+          },
+          false,
+          'player/setActiveScope'
+        ),
 
       syncFromEngine: (frame) =>
-        set((s) => {
-          s.currentFrame = frame;
-        }, false, 'player/syncFromEngine'),
+        set(
+          (s) => {
+            s.currentFrame = frame;
+          },
+          false,
+          'player/syncFromEngine'
+        ),
 
-      resetStore: () =>
-        set(() => ({ ...INITIAL_STATE }), true, 'player/resetStore'),
+      resetStore: () => set(() => ({ ...INITIAL_STATE }), true, 'player/resetStore'),
     })),
-    { name: 'PlayerStore', enabled: import.meta.env.DEV },
+    getStoreDevtoolsOptions('PlayerStore')
   )
 );
 
@@ -173,6 +241,4 @@ export const selectActiveScope = (state: PlayerStoreState) => state.activeScope;
 export const selectHasInOutRange = (state: PlayerStoreState) =>
   state.inPoint !== null && state.outPoint !== null;
 export const selectInOutDuration = (state: PlayerStoreState) =>
-  state.inPoint !== null && state.outPoint !== null
-    ? state.outPoint - state.inPoint
-    : null;
+  state.inPoint !== null && state.outPoint !== null ? state.outPoint - state.inPoint : null;

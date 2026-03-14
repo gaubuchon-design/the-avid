@@ -28,6 +28,7 @@ const ALLOWED_INVOKE_CHANNELS = new Set([
   'app:reveal-in-finder',
   'app:download-update',
   'app:check-for-updates',
+  'app:get-update-state',
   'app:install-update',
   'app:notify',
   'app:get-theme',
@@ -74,6 +75,7 @@ const ALLOWED_INVOKE_CHANNELS = new Set([
   // Jobs
   'jobs:list',
   'jobs:start-export',
+  'jobs:transcode-export-artifact',
 
   // File system
   'fs:read-text',
@@ -89,6 +91,22 @@ const ALLOWED_INVOKE_CHANNELS = new Set([
   'video-io:send-frame',
   'video-io:device-status',
   'video-io:get-transport-buffer',
+
+  // Desktop parity playback
+  'parity-playback:sync-project',
+  'parity-playback:create-transport',
+  'parity-playback:get-transport-view',
+  'parity-playback:attach-streams',
+  'parity-playback:preroll',
+  'parity-playback:start',
+  'parity-playback:stop',
+  'parity-playback:release-transport',
+  'parity-playback:play',
+  'parity-playback:sync-frame',
+  'parity-playback:get-telemetry',
+  'parity-playback:attach-output-device',
+  'parity-playback:detach-output-device',
+  'parity-playback:invalidate-caches',
 
   // Streaming
   'streaming:available',
@@ -177,6 +195,7 @@ const ALLOWED_SUBSCRIBE_CHANNELS = new Set([
   'app:update-available',
   'app:update-progress',
   'app:update-downloaded',
+  'app:update-state',
 
   // Deep link events
   'app:deep-link',
@@ -204,7 +223,7 @@ function safeSubscribe<Args extends unknown[]>(
 ): () => void {
   if (!ALLOWED_SUBSCRIBE_CHANNELS.has(channel)) {
     console.warn(`[Preload] Attempted subscription to disallowed channel: ${channel}`);
-    return () => {};
+    return () => undefined;
   }
   return subscribe(channel, callback);
 }
@@ -223,6 +242,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     revealInFinder: (filePath: string) => safeInvoke('app:reveal-in-finder', filePath) as Promise<boolean>,
     downloadUpdate: () => safeInvoke('app:download-update') as Promise<boolean>,
     checkForUpdates: () => safeInvoke('app:check-for-updates') as Promise<unknown>,
+    getUpdateState: () => safeInvoke('app:get-update-state') as Promise<unknown>,
     installUpdate: () => safeInvoke('app:install-update') as Promise<void>,
   },
   gpu: {
@@ -248,8 +268,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     safeInvoke('projects:save', project),
   deleteProject: (projectId: string) =>
     safeInvoke('projects:delete', projectId),
-  importMedia: (projectId: string, filePaths: string[]) =>
-    safeInvoke('projects:import-media', projectId, filePaths),
+  importMedia: (projectId: string, filePaths: string[], binId?: string) =>
+    safeInvoke('projects:import-media', projectId, filePaths, binId),
   scanProjectMedia: (projectId: string) =>
     safeInvoke('projects:scan-media', projectId),
   relinkProjectMedia: (projectId: string, searchRoots: string[]) =>
@@ -264,6 +284,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     safeInvoke('jobs:list'),
   startExportJob: (project: unknown) =>
     safeInvoke('jobs:start-export', project),
+  transcodeExportArtifact: (payload: unknown) =>
+    safeInvoke('jobs:transcode-export-artifact', payload),
   readTextFile: (filePath: string) =>
     safeInvoke('fs:read-text', filePath) as Promise<string>,
   writeTextFile: (filePath: string, contents: string) =>
@@ -309,6 +331,35 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deviceStatus:   (deviceId: string) => safeInvoke('video-io:device-status', deviceId),
     getTransportBuffer: (deviceId: string) => safeInvoke('video-io:get-transport-buffer', deviceId),
     onFrameAvailable: (cb: (info: unknown) => void) => safeSubscribe('video-io:frame-available', cb),
+  },
+
+  parityPlayback: {
+    syncProject: (project: unknown) => safeInvoke('parity-playback:sync-project', project) as Promise<boolean>,
+    createTransport: (request: unknown) => safeInvoke('parity-playback:create-transport', request),
+    getTransportView: (transportHandle: string) => safeInvoke('parity-playback:get-transport-view', transportHandle),
+    getAudioMonitorPreview: (transportHandle: string) =>
+      safeInvoke('parity-playback:get-audio-monitor-preview', transportHandle),
+    attachStreams: (transportHandle: string, streams: unknown[]) =>
+      safeInvoke('parity-playback:attach-streams', transportHandle, streams) as Promise<boolean>,
+    preroll: (transportHandle: string, range: unknown) =>
+      safeInvoke('parity-playback:preroll', transportHandle, range) as Promise<boolean>,
+    start: (transportHandle: string, frame: number) =>
+      safeInvoke('parity-playback:start', transportHandle, frame) as Promise<boolean>,
+    stop: (transportHandle: string) =>
+      safeInvoke('parity-playback:stop', transportHandle) as Promise<boolean>,
+    releaseTransport: (transportHandle: string) =>
+      safeInvoke('parity-playback:release-transport', transportHandle) as Promise<boolean>,
+    play: (transportHandle: string, frame: number, playbackRate?: number) =>
+      safeInvoke('parity-playback:play', transportHandle, frame, playbackRate) as Promise<boolean>,
+    syncFrame: (transportHandle: string, frame: number) =>
+      safeInvoke('parity-playback:sync-frame', transportHandle, frame) as Promise<boolean>,
+    getTelemetry: (transportHandle: string) => safeInvoke('parity-playback:get-telemetry', transportHandle),
+    attachOutputDevice: (transportHandle: string, config: unknown) =>
+      safeInvoke('parity-playback:attach-output-device', transportHandle, config) as Promise<boolean>,
+    detachOutputDevice: (transportHandle: string, deviceId?: string) =>
+      safeInvoke('parity-playback:detach-output-device', transportHandle, deviceId) as Promise<boolean>,
+    invalidateCaches: (projectId: string) =>
+      safeInvoke('parity-playback:invalidate-caches', projectId) as Promise<boolean>,
   },
 
   // ─── Streaming (NDI, SRT) ───────────────────────────────────────────
@@ -389,6 +440,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onUpdateAvailable:  (cb: (info: { version: string }) => void) => safeSubscribe('app:update-available', cb),
   onUpdateProgress:   (cb: (info: { percent: number }) => void) => safeSubscribe('app:update-progress', cb),
   onUpdateDownloaded: (cb: (info: { version: string }) => void) => safeSubscribe('app:update-downloaded', cb),
+  onUpdateState:      (cb: (info: unknown) => void) => safeSubscribe('app:update-state', cb),
 
   // Deep link events
   onDeepLink: (cb: (url: string) => void) => safeSubscribe('app:deep-link', cb),

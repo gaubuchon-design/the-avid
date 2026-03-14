@@ -32,6 +32,8 @@ export type {
   ModelResult,
   ModelOutput,
   TranscriptSegmentOutput,
+  TranscriptLanguageOutput,
+  TranscriptSpeakerOutput,
   WordTimestamp,
   ExecutionMetrics,
   IModelBackend,
@@ -59,6 +61,7 @@ export { TensorRTBackend } from './backends/TensorRTBackend';
 export { LlamaCppBackend } from './backends/LlamaCppBackend';
 export { MLXBackend } from './backends/MLXBackend';
 export { CTranslate2Backend } from './backends/CTranslate2Backend';
+export { FasterWhisperBackend } from './backends/FasterWhisperBackend';
 export { MockBackend } from './backends/MockBackend';
 
 // ---------------------------------------------------------------------------

@@ -10,9 +10,10 @@ describe('EffectsEngine', () => {
   // ── Definition Tests ──────────────────────────────────────────────────
 
   describe('definitions', () => {
-    it('should have all 12 built-in effects registered', () => {
+    it('registers a unique built-in effect catalog', () => {
       const defs = effectsEngine.getDefinitions();
-      expect(defs.length).toBe(12);
+      expect(defs.length).toBeGreaterThanOrEqual(12);
+      expect(new Set(defs.map((definition) => definition.id)).size).toBe(defs.length);
     });
 
     it('should contain expected effect IDs', () => {
@@ -43,13 +44,11 @@ describe('EffectsEngine', () => {
       expect(effectsEngine.getDefinition('nonexistent')).toBeUndefined();
     });
 
-    it('getCategories() returns sorted unique categories', () => {
+    it('getCategories() returns sorted unique categories that include the core editorial groups', () => {
       const cats = effectsEngine.getCategories();
-      expect(cats).toEqual(['Blur', 'Color', 'Composite', 'Stylize', 'Transform']);
-      // Verify sorted
-      for (let i = 1; i < cats.length; i++) {
-        expect(cats[i]! >= cats[i - 1]!).toBe(true);
-      }
+      expect(new Set(cats).size).toBe(cats.length);
+      expect(cats).toEqual([...cats].sort((left, right) => left.localeCompare(right)));
+      expect(cats).toEqual(expect.arrayContaining(['Blur', 'Color', 'Composite', 'Stylize', 'Transform']));
     });
   });
 

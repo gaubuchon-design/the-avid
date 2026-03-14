@@ -301,10 +301,11 @@ router.post(
   async (req: Request, res: Response) => {
     const { brandKitId } = req.body;
     const userId = req.user!.id;
+    const projectId = req.params['projectId']!;
 
     const report = await db.complianceReport.create({
       data: {
-        projectId: req.params['projectId'],
+        projectId,
         brandKitId,
         overallStatus: 'PASS',
         findings: [],

@@ -1,4 +1,4 @@
-import type { EditorMediaAsset } from './project-library';
+import type { CapabilityDisposition, CapabilitySurface, CapabilitySurfaceReport, EditorMediaAsset } from './project-library';
 
 // ── Weak caches for repeated calls on the same asset objects ─────────────────
 // These avoid re-computing values when UI components re-render with the same
@@ -6,6 +6,48 @@ import type { EditorMediaAsset } from './project-library';
 
 const playbackUrlCache = new WeakMap<object, string | undefined>();
 const resolutionLabelCache = new WeakMap<object, string | null>();
+
+export function getMediaAssetSurfaceCapability(
+  asset: Pick<EditorMediaAsset, 'capabilityReport'>,
+  surface: CapabilitySurface,
+): CapabilitySurfaceReport | undefined {
+  return asset.capabilityReport?.surfaces.find((candidate) => candidate.surface === surface);
+}
+
+export function getMediaCapabilityDispositionLabel(disposition: CapabilityDisposition): string {
+  switch (disposition) {
+    case 'proxy-only':
+      return 'Proxy only';
+    case 'mezzanine-required':
+      return 'Mezzanine required';
+    case 'adapter-required':
+      return 'Adapter required';
+    default:
+      return disposition;
+  }
+}
+
+function getReferenceById(
+  asset: Pick<EditorMediaAsset, 'references'>,
+  referenceId: string | undefined,
+) {
+  if (!referenceId) return undefined;
+  return asset.references?.find((reference) => reference.id === referenceId);
+}
+
+function getVariantReference(
+  asset: Pick<EditorMediaAsset, 'references' | 'variants'>,
+  purposes: EditorMediaAsset['variants'] extends Array<infer Variant>
+    ? Array<Variant extends { purpose: infer Purpose } ? Extract<Purpose, string> : never>
+    : string[],
+) {
+  const variant = asset.variants?.find((candidate) => purposes.includes(candidate.purpose));
+  const preferredReferenceId = variant?.referenceIds.find((referenceId) => {
+    const reference = getReferenceById(asset, referenceId);
+    return Boolean(reference?.url || reference?.path);
+  });
+  return getReferenceById(asset, preferredReferenceId);
+}
 
 /**
  * Get the best available playback URL for a media asset.
@@ -15,13 +57,18 @@ const resolutionLabelCache = new WeakMap<object, string | null>();
  * @param asset - The asset to query. Safe if null fields are present.
  * @returns The playback URL, or undefined if none is available.
  */
-export function getMediaAssetPlaybackUrl(asset: Pick<EditorMediaAsset, 'playbackUrl' | 'locations' | 'proxyMetadata'>): string | undefined {
+export function getMediaAssetPlaybackUrl(
+  asset: Pick<EditorMediaAsset, 'playbackUrl' | 'locations' | 'proxyMetadata' | 'references' | 'variants'>,
+): string | undefined {
   if (!asset) return undefined;
 
   if (playbackUrlCache.has(asset)) return playbackUrlCache.get(asset);
 
   let url: string | undefined;
-  if (asset.proxyMetadata?.status === 'READY' && asset.proxyMetadata.playbackUrl) {
+  const variantReference = getVariantReference(asset, ['playback', 'proxy', 'graphic-render']);
+  if (variantReference?.url) {
+    url = variantReference.url;
+  } else if (asset.proxyMetadata?.status === 'READY' && asset.proxyMetadata.playbackUrl) {
     url = asset.proxyMetadata.playbackUrl;
   } else {
     url = asset.playbackUrl ?? asset.locations?.playbackUrl;
@@ -38,8 +85,14 @@ export function getMediaAssetPlaybackUrl(asset: Pick<EditorMediaAsset, 'playback
  * @param asset - The asset to query. Safe if null fields are present.
  * @returns The file path, or undefined if none is available.
  */
-export function getMediaAssetPrimaryPath(asset: Pick<EditorMediaAsset, 'locations' | 'proxyMetadata'>): string | undefined {
+export function getMediaAssetPrimaryPath(
+  asset: Pick<EditorMediaAsset, 'locations' | 'proxyMetadata' | 'references' | 'variants'>,
+): string | undefined {
   if (!asset) return undefined;
+  const variantReference = getVariantReference(asset, ['proxy', 'graphic-render', 'managed', 'source', 'subtitle']);
+  if (variantReference?.path) {
+    return variantReference.path;
+  }
   if (asset.proxyMetadata?.status === 'READY' && asset.proxyMetadata.filePath) {
     return asset.proxyMetadata.filePath;
   }
