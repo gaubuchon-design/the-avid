@@ -20,7 +20,7 @@ import type {
   CacheEntry,
   CacheStats,
 } from '@mcua/core';
-import { isDevelopmentEnvironment } from '../lib/runtimeEnvironment';
+import { getStoreDevtoolsOptions } from '../lib/runtimeEnvironment';
 
 // ─── State ─────────────────────────────────────────────────────────────────
 
@@ -57,7 +57,7 @@ interface NEXISState {
   cacheStats: CacheStats;
 
   // Storage Usage (aggregate)
-  storageUsed: number;  // bytes
+  storageUsed: number; // bytes
   storageTotal: number; // bytes
 
   // UI
@@ -170,164 +170,231 @@ export const useNexisStore = create<NEXISState & NEXISActions>()(
       // ── Initial State ───────────────────────────────────────────────────
       ...INITIAL_NEXIS_STATE,
 
-    // ── Connection Actions ──────────────────────────────────────────────
+      // ── Connection Actions ──────────────────────────────────────────────
 
-    connectWorkspace: (hostname) => set((s) => {
-      s.hostname = hostname;
-      s.lastError = null;
-      // Optimistically mark as connected. In a real implementation,
-      // the connection handshake would transition through 'connecting'
-      // asynchronously via setConnectionStatus.
-      s.connectionStatus = 'connected';
-      s.isConnected = true;
-    }),
+      connectWorkspace: (hostname) =>
+        set((s) => {
+          s.hostname = hostname;
+          s.lastError = null;
+          // Optimistically mark as connected. In a real implementation,
+          // the connection handshake would transition through 'connecting'
+          // asynchronously via setConnectionStatus.
+          s.connectionStatus = 'connected';
+          s.isConnected = true;
+        }),
 
-    disconnectWorkspace: () => set((s) => {
-      s.connectionStatus = 'disconnected';
-      s.isConnected = false;
-      s.hostname = null;
-      s.workspaces = [];
-      s.activeWorkspaceId = null;
-      s.binLocks = [];
-      s.coPresenceUsers = [];
-      s.mediaServicesJobs = [];
-    }),
+      disconnectWorkspace: () =>
+        set((s) => {
+          s.connectionStatus = 'disconnected';
+          s.isConnected = false;
+          s.hostname = null;
+          s.workspaces = [];
+          s.activeWorkspaceId = null;
+          s.binLocks = [];
+          s.coPresenceUsers = [];
+          s.mediaServicesJobs = [];
+        }),
 
-    setConnectionStatus: (status) => set((s) => {
-      s.connectionStatus = status;
-      s.isConnected = status === 'connected';
-    }),
+      setConnectionStatus: (status) =>
+        set((s) => {
+          s.connectionStatus = status;
+          s.isConnected = status === 'connected';
+        }),
 
-    setLastError: (error) => set((s) => { s.lastError = error; }),
+      setLastError: (error) =>
+        set((s) => {
+          s.lastError = error;
+        }),
 
-    // ── Workspace Actions ───────────────────────────────────────────────
+      // ── Workspace Actions ───────────────────────────────────────────────
 
-    setWorkspaces: (workspaces) => set((s) => {
-      s.workspaces = workspaces;
-      // Recompute aggregate storage
-      s.storageTotal = workspaces.reduce((sum, ws) => sum + ws.totalCapacityBytes, 0);
-      s.storageUsed = workspaces.reduce((sum, ws) => sum + ws.usedCapacityBytes, 0);
-    }),
+      setWorkspaces: (workspaces) =>
+        set((s) => {
+          s.workspaces = workspaces;
+          // Recompute aggregate storage
+          s.storageTotal = workspaces.reduce((sum, ws) => sum + ws.totalCapacityBytes, 0);
+          s.storageUsed = workspaces.reduce((sum, ws) => sum + ws.usedCapacityBytes, 0);
+        }),
 
-    selectWorkspace: (id) => set((s) => { s.activeWorkspaceId = id; }),
+      selectWorkspace: (id) =>
+        set((s) => {
+          s.activeWorkspaceId = id;
+        }),
 
-    setStorageGroups: (groups) => set((s) => { s.storageGroups = groups; }),
+      setStorageGroups: (groups) =>
+        set((s) => {
+          s.storageGroups = groups;
+        }),
 
-    // ── Media Browsing Actions ──────────────────────────────────────────
+      // ── Media Browsing Actions ──────────────────────────────────────────
 
-    setMediaPaths: (entries) => set((s) => { s.mediaPaths = entries; }),
+      setMediaPaths: (entries) =>
+        set((s) => {
+          s.mediaPaths = entries;
+        }),
 
-    selectMedia: (id) => set((s) => { s.selectedMediaId = id; }),
+      selectMedia: (id) =>
+        set((s) => {
+          s.selectedMediaId = id;
+        }),
 
-    // ── Bin Lock Actions ────────────────────────────────────────────────
+      // ── Bin Lock Actions ────────────────────────────────────────────────
 
-    lockPath: (binId, binName) => set((s) => {
-      const existing = s.binLocks.findIndex((l) => l.binId === binId);
-      const lock: NEXISBinLock = {
-        binId,
-        binName,
-        lockStatus: 'locked-self',
-        lockedBy: 'current-user',
-        lockedByDisplayName: 'You',
-        lockedAt: new Date().toISOString(),
-        workspace: s.workspaces.find((w) => w.id === s.activeWorkspaceId)?.name ?? 'default',
-      };
-      if (existing >= 0) {
-        s.binLocks[existing] = lock;
-      } else {
-        s.binLocks.push(lock);
-      }
-    }),
+      lockPath: (binId, binName) =>
+        set((s) => {
+          const existing = s.binLocks.findIndex((l) => l.binId === binId);
+          const lock: NEXISBinLock = {
+            binId,
+            binName,
+            lockStatus: 'locked-self',
+            lockedBy: 'current-user',
+            lockedByDisplayName: 'You',
+            lockedAt: new Date().toISOString(),
+            workspace: s.workspaces.find((w) => w.id === s.activeWorkspaceId)?.name ?? 'default',
+          };
+          if (existing >= 0) {
+            s.binLocks[existing] = lock;
+          } else {
+            s.binLocks.push(lock);
+          }
+        }),
 
-    unlockPath: (binId) => set((s) => {
-      const lock = s.binLocks.find((l) => l.binId === binId);
-      if (lock) {
-        lock.lockStatus = 'unlocked';
-        lock.lockedBy = null;
-        lock.lockedByDisplayName = null;
-        lock.lockedAt = null;
-      }
-    }),
+      unlockPath: (binId) =>
+        set((s) => {
+          const lock = s.binLocks.find((l) => l.binId === binId);
+          if (lock) {
+            lock.lockStatus = 'unlocked';
+            lock.lockedBy = null;
+            lock.lockedByDisplayName = null;
+            lock.lockedAt = null;
+          }
+        }),
 
-    setBinLocks: (locks) => set((s) => { s.binLocks = locks; }),
+      setBinLocks: (locks) =>
+        set((s) => {
+          s.binLocks = locks;
+        }),
 
-    // ── Write Target Actions ────────────────────────────────────────────
+      // ── Write Target Actions ────────────────────────────────────────────
 
-    setWriteTargets: (targets) => set((s) => { s.writeTargets = targets; }),
+      setWriteTargets: (targets) =>
+        set((s) => {
+          s.writeTargets = targets;
+        }),
 
-    setDefaultWriteTarget: (workspaceId, purpose) => set((s) => {
-      for (const target of s.writeTargets) {
-        if (target.purpose === purpose) {
-          target.isDefault = target.workspaceId === workspaceId;
-        }
-      }
-    }),
+      setDefaultWriteTarget: (workspaceId, purpose) =>
+        set((s) => {
+          for (const target of s.writeTargets) {
+            if (target.purpose === purpose) {
+              target.isDefault = target.workspaceId === workspaceId;
+            }
+          }
+        }),
 
-    // ── Co-Presence Actions ─────────────────────────────────────────────
+      // ── Co-Presence Actions ─────────────────────────────────────────────
 
-    setCoPresenceUsers: (users) => set((s) => { s.coPresenceUsers = users; }),
+      setCoPresenceUsers: (users) =>
+        set((s) => {
+          s.coPresenceUsers = users;
+        }),
 
-    updateCoPresenceUser: (userId, patch) => set((s) => {
-      const user = s.coPresenceUsers.find((u) => u.userId === userId);
-      if (user) Object.assign(user, patch);
-    }),
+      updateCoPresenceUser: (userId, patch) =>
+        set((s) => {
+          const user = s.coPresenceUsers.find((u) => u.userId === userId);
+          if (user) Object.assign(user, patch);
+        }),
 
-    // ── MediaServices Actions ───────────────────────────────────────────
+      // ── MediaServices Actions ───────────────────────────────────────────
 
-    addMediaServicesJob: (job) => set((s) => { s.mediaServicesJobs.unshift(job); }),
+      addMediaServicesJob: (job) =>
+        set((s) => {
+          s.mediaServicesJobs.unshift(job);
+        }),
 
-    updateMediaServicesJob: (jobId, patch) => set((s) => {
-      const job = s.mediaServicesJobs.find((j) => j.id === jobId);
-      if (job) Object.assign(job, patch);
-    }),
+      updateMediaServicesJob: (jobId, patch) =>
+        set((s) => {
+          const job = s.mediaServicesJobs.find((j) => j.id === jobId);
+          if (job) Object.assign(job, patch);
+        }),
 
-    removeMediaServicesJob: (jobId) => set((s) => {
-      s.mediaServicesJobs = s.mediaServicesJobs.filter((j) => j.id !== jobId);
-    }),
+      removeMediaServicesJob: (jobId) =>
+        set((s) => {
+          s.mediaServicesJobs = s.mediaServicesJobs.filter((j) => j.id !== jobId);
+        }),
 
-    // ── Cache Actions ───────────────────────────────────────────────────
+      // ── Cache Actions ───────────────────────────────────────────────────
 
-    refreshCache: () => set((s) => {
-      // Trigger a cache refresh by resetting stats; in real implementation
-      // this would call the NEXISCacheManager to re-scan
-      s.cacheStats = {
-        ...s.cacheStats,
-        hitRate: 0,
-        missRate: 0,
-      };
-    }),
+      refreshCache: () =>
+        set((s) => {
+          // Trigger a cache refresh by resetting stats; in real implementation
+          // this would call the NEXISCacheManager to re-scan
+          s.cacheStats = {
+            ...s.cacheStats,
+            hitRate: 0,
+            missRate: 0,
+          };
+        }),
 
-    setCacheEntries: (entries) => set((s) => { s.cacheEntries = entries; }),
+      setCacheEntries: (entries) =>
+        set((s) => {
+          s.cacheEntries = entries;
+        }),
 
-    updateCacheEntry: (id, patch) => set((s) => {
-      const entry = s.cacheEntries.find((e) => e.id === id);
-      if (entry) Object.assign(entry, patch);
-    }),
+      updateCacheEntry: (id, patch) =>
+        set((s) => {
+          const entry = s.cacheEntries.find((e) => e.id === id);
+          if (entry) Object.assign(entry, patch);
+        }),
 
-    setCacheStats: (stats) => set((s) => { s.cacheStats = stats; }),
+      setCacheStats: (stats) =>
+        set((s) => {
+          s.cacheStats = stats;
+        }),
 
-    // ── UI Actions ──────────────────────────────────────────────────────
+      // ── UI Actions ──────────────────────────────────────────────────────
 
-    toggleWorkspaceBrowser: () => set((s) => { s.showWorkspaceBrowser = !s.showWorkspaceBrowser; }),
+      toggleWorkspaceBrowser: () =>
+        set((s) => {
+          s.showWorkspaceBrowser = !s.showWorkspaceBrowser;
+        }),
 
-    toggleCachePanel: () => set((s) => { s.showCachePanel = !s.showCachePanel; }),
+      toggleCachePanel: () =>
+        set((s) => {
+          s.showCachePanel = !s.showCachePanel;
+        }),
 
-    toggleMediaServicesPanel: () => set((s) => {
-      s.showMediaServicesPanel = !s.showMediaServicesPanel;
-    }),
+      toggleMediaServicesPanel: () =>
+        set((s) => {
+          s.showMediaServicesPanel = !s.showMediaServicesPanel;
+        }),
 
-    setActiveNexisTab: (tab) => set((s) => { s.activeNexisTab = tab; }),
+      setActiveNexisTab: (tab) =>
+        set((s) => {
+          s.activeNexisTab = tab;
+        }),
 
-    // ── Error & Reset ────────────────────────────────────────────────────
+      // ── Error & Reset ────────────────────────────────────────────────────
 
-    clearError: () => set((s) => { s.lastError = null; }, false, 'nexis/clearError'),
+      clearError: () =>
+        set(
+          (s) => {
+            s.lastError = null;
+          },
+          false,
+          'nexis/clearError'
+        ),
 
-    resetStore: () => set(() => ({
-      ...INITIAL_NEXIS_STATE,
-      cacheStats: { ...DEFAULT_CACHE_STATS },
-    }), true, 'nexis/resetStore'),
-  })),
-  { name: 'NexisStore', enabled: isDevelopmentEnvironment() },
+      resetStore: () =>
+        set(
+          () => ({
+            ...INITIAL_NEXIS_STATE,
+            cacheStats: { ...DEFAULT_CACHE_STATS },
+          }),
+          true,
+          'nexis/resetStore'
+        ),
+    })),
+    getStoreDevtoolsOptions('NexisStore')
   )
 );
 

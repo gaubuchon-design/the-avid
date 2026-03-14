@@ -4,7 +4,11 @@ import { useEffectsStore } from '../../store/effects.store';
 import { Timecode } from '../../lib/timecode';
 import { audioEngine } from '../../engine/AudioEngine';
 import { effectsEngine } from '../../engine/EffectsEngine';
-import type { Clip } from '../../store/editor.store';
+import {
+  BIN_COLOR_PRESETS,
+  TRACK_COLOR_PRESETS,
+} from '../../store/editor.store';
+import type { Bin, Clip, MediaAsset, Track } from '../../store/editor.store';
 
 function formatTC(sec: number) {
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60),
@@ -20,6 +24,58 @@ function useSelectedClip(): Clip | null {
   const targetId = inspectedClipId ?? selectedClipIds[0] ?? null;
   if (!targetId) return null;
   return tracks.flatMap(t => t.clips).find(c => c.id === targetId) ?? null;
+}
+
+function findTrackForClip(tracks: Track[], clipId: string | null): Track | null {
+  if (!clipId) return null;
+  return tracks.find((track) => track.clips.some((clip) => clip.id === clipId)) ?? null;
+}
+
+function findBinById(bins: Bin[], binId: string | null): Bin | null {
+  if (!binId) return null;
+  for (const bin of bins) {
+    if (bin.id === binId) {
+      return bin;
+    }
+    const nested = findBinById(bin.children, binId);
+    if (nested) {
+      return nested;
+    }
+  }
+  return null;
+}
+
+function findAssetById(bins: Bin[], assetId: string | undefined): MediaAsset | null {
+  if (!assetId) {
+    return null;
+  }
+  for (const bin of bins) {
+    const asset = bin.assets.find((candidate) => candidate.id === assetId);
+    if (asset) {
+      return asset;
+    }
+    const nested = findAssetById(bin.children, assetId);
+    if (nested) {
+      return nested;
+    }
+  }
+  return null;
+}
+
+function countBinAssets(bin: Bin): number {
+  return bin.assets.length + bin.children.reduce((count, child) => count + countBinAssets(child), 0);
+}
+
+function getInspectorDomain(track: Track | null, clip: Clip | null): 'audio' | 'video' | 'bin' | 'none' {
+  if (clip) {
+    return clip.type === 'audio' ? 'audio' : 'video';
+  }
+
+  if (!track) {
+    return 'none';
+  }
+
+  return track.type === 'AUDIO' ? 'audio' : 'video';
 }
 
 /* ─── Shared widgets ─────────────────────────────────────────────────────── */
@@ -91,19 +147,13 @@ function CollapsibleSection({ title, children, defaultOpen = false }: {
 function VideoTab() {
   const clip = useSelectedClip();
   const { updateIntrinsicVideo, resetIntrinsicVideo } = useEditorStore();
-  const { clipEffects, addEffect, removeEffect, toggleEffect } = useEffectsStore();
 
   if (!clip) return (
-    <div className="tab-content" style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
-      Select a clip to inspect
-    </div>
+    <EmptyInspectorState message="Select a video clip to inspect." />
   );
 
   const v = clip.intrinsicVideo;
   const update = (patch: Partial<typeof v>) => updateIntrinsicVideo(clip.id, patch);
-
-  // Plugin effects applied to this clip
-  const effects = clipEffects[clip.id] || [];
 
   return (
     <div className="tab-content">
@@ -131,29 +181,6 @@ function VideoTab() {
 
       {/* Intrinsic: Time Remapping */}
       <TimeRemapSection clip={clip} />
-
-      {/* Plugin effects applied to this clip */}
-      <div className="inspector-section">
-        <div className="inspector-section-title">Applied Effects</div>
-        {effects.length === 0 && (
-          <div style={{ padding: '6px 0', fontSize: 10, color: 'var(--text-muted)' }}>No effects applied</div>
-        )}
-        {effects.map(fx => {
-          const def = effectsEngine.getDefinition(fx.definitionId);
-          return (
-            <AppliedEffectRow
-              key={fx.id}
-              clipId={clip.id}
-              effectId={fx.id}
-              name={def?.name ?? fx.definitionId}
-              enabled={fx.enabled}
-              params={fx.params}
-              paramDefs={def?.params ?? []}
-            />
-          );
-        })}
-        <EffectBrowserButton clipId={clip.id} />
-      </div>
     </div>
   );
 }
@@ -387,77 +414,10 @@ function TimeRemapSection({ clip }: { clip: Clip }) {
 
 function AudioTab() {
   const clip = useSelectedClip();
-  const { updateIntrinsicAudio, resetIntrinsicAudio, selectedClipIds, tracks } = useEditorStore();
-  // Derive the track ID that owns this clip (for audio engine metering)
-  const trackId = clip
-    ? tracks.find(t => t.clips.some(c => c.id === clip.id))?.id ?? 'master'
-    : 'master';
-
-  const [gain, setGain] = useState(0);
-  const [pan, setPan] = useState(0);
-  // Local state for plugin audio controls (304C, SP 76, DynS) that don't map to intrinsic props
-  const [slope, setSlope] = useState(50);
-  const [attack, setAttack] = useState(30);
-  const [release, setRelease] = useState(50);
-  const [inputGain, setInputGain] = useState(0);
-  const [compression, setCompression] = useState(40);
-  const [outputGain, setOutputGain] = useState(0);
-  const [sp76Subject, setSp76Subject] = useState(50);
-  const [sp76Mixes, setSp76Mixes] = useState(50);
-  const [sp76Release, setSp76Release] = useState(50);
-  const [dynEnabled, setDynEnabled] = useState(false);
-  const [dynDepth, setDynDepth] = useState(0);
-  // VU Meter
-  const [meterLevel, setMeterLevel] = useState({ peak: 0, rms: 0 });
-
-  // Ensure the audio engine is initialised
-  useEffect(() => {
-    audioEngine.init();
-  }, []);
-
-  // Poll meter levels from the real audio engine
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const level = audioEngine.getMeterLevel(trackId);
-      setMeterLevel(level);
-    }, 50);
-    return () => clearInterval(interval);
-  }, [trackId]);
-
-  // Wire gain changes to the audio engine
-  const handleGainChange = useCallback((dB: number) => {
-    setGain(dB);
-    // Convert dB to linear gain: 0 dB = 1.0, range approx -60..+6
-    const linear = dB <= -60 ? 0 : Math.pow(10, dB / 20);
-    audioEngine.setTrackGain(trackId, Math.min(2, linear));
-  }, [trackId]);
-
-  // Wire pan changes to the audio engine
-  const handlePanChange = useCallback((panVal: number) => {
-    setPan(panVal);
-    // panVal is -50..+50, normalise to -1..+1
-    audioEngine.setTrackPan(trackId, panVal / 50);
-  }, [trackId]);
-
-  // Wire compressor params to the audio engine (304C + DynS combined)
-  const handleCompressorUpdate = useCallback((params: {
-    attack?: number; release?: number; inputGain?: number;
-    compression?: number; outputGain?: number; slope?: number;
-  }) => {
-    // Map UI values to Web Audio compressor params
-    audioEngine.setCompressor(trackId, {
-      threshold: -(params.compression ?? compression),
-      ratio: 1 + ((params.slope ?? slope) / 100) * 19, // slope 0..100 -> ratio 1..20
-      attack: (params.attack ?? attack) / 1000,          // ms -> seconds
-      release: (params.release ?? release) / 1000,        // ms -> seconds
-      knee: 10,
-    });
-  }, [trackId, attack, release, compression, slope]);
+  const { updateIntrinsicAudio, resetIntrinsicAudio } = useEditorStore();
 
   if (!clip) return (
-    <div className="tab-content" style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
-      Select a clip to inspect
-    </div>
+    <EmptyInspectorState message="Select an audio clip to inspect." />
   );
 
   const a = clip.intrinsicAudio;
@@ -477,8 +437,68 @@ function AudioTab() {
         <Slider label="Pan" value={a.pan + 100} unit="" min={0} max={200}
           onChange={v => updateA({ pan: v - 100 })} />
       </div>
+    </div>
+  );
+}
 
-      {/* 304C Compressor (plugin audio effect section) */}
+function AudioEffectsTab({ clip, track }: { clip: Clip | null; track: Track | null }) {
+  const trackId = track?.id ?? 'master';
+  const [gain, setGain] = useState(0);
+  const [pan, setPan] = useState(0);
+  const [slope, setSlope] = useState(50);
+  const [attack, setAttack] = useState(30);
+  const [release, setRelease] = useState(50);
+  const [inputGain, setInputGain] = useState(0);
+  const [compression, setCompression] = useState(40);
+  const [outputGain, setOutputGain] = useState(0);
+  const [sp76Subject, setSp76Subject] = useState(50);
+  const [sp76Mixes, setSp76Mixes] = useState(50);
+  const [sp76Release, setSp76Release] = useState(50);
+  const [dynEnabled, setDynEnabled] = useState(false);
+  const [dynDepth, setDynDepth] = useState(0);
+  const [meterLevel, setMeterLevel] = useState({ peak: 0, rms: 0 });
+
+  useEffect(() => {
+    audioEngine.init();
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setMeterLevel(audioEngine.getMeterLevel(trackId));
+    }, 50);
+    return () => clearInterval(interval);
+  }, [trackId]);
+
+  const handleGainChange = useCallback((dB: number) => {
+    setGain(dB);
+    const linear = dB <= -60 ? 0 : Math.pow(10, dB / 20);
+    audioEngine.setTrackGain(trackId, Math.min(2, linear));
+  }, [trackId]);
+
+  const handlePanChange = useCallback((panVal: number) => {
+    setPan(panVal);
+    audioEngine.setTrackPan(trackId, panVal / 50);
+  }, [trackId]);
+
+  const handleCompressorUpdate = useCallback((params: {
+    attack?: number; release?: number; inputGain?: number;
+    compression?: number; outputGain?: number; slope?: number;
+  }) => {
+    audioEngine.setCompressor(trackId, {
+      threshold: -(params.compression ?? compression),
+      ratio: 1 + ((params.slope ?? slope) / 100) * 19,
+      attack: (params.attack ?? attack) / 1000,
+      release: (params.release ?? release) / 1000,
+      knee: 10,
+    });
+  }, [trackId, attack, release, compression, slope]);
+
+  if (!clip && !track) {
+    return <EmptyInspectorState message="Select an audio clip or audio track to inspect effects." />;
+  }
+
+  return (
+    <div className="tab-content">
       <div className="inspector-section">
         <div className="inspector-section-title">304C</div>
         <div className="vu-meter-container" title={`Peak: ${(meterLevel.peak * 100).toFixed(1)}%  RMS: ${(meterLevel.rms * 100).toFixed(1)}%`}>
@@ -499,15 +519,18 @@ function AudioTab() {
             }} />
           </div>
         </div>
-        <Slider label="Slope" value={slope} onChange={v => { setSlope(v); handleCompressorUpdate({ slope: v }); }} />
-        <Slider label="Attack" value={attack} onChange={v => { setAttack(v); handleCompressorUpdate({ attack: v }); }} />
-        <Slider label="Release" value={release} onChange={v => { setRelease(v); handleCompressorUpdate({ release: v }); }} />
-        <Slider label="Input Gain" value={inputGain + 60} unit="dB" min={0} max={120} onChange={v => { const dB = v - 60; setInputGain(dB); handleCompressorUpdate({ inputGain: dB }); }} />
-        <Slider label="Compression" value={compression} onChange={v => { setCompression(v); handleCompressorUpdate({ compression: v }); }} />
-        <Slider label="Output Gain" value={outputGain + 60} unit="dB" min={0} max={120} onChange={v => setOutputGain(v - 60)} />
+        <Slider label="Slope" value={slope} onChange={(value) => { setSlope(value); handleCompressorUpdate({ slope: value }); }} />
+        <Slider label="Attack" value={attack} onChange={(value) => { setAttack(value); handleCompressorUpdate({ attack: value }); }} />
+        <Slider label="Release" value={release} onChange={(value) => { setRelease(value); handleCompressorUpdate({ release: value }); }} />
+        <Slider label="Input Gain" value={inputGain + 60} unit="dB" min={0} max={120} onChange={(value) => {
+          const dB = value - 60;
+          setInputGain(dB);
+          handleCompressorUpdate({ inputGain: dB });
+        }} />
+        <Slider label="Compression" value={compression} onChange={(value) => { setCompression(value); handleCompressorUpdate({ compression: value }); }} />
+        <Slider label="Output Gain" value={outputGain + 60} unit="dB" min={0} max={120} onChange={(value) => setOutputGain(value - 60)} />
       </div>
 
-      {/* SP 76 */}
       <div className="inspector-section">
         <div className="inspector-section-title">SP 76</div>
         <Slider label="Subject" value={sp76Subject} onChange={setSp76Subject} />
@@ -515,7 +538,6 @@ function AudioTab() {
         <Slider label="Release" value={sp76Release} onChange={setSp76Release} />
       </div>
 
-      {/* DynS */}
       <div className="inspector-section">
         <div className="inspector-section-title" style={{ display: 'flex', alignItems: 'center' }}>
           DynS Compressor/Limiter
@@ -523,14 +545,13 @@ function AudioTab() {
             <ToggleSwitch enabled={dynEnabled} onToggle={() => setDynEnabled(!dynEnabled)} />
           </div>
         </div>
-        <Slider label="Dyn/Depth" value={dynDepth + 60} unit="dB" min={0} max={120} onChange={v => setDynDepth(v - 60)} />
+        <Slider label="Dyn/Depth" value={dynDepth + 60} unit="dB" min={0} max={120} onChange={(value) => setDynDepth(value - 60)} />
       </div>
 
-      {/* Audio engine direct controls (gain/pan routed to WebAudio) */}
       <div className="inspector-section">
         <div className="inspector-section-title">Audio Engine</div>
-        <Slider label="Gain" value={gain + 60} unit="dB" min={0} max={120} onChange={v => handleGainChange(v - 60)} />
-        <Slider label="Pan" value={pan + 50} unit="" min={0} max={100} onChange={v => handlePanChange(v - 50)} />
+        <Slider label="Gain" value={gain + 60} unit="dB" min={0} max={120} onChange={(value) => handleGainChange(value - 60)} />
+        <Slider label="Pan" value={pan + 50} unit="" min={0} max={100} onChange={(value) => handlePanChange(value - 50)} />
       </div>
     </div>
   );
@@ -814,24 +835,324 @@ function ClipInfo() {
   );
 }
 
+function EmptyInspectorState({ message }: { message: string }) {
+  return (
+    <div className="tab-content" style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
+      {message}
+    </div>
+  );
+}
+
+function ColorPickerSection({
+  title,
+  color,
+  palette,
+  onChange,
+}: {
+  title: string;
+  color: string;
+  palette: string[];
+  onChange: (color: string) => void;
+}) {
+  return (
+    <div className="inspector-section">
+      <div className="inspector-section-title">{title}</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+        {palette.map((swatch) => (
+          <button
+            key={swatch}
+            className="fx-keyframe-btn"
+            onClick={() => onChange(swatch)}
+            title={swatch}
+            style={{
+              width: 18,
+              height: 18,
+              padding: 0,
+              borderRadius: 999,
+              background: swatch,
+              boxShadow: color.toLowerCase() === swatch.toLowerCase()
+                ? '0 0 0 1px rgba(255,255,255,0.9), 0 0 0 3px rgba(91,106,245,0.35)'
+                : undefined,
+            }}
+          />
+        ))}
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 2 }}>
+          <input
+            type="color"
+            value={color}
+            onChange={(event) => onChange(event.target.value)}
+            style={{ width: 24, height: 20, border: 'none', background: 'transparent', padding: 0 }}
+          />
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-muted)' }}>
+            {color.toUpperCase()}
+          </span>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function TrackContextCard({ track }: { track: Track }) {
+  const { toggleMute, toggleSolo, toggleLock, setTrackVolume, updateTrackColor } = useEditorStore();
+  const clipCount = track.clips.length;
+  const trackRole = track.type === 'AUDIO'
+    ? 'Audio'
+    : track.type === 'GRAPHIC'
+      ? 'Graphic'
+      : track.type === 'EFFECT'
+        ? 'Effect'
+        : track.type === 'SUBTITLE'
+          ? 'Subtitle'
+          : 'Video';
+
+  return (
+    <>
+      <div className="inspector-section">
+        <div className="inspector-section-title">Track</div>
+        <div className="property-row">
+          <div className="property-label">Name</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-primary)' }}>{track.name}</div>
+        </div>
+        <div className="property-row">
+          <div className="property-label">Role</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-primary)' }}>{trackRole}</div>
+        </div>
+        <div className="property-row">
+          <div className="property-label">Clips</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-primary)' }}>{clipCount}</div>
+        </div>
+        <Slider
+          label="Track Level"
+          value={Math.round(track.volume * 100)}
+          unit="%"
+          min={0}
+          max={200}
+          onChange={(value) => setTrackVolume(track.id, value / 100)}
+        />
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          <button className={`fx-keyframe-btn${track.muted ? ' active' : ''}`} onClick={() => toggleMute(track.id)}>Mute</button>
+          <button className={`fx-keyframe-btn${track.solo ? ' active' : ''}`} onClick={() => toggleSolo(track.id)}>Solo</button>
+          <button className={`fx-keyframe-btn${track.locked ? ' active' : ''}`} onClick={() => toggleLock(track.id)}>Lock</button>
+        </div>
+      </div>
+      <ColorPickerSection
+        title="Track Color"
+        color={track.color}
+        palette={TRACK_COLOR_PRESETS[track.type] ?? TRACK_COLOR_PRESETS.VIDEO}
+        onChange={(color) => updateTrackColor(track.id, color)}
+      />
+    </>
+  );
+}
+
+function BinContextCard({ bin }: { bin: Bin }) {
+  const { updateBinColor } = useEditorStore();
+  const totalAssets = countBinAssets(bin);
+
+  return (
+    <>
+      <div className="inspector-section">
+        <div className="inspector-section-title">Bin</div>
+        <div className="property-row">
+          <div className="property-label">Name</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-primary)' }}>{bin.name}</div>
+        </div>
+        <div className="property-row">
+          <div className="property-label">Items</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-primary)' }}>{totalAssets}</div>
+        </div>
+        <div className="property-row">
+          <div className="property-label">Children</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-primary)' }}>{bin.children.length}</div>
+        </div>
+      </div>
+      <ColorPickerSection
+        title="Bin Color"
+        color={bin.color}
+        palette={BIN_COLOR_PRESETS}
+        onChange={(color) => updateBinColor(bin.id, color)}
+      />
+    </>
+  );
+}
+
+function VideoEffectsTab({ clip, track }: { clip: Clip | null; track: Track | null }) {
+  const { clipEffects } = useEffectsStore();
+
+  if (!clip) {
+    return (
+      <EmptyInspectorState message={`Select a clip on ${track?.name ?? 'a video track'} to apply video effects.`} />
+    );
+  }
+
+  const effects = clipEffects[clip.id] || [];
+
+  return (
+    <div className="tab-content">
+      <div className="inspector-section">
+        <div className="inspector-section-title">Video Effects</div>
+        {effects.length === 0 && (
+          <div style={{ padding: '6px 0', fontSize: 10, color: 'var(--text-muted)' }}>No video effects applied</div>
+        )}
+        {effects.map((fx) => {
+          const def = effectsEngine.getDefinition(fx.definitionId);
+          return (
+            <AppliedEffectRow
+              key={fx.id}
+              clipId={clip.id}
+              effectId={fx.id}
+              name={def?.name ?? fx.definitionId}
+              enabled={fx.enabled}
+              params={fx.params}
+              paramDefs={def?.params ?? []}
+            />
+          );
+        })}
+        <EffectBrowserButton clipId={clip.id} />
+      </div>
+    </div>
+  );
+}
+
+function ContextInfoTab({
+  clip,
+  track,
+  bin,
+  asset,
+}: {
+  clip: Clip | null;
+  track: Track | null;
+  bin: Bin | null;
+  asset: MediaAsset | null;
+}) {
+  const { projectSettings } = useEditorStore();
+  const infoTc = new Timecode({ fps: projectSettings?.frameRate || 24 });
+
+  if (!clip && !track && !bin) {
+    return <EmptyInspectorState message="Select a clip, track, or bin to inspect." />;
+  }
+
+  return (
+    <div className="tab-content">
+      {asset && (
+        <div className="inspector-section">
+          <div className="inspector-section-title">Source Media</div>
+          {[
+            ['Asset', asset.name],
+            ['Type', asset.type],
+            ['Duration', asset.duration ? infoTc.secondsToTC(asset.duration) : '--'],
+            ['Resolution', asset.width && asset.height ? `${asset.width}x${asset.height}` : '--'],
+            ['Waveform', asset.waveformData?.length ? `${asset.waveformData.length} samples` : 'Unavailable'],
+            ['Thumbnails', asset.thumbnailFrames?.length ? `${asset.thumbnailFrames.length} frames` : asset.thumbnailUrl ? 'Poster frame ready' : 'Unavailable'],
+          ].map(([label, value]) => (
+            <div key={label} className="property-row">
+              <div className="property-label">{label}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text-primary)' }}>{value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {clip && (
+        <div className="inspector-section">
+          <div className="inspector-section-title">Clip Info</div>
+          {[
+            ['Name', clip.name],
+            ['Start', infoTc.secondsToTC(clip.startTime)],
+            ['End', infoTc.secondsToTC(clip.endTime)],
+            ['Duration', infoTc.secondsToTC(clip.endTime - clip.startTime)],
+            ['Track', track?.name ?? '--'],
+          ].map(([label, value]) => (
+            <div key={label} className="property-row">
+              <div className="property-label">{label}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text-primary)' }}>{value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {track && (
+        <div className="inspector-section">
+          <div className="inspector-section-title">Track Info</div>
+          {[
+            ['Name', track.name],
+            ['Type', track.type],
+            ['Color', track.color.toUpperCase()],
+            ['Clips', String(track.clips.length)],
+          ].map(([label, value]) => (
+            <div key={label} className="property-row">
+              <div className="property-label">{label}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text-primary)' }}>{value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {bin && (
+        <div className="inspector-section">
+          <div className="inspector-section-title">Bin Info</div>
+          {[
+            ['Name', bin.name],
+            ['Color', bin.color.toUpperCase()],
+            ['Items', String(countBinAssets(bin))],
+            ['Sub Bins', String(bin.children.length)],
+          ].map(([label, value]) => (
+            <div key={label} className="property-row">
+              <div className="property-label">{label}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text-primary)' }}>{value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Main Inspector Panel ───────────────────────────────────────────────── */
 
 export function InspectorPanel() {
-  const { activeInspectorTab, setInspectorTab, projectSettings } = useEditorStore();
+  const {
+    activeInspectorTab,
+    setInspectorTab,
+    projectSettings,
+    tracks,
+    selectedTrackId,
+    selectedBinId,
+    bins,
+  } = useEditorStore();
   const clip = useSelectedClip();
+  const clipTrack = findTrackForClip(tracks, clip?.id ?? null);
+  const selectedTrack = tracks.find((track) => track.id === selectedTrackId) ?? null;
+  const track = clipTrack ?? selectedTrack;
+  const bin = !clip ? findBinById(bins, selectedBinId) : null;
+  const asset = clip ? findAssetById(bins, clip.assetId) : null;
+  const domain = clip || track ? getInspectorDomain(track, clip) : bin ? 'bin' : 'none';
 
   const tc = new Timecode({ fps: projectSettings?.frameRate || 24 });
 
-  // Figma tabs: Video | Audio | Info | FX (effects properties)
   const tabs: Array<{ id: string; label: string }> = [
-    { id: 'video', label: 'Video' },
-    { id: 'audio', label: 'Audio' },
+    ...(domain === 'video'
+      ? [
+          { id: 'video', label: 'Video' },
+          { id: 'effects', label: 'Video FX' },
+        ]
+      : domain === 'audio'
+        ? [
+            { id: 'audio', label: 'Audio' },
+            { id: 'effects', label: 'Audio FX' },
+          ]
+        : []),
     { id: 'info', label: 'Info' },
-    { id: 'effects', label: 'FX' },
   ];
+  const resolvedTab = tabs.some((tab) => tab.id === activeInspectorTab)
+    ? activeInspectorTab
+    : tabs[0]?.id ?? 'info';
 
-  const clipName = clip?.name || 'No Clip';
-  const clipDuration = clip ? tc.secondsToTC(clip.endTime - clip.startTime) : '00:00:00:00';
+  const clipName = clip?.name ?? track?.name ?? bin?.name ?? 'Nothing Selected';
+  const clipDuration = clip
+    ? tc.secondsToTC(clip.endTime - clip.startTime)
+      : track
+        ? `${track.type} • ${track.clips.length} clip${track.clips.length === 1 ? '' : 's'}`
+      : bin
+        ? `${countBinAssets(bin)} asset${countBinAssets(bin) === 1 ? '' : 's'}`
+        : 'Select a clip, track, or bin';
 
   return (
     <div className="inspector-panel">
@@ -849,7 +1170,7 @@ export function InspectorPanel() {
       <div className="panel-tabs">
         {tabs.map(t => (
           <button key={t.id}
-            className={`panel-tab${activeInspectorTab === t.id ? ' active' : ''}`}
+            className={`panel-tab${resolvedTab === t.id ? ' active' : ''}`}
             onClick={() => setInspectorTab(t.id as any)}>
             {t.label}
           </button>
@@ -857,15 +1178,16 @@ export function InspectorPanel() {
       </div>
 
       <div className="panel-body">
-        {activeInspectorTab === 'video' && (
-          <>
-            <ClipInfo />
-            <VideoTab />
-          </>
+        {track && <TrackContextCard track={track} />}
+        {!track && bin && <BinContextCard bin={bin} />}
+
+        {resolvedTab === 'video' && <VideoTab />}
+        {resolvedTab === 'audio' && <AudioTab />}
+        {resolvedTab === 'info' && (
+          <ContextInfoTab clip={clip} track={track} bin={bin} asset={asset} />
         )}
-        {activeInspectorTab === 'audio' && <AudioTab />}
-        {activeInspectorTab === 'info' && <InfoTab />}
-        {activeInspectorTab === 'effects' && <EffectsPropertiesTab />}
+        {resolvedTab === 'effects' && domain === 'audio' && <AudioEffectsTab clip={clip} track={track} />}
+        {resolvedTab === 'effects' && domain === 'video' && <VideoEffectsTab clip={clip} track={track} />}
       </div>
     </div>
   );

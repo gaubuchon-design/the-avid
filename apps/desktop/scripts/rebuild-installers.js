@@ -11,7 +11,7 @@
  * rebuilding so stale installers do not survive between runs.
  */
 
-const { execFileSync } = require('child_process');
+const { execFileSync, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -95,6 +95,15 @@ function ensureTargetsAreSupported(targets, allowCross) {
 }
 
 function runWorkspaceScript(scriptName) {
+  if (process.platform === 'win32') {
+    // npm.cmd cannot be spawned directly via execFileSync on GitHub's Windows runners.
+    execSync(`${npmCmd} run ${scriptName} --workspace=@mcua/desktop`, {
+      cwd: repoRoot,
+      stdio: 'inherit',
+    });
+    return;
+  }
+
   execFileSync(npmCmd, ['run', scriptName, '--workspace=@mcua/desktop'], {
     cwd: repoRoot,
     stdio: 'inherit',

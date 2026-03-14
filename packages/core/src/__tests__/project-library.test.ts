@@ -545,6 +545,40 @@ describe('hydrateMediaAsset canonical contracts', () => {
     expect(asset.capabilityReport?.surfaces.find((surface) => surface.surface === 'worker')?.disposition).toBe('native');
   });
 
+  it('keeps generated thumbnail frames available for video preview surfaces', () => {
+    const asset = hydrateMediaAsset(makeAsset({
+      name: 'Preview Reel.mov',
+      type: 'VIDEO',
+      duration: 36,
+      thumbnailFrames: [
+        {
+          timeSeconds: 0,
+          imageUrl: 'file:///project/media/thumbnails/asset-1/frame-00000000.jpg',
+          relativePath: 'media/thumbnails/asset-1/frame-00000000.jpg',
+        },
+        {
+          timeSeconds: 10,
+          imageUrl: 'file:///project/media/thumbnails/asset-1/frame-00010000.jpg',
+          relativePath: 'media/thumbnails/asset-1/frame-00010000.jpg',
+        },
+      ],
+    }));
+
+    expect(asset.thumbnailUrl).toBe('file:///project/media/thumbnails/asset-1/frame-00000000.jpg');
+    expect(asset.thumbnailFrames).toEqual([
+      {
+        timeSeconds: 0,
+        imageUrl: 'file:///project/media/thumbnails/asset-1/frame-00000000.jpg',
+        relativePath: 'media/thumbnails/asset-1/frame-00000000.jpg',
+      },
+      {
+        timeSeconds: 10,
+        imageUrl: 'file:///project/media/thumbnails/asset-1/frame-00010000.jpg',
+        relativePath: 'media/thumbnails/asset-1/frame-00010000.jpg',
+      },
+    ]);
+  });
+
   it('models bitmap stills, subtitle sidecars, and layered graphics explicitly', () => {
     const bitmap = hydrateMediaAsset(makeAsset({
       name: 'Title Card.png',

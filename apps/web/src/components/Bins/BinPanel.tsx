@@ -14,6 +14,27 @@ function formatDate(d?: Date | string): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+function getAssetPreviewUrl(asset: MediaAsset): string | undefined {
+  return asset.thumbnailUrl ?? asset.thumbnailFrames?.[0]?.imageUrl;
+}
+
+function AssetPreview({ asset, className }: { asset: MediaAsset; className?: string }) {
+  const previewUrl = getAssetPreviewUrl(asset);
+  const typeIcon: Record<string, string> = {
+    VIDEO: '▶',
+    AUDIO: '♪',
+    IMAGE: '⬛',
+    GRAPHIC: '◫',
+    DOCUMENT: '📄',
+  };
+
+  return previewUrl ? (
+    <img className={className} src={previewUrl} alt="" loading="lazy" />
+  ) : (
+    <div className={`asset-thumb-placeholder${className ? ` ${className}` : ''}`}>{typeIcon[asset.type] ?? '📄'}</div>
+  );
+}
+
 interface BinItemProps {
   bin: Bin;
   depth?: number;
@@ -68,8 +89,6 @@ const AssetCard = memo(function AssetCard({ asset }: AssetCardProps) {
   const { setSourceAsset, sourceAsset } = useEditorStore();
   const isSelected = sourceAsset?.id === asset.id;
 
-  const typeIcon: Record<string, string> = { VIDEO: '▶', AUDIO: '♪', IMAGE: '⬛', DOCUMENT: '📄' };
-
   return (
     <div
       className={`asset-card${isSelected ? ' selected' : ''}`}
@@ -87,7 +106,7 @@ const AssetCard = memo(function AssetCard({ asset }: AssetCardProps) {
         {asset.status === 'PROCESSING' ? (
           <div className="asset-status-processing">Processing…</div>
         ) : (
-          <div className="asset-thumb-placeholder">{typeIcon[asset.type] ?? '📄'}</div>
+          <AssetPreview asset={asset} className="asset-thumb-media" />
         )}
         {asset.duration && <div className="asset-duration">{formatDuration(asset.duration)}</div>}
         <div className={`asset-type-badge ${asset.type.toLowerCase()}`}>{asset.type}</div>
@@ -124,6 +143,7 @@ function AssetListView({ assets }: { assets: MediaAsset[] }) {
       {/* Column headers */}
       <div className="bin-list-header">
         <span className="bin-col-color"></span>
+        <span className="bin-col-preview">Preview</span>
         <span className="bin-col-name">Name</span>
         <span className="bin-col-duration">Duration</span>
         <span className="bin-col-fps">FPS</span>
@@ -158,6 +178,11 @@ function AssetListView({ assets }: { assets: MediaAsset[] }) {
                   asset.type === 'IMAGE' ? 'var(--track-effect)' :
                   asset.type === 'GRAPHIC' ? 'var(--track-gfx)' : 'var(--text-muted)',
               }} />
+            </span>
+            <span className="bin-col-preview">
+              <span className="bin-preview">
+                <AssetPreview asset={asset} className="bin-preview-image" />
+              </span>
             </span>
             <span className="bin-col-name truncate" title={asset.name}>
               {asset.hasAlpha && <span title="Has alpha channel" style={{ color: 'var(--warning)', marginRight: 3 }}>A</span>}

@@ -271,6 +271,14 @@ export interface EditorMediaWaveformMetadata {
   updatedAt?: string;
 }
 
+export interface EditorMediaThumbnailFrame {
+  timeSeconds: number;
+  imageUrl: string;
+  relativePath?: string;
+  width?: number;
+  height?: number;
+}
+
 export interface EditorMediaSemanticMetadata {
   status: MediaSemanticStatus;
   tags: string[];
@@ -337,6 +345,7 @@ export interface EditorMediaAsset {
   duration?: number;
   status: 'UPLOADING' | 'PROCESSING' | 'READY' | 'ERROR' | 'INGESTING' | 'OFFLINE';
   thumbnailUrl?: string;
+  thumbnailFrames?: EditorMediaThumbnailFrame[];
   playbackUrl?: string;
   waveformData?: number[];
   fileExtension?: string;
@@ -1637,6 +1646,7 @@ function buildCapabilityReport(
 
 function normalizeMediaAsset(asset: EditorMediaAsset): EditorMediaAsset {
   const waveformPeaks = asset.waveformMetadata?.peaks ?? asset.waveformData ?? [];
+  const thumbnailFrames = (asset.thumbnailFrames ?? []).map((frame) => ({ ...frame }));
   const playbackUrl = asset.proxyMetadata?.status === 'READY'
     ? asset.proxyMetadata.playbackUrl ?? asset.playbackUrl ?? asset.locations?.playbackUrl
     : asset.playbackUrl ?? asset.locations?.playbackUrl;
@@ -1688,6 +1698,8 @@ function normalizeMediaAsset(asset: EditorMediaAsset): EditorMediaAsset {
     assetClass,
     supportTier,
     duration: asset.duration ?? technicalMetadata?.durationSeconds,
+    thumbnailUrl: asset.thumbnailUrl ?? thumbnailFrames[0]?.imageUrl,
+    thumbnailFrames,
     playbackUrl,
     waveformData: [...waveformPeaks],
     fileExtension: asset.fileExtension ?? (inferAssetExtension(asset) || undefined),

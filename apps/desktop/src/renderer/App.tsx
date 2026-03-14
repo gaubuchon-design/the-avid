@@ -144,93 +144,93 @@ function UpdateBanner() {
       right: 16,
       backgroundColor: '#232329',
       border: '1px solid #50505a',
-      borderRadius: 8,
-      padding: '12px 16px',
+      borderRadius: 12,
+      padding: '14px 16px',
       color: '#efeff2',
       fontSize: 13,
       zIndex: 9999,
-      maxWidth: 360,
+      width: 'min(420px, calc(100vw - 24px))',
       display: 'flex',
-      alignItems: 'center',
+      alignItems: 'flex-start',
       gap: 12,
+      flexWrap: 'wrap',
+      boxShadow: '0 18px 48px rgba(0, 0, 0, 0.28)',
     }}>
-      {updateState.status === 'downloaded' ? (
-        <>
-          <span>{label}</span>
-          {!updateState.restartScheduled ? (
-            <>
-              <button
-                onClick={() => window.electronAPI?.app.installUpdate()}
-                style={{
-                  backgroundColor: '#81818d',
-                  color: '#ffffff',
-                  border: 'none',
-                  borderRadius: 6,
-                  padding: '6px 12px',
-                  fontSize: 12,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                Restart Now
-              </button>
-              <button
-                onClick={() => setDismissedToken(updateState.availableVersion ?? 'downloaded')}
-                style={{
-                  backgroundColor: 'transparent',
-                  color: '#9d9da7',
-                  border: 'none',
-                  fontSize: 12,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                Later
-              </button>
-            </>
-          ) : null}
-        </>
-      ) : updateState.status === 'error' ? (
-        <>
-          <span>{label}</span>
-          <button
-            onClick={() => {
-              setDismissedToken(null);
-              void window.electronAPI?.app.checkForUpdates();
-            }}
-            style={{
-              backgroundColor: '#81818d',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: 6,
-              padding: '6px 12px',
-              fontSize: 12,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            Retry
-          </button>
-          <button
-            onClick={() => setDismissedToken(updateState.error ?? 'error')}
-            style={{
-              backgroundColor: 'transparent',
-              color: '#9d9da7',
-              border: 'none',
-              fontSize: 12,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            Dismiss
-          </button>
-        </>
-      ) : (
-        <>
-          <span>{label}</span>
-          {updateState.status === 'checking' ? null : (
+      <div style={{
+        flex: '1 1 220px',
+        minWidth: 0,
+        lineHeight: 1.45,
+        whiteSpace: 'normal',
+        wordBreak: 'break-word',
+      }}>
+        {label}
+      </div>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        gap: 8,
+        flex: '0 1 auto',
+        flexWrap: 'wrap',
+        marginLeft: 'auto',
+      }}>
+        {updateState.status === 'downloaded' ? (
+          <>
+            {!updateState.restartScheduled ? (
+              <>
+                <button
+                  onClick={() => window.electronAPI?.app.installUpdate()}
+                  style={{
+                    backgroundColor: '#81818d',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: 6,
+                    padding: '6px 12px',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  Restart Now
+                </button>
+                <button
+                  onClick={() => setDismissedToken(updateState.availableVersion ?? 'downloaded')}
+                  style={{
+                    backgroundColor: 'transparent',
+                    color: '#9d9da7',
+                    border: 'none',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  Later
+                </button>
+              </>
+            ) : null}
+          </>
+        ) : updateState.status === 'error' ? (
+          <>
             <button
-              onClick={() => void window.electronAPI?.app.checkForUpdates()}
+              onClick={() => {
+                setDismissedToken(null);
+                void window.electronAPI?.app.checkForUpdates();
+              }}
+              style={{
+                backgroundColor: '#81818d',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: 6,
+                padding: '6px 12px',
+                fontSize: 12,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Retry
+            </button>
+            <button
+              onClick={() => setDismissedToken(updateState.error ?? 'error')}
               style={{
                 backgroundColor: 'transparent',
                 color: '#9d9da7',
@@ -240,11 +240,29 @@ function UpdateBanner() {
                 whiteSpace: 'nowrap',
               }}
             >
-              Check Again
+              Dismiss
             </button>
-          )}
-        </>
-      )}
+          </>
+        ) : (
+          <>
+            {updateState.status === 'checking' ? null : (
+              <button
+                onClick={() => void window.electronAPI?.app.checkForUpdates()}
+                style={{
+                  backgroundColor: 'transparent',
+                  color: '#9d9da7',
+                  border: 'none',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Check Again
+              </button>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

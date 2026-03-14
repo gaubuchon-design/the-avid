@@ -60,6 +60,7 @@ import { MediaPage } from './MediaPage';
 import { PanelResizeHandle } from '../components/Layout/PanelResizeHandle';
 import {
   clampEditorLayoutForViewport,
+  getEditorLayoutViewportBounds,
   readStoredEditorLayout,
   type EditorLayoutState,
 } from '../lib/editorLayout';
@@ -498,14 +499,27 @@ export function EditorPage() {
   }, []);
 
   const effectiveLayout = clampEditorLayoutForViewport(layout, viewport.width, viewport.height);
-  const maxBinWidth = Math.min(420, Math.max(260, Math.floor(Math.max(960, viewport.width) * 0.34)));
-  const maxTrackerWidth = Math.min(420, Math.max(280, Math.floor(Math.max(960, viewport.width) * 0.28)));
-  const maxInspectorWidth = Math.min(440, Math.max(300, Math.floor(Math.max(960, viewport.width) * 0.32)));
-  const maxTimelineHeight = Math.min(460, Math.max(220, Math.floor(Math.max(720, viewport.height) * 0.46)));
+  const viewportBounds = getEditorLayoutViewportBounds(viewport.width, viewport.height);
+  const maxBinWidth = viewportBounds.maxBinWidth;
+  const maxTrackerWidth = viewportBounds.maxTrackerWidth;
+  const maxInspectorWidth = viewportBounds.maxInspectorWidth;
+  const maxTimelineHeight = viewportBounds.maxTimelineHeight;
+  const isStackedWorkspace = viewport.width < 1040;
+  const isShortViewport = viewport.height < 820;
   const dockTracker = showTracker && viewport.width >= 1520;
   const overlayTracker = showTracker && !dockTracker;
   const dockInspector = showInspector && viewport.width >= 1320;
   const overlayInspector = showInspector && !dockInspector;
+  const overlayWidthCap = Math.max(
+    260,
+    Math.min(400, Math.floor(viewport.width * (viewport.width < 1320 ? 0.42 : 0.36))),
+  );
+  const overlayTrackerWidth = Math.min(effectiveLayout.trackerWidth, overlayWidthCap);
+  const overlayInspectorWidth = Math.min(effectiveLayout.inspectorWidth, overlayWidthCap);
+  const stackedBinHeight = Math.max(
+    168,
+    Math.min(320, Math.floor(viewport.height * (isShortViewport ? 0.24 : 0.28))),
+  );
   const workspaceColumns = [
     `${effectiveLayout.binWidth}px`,
     'var(--panel-divider-w)',
@@ -516,7 +530,12 @@ export function EditorPage() {
   const editorShellStyle = {
     '--timeline-h': `${effectiveLayout.timelineHeight}px`,
   } as React.CSSProperties;
-  const auxiliaryPanelRightInset = showInspector ? effectiveLayout.inspectorWidth + 16 : 0;
+  const inspectorInsetWidth = dockInspector
+    ? effectiveLayout.inspectorWidth
+    : overlayInspector && !isStackedWorkspace
+      ? overlayInspectorWidth
+      : 0;
+  const auxiliaryPanelRightInset = showInspector ? inspectorInsetWidth + 16 : 16;
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -543,23 +562,30 @@ export function EditorPage() {
       {activePage === 'edit' && (
         <>
           <div
-            className={`workspace${overlayTracker || overlayInspector ? ' workspace-has-overlay' : ''}`}
-            style={{ gridTemplateColumns: workspaceColumns }}
+            className={`workspace${overlayTracker || overlayInspector ? ' workspace-has-overlay' : ''}${isStackedWorkspace ? ' workspace-stacked' : ''}`}
+            style={isStackedWorkspace
+              ? {
+                  gridTemplateColumns: 'minmax(0, 1fr)',
+                  gridTemplateRows: `${stackedBinHeight}px minmax(0, 1fr)`,
+                }
+              : { gridTemplateColumns: workspaceColumns }}
           >
             <div className="left-panels workspace-panel">
               <PanelErrorBoundary panelName="BinPanel">
                 <BinPanel />
               </PanelErrorBoundary>
             </div>
-            <PanelResizeHandle
-              axis="horizontal"
-              ariaLabel="Resize media bin"
-              value={effectiveLayout.binWidth}
-              min={220}
-              max={maxBinWidth}
-              className="workspace-resize-handle resize-handle-h"
-              onChange={(next) => setLayout((current) => ({ ...current, binWidth: next }))}
-            />
+            {!isStackedWorkspace ? (
+              <PanelResizeHandle
+                axis="horizontal"
+                ariaLabel="Resize media bin"
+                value={effectiveLayout.binWidth}
+                min={viewportBounds.minBinWidth}
+                max={maxBinWidth}
+                className="workspace-resize-handle resize-handle-h"
+                onChange={(next) => setLayout((current) => ({ ...current, binWidth: next }))}
+              />
+            ) : null}
             <div className="canvas-area workspace-panel" style={{ position: 'relative' }}>
               <PanelErrorBoundary panelName="ComposerPanel">
                 <ComposerPanel
@@ -579,7 +605,7 @@ export function EditorPage() {
                   axis="horizontal"
                   ariaLabel="Resize tracker panel"
                   value={effectiveLayout.trackerWidth}
-                  min={260}
+                  min={viewportBounds.minTrackerWidth}
                   max={maxTrackerWidth}
                   invert
                   className="workspace-resize-handle resize-handle-h"
@@ -598,7 +624,7 @@ export function EditorPage() {
                   axis="horizontal"
                   ariaLabel="Resize inspector panel"
                   value={effectiveLayout.inspectorWidth}
-                  min={280}
+                  min={viewportBounds.minInspectorWidth}
                   max={maxInspectorWidth}
                   invert
                   className="workspace-resize-handle resize-handle-h"
@@ -612,22 +638,29 @@ export function EditorPage() {
               </>
             )}
             {(overlayTracker || overlayInspector) && (
-              <div className="workspace-overlay-rail" aria-label="Secondary editor panels">
+              <div
+                className={`workspace-overlay-rail${isStackedWorkspace ? ' workspace-overlay-rail-stacked' : ''}`}
+                aria-label="Secondary editor panels"
+              >
                 {overlayTracker && (
                   <div
-                    className="workspace-overlay-panel"
-                    style={{ gridTemplateColumns: `var(--panel-divider-w) ${effectiveLayout.trackerWidth}px` }}
+                    className={`workspace-overlay-panel${isStackedWorkspace ? ' workspace-overlay-panel-stacked' : ''}`}
+                    style={isStackedWorkspace
+                      ? undefined
+                      : { gridTemplateColumns: `var(--panel-divider-w) ${overlayTrackerWidth}px` }}
                   >
-                    <PanelResizeHandle
-                      axis="horizontal"
-                      ariaLabel="Resize tracker panel"
-                      value={effectiveLayout.trackerWidth}
-                      min={260}
-                      max={maxTrackerWidth}
-                      invert
-                      className="workspace-resize-handle resize-handle-h"
-                      onChange={(next) => setLayout((current) => ({ ...current, trackerWidth: next }))}
-                    />
+                    {!isStackedWorkspace ? (
+                      <PanelResizeHandle
+                        axis="horizontal"
+                        ariaLabel="Resize tracker panel"
+                        value={effectiveLayout.trackerWidth}
+                        min={viewportBounds.minTrackerWidth}
+                        max={maxTrackerWidth}
+                        invert
+                        className="workspace-resize-handle resize-handle-h"
+                        onChange={(next) => setLayout((current) => ({ ...current, trackerWidth: next }))}
+                      />
+                    ) : null}
                     <div className="workspace-panel tracker-panel-shell workspace-overlay-surface">
                       <PanelErrorBoundary panelName="TrackerPanel">
                         <TrackerPanel />
@@ -637,19 +670,23 @@ export function EditorPage() {
                 )}
                 {overlayInspector && (
                   <div
-                    className="workspace-overlay-panel"
-                    style={{ gridTemplateColumns: `var(--panel-divider-w) ${effectiveLayout.inspectorWidth}px` }}
+                    className={`workspace-overlay-panel${isStackedWorkspace ? ' workspace-overlay-panel-stacked' : ''}`}
+                    style={isStackedWorkspace
+                      ? undefined
+                      : { gridTemplateColumns: `var(--panel-divider-w) ${overlayInspectorWidth}px` }}
                   >
-                    <PanelResizeHandle
-                      axis="horizontal"
-                      ariaLabel="Resize inspector panel"
-                      value={effectiveLayout.inspectorWidth}
-                      min={280}
-                      max={maxInspectorWidth}
-                      invert
-                      className="workspace-resize-handle resize-handle-h"
-                      onChange={(next) => setLayout((current) => ({ ...current, inspectorWidth: next }))}
-                    />
+                    {!isStackedWorkspace ? (
+                      <PanelResizeHandle
+                        axis="horizontal"
+                        ariaLabel="Resize inspector panel"
+                        value={effectiveLayout.inspectorWidth}
+                        min={viewportBounds.minInspectorWidth}
+                        max={maxInspectorWidth}
+                        invert
+                        className="workspace-resize-handle resize-handle-h"
+                        onChange={(next) => setLayout((current) => ({ ...current, inspectorWidth: next }))}
+                      />
+                    ) : null}
                     <div className="workspace-panel inspector-panel-shell workspace-overlay-surface">
                       <PanelErrorBoundary panelName="InspectorPanel">
                         <InspectorPanel />
@@ -665,7 +702,7 @@ export function EditorPage() {
               axis="vertical"
               ariaLabel="Resize timeline"
               value={effectiveLayout.timelineHeight}
-              min={180}
+              min={viewportBounds.minTimelineHeight}
               max={maxTimelineHeight}
               invert
               className="timeline-resize-handle resize-handle-v"
@@ -692,10 +729,11 @@ export function EditorPage() {
             position: 'fixed', inset: 0, zIndex: 1000,
             background: 'rgba(0,0,0,0.6)', display: 'flex',
             alignItems: 'center', justifyContent: 'center',
+            padding: 16,
           }}
         >
           <div style={{
-            width: '90%', maxWidth: 680, height: '85vh', maxHeight: 720,
+            width: 'min(680px, 100%)', maxWidth: 680, height: 'min(85vh, 720px)', maxHeight: 720,
             borderRadius: 'var(--radius-lg)',
             overflow: 'hidden', position: 'relative',
             boxShadow: 'var(--shadow-lg)',
@@ -729,8 +767,8 @@ export function EditorPage() {
       {showAlphaImportDialog && <AlphaImportDialog />}
       {showTitleTool && (
         <div style={{
-          position: 'fixed', top: 40, right: auxiliaryPanelRightInset, bottom: 40,
-          width: 360, zIndex: 900,
+          position: 'fixed', top: 24, right: auxiliaryPanelRightInset, bottom: 24,
+          width: 'min(360px, calc(100vw - 32px))', zIndex: 900,
           background: 'var(--bg-surface)',
           borderLeft: '1px solid var(--border-default)',
           overflow: 'auto',
@@ -740,8 +778,8 @@ export function EditorPage() {
       )}
       {showSubtitleEditor && (
         <div style={{
-          position: 'fixed', top: 40, right: auxiliaryPanelRightInset, bottom: 40,
-          width: 380, zIndex: 900,
+          position: 'fixed', top: 24, right: auxiliaryPanelRightInset, bottom: 24,
+          width: 'min(380px, calc(100vw - 32px))', zIndex: 900,
           background: 'var(--bg-surface)',
           borderLeft: '1px solid var(--border-default)',
           overflow: 'auto',

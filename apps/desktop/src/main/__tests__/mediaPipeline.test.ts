@@ -2,7 +2,15 @@ import os from 'os';
 import path from 'path';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it } from 'vitest';
-import { resolveImportSourcePaths } from '../mediaPipeline';
+import { createProjectMediaPaths, resolveImportSourcePaths } from '../mediaPipeline';
+
+describe('createProjectMediaPaths', () => {
+  it('includes a thumbnail cache directory for generated poster frames', () => {
+    const paths = createProjectMediaPaths('/tmp/test-project');
+
+    expect(paths.thumbnailsPath).toBe('/tmp/test-project/media/thumbnails');
+  });
+});
 
 describe('resolveImportSourcePaths', () => {
   const tempDirs: string[] = [];

@@ -16,28 +16,47 @@ function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, '');
 }
 
-export function isDevelopmentEnvironment(): boolean {
-  const viteDevFlag = (
+function getRuntimeImportMetaEnv(): RuntimeImportMetaEnv | undefined {
+  return (
     import.meta as ImportMeta & {
       env?: RuntimeImportMetaEnv;
     }
-  ).env?.DEV;
+  ).env;
+}
+
+function getRuntimeProcessEnv(): RuntimeProcessLike['env'] | undefined {
+  return (globalThis as { process?: RuntimeProcessLike }).process?.env;
+}
+
+export function isDevelopmentEnvironment(): boolean {
+  const viteDevFlag = getRuntimeImportMetaEnv()?.DEV;
 
   if (typeof viteDevFlag === 'boolean') {
     return viteDevFlag;
   }
 
-  const nodeEnv = (globalThis as { process?: RuntimeProcessLike }).process?.env?.NODE_ENV;
+  const nodeEnv = getRuntimeProcessEnv()?.NODE_ENV;
   return typeof nodeEnv === 'string' ? nodeEnv !== 'production' : false;
 }
 
+export function isTestEnvironment(): boolean {
+  return getRuntimeProcessEnv()?.NODE_ENV === 'test';
+}
+
+export function isStoreDevtoolsEnabled(): boolean {
+  return isDevelopmentEnvironment() && !isTestEnvironment();
+}
+
+export function getStoreDevtoolsOptions(name: string): { name: string; enabled: boolean } {
+  return {
+    name,
+    enabled: isStoreDevtoolsEnabled(),
+  };
+}
+
 export function resolveApiBaseUrl(): string {
-  const importMetaEnv = (
-    import.meta as ImportMeta & {
-      env?: RuntimeImportMetaEnv;
-    }
-  ).env;
-  const processEnv = (globalThis as { process?: RuntimeProcessLike }).process?.env;
+  const importMetaEnv = getRuntimeImportMetaEnv();
+  const processEnv = getRuntimeProcessEnv();
 
   const configuredBase =
     importMetaEnv?.VITE_API_BASE_URL ??

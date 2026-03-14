@@ -8,7 +8,7 @@ import {
   NodeParams,
   colorEngine,
 } from '../engine/ColorEngine';
-import { isDevelopmentEnvironment } from '../lib/runtimeEnvironment';
+import { getStoreDevtoolsOptions } from '../lib/runtimeEnvironment';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -142,189 +142,281 @@ export const useColorStore = create<ColorState & ColorActions>()(
 
       // Actions
       selectNode: (id) =>
-        set((s) => {
-          s.selectedNodeId = id;
-        }, false, 'color/selectNode'),
+        set(
+          (s) => {
+            s.selectedNodeId = id;
+          },
+          false,
+          'color/selectNode'
+        ),
 
       setActiveView: (view) =>
-        set((s) => {
-          s.activeView = view;
-        }, false, 'color/setActiveView'),
+        set(
+          (s) => {
+            s.activeView = view;
+          },
+          false,
+          'color/setActiveView'
+        ),
 
       setWheelMode: (mode) =>
-        set((s) => {
-          s.wheelMode = mode;
-        }, false, 'color/setWheelMode'),
+        set(
+          (s) => {
+            s.wheelMode = mode;
+          },
+          false,
+          'color/setWheelMode'
+        ),
 
       setCurveType: (type) =>
-        set((s) => {
-          s.curveType = type;
-        }, false, 'color/setCurveType'),
+        set(
+          (s) => {
+            s.curveType = type;
+          },
+          false,
+          'color/setCurveType'
+        ),
 
       setScopeType: (type) =>
-        set((s) => {
-          s.scopeType = type;
-        }, false, 'color/setScopeType'),
+        set(
+          (s) => {
+            s.scopeType = type;
+          },
+          false,
+          'color/setScopeType'
+        ),
 
       setScopePosition: (pos) =>
-        set((s) => {
-          s.scopePosition = pos;
-        }, false, 'color/setScopePosition'),
+        set(
+          (s) => {
+            s.scopePosition = pos;
+          },
+          false,
+          'color/setScopePosition'
+        ),
 
       toggleABWipe: () =>
-        set((s) => {
-          s.abWipeEnabled = !s.abWipeEnabled;
-        }, false, 'color/toggleABWipe'),
+        set(
+          (s) => {
+            s.abWipeEnabled = !s.abWipeEnabled;
+          },
+          false,
+          'color/toggleABWipe'
+        ),
 
       setABWipePosition: (position) =>
-        set((s) => {
-          s.abWipePosition = Math.max(0, Math.min(100, position));
-        }, false, 'color/setABWipePosition'),
+        set(
+          (s) => {
+            s.abWipePosition = Math.max(0, Math.min(100, position));
+          },
+          false,
+          'color/setABWipePosition'
+        ),
 
       setQualifierShowMatte: (show) =>
-        set((s) => {
-          s.qualifierShowMatte = show;
-        }, false, 'color/setQualifierShowMatte'),
+        set(
+          (s) => {
+            s.qualifierShowMatte = show;
+          },
+          false,
+          'color/setQualifierShowMatte'
+        ),
 
       setQualifierMatteMode: (mode) =>
-        set((s) => {
-          s.qualifierMatteMode = mode;
-        }, false, 'color/setQualifierMatteMode'),
+        set(
+          (s) => {
+            s.qualifierMatteMode = mode;
+          },
+          false,
+          'color/setQualifierMatteMode'
+        ),
 
       syncFromEngine: () =>
-        set((s) => {
-          s.nodes = colorEngine.getAllNodes();
-          s.connections = colorEngine.getConnections();
-          s.looks = colorEngine.getLooks().map((l) => ({
-            id: l.id,
-            name: l.name,
-            thumbnail: l.thumbnail,
-          }));
-          s.stills = colorEngine.getStills().map((st) => ({
-            id: st.id,
-            name: st.name,
-            frame: st.frame,
-          }));
-        }, false, 'color/syncFromEngine'),
+        set(
+          (s) => {
+            s.nodes = colorEngine.getAllNodes();
+            s.connections = colorEngine.getConnections();
+            s.looks = colorEngine.getLooks().map((l) => ({
+              id: l.id,
+              name: l.name,
+              thumbnail: l.thumbnail,
+            }));
+            s.stills = colorEngine.getStills().map((st) => ({
+              id: st.id,
+              name: st.name,
+              frame: st.frame,
+            }));
+          },
+          false,
+          'color/syncFromEngine'
+        ),
 
       addNode: (type) => {
         colorEngine.addNode(type);
-        set((s) => {
-          s.nodes = colorEngine.getAllNodes();
-          s.connections = colorEngine.getConnections();
-        }, false, 'color/addNode');
+        set(
+          (s) => {
+            s.nodes = colorEngine.getAllNodes();
+            s.connections = colorEngine.getConnections();
+          },
+          false,
+          'color/addNode'
+        );
       },
 
       removeNode: (id) => {
         colorEngine.removeNode(id);
-        set((s) => {
-          s.nodes = colorEngine.getAllNodes();
-          s.connections = colorEngine.getConnections();
-          if (s.selectedNodeId === id) s.selectedNodeId = null;
-        }, false, 'color/removeNode');
+        set(
+          (s) => {
+            s.nodes = colorEngine.getAllNodes();
+            s.connections = colorEngine.getConnections();
+            if (s.selectedNodeId === id) s.selectedNodeId = null;
+          },
+          false,
+          'color/removeNode'
+        );
       },
 
       updateNodeParams: (id, params) => {
         colorEngine.updateNodeParams(id, params);
-        set((s) => {
-          s.nodes = colorEngine.getAllNodes();
-        }, false, 'color/updateNodeParams');
+        set(
+          (s) => {
+            s.nodes = colorEngine.getAllNodes();
+          },
+          false,
+          'color/updateNodeParams'
+        );
       },
 
       saveLook: (name) => {
         colorEngine.saveLook(name);
-        set((s) => {
-          s.looks = colorEngine.getLooks().map((l) => ({
-            id: l.id,
-            name: l.name,
-            thumbnail: l.thumbnail,
-          }));
-        }, false, 'color/saveLook');
+        set(
+          (s) => {
+            s.looks = colorEngine.getLooks().map((l) => ({
+              id: l.id,
+              name: l.name,
+              thumbnail: l.thumbnail,
+            }));
+          },
+          false,
+          'color/saveLook'
+        );
       },
 
       loadLook: (id) => {
         colorEngine.loadLook(id);
-        set((s) => {
-          s.nodes = colorEngine.getAllNodes();
-          s.connections = colorEngine.getConnections();
-        }, false, 'color/loadLook');
+        set(
+          (s) => {
+            s.nodes = colorEngine.getAllNodes();
+            s.connections = colorEngine.getConnections();
+          },
+          false,
+          'color/loadLook'
+        );
       },
 
       saveStill: (name) => {
         colorEngine.saveStill(name, '');
-        set((s) => {
-          s.stills = colorEngine.getStills().map((st) => ({
-            id: st.id,
-            name: st.name,
-            frame: st.frame,
-          }));
-        }, false, 'color/saveStill');
+        set(
+          (s) => {
+            s.stills = colorEngine.getStills().map((st) => ({
+              id: st.id,
+              name: st.name,
+              frame: st.frame,
+            }));
+          },
+          false,
+          'color/saveStill'
+        );
       },
 
       addPowerWindow: (type) =>
-        set((s) => {
-          const id = `pw_${++windowIdCounter}_${Date.now().toString(36)}`;
-          s.powerWindows.push({
-            id,
-            type,
-            centerX: 0.5,
-            centerY: 0.5,
-            radiusX: 0.25,
-            radiusY: 0.25,
-            width: 0.5,
-            height: 0.5,
-            rotation: 0,
-            softness: 0.1,
-            invert: false,
-            enabled: true,
-          });
-          s.selectedWindowId = id;
-        }, false, 'color/addPowerWindow'),
+        set(
+          (s) => {
+            const id = `pw_${++windowIdCounter}_${Date.now().toString(36)}`;
+            s.powerWindows.push({
+              id,
+              type,
+              centerX: 0.5,
+              centerY: 0.5,
+              radiusX: 0.25,
+              radiusY: 0.25,
+              width: 0.5,
+              height: 0.5,
+              rotation: 0,
+              softness: 0.1,
+              invert: false,
+              enabled: true,
+            });
+            s.selectedWindowId = id;
+          },
+          false,
+          'color/addPowerWindow'
+        ),
 
       removePowerWindow: (id) =>
-        set((s) => {
-          s.powerWindows = s.powerWindows.filter((w) => w.id !== id);
-          if (s.selectedWindowId === id) s.selectedWindowId = null;
-        }, false, 'color/removePowerWindow'),
+        set(
+          (s) => {
+            s.powerWindows = s.powerWindows.filter((w) => w.id !== id);
+            if (s.selectedWindowId === id) s.selectedWindowId = null;
+          },
+          false,
+          'color/removePowerWindow'
+        ),
 
       updatePowerWindow: (id, updates) =>
-        set((s) => {
-          const win = s.powerWindows.find((w) => w.id === id);
-          if (win) Object.assign(win, updates);
-        }, false, 'color/updatePowerWindow'),
+        set(
+          (s) => {
+            const win = s.powerWindows.find((w) => w.id === id);
+            if (win) Object.assign(win, updates);
+          },
+          false,
+          'color/updatePowerWindow'
+        ),
 
       selectPowerWindow: (id) =>
-        set((s) => {
-          s.selectedWindowId = id;
-        }, false, 'color/selectPowerWindow'),
+        set(
+          (s) => {
+            s.selectedWindowId = id;
+          },
+          false,
+          'color/selectPowerWindow'
+        ),
 
       setGPUReady: (ready, mode) =>
-        set((s) => {
-          s.gpuReady = ready;
-          s.processingMode = mode;
-        }, false, 'color/setGPUReady'),
+        set(
+          (s) => {
+            s.gpuReady = ready;
+            s.processingMode = mode;
+          },
+          false,
+          'color/setGPUReady'
+        ),
 
       resetStore: () =>
-        set((s) => {
-          s.nodes = colorEngine.getAllNodes();
-          s.connections = colorEngine.getConnections();
-          s.selectedNodeId = null;
-          s.activeView = 'primary';
-          s.wheelMode = 'primary';
-          s.curveType = 'custom';
-          s.scopeType = 'waveform';
-          s.scopePosition = 'post';
-          s.qualifierShowMatte = false;
-          s.qualifierMatteMode = 'highlight';
-          s.powerWindows = [];
-          s.selectedWindowId = null;
-          s.looks = [];
-          s.stills = [];
-          s.abWipeEnabled = false;
-          s.abWipePosition = 50;
-        }, false, 'color/resetStore'),
+        set(
+          (s) => {
+            s.nodes = colorEngine.getAllNodes();
+            s.connections = colorEngine.getConnections();
+            s.selectedNodeId = null;
+            s.activeView = 'primary';
+            s.wheelMode = 'primary';
+            s.curveType = 'custom';
+            s.scopeType = 'waveform';
+            s.scopePosition = 'post';
+            s.qualifierShowMatte = false;
+            s.qualifierMatteMode = 'highlight';
+            s.powerWindows = [];
+            s.selectedWindowId = null;
+            s.looks = [];
+            s.stills = [];
+            s.abWipeEnabled = false;
+            s.abWipePosition = 50;
+          },
+          false,
+          'color/resetStore'
+        ),
     })),
-    { name: 'ColorStore', enabled: isDevelopmentEnvironment() },
+    getStoreDevtoolsOptions('ColorStore')
   )
 );
 
@@ -336,10 +428,9 @@ colorEngine.subscribe(() => {
 // Initialize GPU pipeline
 colorEngine.initGPU().then(async () => {
   const { colorGradingPipeline } = await import('../engine/color/ColorGradingPipeline');
-  useColorStore.getState().setGPUReady(
-    colorGradingPipeline.isReady,
-    colorGradingPipeline.processingMode,
-  );
+  useColorStore
+    .getState()
+    .setGPUReady(colorGradingPipeline.isReady, colorGradingPipeline.processingMode);
 });
 
 // ─── Named Selectors ────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef, memo } from 'react';
 import { useEditorStore } from '../../store/editor.store';
-import type { Clip } from '../../store/editor.store';
+import type { Bin, Clip, MediaAsset } from '../../store/editor.store';
 import { editEngine } from '../../engine/EditEngine';
 import { snapEngine } from '../../engine/SnapEngine';
 import { smartToolEngine } from '../../engine/SmartToolEngine';
@@ -116,8 +116,82 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+function findAssetById(assets: MediaAsset[], assetId?: string): MediaAsset | null {
+  if (!assetId) {
+    return null;
+  }
+  return assets.find((asset) => asset.id === assetId) ?? null;
+}
+
+function collectAssets(bins: Bin[]): MediaAsset[] {
+  return bins.flatMap((bin) => [
+    ...bin.assets,
+    ...collectAssets(bin.children),
+  ]);
+}
+
+function toRgba(color: string, alpha: number): string {
+  if (color.startsWith('#')) {
+    const hex = color.slice(1);
+    const normalized = hex.length === 3
+      ? hex.split('').map((value) => value + value).join('')
+      : hex;
+    const parsed = Number.parseInt(normalized, 16);
+    if (Number.isFinite(parsed) && normalized.length === 6) {
+      const red = (parsed >> 16) & 255;
+      const green = (parsed >> 8) & 255;
+      const blue = parsed & 255;
+      return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+    }
+  }
+
+  if (color.startsWith('rgb(')) {
+    return color.replace('rgb(', 'rgba(').replace(')', `, ${alpha})`);
+  }
+
+  return color;
+}
+
+function resolveClipWaveform(clip: Clip, asset: MediaAsset | null): number[] | undefined {
+  return clip.waveformData ?? asset?.waveformData ?? asset?.waveformMetadata?.peaks;
+}
+
+function resolveThumbnailTiles(
+  clip: Clip,
+  asset: MediaAsset | null,
+  width: number,
+): Array<{ key: string; imageUrl: string }> {
+  if (clip.type !== 'video' || width < 48 || !asset?.thumbnailUrl) {
+    return [];
+  }
+
+  const frames = asset.thumbnailFrames?.length
+    ? asset.thumbnailFrames
+    : [{ timeSeconds: 0, imageUrl: asset.thumbnailUrl }];
+  const visibleSourceDuration = Math.max(
+    0.1,
+    (asset.duration ?? (clip.endTime - clip.startTime)) - clip.trimStart - clip.trimEnd,
+  );
+  const tileCount = Math.max(1, Math.min(12, Math.round(width / 56)));
+
+  return Array.from({ length: tileCount }, (_value, index) => {
+    const ratio = tileCount === 1 ? 0.5 : index / Math.max(tileCount - 1, 1);
+    const targetTime = clip.trimStart + (visibleSourceDuration * ratio);
+    const frame = frames.reduce((best, candidate) => (
+      Math.abs(candidate.timeSeconds - targetTime) < Math.abs(best.timeSeconds - targetTime)
+        ? candidate
+        : best
+    ), frames[0]!);
+
+    return {
+      key: `${frame.imageUrl}-${frame.timeSeconds}-${index}`,
+      imageUrl: frame.imageUrl,
+    };
+  });
+}
+
 export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor }: ClipViewProps) {
-  const { selectedClipIds, selectClip, tracks, markers, playheadTime } =
+  const { selectedClipIds, selectClip, tracks, markers, playheadTime, bins } =
     useEditorStore();
   const activeTool = useEditorStore((s) => s.activeTool);
   const selectedTrimEditPoints = useEditorStore((s) => s.selectedTrimEditPoints);
@@ -128,6 +202,10 @@ export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor
   const width = Math.max(2, (clip.endTime - clip.startTime) * zoom);
   const left = clip.startTime * zoom;
   const typeClass = `clip-${clip.type}`;
+  const previewAsset = findAssetById(collectAssets(bins), clip.assetId);
+  const waveformData = resolveClipWaveform(clip, previewAsset);
+  const thumbnailTiles = resolveThumbnailTiles(clip, previewAsset, width);
+  const clipAccent = clip.color ?? trackColor;
   const trimActive = trimRenderRevision.startsWith('true:');
   const liveTrimState = trimActive ? trimEngine.getState() : null;
 
@@ -522,6 +600,10 @@ export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor
           top: 3,
           bottom: 3,
           position: 'absolute',
+          background: thumbnailTiles.length > 0
+            ? `linear-gradient(180deg, ${toRgba(clipAccent, 0.18)} 0%, ${toRgba(clipAccent, 0.56)} 100%)`
+            : `linear-gradient(180deg, ${toRgba(clipAccent, 0.72)} 0%, ${toRgba(clipAccent, 0.34)} 100%)`,
+          borderColor: toRgba(clipAccent, 0.72),
         }}
         role="gridcell"
         aria-label={`${clip.name} (${clip.type}, ${(clip.endTime - clip.startTime).toFixed(2)}s)`}
@@ -536,7 +618,17 @@ export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor
             selectClip(clip.id, e.ctrlKey || e.metaKey);
           }
         }}
-      >
+        >
+        {thumbnailTiles.length > 0 && (
+          <div className="clip-thumbnail-strip" aria-hidden="true">
+            {thumbnailTiles.map((tile) => (
+              <div key={tile.key} className="clip-thumbnail-tile">
+                <img className="clip-thumbnail-image" src={tile.imageUrl} alt="" loading="lazy" />
+              </div>
+            ))}
+          </div>
+        )}
+
         {width > 18 && (
           <div
             className={`clip-trim-handle left${leftTrimActive ? ' is-trim-target active' : activeLeftTrimRoller ? ' is-trim-target' : ''}${selectedLeftTrimEditPoint ? ' is-cut-selected' : ''}`}
@@ -564,16 +656,16 @@ export const ClipView = memo(function ClipView({ clip, zoom, trackId, trackColor
           </div>
         )}
 
-        {clip.waveformData && clip.type === 'audio' && (
+        {waveformData && clip.type === 'audio' && (
           <Waveform
-            data={clip.waveformData}
+            data={waveformData}
             width={width}
             height={32}
-            color={trackColor}
+            color={clipAccent}
           />
         )}
 
-        {width > 30 && <div className="clip-label">{clip.name}</div>}
+        {width > 30 && <div className={`clip-label${thumbnailTiles.length > 0 ? ' has-preview' : ''}`}>{clip.name}</div>}
 
         {width > 18 && (
           <div
