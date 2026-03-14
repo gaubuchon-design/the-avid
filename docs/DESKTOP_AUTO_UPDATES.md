@@ -73,7 +73,7 @@ Electron Builder now resolves publish configuration through:
 Supported environment variables:
 
 - `DESKTOP_UPDATE_BASE_URL`
-  - default: `https://downloads.theavid.com/desktop`
+  - default: `https://the-avid-desktop-updates.vercel.app/desktop-updates`
 - `DESKTOP_UPDATE_CHANNEL`
   - default: derived from the semver prerelease tag, otherwise `stable`
 - `DESKTOP_UPDATE_SHARED_KEY`
@@ -108,6 +108,9 @@ Notes:
 - macOS auto-update uses the ZIP artifact and `latest-mac.yml`.
 - The DMG remains useful for first-time installs, but ZIP is the updater payload
   for macOS.
+- The publish step now also generates public latest-download routes at
+  `/desktop-downloads/<channel>/mac` and `/desktop-downloads/<channel>/win` so
+  the current macOS and Windows installers have stable shareable URLs.
 - The publish script now deletes superseded blobs inside the same update channel
   after a successful publish, so Vercel Blob usage stays bounded.
 
@@ -138,8 +141,8 @@ The desktop packaging scripts now use the CDN-aware Electron Builder config:
 - `npm run dist:desktop:refresh -- --targets=mac`
 - `npm run dist:desktop:refresh -- --targets=win`
 
-All packaging entry points also sync versions before generating artifacts.
-The GitHub release workflows now resolve and apply the next desktop version
+All packaging entry points also sync versions before generating artifacts. The
+GitHub release workflows now resolve and apply the next desktop version
 automatically before building macOS and Windows installers.
 
 ## CI/CD

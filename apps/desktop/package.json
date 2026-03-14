@@ -77,7 +77,9 @@
       {
         "from": "resources/bin/${os}",
         "to": "bin",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "asarUnpack": [
@@ -95,7 +97,10 @@
       "gatekeeperAssess": false,
       "entitlements": "resources/entitlements.mac.plist",
       "entitlementsInherit": "resources/entitlements.mac.inherit.plist",
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "darkModeSupport": true,
       "minimumSystemVersion": "12.0"
     },
@@ -104,8 +109,17 @@
       "icon": "resources/icon.icns",
       "iconSize": 128,
       "contents": [
-        { "x": 380, "y": 170, "type": "link", "path": "/Applications" },
-        { "x": 130, "y": 170, "type": "file" }
+        {
+          "x": 380,
+          "y": 170,
+          "type": "link",
+          "path": "/Applications"
+        },
+        {
+          "x": 130,
+          "y": 170,
+          "type": "file"
+        }
       ],
       "window": {
         "width": 540,
@@ -114,7 +128,10 @@
     },
     "win": {
       "icon": "resources/icon.ico",
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "publisherName": "The Avid, Inc."
     },
     "nsis": {
@@ -134,8 +151,17 @@
     "linux": {
       "icon": "resources/icons",
       "category": "AudioVideo",
-      "target": ["AppImage", "deb"],
-      "mimeTypes": ["video/mp4", "video/quicktime", "video/x-msvideo", "audio/mpeg", "audio/wav"]
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "mimeTypes": [
+        "video/mp4",
+        "video/quicktime",
+        "video/x-msvideo",
+        "audio/mpeg",
+        "audio/wav"
+      ]
     },
     "fileAssociations": [
       {
@@ -161,7 +187,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://downloads.theavid.com/desktop/stable",
+        "url": "https://the-avid-desktop-updates.vercel.app/desktop-updates/stable",
         "channel": "stable"
       }
     ],

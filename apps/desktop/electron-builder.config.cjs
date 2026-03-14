@@ -20,9 +20,11 @@ function detectReleaseChannel(version) {
 }
 
 const updateBaseUrl = trimTrailingSlash(
-  process.env.DESKTOP_UPDATE_BASE_URL || 'https://downloads.theavid.com/desktop',
+  process.env.DESKTOP_UPDATE_BASE_URL ||
+    'https://the-avid-desktop-updates.vercel.app/desktop-updates'
 );
-const updateChannel = process.env.DESKTOP_UPDATE_CHANNEL || detectReleaseChannel(packageJson.version);
+const updateChannel =
+  process.env.DESKTOP_UPDATE_CHANNEL || detectReleaseChannel(packageJson.version);
 const updateSharedKey = process.env.DESKTOP_UPDATE_SHARED_KEY;
 
 const publishTarget = {

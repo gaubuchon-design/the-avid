@@ -32,19 +32,21 @@ interface MacadamPlayback {
 }
 
 interface MacadamModule {
-  getDeviceInfo(): Promise<Array<{
-    id: number;
-    name: string;
-    displayModes: Array<{
+  getDeviceInfo(): Promise<
+    Array<{
+      id: number;
       name: string;
-      width: number;
-      height: number;
-      frameRate: { numerator: number; denominator: number };
-      interlaced: boolean;
-    }>;
-    supportsCapture: boolean;
-    supportsPlayback: boolean;
-  }>>;
+      displayModes: Array<{
+        name: string;
+        width: number;
+        height: number;
+        frameRate: { numerator: number; denominator: number };
+        interlaced: boolean;
+      }>;
+      supportsCapture: boolean;
+      supportsPlayback: boolean;
+    }>
+  >;
   capture(config: Record<string, unknown>): MacadamCapture;
   playback(config: Record<string, unknown>): MacadamPlayback;
 }
@@ -75,8 +77,10 @@ export class DeckLinkDevice {
    */
   async init(): Promise<boolean> {
     try {
-      // Dynamic import — fails gracefully if macadam is not installed
-      this.macadam = await import('macadam') as unknown as MacadamModule;
+      // Keep the DeckLink binding optional so CI/package builds still succeed
+      // when the native addon is not installed on the host machine.
+      const moduleId = 'macadam';
+      this.macadam = (await import(/* @vite-ignore */ moduleId)) as unknown as MacadamModule;
       return true;
     } catch {
       console.warn('[DeckLink] macadam module not available — DeckLink support disabled');
@@ -229,7 +233,9 @@ export class DeckLinkDevice {
    */
   onFrame(callback: FrameCallback): () => void {
     this.frameCallbacks.add(callback);
-    return () => { this.frameCallbacks.delete(callback); };
+    return () => {
+      this.frameCallbacks.delete(callback);
+    };
   }
 
   /** Get current device status */
@@ -257,7 +263,8 @@ export class DeckLinkDevice {
         // Detect resolution from frame data on first frame using the pixel format's bytes-per-pixel
         // For UYVY (8BitYUV): 2 bytes per pixel, so width = bytesPerRow / 2
         if (this.frameCount === 1 && rawFrame.video.length > 0) {
-          const bpp = config.pixelFormat === '8BitBGRA' ? 4 : config.pixelFormat === '10BitRGB' ? 4 : 2;
+          const bpp =
+            config.pixelFormat === '8BitBGRA' ? 4 : config.pixelFormat === '10BitRGB' ? 4 : 2;
           // Common resolutions to match against
           const knownHeights = [480, 576, 720, 1080, 2160];
           for (const h of knownHeights) {
@@ -275,17 +282,20 @@ export class DeckLinkDevice {
           width: this.captureWidth,
           height: this.captureHeight,
           pixelFormat: config.pixelFormat,
-          bytesPerRow: this.captureHeight > 0 ? rawFrame.video.length / this.captureHeight : rawFrame.video.length,
+          bytesPerRow:
+            this.captureHeight > 0
+              ? rawFrame.video.length / this.captureHeight
+              : rawFrame.video.length,
           timecode: rawFrame.timecode || '00:00:00:00',
           frameNumber: this.frameCount,
           timestamp: performance.now(),
           videoData: rawFrame.video.buffer.slice(
             rawFrame.video.byteOffset,
-            rawFrame.video.byteOffset + rawFrame.video.byteLength,
+            rawFrame.video.byteOffset + rawFrame.video.byteLength
           ),
           audioData: rawFrame.audio?.buffer.slice(
             rawFrame.audio.byteOffset,
-            rawFrame.audio.byteOffset + rawFrame.audio.byteLength,
+            rawFrame.audio.byteOffset + rawFrame.audio.byteLength
           ) as ArrayBuffer | undefined,
           audioChannels: config.audioChannels,
           audioSampleRate: 48000,
