@@ -47,8 +47,11 @@ That is why this implementation splits responsibilities:
   - health endpoint plus authenticated artifact dispatch
 - [services/desktop-update-cdn/api/desktop-updates/handler.js](/Users/guillaumeaubuchon/GitHub/the-avid/services/desktop-update-cdn/api/desktop-updates/handler.js)
   - authenticated metadata and artifact delivery through signed Blob redirects
+- [services/desktop-update-cdn/api/desktop-downloads/index.js](/Users/guillaumeaubuchon/GitHub/the-avid/services/desktop-update-cdn/api/desktop-downloads/index.js)
+  - public latest-download redirects for macOS and Windows installers
 - [services/desktop-update-cdn/scripts/publish-desktop-builds.js](/Users/guillaumeaubuchon/GitHub/the-avid/services/desktop-update-cdn/scripts/publish-desktop-builds.js)
   - uploads built desktop artifacts into Blob paths that match the updater feed
+    and generates a `downloads.json` manifest for stable direct-download links
 
 ## Environment Variables
 
@@ -96,6 +99,13 @@ Your desktop feed base URL will then look like:
 https://your-updater-project.vercel.app/desktop-updates/stable
 ```
 
+And the stable direct installer links will look like:
+
+```text
+https://your-updater-project.vercel.app/desktop-downloads/stable/mac
+https://your-updater-project.vercel.app/desktop-downloads/stable/win
+```
+
 ## Publishing New Desktop Builds
 
 After running the desktop packaging build:
@@ -106,9 +116,9 @@ npm run dist:desktop:refresh -- --targets=mac,win --allow-cross
 npm run publish:desktop:updates -- --channel=stable
 ```
 
-The GitHub Actions desktop release workflows now perform that auto-bump step
-for you before building installers, using the currently published feed version
-as the baseline.
+The GitHub Actions desktop release workflows now perform that auto-bump step for
+you before building installers, using the currently published feed version as
+the baseline.
 
 The publish script uploads:
 
@@ -116,7 +126,9 @@ The publish script uploads:
 - `latest-mac.yml`
 - `stable-mac.yml` when present
 - referenced installer payloads
+- the first-install macOS artifact (`.dmg` when available)
 - matching `.blockmap` files
+- `downloads.json` for latest-download routing
 
 It also prunes stale blobs from the same channel after the new release uploads
 complete, so old installer payloads do not linger in Vercel Blob storage and
@@ -133,6 +145,9 @@ aggregate publish job after both platform builds finish:
 
 - [desktop-installers.yml](/Users/guillaumeaubuchon/GitHub/the-avid/.github/workflows/desktop-installers.yml)
 - [release-train.yml](/Users/guillaumeaubuchon/GitHub/the-avid/.github/workflows/release-train.yml)
+
+Those workflows also write the stable macOS and Windows download URLs into the
+GitHub Actions step summary after a successful publish.
 
 ## Security Notes
 

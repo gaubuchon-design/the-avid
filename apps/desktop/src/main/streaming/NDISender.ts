@@ -14,7 +14,12 @@ import type { NDIConfig } from './types';
 interface GrandioseModule {
   find(opts?: { showLocalSources?: boolean; timeout?: number }): Promise<NDISource[]>;
   receive(opts: { source: NDISource }): Promise<NDIReceiverInterface>;
-  send?(opts: { name: string; groups?: string; clockVideo?: boolean; clockAudio?: boolean }): NDISenderHandle;
+  send?(opts: {
+    name: string;
+    groups?: string;
+    clockVideo?: boolean;
+    clockAudio?: boolean;
+  }): NDISenderHandle;
 }
 
 interface NDISource {
@@ -38,12 +43,7 @@ interface NDISenderHandle {
     fourCC: string;
     data: Buffer;
   }): void;
-  audio(frame: {
-    sampleRate: number;
-    numChannels: number;
-    numSamples: number;
-    data: Buffer;
-  }): void;
+  audio(frame: { sampleRate: number; numChannels: number; numSamples: number; data: Buffer }): void;
   destroy(): void;
 }
 
@@ -79,7 +79,8 @@ export class NDISender {
    */
   async loadModule(): Promise<boolean> {
     try {
-      this.grandiose = await import('grandiose') as unknown as GrandioseModule;
+      const moduleId = 'grandiose';
+      this.grandiose = (await import(/* @vite-ignore */ moduleId)) as unknown as GrandioseModule;
       return true;
     } catch {
       console.warn('[NDI] grandiose module not available — NDI output disabled');
@@ -100,7 +101,8 @@ export class NDISender {
    */
   async init(config: NDIConfig): Promise<void> {
     if (!this.grandiose) throw new Error('NDI SDK not available');
-    if (!this.grandiose.send) throw new Error('NDI sender not supported in this version of grandiose');
+    if (!this.grandiose.send)
+      throw new Error('NDI sender not supported in this version of grandiose');
 
     this.sender = this.grandiose.send({
       name: config.sourceName,
@@ -123,7 +125,7 @@ export class NDISender {
     width: number,
     height: number,
     frameRateNum: number,
-    frameRateDen = 1,
+    frameRateDen = 1
   ): void {
     if (!this.sender || !this._isActive) return;
 
@@ -143,12 +145,7 @@ export class NDISender {
   /**
    * Send audio samples over NDI.
    */
-  sendAudioFrame(
-    data: Buffer,
-    sampleRate: number,
-    channels: number,
-    numSamples: number,
-  ): void {
+  sendAudioFrame(data: Buffer, sampleRate: number, channels: number, numSamples: number): void {
     if (!this.sender || !this._isActive) return;
 
     this.sender.audio({
@@ -195,7 +192,8 @@ export class NDIDiscovery {
 
   async loadModule(): Promise<boolean> {
     try {
-      this.grandiose = await import('grandiose') as unknown as GrandioseModule;
+      const moduleId = 'grandiose';
+      this.grandiose = (await import(/* @vite-ignore */ moduleId)) as unknown as GrandioseModule;
       return true;
     } catch {
       return false;

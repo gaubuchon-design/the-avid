@@ -5,6 +5,14 @@
   "outputDirectory": null,
   "rewrites": [
     {
+      "source": "/desktop-downloads",
+      "destination": "/api/desktop-downloads"
+    },
+    {
+      "source": "/desktop-downloads/(.*)",
+      "destination": "/api/desktop-downloads?path=$1"
+    },
+    {
       "source": "/desktop-updates",
       "destination": "/api/desktop-updates"
     },
