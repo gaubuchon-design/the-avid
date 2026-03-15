@@ -84,6 +84,7 @@ npm run build
 npm run type-check
 npm run test
 npm run lint
+npm run test:coverage    # Tests with coverage thresholds
 ```
 
 Useful scoped commands:
@@ -91,6 +92,7 @@ Useful scoped commands:
 ```bash
 npm run type-check --workspace=@mcua/web
 npm run test --workspace=@mcua/desktop
+npm run test:coverage --workspace=@mcua/core
 npm run db:generate --workspace=@mcua/api
 ```
 
@@ -163,6 +165,7 @@ Key operational docs:
 - [docs/DESKTOP_AUTO_UPDATES.md](docs/DESKTOP_AUTO_UPDATES.md)
 - [docs/PACKAGING_NOTES.md](docs/PACKAGING_NOTES.md)
 - [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md)
+- [docs/CICD_RELEASE_PIPELINE.md](docs/CICD_RELEASE_PIPELINE.md)
 
 ## Contributing
 

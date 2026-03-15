@@ -12,6 +12,12 @@ export default defineConfig({
     coverage: {
       reporter: ['text', 'json-summary'],
       include: ['src/engine/**', 'src/store/**'],
+      thresholds: {
+        statements: 50,
+        branches: 40,
+        functions: 45,
+        lines: 50,
+      },
     },
   },
   resolve: {

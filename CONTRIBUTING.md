@@ -1,6 +1,7 @@
 # Contributing to The Avid
 
-Thank you for your interest in contributing to The Avid. This document covers the development workflow, coding standards, and pull request process.
+Thank you for your interest in contributing to The Avid. This document covers
+the development workflow, coding standards, and pull request process.
 
 ## Table of Contents
 
@@ -48,21 +49,21 @@ npm run dev:web
 
 This is a monorepo managed with npm workspaces and Turborepo.
 
-| Directory | Scope | Description |
-|-----------|-------|-------------|
-| `apps/web` | `@mcua/web` | React 18 + Vite browser editor |
-| `apps/desktop` | `@mcua/desktop` | Electron desktop application |
-| `apps/mobile` | `@mcua/mobile` | Expo / React Native companion |
-| `apps/api` | `@mcua/api` | Express + Prisma API server |
-| `packages/core` | `@mcua/core` | Shared types, project model, utilities |
-| `packages/ui` | `@mcua/ui` | Shared React hooks and design tokens |
-| `packages/render-agent` | `@mcua/render-agent` | Render pipeline agent |
-| `libs/contracts` | `@mcua/contracts` | TypeScript interfaces and API contracts |
-| `libs/adapters` | `@mcua/adapters` | Platform adapters |
-| `libs/ui-components` | `@mcua/ui-components` | Shared React components |
-| `services/agent-orchestrator` | `@mcua/agent-orchestrator` | AI agent coordination |
-| `services/knowledge-node` | `@mcua/knowledge-node` | Knowledge graph service |
-| `services/local-ai-runtime` | `@mcua/local-ai-runtime` | Local AI model runtime |
+| Directory                     | Scope                      | Description                             |
+| ----------------------------- | -------------------------- | --------------------------------------- |
+| `apps/web`                    | `@mcua/web`                | React 18 + Vite browser editor          |
+| `apps/desktop`                | `@mcua/desktop`            | Electron desktop application            |
+| `apps/mobile`                 | `@mcua/mobile`             | Expo / React Native companion           |
+| `apps/api`                    | `@mcua/api`                | Express + Prisma API server             |
+| `packages/core`               | `@mcua/core`               | Shared types, project model, utilities  |
+| `packages/ui`                 | `@mcua/ui`                 | Shared React hooks and design tokens    |
+| `packages/render-agent`       | `@mcua/render-agent`       | Render pipeline agent                   |
+| `libs/contracts`              | `@mcua/contracts`          | TypeScript interfaces and API contracts |
+| `libs/adapters`               | `@mcua/adapters`           | Platform adapters                       |
+| `libs/ui-components`          | `@mcua/ui-components`      | Shared React components                 |
+| `services/agent-orchestrator` | `@mcua/agent-orchestrator` | AI agent coordination                   |
+| `services/knowledge-node`     | `@mcua/knowledge-node`     | Knowledge graph service                 |
+| `services/local-ai-runtime`   | `@mcua/local-ai-runtime`   | Local AI model runtime                  |
 
 ### Dependency Rules
 
@@ -151,10 +152,13 @@ npm run db:seed
 
 ### TypeScript
 
-- **Strict mode is mandatory.** The root `tsconfig.base.json` enforces `"strict": true`.
+- **Strict mode is mandatory.** The root `tsconfig.base.json` enforces
+  `"strict": true`.
 - Prefer explicit return types on exported functions.
-- Use `unknown` over `any`. If `any` is truly required, add a `// eslint-disable-next-line` comment with a reason.
-- Use discriminated unions over optional fields where the shape depends on a variant.
+- Use `unknown` over `any`. If `any` is truly required, add a
+  `// eslint-disable-next-line` comment with a reason.
+- Use discriminated unions over optional fields where the shape depends on a
+  variant.
 - Prefer `readonly` arrays and properties where mutation is not needed.
 - Use `type` for data shapes and `interface` for contracts that may be extended.
 
@@ -162,20 +166,21 @@ npm run db:seed
 
 - Use functional components exclusively.
 - Prefer named exports over default exports.
-- Co-locate component tests with the component file (e.g., `Button.tsx` / `Button.test.tsx`).
+- Co-locate component tests with the component file (e.g., `Button.tsx` /
+  `Button.test.tsx`).
 - Use `React.memo` only when profiling shows a measurable benefit.
 - Keep components focused: one responsibility per component.
 
 ### File Naming
 
-| Kind | Convention | Example |
-|------|-----------|---------|
-| React component | PascalCase | `TimelineTrack.tsx` |
-| Hook | camelCase with `use` prefix | `useProjectStore.ts` |
-| Utility / helper | camelCase | `formatTimecode.ts` |
-| Constant / config | camelCase or SCREAMING_SNAKE | `defaultSettings.ts` |
-| Test file | Same name + `.test` suffix | `TimelineTrack.test.tsx` |
-| Type definition | PascalCase | `ProjectTypes.ts` |
+| Kind              | Convention                   | Example                  |
+| ----------------- | ---------------------------- | ------------------------ |
+| React component   | PascalCase                   | `TimelineTrack.tsx`      |
+| Hook              | camelCase with `use` prefix  | `useProjectStore.ts`     |
+| Utility / helper  | camelCase                    | `formatTimecode.ts`      |
+| Constant / config | camelCase or SCREAMING_SNAKE | `defaultSettings.ts`     |
+| Test file         | Same name + `.test` suffix   | `TimelineTrack.test.tsx` |
+| Type definition   | PascalCase                   | `ProjectTypes.ts`        |
 
 ### Import Ordering
 
@@ -189,7 +194,8 @@ Imports should follow this order, separated by blank lines:
 
 ### Formatting
 
-This project uses Prettier for code formatting. The configuration is in `.prettierrc`:
+This project uses Prettier for code formatting. The configuration is in
+`.prettierrc`:
 
 - Semicolons: yes
 - Single quotes: yes
@@ -219,17 +225,17 @@ This project uses [Conventional Commits](https://www.conventionalcommits.org/):
 
 ### Types
 
-| Type | Description |
-|------|-------------|
-| `feat` | A new feature |
-| `fix` | A bug fix |
-| `docs` | Documentation only |
-| `style` | Formatting, semicolons, etc. (no logic change) |
+| Type       | Description                                             |
+| ---------- | ------------------------------------------------------- |
+| `feat`     | A new feature                                           |
+| `fix`      | A bug fix                                               |
+| `docs`     | Documentation only                                      |
+| `style`    | Formatting, semicolons, etc. (no logic change)          |
 | `refactor` | Code change that neither fixes a bug nor adds a feature |
-| `perf` | Performance improvement |
-| `test` | Adding or correcting tests |
-| `chore` | Build process, tooling, CI changes |
-| `revert` | Reverts a previous commit |
+| `perf`     | Performance improvement                                 |
+| `test`     | Adding or correcting tests                              |
+| `chore`    | Build process, tooling, CI changes                      |
+| `revert`   | Reverts a previous commit                               |
 
 ### Scopes
 
@@ -276,15 +282,25 @@ docs(desktop): update packaging instructions
 # All tests
 npm run test
 
+# All tests with coverage enforcement
+npm run test:coverage
+
 # Watch mode (web)
 cd apps/web && npm run test:watch
 
-# Coverage report (web)
-cd apps/web && npm run test:coverage
+# Coverage report (single package)
+npx turbo run test:coverage --filter=@mcua/core
 
 # Specific package
 npx turbo run test --filter=@mcua/core
 ```
+
+### Coverage Thresholds
+
+All workspaces enforce minimum coverage thresholds (50% statements, 40%
+branches, 45% functions, 50% lines). If your changes cause coverage to drop
+below these thresholds, `test:coverage` will fail. Add tests for new code paths
+to maintain or improve coverage.
 
 ### Testing Conventions
 
@@ -292,7 +308,8 @@ npx turbo run test --filter=@mcua/core
 - Place test files adjacent to the code they test.
 - Name test files with the `.test.ts` or `.test.tsx` suffix.
 - Use `describe` / `it` blocks with clear, behavior-focused descriptions.
-- Mock external services at the boundary (e.g., mock the HTTP client, not the business logic).
+- Mock external services at the boundary (e.g., mock the HTTP client, not the
+  business logic).
 
 ### Test Structure
 
@@ -315,6 +332,7 @@ describe('formatTimecode', () => {
 ### Common Issues
 
 **`npm install` fails with workspace resolution errors**
+
 ```bash
 # Clear all caches and reinstall
 npm run clean
@@ -322,6 +340,7 @@ npm install
 ```
 
 **Docker services won't start**
+
 ```bash
 # Check for port conflicts
 lsof -i :5432  # PostgreSQL
@@ -334,12 +353,14 @@ docker compose up -d
 ```
 
 **TypeScript errors after pulling new changes**
+
 ```bash
 # Rebuild all packages (dependencies resolve in order)
 npm run build
 ```
 
 **Electron app won't start**
+
 ```bash
 cd apps/desktop
 npm run postinstall   # Rebuild native modules
@@ -348,6 +369,9 @@ npm run dev
 
 ### Getting Help
 
-- Check existing [issues](https://github.com/gaubuchon-design/the-avid/issues) before filing a new one.
-- For questions, open a [discussion](https://github.com/gaubuchon-design/the-avid/discussions).
-- For security vulnerabilities, email security@theavid.app (do not open a public issue).
+- Check existing [issues](https://github.com/gaubuchon-design/the-avid/issues)
+  before filing a new one.
+- For questions, open a
+  [discussion](https://github.com/gaubuchon-design/the-avid/discussions).
+- For security vulnerabilities, email security@theavid.app (do not open a public
+  issue).

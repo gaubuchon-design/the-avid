@@ -1,155 +1,209 @@
-# CI/CD Release Pipeline
+# CI/CD and Release Pipeline
 
-This repo now includes an automated post-CI release workflow:
+This document describes the full continuous integration, testing, and release
+pipeline for The Avid monorepo.
 
-- [release-train.yml](/Users/guillaumeaubuchon/GitHub/the-avid/.github/workflows/release-train.yml)
+## Workflow Files
 
-It is designed to run after
-[ci.yml](/Users/guillaumeaubuchon/GitHub/the-avid/.github/workflows/ci.yml)
-succeeds on `master`, or on manual dispatch.
+| Workflow                                                                | Trigger                                           | Purpose                                          |
+| ----------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------ |
+| [`ci.yml`](../.github/workflows/ci.yml)                                 | PR to `master`, push to `master`                  | Lint, type-check, test, build, Docker smoke test |
+| [`release-train.yml`](../.github/workflows/release-train.yml)           | After CI succeeds on `master`, or manual dispatch | Deploy all surfaces, tag release, health checks  |
+| [`desktop-installers.yml`](../.github/workflows/desktop-installers.yml) | Manual dispatch, weekly schedule                  | Standalone desktop installer builds              |
 
-## Release topology
+## CI Pipeline (`ci.yml`)
 
-After a successful merge to `master`, the workflow can automatically:
+The CI pipeline runs on every PR and push to `master`. Jobs are parallelized for
+fast feedback.
 
-1. deploy the browser app to Vercel
-2. deploy the private desktop update endpoint to Vercel
-3. build and publish the API container image to GHCR
-4. trigger the API server rollout through a deploy hook
-5. build macOS and Windows desktop installers
-6. publish the desktop auto-update feed to private Vercel Blob and remove stale
-   blobs from that channel
-7. publish a mobile OTA update through Expo EAS
-8. optionally kick off native mobile builds
+### Job Graph
 
-## Required GitHub secrets and variables
+```text
+lint ─────────────┐
+                   ├──> build ──> docker (PR only)
+type-check ───────┘
+security-audit  (independent)
+test            (independent, matrix: Node 20 + 22)
+```
 
-### Shared release inputs
+### Jobs
 
-- `DESKTOP_UPDATE_SHARED_KEY`
-- `BLOB_READ_WRITE_TOKEN`
-- `DESKTOP_UPDATE_CHANNEL`
-- `DESKTOP_UPDATE_BLOB_PREFIX`
-- `DESKTOP_UPDATE_BASE_URL`
+**Lint** — ESLint across all workspaces + Prettier format check.
 
-### Web deployment to Vercel
+**Type-check** — TypeScript strict-mode compilation across all workspaces.
 
-- secret: `VERCEL_TOKEN`
-- variable: `VERCEL_ORG_ID`
-- variable: `VERCEL_WEB_PROJECT_ID`
+**Security Audit** — `npm audit` for production dependencies. Reports
+high/critical vulnerability counts in the GitHub Actions summary. Uses
+`continue-on-error` so it does not block the pipeline, but surfaces findings.
 
-The Vercel web project should use:
+**Test** — Runs `test:coverage` across all workspaces on Node 20 and 22.
+Coverage artifacts are uploaded on Node 20 runs, and a per-package coverage
+summary table is written to the GitHub Actions summary.
 
-- repo: this repository
-- project directory:
-  [apps/web](/Users/guillaumeaubuchon/GitHub/the-avid/apps/web)
+**Build** — Full monorepo build. Depends on lint and type-check passing first.
+Reports build artifact sizes in the summary.
 
-Set the browser app environment variables directly in that Vercel project,
-including:
+**Docker** — Smoke-test build of the API Docker image (PR only, no push).
 
-- `VITE_API_BASE_URL`
-- any transcription or AI runtime variables the web app needs
+### Caching
 
-### Desktop updater endpoint deployment to Vercel
+All jobs use the Turborepo local cache via `actions/cache`. Cache keys are
+scoped by job type, OS, and commit SHA with fallback to OS-scoped restore keys.
 
-- secret: `VERCEL_TOKEN`
-- variable: `VERCEL_ORG_ID`
-- variable: `VERCEL_DESKTOP_UPDATES_PROJECT_ID`
+Remote caching is available when `TURBO_TOKEN` and `TURBO_TEAM` are configured.
 
-The updater endpoint Vercel project should use:
+## Test Coverage
 
-- repo: this repository
-- project directory:
-  [services/desktop-update-cdn](/Users/guillaumeaubuchon/GitHub/the-avid/services/desktop-update-cdn)
+### Coverage Thresholds
 
-### API server rollout
+All workspace vitest configs enforce minimum coverage thresholds:
 
-- optional secret: `API_DEPLOY_HOOK_URL`
-- optional secret: `API_DEPLOY_HOOK_BEARER`
+| Metric     | Minimum |
+| ---------- | ------- |
+| Statements | 50%     |
+| Branches   | 40%     |
+| Functions  | 45%     |
+| Lines      | 50%     |
 
-The workflow always builds and pushes `ghcr.io/<owner>/the-avid-api`. If
-`API_DEPLOY_HOOK_URL` is configured, it also POSTs the new image reference and
-commit SHA to that endpoint so your runtime platform can pull and roll forward
-automatically.
+These are starting-point thresholds. They should be raised as coverage improves.
 
-This keeps the repo provider-agnostic for the API, which matters because the
-current API is a websocket-capable Express server and is better suited to a
-container host than to static/serverless hosting.
+### Coverage Reporting
 
-### Mobile OTA and native builds
+- CI runs `test:coverage` which produces `coverage/` directories in each
+  workspace
+- Coverage summaries (`json-summary` format) are uploaded as artifacts
+- A coverage summary table is posted to the GitHub Actions run summary
+- Coverage artifacts are retained for 14 days
 
-- secret: `EXPO_TOKEN`
-- variable: `EXPO_EAS_PROJECT_ID`
-- variable: `EXPO_UPDATES_URL`
-- optional variable: `EXPO_APP_VERSION`
-- optional variable: `MOBILE_BUILD_ON_MASTER`
+### Running Coverage Locally
 
-The mobile app configuration is now environment-driven through:
+```bash
+npm run test:coverage                          # All workspaces
+npx turbo run test:coverage --filter=@mcua/core  # Single workspace
+```
 
-- [app.config.ts](/Users/guillaumeaubuchon/GitHub/the-avid/apps/mobile/app.config.ts)
-- [eas.json](/Users/guillaumeaubuchon/GitHub/the-avid/apps/mobile/eas.json)
+## Release Pipeline (`release-train.yml`)
 
-`MOBILE_BUILD_ON_MASTER=true` enables automatic native build kickoffs after each
-successful OTA publish.
+After CI succeeds on `master`, the release train runs automatically. It can also
+be triggered manually.
 
-## Desktop storage cleanup
+### Release Steps
 
-Desktop updater publishing is handled by:
+1. **Resolve release context** — Determines the release SHA and ref.
+2. **Tag release** — Creates a `release/<short-sha>` git tag.
+3. **Deploy web app** — Vercel production deployment with post-deploy health
+   check (HTTP 200 within 5 attempts).
+4. **Deploy desktop update endpoint** — Vercel deployment of the updater feed.
+5. **Build and push API image** — Docker build + push to GHCR with `sha-<short>`
+   and `latest` tags.
+6. **Trigger API rollout** — POST to deploy hook with image ref. Includes
+   post-deploy health check when `API_HEALTH_URL` is configured.
+7. **Build desktop installers** — macOS (macos-14) and Windows (windows-2022) in
+   parallel.
+8. **Publish desktop update feed** — Uploads to Vercel Blob, cleans stale
+   artifacts.
+9. **Publish mobile OTA update** — Expo EAS update on production branch.
+10. **Kick off mobile native builds** — Optional, gated on
+    `MOBILE_BUILD_ON_MASTER=true`.
+11. **Release summary** — Aggregated status table of all deployment components.
 
-- [publish-desktop-builds.js](/Users/guillaumeaubuchon/GitHub/the-avid/services/desktop-update-cdn/scripts/publish-desktop-builds.js)
+### Health Checks
 
-It now:
+Post-deployment health checks are built into the release pipeline:
 
-- uploads the current channel metadata and payloads
-- lists every blob already stored under that channel prefix
-- deletes anything not part of the current release set
+- **Web app**: Polls the deployment URL for HTTP 200 (5 attempts, 10s apart)
+- **API**: Polls `API_HEALTH_URL` for HTTP 200 (6 attempts, 15s apart)
 
-That keeps the updater channel lean so old installers do not accumulate in
-Vercel Blob storage.
+Health check failures produce GitHub Actions warnings but do not fail the
+workflow, since the deployment itself succeeded.
 
-Important behavior:
+## Required GitHub Secrets and Variables
 
-- cleanup happens only after the new release artifacts upload successfully
-- cleanup is channel-scoped, so `stable` and `beta` can still coexist
-- desktop publishing now runs once per release after macOS and Windows artifacts
-  are aggregated
+### Shared CI
 
-## Versioning expectations
+| Name          | Type     | Required | Purpose                     |
+| ------------- | -------- | -------- | --------------------------- |
+| `TURBO_TOKEN` | Secret   | No       | Turborepo remote cache      |
+| `TURBO_TEAM`  | Variable | No       | Turborepo remote cache team |
 
-Desktop auto-updates still require a strictly newer app version than the
-currently published installer feed, but the workflows now handle that
-automatically.
+### Web Deployment
 
-The release workflows resolve the desktop version with:
+| Name                    | Type     | Required | Purpose                       |
+| ----------------------- | -------- | -------- | ----------------------------- |
+| `VERCEL_TOKEN`          | Secret   | Yes      | Vercel API access             |
+| `VERCEL_ORG_ID`         | Variable | Yes      | Vercel organization           |
+| `VERCEL_WEB_PROJECT_ID` | Variable | Yes      | Vercel project for `apps/web` |
 
-- the repo version, if it is already newer than the published updater feed
-- otherwise the next semantic version after the currently published updater feed
+### Desktop Update Endpoint
 
-Manual override is still available:
+| Name                                | Type     | Required | Purpose                          |
+| ----------------------------------- | -------- | -------- | -------------------------------- |
+| `VERCEL_DESKTOP_UPDATES_PROJECT_ID` | Variable | Yes      | Vercel project for updater       |
+| `DESKTOP_UPDATE_SHARED_KEY`         | Secret   | Yes      | Auth key for update feed         |
+| `BLOB_READ_WRITE_TOKEN`             | Secret   | Yes      | Vercel Blob storage access       |
+| `DESKTOP_UPDATE_CHANNEL`            | Variable | No       | Channel name (default: `stable`) |
+| `DESKTOP_UPDATE_BLOB_PREFIX`        | Variable | No       | Blob key prefix                  |
+| `DESKTOP_UPDATE_BASE_URL`           | Variable | No       | Public URL for update feed       |
+
+### API Deployment
+
+| Name                     | Type     | Required | Purpose                               |
+| ------------------------ | -------- | -------- | ------------------------------------- |
+| `API_DEPLOY_HOOK_URL`    | Secret   | No       | POST endpoint for rollout trigger     |
+| `API_DEPLOY_HOOK_BEARER` | Secret   | No       | Bearer token for deploy hook          |
+| `API_HEALTH_URL`         | Variable | No       | Health endpoint for post-deploy check |
+
+### Mobile (Expo)
+
+| Name                     | Type     | Required | Purpose                         |
+| ------------------------ | -------- | -------- | ------------------------------- |
+| `EXPO_TOKEN`             | Secret   | Yes      | Expo/EAS authentication         |
+| `EXPO_EAS_PROJECT_ID`    | Variable | Yes      | EAS project identifier          |
+| `EXPO_UPDATES_URL`       | Variable | Yes      | Expo Updates URL                |
+| `EXPO_APP_VERSION`       | Variable | No       | App version override            |
+| `MOBILE_BUILD_ON_MASTER` | Variable | No       | Set `true` to auto-build native |
+
+### Desktop Code Signing
+
+| Name                          | Type   | Required | Purpose                                      |
+| ----------------------------- | ------ | -------- | -------------------------------------------- |
+| `CSC_LINK`                    | Secret | No       | macOS code signing certificate (base64 .p12) |
+| `CSC_KEY_PASSWORD`            | Secret | No       | macOS certificate password                   |
+| `APPLE_ID`                    | Secret | No       | Apple notarization ID                        |
+| `APPLE_TEAM_ID`               | Secret | No       | Apple team ID                                |
+| `APPLE_APP_SPECIFIC_PASSWORD` | Secret | No       | Apple app-specific password                  |
+| `WIN_CSC_LINK`                | Secret | No       | Windows code signing certificate             |
+| `WIN_CSC_KEY_PASSWORD`        | Secret | No       | Windows certificate password                 |
+
+## Desktop Versioning
+
+Desktop auto-updates require a strictly newer app version than the currently
+published feed. The workflows handle this automatically by resolving against the
+live feed.
+
+Manual override:
 
 ```bash
 npm run version:desktop -- --set=0.2.0
 ```
 
-And manual auto-bump is available too:
+## Desktop Storage Cleanup
 
-```bash
-npm run version:desktop:auto -- --feed-base-url=https://the-avid-desktop-updates.vercel.app/desktop-updates --channel=stable
-```
+The publish script uploads current channel artifacts and deletes stale blobs
+from the same channel prefix, keeping storage lean.
 
-## Practical rollout order
+## Practical Rollout Order
 
-Recommended production order:
+1. Configure the web Vercel project
+2. Configure the updater Vercel project
+3. Configure the API deploy hook for your container host
+4. Configure Expo EAS project values and `EXPO_TOKEN`
+5. Add the GitHub secrets and variables listed above
+6. Merge a release PR to `master`
 
-1. configure the web Vercel project
-2. configure the updater Vercel project
-3. configure the API deploy hook for your container host
-4. configure Expo EAS project values and `EXPO_TOKEN`
-5. add the GitHub secrets and variables above
-6. merge a release PR to `master`
+## Related Docs
 
-## Related docs
-
-- [DESKTOP_AUTO_UPDATES.md](/Users/guillaumeaubuchon/GitHub/the-avid/docs/DESKTOP_AUTO_UPDATES.md)
-- [VERCEL_DESKTOP_UPDATE_ENDPOINT.md](/Users/guillaumeaubuchon/GitHub/the-avid/docs/VERCEL_DESKTOP_UPDATE_ENDPOINT.md)
-- [PACKAGING_NOTES.md](/Users/guillaumeaubuchon/GitHub/the-avid/docs/PACKAGING_NOTES.md)
+- [DESKTOP_AUTO_UPDATES.md](DESKTOP_AUTO_UPDATES.md)
+- [VERCEL_DESKTOP_UPDATE_ENDPOINT.md](VERCEL_DESKTOP_UPDATE_ENDPOINT.md)
+- [PACKAGING_NOTES.md](PACKAGING_NOTES.md)
+- [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md)
