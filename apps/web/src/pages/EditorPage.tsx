@@ -37,6 +37,7 @@ const RenderQueuePanel = lazy(() => import('../components/Deliver/RenderQueuePan
 
 // Lazy-loaded utility panels
 const MultiCamPanel = lazy(() => import('../components/MultiCamPanel/MultiCamPanel').then(m => ({ default: m.MultiCamPanel })));
+const ColorPanel = lazy(() => import('../components/ColorPanel/ColorPanel').then(m => ({ default: m.ColorPanel })));
 
 // Playback is driven by PlaybackEngine (RAF-based) via editor.store.ts togglePlay().
 // Keyboard dispatch is centralized in useGlobalKeyboard() — called once from EditorPage.
@@ -423,7 +424,11 @@ export function EditorPage() {
       )}
       {activePage === 'color' && (
         <ErrorBoundary resetKeys={[activePage]}>
-          <div style={{ gridRow: '2 / 5', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>Color Page</div>
+          <Suspense fallback={<LoadingSpinner />}>
+            <div style={{ gridRow: '2 / 5', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <ColorPanel />
+            </div>
+          </Suspense>
         </ErrorBoundary>
       )}
       {activePage === 'vfx' && (

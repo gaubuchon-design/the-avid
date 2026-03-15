@@ -539,6 +539,7 @@ const AssetCard = memo(function AssetCard({ asset }: AssetCardProps) {
         )}
         {asset.duration && <div className="asset-duration">{formatDuration(asset.duration)}</div>}
         <div className={`asset-type-badge ${asset.type.toLowerCase()}`}>{asset.type}</div>
+        {asset.isHDR && <span className="hdr-badge" title={`HDR (${asset.hdrMode?.toUpperCase() ?? 'HDR'})`}>HDR</span>}
         {asset.isFavorite && <div className="asset-fav">&#9733;</div>}
       </div>
       <div className="asset-name truncate" title={asset.name}>{asset.name}</div>
@@ -654,6 +655,7 @@ function AssetListView({ assets }: { assets: MediaAsset[] }) {
               }} />
             </span>
             <span className="bin-col-name truncate" title={asset.name}>
+              {asset.isHDR && <span className="hdr-badge" title={`HDR (${asset.hdrMode?.toUpperCase() ?? 'HDR'})`}>HDR</span>}
               {asset.hasAlpha && <span title="Has alpha channel" style={{ color: 'var(--warning)', marginRight: 3 }}>A</span>}
               {asset.name}
             </span>

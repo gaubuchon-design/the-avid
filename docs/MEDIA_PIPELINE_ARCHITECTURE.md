@@ -167,6 +167,27 @@ lowest-common-denominator file model.
 - Final timeline rendering is a later stage that requires a true
   compositor/playback engine.
 
+### 9. Color Metadata Flow
+
+On ingest, each asset's color space metadata is captured:
+
+1. **Detection**: `MediaPipeline.detectColorSpace()` probes `VideoFrame.colorSpace`
+   primaries via WebCodecs. Falls back to file-extension heuristics (EXR → linear,
+   DPX → log, etc.).
+2. **Storage**: Results are stored on the `MediaAsset` in the editor store as
+   `colorSpace` (string), `isHDR` (boolean), and `hdrMode` (`'sdr'`|`'hlg'`|`'pq'`).
+3. **Pipeline resolution**: When a clip enters the timeline, `resolveColorPipeline()`
+   compares its source color space against the sequence working space to determine
+   whether an input transform is needed. Warnings are generated for gamut-clipping
+   and HDR/SDR mismatch scenarios.
+4. **Export/render**: The `DeliverySpec` carries `outputColorSpace`, `hdrMode`,
+   and `transferFunction`. The render pipeline applies the appropriate output
+   transform (and tone mapping when crossing HDR/SDR boundaries).
+
+The `ColorDescriptor` type (in `@mcua/core/project-library`) captures the full
+color profile: primaries, transfer, matrix, range, bit depth, chroma subsampling,
+HDR mode, ICC profile, and mastering display metadata.
+
 ## Playback Strategy
 
 - Desktop should prefer managed originals for immediate editability.
@@ -202,6 +223,53 @@ engine:
   audio-turnover manifests, and a best-effort screener render
 - timeline/bin preview surfaces that consume the same thumbnail and waveform
   metadata stored on the asset
+
+## 10. Hardware Acceleration
+
+The pipeline uses native GPU hardware acceleration across all supported
+platforms, falling back gracefully to CPU/software codecs when hardware is
+unavailable.
+
+### Supported Hardware Acceleration SDKs
+
+| Vendor      | Platform      | Encode API        | Decode API            | Compute            |
+|-------------|---------------|-------------------|-----------------------|--------------------|
+| **NVIDIA**  | Win/Linux     | NVENC             | NVDEC (CUVID)         | CUDA via WebGPU    |
+| **AMD**     | Windows       | AMF               | D3D11VA               | OpenCL via WebGPU  |
+| **AMD**     | Linux         | VA-API (radeonsi) | VA-API                | OpenCL via WebGPU  |
+| **Intel**   | Win/macOS     | QSV (oneVPL)      | QSV                   | WebGPU             |
+| **Intel**   | Linux         | VA-API (iHD/i965) | VA-API                | WebGPU             |
+| **Apple**   | macOS/iOS     | VideoToolbox      | VideoToolbox          | Metal via WebGPU   |
+| **Qualcomm**| Windows ARM   | MediaCodec        | MediaCodec / D3D11VA  | WebGPU (Adreno)    |
+
+### Per-Operation Acceleration
+
+- **Ingest/Proxy Generation:** Hardware decode → hardware encode for proxy
+  transcodes. NVENC, VideoToolbox, AMF, QSV, VA-API presets for H.264 proxy.
+- **Preview/Playback:** WebCodecs `VideoDecoder` with `hardwareAcceleration:
+  'prefer-hardware'` for browser-side playback. Desktop uses FFmpeg hardware
+  decode.
+- **Transcription:** GPU-accelerated audio extraction via hardware decode.
+  CUDA for Whisper model inference (NVIDIA), CoreML (Apple Silicon), OpenVINO
+  (Intel).
+- **Color Processing:** WebGPU compute shaders for real-time color transforms,
+  LUT application, and grading node graphs. Maps to CUDA (NVIDIA), Metal
+  (Apple), Vulkan (AMD/Intel) through the browser's WebGPU backend.
+- **Render/Export:** Full hardware-accelerated encode pipeline with
+  vendor-specific quality tuning. NVENC P4/HQ presets, VideoToolbox
+  non-realtime mode, AMF quality mode, QSV medium preset.
+- **Effects/Compositing:** 26 GPU-accelerated WGSL compute shaders for
+  blur, chroma key, color correction, LUTs, noise, distortion, etc.
+
+### Key Files
+
+- `apps/desktop/src/main/gpu.ts` — Desktop GPU detection (Electron)
+- `apps/web/src/engine/HardwareAccelerator.ts` — Browser GPU/CPU detection + dispatch
+- `apps/web/src/engine/PlatformCapabilities.ts` — Platform capability probing
+- `packages/render-agent/src/workers/RenderWorker.ts` — FFmpeg HW encode
+- `packages/render-agent/src/workers/IngestWorker.ts` — FFmpeg HW proxy
+- `packages/render-agent/src/workers/TranscribeWorker.ts` — HW audio extraction
+- `libs/contracts/src/render-pipeline.ts` — HW accel type contracts
 
 ## Remaining Work After This Pass
 

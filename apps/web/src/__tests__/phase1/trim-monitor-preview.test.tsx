@@ -58,6 +58,7 @@ describe('trim monitor preview', () => {
             { id: 'asset-left', name: 'Interview A', type: 'VIDEO', status: 'READY', tags: [], isFavorite: false },
             { id: 'asset-right', name: 'Interview B', type: 'VIDEO', status: 'READY', tags: [], isFavorite: false },
           ],
+          sequences: [],
         },
       ],
       tracks: [
@@ -146,6 +147,7 @@ describe('trim monitor preview', () => {
             { id: 'asset-left', name: 'Interview A', type: 'VIDEO', status: 'READY', tags: [], isFavorite: false },
             { id: 'asset-right', name: 'Interview B', type: 'VIDEO', status: 'READY', tags: [], isFavorite: false },
           ],
+          sequences: [],
         },
       ],
       tracks: [
@@ -231,6 +233,7 @@ describe('trim monitor preview', () => {
             { id: 'asset-left', name: 'Interview A', type: 'VIDEO', status: 'READY', tags: [], isFavorite: false },
             { id: 'asset-right', name: 'Interview B', type: 'VIDEO', status: 'READY', tags: [], isFavorite: false },
           ],
+          sequences: [],
         },
       ],
       tracks: [
@@ -329,6 +332,7 @@ describe('trim monitor preview', () => {
           assets: [
             { id: 'asset-main', name: 'Main Clip', type: 'VIDEO', status: 'READY', tags: [], isFavorite: false },
           ],
+          sequences: [],
         },
       ],
       tracks: [

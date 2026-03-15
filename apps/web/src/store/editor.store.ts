@@ -146,6 +146,10 @@ export interface MediaAsset {
   mimeType?: string;
   colorLabel?: string;
   rating?: number;
+  /** Whether this asset is HDR content (PQ/HLG transfer function detected). */
+  isHDR?: boolean;
+  /** HDR mode detected from source media ('sdr' | 'hlg' | 'pq'). */
+  hdrMode?: 'sdr' | 'hlg' | 'pq';
   // File reference for re-probe or relink
   fileHandle?: File;
   mediaDbId?: string;
@@ -298,6 +302,10 @@ export interface ProjectSettings {
   height: number;
   frameRate: number;
   exportFormat: string;
+  /** Working color space for the project timeline. */
+  workingColorSpace: 'rec709' | 'rec2020' | 'dci-p3' | 'aces-cct';
+  /** HDR mode for the project. */
+  hdrMode: 'sdr' | 'hlg' | 'pq';
 }
 
 export interface SequenceSettings {
@@ -982,6 +990,8 @@ const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   height: 2160,
   frameRate: 24,
   exportFormat: 'mov',
+  workingColorSpace: 'rec709',
+  hdrMode: 'sdr',
 };
 
 // Helper: evaluate smart bin rules against an asset
@@ -2476,6 +2486,18 @@ export const useEditorStore = create<EditorState & EditorActions>()(
               asset.fps = metadata.fps;
               asset.codec = metadata.codec;
               asset.colorSpace = metadata.colorSpace;
+              // Infer HDR mode from detected color space / transfer function
+              const cs = (metadata.colorSpace ?? '').toLowerCase();
+              if (cs.includes('pq') || cs.includes('st2084') || cs.includes('smpte2084')) {
+                asset.hdrMode = 'pq';
+                asset.isHDR = true;
+              } else if (cs.includes('hlg') || cs.includes('arib')) {
+                asset.hdrMode = 'hlg';
+                asset.isHDR = true;
+              } else {
+                asset.hdrMode = 'sdr';
+                asset.isHDR = false;
+              }
               asset.hasAlpha = metadata.hasAlpha;
               // Alpha mode will be set after dialog resolves (see below)
               asset.audioChannels = metadata.audioChannels;

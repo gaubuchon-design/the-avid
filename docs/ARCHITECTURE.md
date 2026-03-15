@@ -109,6 +109,46 @@ Current ingest behavior includes:
 These behaviors are documented in
 [MEDIA_PIPELINE_ARCHITECTURE.md](MEDIA_PIPELINE_ARCHITECTURE.md).
 
+## Color Pipeline
+
+The application implements a smart color management pipeline that tracks color
+space from source media through the working timeline to output/delivery.
+
+### Pipeline Flow
+
+```
+Source Clip → Input Transform → Working Space → Color Grading → Output Transform → Delivery
+```
+
+- **Source detection**: `MediaPipeline.detectColorSpace()` reads color primaries
+  via WebCodecs `VideoFrame.colorSpace`. HDR mode (PQ/HLG) is inferred from the
+  detected transfer function.
+- **Working space**: Set at both project (`ProjectSettings.workingColorSpace`) and
+  sequence (`SequenceSettings.colorSpace`) level. Supported: Rec.709, Rec.2020,
+  DCI-P3, ACEScct.
+- **Color grading**: Performed in working space by the `ColorEngine` node graph
+  (primary wheels, curves, qualifier, power windows, LUTs).
+- **Output transform**: Applied during render/export based on `DeliverySpec`
+  color settings. Handles HDR↔SDR tone mapping when source and output differ.
+
+### GPU Acceleration
+
+Color space transforms use WGSL compute shaders via WebGPU when available
+(`colorSpaceTransform.ts`), with automatic CPU fallback. Supported transforms:
+
+- Rec.709 ↔ Rec.2020 / DCI-P3 / ACES AP0
+- Transfer functions: sRGB, PQ (ST 2084), HLG (ARIB STD-B67), ACEScct
+
+### Key Files
+
+- `apps/web/src/engine/gpu/shaders/colorSpaceTransform.ts` — GPU/CPU transforms
+- `apps/web/src/engine/ColorEngine.ts` — Node-graph grading + pipeline integration
+- `apps/web/src/lib/colorPipeline.ts` — Smart pipeline resolution + warnings
+- `apps/web/src/store/color.store.ts` — Pipeline UI state
+- `packages/core/src/project-library.ts` — `ColorDescriptor` type
+- `libs/contracts/src/publish-variants.ts` — Output color in `DeliverySpec`
+- `libs/contracts/src/render-pipeline.ts` — Color in `RenderJob`
+
 ## AI Architecture
 
 The repo currently has more than one AI integration surface:

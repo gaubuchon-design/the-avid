@@ -167,6 +167,30 @@ See:
 - [DESKTOP_AUTO_UPDATES.md](DESKTOP_AUTO_UPDATES.md)
 - [VERCEL_DESKTOP_UPDATE_ENDPOINT.md](VERCEL_DESKTOP_UPDATE_ENDPOINT.md)
 
+## Color Pipeline
+
+The editor includes a professional color management pipeline. Key concepts:
+
+- **Working Color Space**: Set per-project and per-sequence (Rec.709, Rec.2020,
+  DCI-P3, ACEScct). Configurable in New Project Dialog and Sequence Dialog.
+- **Color Page**: Switch to the Color page (Shift+6) for the full grading
+  interface — primary/log wheels, curves, qualifier, power windows, node graph,
+  and the Pipeline tab for color space management.
+- **Pipeline Tab**: Shows the source→working→display transform chain with
+  mismatch warnings and auto-detect toggle.
+- **HDR Awareness**: HDR clips are flagged with a yellow "HDR" badge in bins.
+  Mixed HDR/SDR timelines trigger pipeline warnings.
+
+### Adding Color Space Support
+
+To add a new color space to the pipeline:
+
+1. Add the matrix constants and transfer functions in
+   `apps/web/src/engine/gpu/shaders/colorSpaceTransform.ts`
+2. Add the WGSL compute shader for GPU acceleration
+3. Update `resolveTransformSteps()` to handle the new space
+4. Add the option to the UI dropdowns in `SequenceDialog` and `NewProjectDialog`
+
 ## Documentation Conventions
 
 - Treat [README.md](../README.md), [ARCHITECTURE.md](ARCHITECTURE.md), and

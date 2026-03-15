@@ -19,7 +19,8 @@ export type ColorViewTab =
   | 'huesat'
   | 'qualifier'
   | 'windows'
-  | 'nodeGraph';
+  | 'nodeGraph'
+  | 'pipeline';
 
 export type WheelMode = 'primary' | 'log';
 
@@ -85,6 +86,13 @@ interface ColorState {
   // GPU status
   gpuReady: boolean;
   processingMode: 'gpu' | 'cpu';
+
+  // Color pipeline management
+  sourceColorSpace: 'rec709' | 'rec2020' | 'dci-p3' | 'aces-linear' | 'aces-cct' | 'srgb' | null;
+  workingColorSpace: 'rec709' | 'rec2020' | 'dci-p3' | 'aces-cct';
+  displayTransform: 'sdr-rec709' | 'hdr-pq' | 'hdr-hlg';
+  pipelineMismatch: boolean;
+  pipelineAutoDetect: boolean;
 }
 
 interface ColorActions {
@@ -110,6 +118,11 @@ interface ColorActions {
   updatePowerWindow: (id: string, updates: Partial<PowerWindow>) => void;
   selectPowerWindow: (id: string | null) => void;
   setGPUReady: (ready: boolean, mode: 'gpu' | 'cpu') => void;
+  setSourceColorSpace: (cs: ColorState['sourceColorSpace']) => void;
+  setWorkingColorSpace: (cs: ColorState['workingColorSpace']) => void;
+  setDisplayTransform: (dt: ColorState['displayTransform']) => void;
+  setPipelineAutoDetect: (auto: boolean) => void;
+  computePipelineMismatch: () => void;
   resetStore: () => void;
 }
 
@@ -139,6 +152,11 @@ export const useColorStore = create<ColorState & ColorActions>()(
       abWipePosition: 50,
       gpuReady: false,
       processingMode: 'cpu' as const,
+      sourceColorSpace: null,
+      workingColorSpace: 'rec709' as const,
+      displayTransform: 'sdr-rec709' as const,
+      pipelineMismatch: false,
+      pipelineAutoDetect: true,
 
       // Actions
       selectNode: (id) =>
@@ -392,6 +410,49 @@ export const useColorStore = create<ColorState & ColorActions>()(
           'color/setGPUReady'
         ),
 
+      setSourceColorSpace: (cs) =>
+        set(
+          (s) => {
+            s.sourceColorSpace = cs;
+            s.pipelineMismatch = cs != null && cs !== s.workingColorSpace;
+          },
+          false,
+          'color/setSourceColorSpace'
+        ),
+
+      setWorkingColorSpace: (cs) =>
+        set(
+          (s) => {
+            s.workingColorSpace = cs;
+            s.pipelineMismatch = s.sourceColorSpace != null && s.sourceColorSpace !== cs;
+          },
+          false,
+          'color/setWorkingColorSpace'
+        ),
+
+      setDisplayTransform: (dt) =>
+        set(
+          (s) => { s.displayTransform = dt; },
+          false,
+          'color/setDisplayTransform'
+        ),
+
+      setPipelineAutoDetect: (auto) =>
+        set(
+          (s) => { s.pipelineAutoDetect = auto; },
+          false,
+          'color/setPipelineAutoDetect'
+        ),
+
+      computePipelineMismatch: () =>
+        set(
+          (s) => {
+            s.pipelineMismatch = s.sourceColorSpace != null && s.sourceColorSpace !== s.workingColorSpace;
+          },
+          false,
+          'color/computePipelineMismatch'
+        ),
+
       resetStore: () =>
         set(
           (s) => {
@@ -411,6 +472,11 @@ export const useColorStore = create<ColorState & ColorActions>()(
             s.stills = [];
             s.abWipeEnabled = false;
             s.abWipePosition = 50;
+            s.sourceColorSpace = null;
+            s.workingColorSpace = 'rec709';
+            s.displayTransform = 'sdr-rec709';
+            s.pipelineMismatch = false;
+            s.pipelineAutoDetect = true;
           },
           false,
           'color/resetStore'

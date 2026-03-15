@@ -54,6 +54,7 @@ describe('phase 1 keyboard routing', () => {
           children: [],
           assets: [asset],
           isOpen: true,
+          sequences: [],
         },
       ],
       tracks: [

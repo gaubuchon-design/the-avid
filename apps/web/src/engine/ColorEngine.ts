@@ -2,6 +2,7 @@
 // Node-graph based color pipeline with primary corrections, curves, and stills.
 
 import { colorGradingPipeline } from './color/ColorGradingPipeline';
+import { colorTransformPipeline, type ColorSpaceId } from './gpu/shaders/colorSpaceTransform';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -558,6 +559,50 @@ export class ColorEngine {
     return () => {
       this.subscribers.delete(cb);
     };
+  }
+
+  // ── Color Space Transform Pipeline ──────────────────────────────────────────
+
+  /**
+   * Apply input color space transform: convert from source clip color space
+   * to the working color space of the project/sequence timeline.
+   */
+  applyInputTransform(imageData: ImageData, sourceCS: ColorSpaceId, workingCS: ColorSpaceId): ImageData {
+    return colorTransformPipeline.transformFrame(imageData, sourceCS, workingCS);
+  }
+
+  /**
+   * Apply output color space transform: convert from working color space
+   * to the output/display color space for monitoring or delivery.
+   */
+  applyOutputTransform(imageData: ImageData, workingCS: ColorSpaceId, outputCS: ColorSpaceId): ImageData {
+    return colorTransformPipeline.transformFrame(imageData, workingCS, outputCS);
+  }
+
+  /**
+   * Full color pipeline: source → working → grade → output.
+   * Applies input transform, runs the color grading node graph, then applies output transform.
+   */
+  applyFullPipeline(
+    imageData: ImageData,
+    sourceCS: ColorSpaceId,
+    workingCS: ColorSpaceId,
+    outputCS: ColorSpaceId,
+  ): ImageData {
+    // Step 1: Transform from source to working color space
+    let frame = sourceCS !== workingCS
+      ? colorTransformPipeline.transformFrame(imageData, sourceCS, workingCS)
+      : imageData;
+
+    // Step 2: Apply the node-graph grading in working space
+    frame = this.processFrame(frame);
+
+    // Step 3: Transform from working to output color space
+    if (workingCS !== outputCS) {
+      frame = colorTransformPipeline.transformFrame(frame, workingCS, outputCS);
+    }
+
+    return frame;
   }
 
   /** Notify all subscribers that state has changed. */

@@ -142,27 +142,49 @@ const CODEC_CONFIGS: Record<string, CodecConfig> = {
   },
 };
 
-/** Hardware-accelerated encoder variants. */
+/** Hardware-accelerated encoder variants keyed by acceleration API. */
 const HW_ENCODERS: Record<string, Record<string, string>> = {
+  // NVIDIA GPU — NVENC (all desktop platforms)
   nvenc: {
     h264: 'h264_nvenc',
     h265: 'hevc_nvenc',
+    av1: 'av1_nvenc',
   },
+  // Apple Silicon & Intel Mac — VideoToolbox (macOS/iOS)
   videotoolbox: {
     h264: 'h264_videotoolbox',
     h265: 'hevc_videotoolbox',
     prores: 'prores_videotoolbox',
   },
+  // Linux VA-API — AMD/Intel/NVIDIA open-source drivers
   vaapi: {
     h264: 'h264_vaapi',
     h265: 'hevc_vaapi',
     vp9: 'vp9_vaapi',
     av1: 'av1_vaapi',
   },
+  // AMD GPU — AMF (Windows)
+  amf: {
+    h264: 'h264_amf',
+    h265: 'hevc_amf',
+    av1: 'av1_amf',
+  },
+  // Intel GPU — Quick Sync Video (Windows/Linux)
+  qsv: {
+    h264: 'h264_qsv',
+    h265: 'hevc_qsv',
+    av1: 'av1_qsv',
+    vp9: 'vp9_qsv',
+  },
+  // Qualcomm Adreno — MediaCodec via FFmpeg (Windows ARM / Android)
+  mediacodec: {
+    h264: 'h264_mediacodec',
+    h265: 'hevc_mediacodec',
+  },
 };
 
 /** Valid hardware acceleration names. */
-const VALID_HW_ACCEL = new Set(['nvenc', 'videotoolbox', 'vaapi']);
+const VALID_HW_ACCEL = new Set(['nvenc', 'videotoolbox', 'vaapi', 'amf', 'qsv', 'mediacodec']);
 
 /** Progress regex matching FFmpeg stderr output. */
 const PROGRESS_REGEX = /frame=\s*(\d+).*fps=\s*([\d.]+).*time=(\S+).*bitrate=\s*(\S+)/;
@@ -624,11 +646,24 @@ export class RenderWorker {
     // Hardware decode acceleration input flags
     const hwAccel = job.params['hwAccel'] as string | undefined;
     if (hwAccel === 'nvenc') {
+      // NVIDIA CUDA — NVDEC for decode, NVENC for encode
       args.push('-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda');
     } else if (hwAccel === 'videotoolbox') {
+      // Apple VideoToolbox — macOS/iOS hardware codec
       args.push('-hwaccel', 'videotoolbox');
     } else if (hwAccel === 'vaapi') {
-      args.push('-hwaccel', 'vaapi', '-hwaccel_device', '/dev/dri/renderD128');
+      // VA-API — Linux AMD/Intel/NVIDIA open-source
+      const vaDevice = (job.params['vaDevice'] as string | undefined) ?? '/dev/dri/renderD128';
+      args.push('-hwaccel', 'vaapi', '-hwaccel_device', vaDevice, '-hwaccel_output_format', 'vaapi');
+    } else if (hwAccel === 'amf') {
+      // AMD AMF — Windows DirectX-based encoding
+      args.push('-hwaccel', 'd3d11va');
+    } else if (hwAccel === 'qsv') {
+      // Intel Quick Sync Video — hardware codec via Media SDK / oneVPL
+      args.push('-hwaccel', 'qsv', '-hwaccel_output_format', 'qsv');
+    } else if (hwAccel === 'mediacodec') {
+      // Qualcomm / Windows ARM — MediaCodec-based decode
+      args.push('-hwaccel', 'mediacodec');
     }
 
     // Frame-accurate seeking with segment in/out points
