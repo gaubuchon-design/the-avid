@@ -1570,6 +1570,8 @@ function extractProjectSettings(comp: AAFCompositionMob): ProjectSettings {
     height: parseInt(getComment('_projectHeight') || '1080', 10),
     frameRate: parseFloat(getComment('_projectFrameRate') || '23.976'),
     exportFormat: getComment('_projectFormat') || 'h264',
+    workingColorSpace: (getComment('_workingColorSpace') as 'rec709' | 'rec2020' | 'dci-p3' | 'aces-cct') || 'rec709',
+    hdrMode: (getComment('_hdrMode') as 'sdr' | 'hlg' | 'pq') || 'sdr',
   };
 }
 

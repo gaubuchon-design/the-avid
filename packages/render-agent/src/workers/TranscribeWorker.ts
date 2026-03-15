@@ -68,9 +68,10 @@ export class TranscribeWorker {
     let wavPath: string | null = null;
 
     try {
-      // Step 1: Extract audio to WAV
+      // Step 1: Extract audio to WAV (with optional hardware-accelerated decode)
+      const hwAccel = (job.params['hwAccel'] as string | undefined);
       onProgress?.({ stage: 'extracting', percent: 0, message: 'Extracting audio...' });
-      wavPath = await this.extractAudio(job.inputUrl);
+      wavPath = await this.extractAudio(job.inputUrl, hwAccel);
       this.tempFiles.add(wavPath);
 
       if (this.cancelled) {
@@ -154,12 +155,29 @@ export class TranscribeWorker {
 
   /**
    * Extract audio from a media file to WAV 16 kHz mono using FFmpeg.
+   * Uses hardware-accelerated decoding when available to speed up extraction
+   * from compressed video containers (H.264/H.265 decode offloaded to GPU).
    * Handles OOM kills (exit code 137) and spawn failures.
    */
-  private extractAudio(inputPath: string): Promise<string> {
+  private extractAudio(inputPath: string, hwAccel?: string): Promise<string> {
     const wavPath = inputPath.replace(/\.[^.]+$/, '_audio.wav');
+
+    // Hardware-accelerated decode flags (before -i) — speeds up demux from
+    // video-heavy containers by offloading video decode to GPU
+    const hwDecodeArgs: string[] = [];
+    if (hwAccel === 'nvenc' || hwAccel === 'cuda') {
+      hwDecodeArgs.push('-hwaccel', 'cuda');
+    } else if (hwAccel === 'videotoolbox') {
+      hwDecodeArgs.push('-hwaccel', 'videotoolbox');
+    } else if (hwAccel === 'qsv') {
+      hwDecodeArgs.push('-hwaccel', 'qsv');
+    } else if (hwAccel === 'vaapi') {
+      hwDecodeArgs.push('-hwaccel', 'vaapi', '-hwaccel_device', '/dev/dri/renderD128');
+    }
+
     const args = [
       '-y',
+      ...hwDecodeArgs,
       '-i', inputPath,
       '-vn',
       '-acodec', 'pcm_s16le',

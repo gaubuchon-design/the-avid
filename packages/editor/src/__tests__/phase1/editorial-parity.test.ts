@@ -310,6 +310,7 @@ describe('phase 1 editorial parity', () => {
           children: [],
           assets: [baseAsset, overlayAsset],
           isOpen: true,
+          sequences: [],
         },
       ],
       tracks: [
@@ -515,7 +516,7 @@ describe('phase 1 editorial parity', () => {
       duration: 14,
     });
 
-    useEditorStore.getState().extractMarkedRange();
+    useEditorStore.getState().extractSelection();
 
     const state = useEditorStore.getState();
     expect(state.tracks[0]!.clips.map((clip) => [clip.id, clip.startTime, clip.endTime])).toEqual([

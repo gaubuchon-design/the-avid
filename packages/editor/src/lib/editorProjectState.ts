@@ -576,6 +576,8 @@ export function hydrateEditorStateFromProject(project: EditorProject): HydratedE
       height: project.settings.height,
       frameRate: project.settings.frameRate,
       exportFormat: project.settings.exportFormat,
+      workingColorSpace: 'rec709',
+      hdrMode: 'sdr',
     },
     sequenceSettings: {
       name: 'Sequence 1',

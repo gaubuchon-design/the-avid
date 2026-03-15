@@ -41,6 +41,48 @@ const INGEST_PRESETS: Record<string, IngestPreset> = {
   },
 };
 
+/** Hardware-accelerated codec overrides keyed by hwAccel API name.
+ *  Used for proxy transcode when hardware encoding is available. */
+const HW_INGEST_OVERRIDES: Record<string, Partial<Record<string, { codec: string; extraArgs: string[] }>>> = {
+  nvenc: {
+    'h264-proxy': { codec: 'h264_nvenc', extraArgs: ['-preset', 'p1', '-tune', 'll', '-rc', 'vbr', '-cq', '28'] },
+  },
+  videotoolbox: {
+    'h264-proxy': { codec: 'h264_videotoolbox', extraArgs: ['-realtime', '1', '-q:v', '65'] },
+    'prores-proxy': { codec: 'prores_videotoolbox', extraArgs: ['-profile:v', '0'] },
+  },
+  amf: {
+    'h264-proxy': { codec: 'h264_amf', extraArgs: ['-quality', 'speed', '-rc', 'cqp', '-qp_i', '28', '-qp_p', '28'] },
+  },
+  qsv: {
+    'h264-proxy': { codec: 'h264_qsv', extraArgs: ['-preset', 'fast', '-global_quality', '28'] },
+  },
+  vaapi: {
+    'h264-proxy': { codec: 'h264_vaapi', extraArgs: ['-qp', '28'] },
+  },
+};
+
+/** Valid hardware acceleration names for ingest. */
+const VALID_INGEST_HW_ACCEL = new Set(['nvenc', 'videotoolbox', 'amf', 'qsv', 'vaapi']);
+
+/** Build FFmpeg decode flags for hardware-accelerated ingest. */
+function buildIngestHWDecodeArgs(hwAccel: string): string[] {
+  switch (hwAccel) {
+    case 'nvenc':
+      return ['-hwaccel', 'cuda'];
+    case 'videotoolbox':
+      return ['-hwaccel', 'videotoolbox'];
+    case 'vaapi':
+      return ['-hwaccel', 'vaapi', '-hwaccel_device', '/dev/dri/renderD128'];
+    case 'amf':
+      return ['-hwaccel', 'd3d11va'];
+    case 'qsv':
+      return ['-hwaccel', 'qsv'];
+    default:
+      return [];
+  }
+}
+
 /** FFmpeg progress data parsed from stderr. */
 export interface IngestProgress {
   /** Current frame number. */
@@ -101,13 +143,28 @@ export class IngestWorker {
 
     const totalDuration = (job.params['durationSec'] as number | undefined) ?? 0;
 
+    // Apply hardware acceleration if requested and supported
+    const hwAccel = (job.params['hwAccel'] as string | undefined);
+    let effectiveCodec = preset.codec;
+    let effectiveExtraArgs = [...preset.extraArgs];
+
+    if (hwAccel && VALID_INGEST_HW_ACCEL.has(hwAccel)) {
+      const override = HW_INGEST_OVERRIDES[hwAccel]?.[presetName];
+      if (override) {
+        effectiveCodec = override.codec;
+        effectiveExtraArgs = override.extraArgs;
+      }
+    }
+
     const args = [
       '-y',
+      // Hardware decode acceleration (before -i)
+      ...(hwAccel ? buildIngestHWDecodeArgs(hwAccel) : []),
       '-i', job.inputUrl,
-      '-c:v', preset.codec,
+      '-c:v', effectiveCodec,
       '-pix_fmt', preset.pixFmt,
-      ...(preset.profile ? ['-profile:v', preset.profile] : []),
-      ...preset.extraArgs,
+      ...(preset.profile && effectiveCodec === preset.codec ? ['-profile:v', preset.profile] : []),
+      ...effectiveExtraArgs,
       '-c:a', 'pcm_s16le',
       '-progress', 'pipe:2',
       outputPath,

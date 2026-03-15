@@ -271,6 +271,8 @@ describe('phase 1 project persistence', () => {
         height: 1920,
         frameRate: 30,
         exportFormat: 'mp4',
+        workingColorSpace: 'rec709',
+        hdrMode: 'sdr',
       },
       sequenceSettings: {
         ...useEditorStore.getState().sequenceSettings,
@@ -322,6 +324,7 @@ describe('phase 1 project persistence', () => {
               isFavorite: false,
             },
           ],
+          sequences: [],
         },
       ],
       markers: [],
@@ -633,8 +636,7 @@ describe('phase 1 project persistence', () => {
     useEditorStore.setState({
       projectId: 'project-shell',
       projectName: 'Shell Save Test',
-      saveStatus: 'saved',
-      hasUnsavedChanges: true,
+      saveStatus: 'unsaved',
     });
 
     const versionsBefore = useCollabStore.getState().versions.length;
@@ -675,8 +677,7 @@ describe('phase 1 project persistence', () => {
     useEditorStore.setState({
       projectId: 'project-fallback-save',
       projectName: 'Fallback Save',
-      saveStatus: 'idle',
-      hasUnsavedChanges: true,
+      saveStatus: 'unsaved',
     });
 
     await useEditorStore.getState().saveProject();
@@ -686,7 +687,6 @@ describe('phase 1 project persistence', () => {
     expect(state.projectId).toBe('project-fallback-save');
     expect(state.projectName).toBe('Fallback Save');
     expect(state.saveStatus).toBe('saved');
-    expect(state.hasUnsavedChanges).toBe(false);
     expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
 
@@ -728,11 +728,11 @@ describe('phase 1 project persistence', () => {
           isOpen: true,
           children: [],
           assets: [],
+          sequences: [],
         },
       ],
       selectedBinId: 'b-master',
       saveStatus: 'saved',
-      hasUnsavedChanges: false,
     });
 
     useCollabStore.getState().saveVersion('Editorial Checkpoint', 'Pre-trim state');
@@ -755,7 +755,6 @@ describe('phase 1 project persistence', () => {
           clips: [],
         },
       ],
-      hasUnsavedChanges: false,
     });
 
     useCollabStore.getState().restoreVersion(checkpointId!);
@@ -764,7 +763,7 @@ describe('phase 1 project persistence', () => {
     expect(restoredState.projectId).toBe('project-versioned');
     expect(restoredState.projectName).toBe('Versioned Cut');
     expect(restoredState.tracks[0]?.clips.map((clip) => clip.id)).toEqual(['clip-original']);
-    expect(restoredState.hasUnsavedChanges).toBe(true);
+    expect(restoredState.saveStatus).toBe('unsaved');
   });
 
   it('renders trim HUD feedback from shared trim state', async () => {
@@ -933,11 +932,11 @@ describe('phase 1 project persistence', () => {
           isOpen: true,
           children: [],
           assets: [],
+          sequences: [],
         },
       ],
       selectedBinId: 'b-master',
       saveStatus: 'saved',
-      hasUnsavedChanges: false,
     });
     useCollabStore.setState({ activeTab: 'versions' });
     useCollabStore.getState().saveVersion('Rendered Restore', 'Saved from version history');
@@ -1032,6 +1031,7 @@ describe('phase 1 project persistence', () => {
           isOpen: true,
           children: [],
           assets: [],
+          sequences: [],
         },
       ],
       selectedBinId: 'b-master',
@@ -1095,6 +1095,7 @@ describe('phase 1 project persistence', () => {
           isOpen: true,
           children: [],
           assets: [],
+          sequences: [],
         },
         {
           id: 'b-selects',
@@ -1103,6 +1104,7 @@ describe('phase 1 project persistence', () => {
           isOpen: true,
           children: [],
           assets: [],
+          sequences: [],
         },
       ],
       selectedBinId: 'b-master',

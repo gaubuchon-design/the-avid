@@ -43,6 +43,7 @@ describe('phase 1 multicam engine', () => {
               isFavorite: false,
             },
           ],
+          sequences: [],
         },
       ],
       activeBinAssets: [
@@ -133,6 +134,7 @@ describe('phase 1 multicam engine', () => {
               isFavorite: false,
             },
           ],
+          sequences: [],
         },
       ],
       tracks: [
@@ -198,6 +200,7 @@ describe('phase 1 multicam engine', () => {
               isFavorite: false,
             },
           ],
+          sequences: [],
         },
       ],
       activeBinAssets: [

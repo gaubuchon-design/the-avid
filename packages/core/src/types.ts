@@ -57,6 +57,12 @@ export interface Project {
  * Technical settings that apply to the entire project,
  * including frame rate, resolution, and export format.
  */
+/** Supported working color space identifiers for project/sequence color management. */
+export type WorkingColorSpace = 'rec709' | 'rec2020' | 'dci-p3' | 'aces-cct';
+
+/** HDR operating mode for the project/sequence. */
+export type ProjectHDRMode = 'sdr' | 'hlg' | 'pq';
+
 export interface ProjectSettings {
   /** Timeline frame rate in frames per second (e.g., 23.976, 29.97, 30, 60). */
   frameRate: number;
@@ -66,6 +72,10 @@ export interface ProjectSettings {
   sampleRate: number;
   /** Default export container format. */
   exportFormat: ExportFormat;
+  /** Working color space for the project timeline. Defaults to 'rec709'. */
+  workingColorSpace: WorkingColorSpace;
+  /** HDR mode for the project. Defaults to 'sdr'. */
+  hdrMode: ProjectHDRMode;
 }
 
 /** Supported media container formats for export. */

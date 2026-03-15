@@ -71,7 +71,7 @@ describe('phase 1 source-track derivation', () => {
       status: 'READY',
       tags: [],
       isFavorite: false,
-      audioChannelLayout: '7.1',
+      audioChannels: 8,
       codec: 'PCM',
       mimeType: 'video/quicktime',
     });

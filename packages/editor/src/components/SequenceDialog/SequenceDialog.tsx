@@ -348,6 +348,8 @@ export const SequenceDialog: React.FC = () => {
   const [width, setWidth] = useState(sequenceSettings.width);
   const [height, setHeight] = useState(sequenceSettings.height);
   const [sampleRate, setSampleRate] = useState(sequenceSettings.sampleRate);
+  const [colorSpace, setColorSpace] = useState(sequenceSettings.colorSpace);
+  const [displayTransform, setDisplayTransform] = useState(sequenceSettings.displayTransform);
   const [startTCString, setStartTCString] = useState('');
 
   // Whether we're editing an existing sequence (has a non-default name)
@@ -362,6 +364,8 @@ export const SequenceDialog: React.FC = () => {
       setWidth(sequenceSettings.width);
       setHeight(sequenceSettings.height);
       setSampleRate(sequenceSettings.sampleRate);
+      setColorSpace(sequenceSettings.colorSpace);
+      setDisplayTransform(sequenceSettings.displayTransform);
 
       // Convert startTC frames to a display string.
       const tc = new Timecode({
@@ -478,6 +482,8 @@ export const SequenceDialog: React.FC = () => {
       width: Math.max(1, width),
       height: Math.max(1, height),
       sampleRate,
+      colorSpace,
+      displayTransform,
     };
 
     updateSequenceSettings(patch);
@@ -744,6 +750,36 @@ export const SequenceDialog: React.FC = () => {
             </div>
           </div>
 
+          {/* Color Management */}
+          <div style={section}>
+            <div style={sectionLabel}>Color Management</div>
+            <div style={fieldRow}>
+              <span style={fieldLabel}>Color Space</span>
+              <select
+                style={selectInput}
+                value={colorSpace}
+                onChange={(e) => setColorSpace(e.target.value as typeof colorSpace)}
+              >
+                <option value="rec709">Rec. 709 (HD)</option>
+                <option value="rec2020">Rec. 2020 (UHD / WCG)</option>
+                <option value="dci-p3">DCI-P3 (Cinema)</option>
+                <option value="aces-cct">ACEScct (ACES)</option>
+              </select>
+            </div>
+            <div style={fieldRow}>
+              <span style={fieldLabel}>Display Transform</span>
+              <select
+                style={selectInput}
+                value={displayTransform}
+                onChange={(e) => setDisplayTransform(e.target.value as typeof displayTransform)}
+              >
+                <option value="sdr-rec709">SDR — Rec. 709</option>
+                <option value="hdr-pq">HDR — PQ (ST 2084)</option>
+                <option value="hdr-hlg">HDR — HLG</option>
+              </select>
+            </div>
+          </div>
+
           <div style={divider} />
 
           {/* Preview Panel */}
@@ -786,6 +822,18 @@ export const SequenceDialog: React.FC = () => {
               <span style={previewKey}>Audio</span>
               <span style={previewValue}>
                 {formatSampleRate(sampleRate)}
+              </span>
+            </div>
+            <div style={previewRow}>
+              <span style={previewKey}>Color Space</span>
+              <span style={previewValue}>
+                {colorSpace === 'rec709' ? 'Rec. 709' : colorSpace === 'rec2020' ? 'Rec. 2020' : colorSpace === 'dci-p3' ? 'DCI-P3' : 'ACEScct'}
+              </span>
+            </div>
+            <div style={previewRow}>
+              <span style={previewKey}>Display</span>
+              <span style={previewValue}>
+                {displayTransform === 'sdr-rec709' ? 'SDR (Rec. 709)' : displayTransform === 'hdr-pq' ? 'HDR (PQ)' : 'HDR (HLG)'}
               </span>
             </div>
           </div>

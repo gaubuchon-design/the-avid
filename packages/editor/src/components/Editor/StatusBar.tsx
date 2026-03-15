@@ -19,9 +19,9 @@ function SaveStatusIndicator() {
 
   const label = (() => {
     switch (saveStatus) {
-      case 'saved': return lastSavedAt ? `Saved` : 'Saved';
+      case 'saved': return 'Saved';
       case 'saving': return 'Saving...';
-      case 'unsaved': return 'Unsaved changes';
+      case 'unsaved': return 'Unsaved';
       case 'error': return 'Save error';
       default: return 'Not saved';
     }
@@ -45,7 +45,6 @@ export function StatusBar() {
   const playheadTime = useEditorStore((s) => s.playheadTime);
   const isPlaying = useEditorStore((s) => s.isPlaying);
   const projectName = useEditorStore((s) => s.projectName);
-  const activePanel = useEditorStore((s) => s.activePanel);
   const projectSettings = useEditorStore((s) => s.projectSettings);
   const sequenceSettings = useEditorStore((s) => s.sequenceSettings);
   const projectId = useEditorStore((s) => s.projectId);
@@ -56,7 +55,7 @@ export function StatusBar() {
   const clipCount = tracks.reduce((n, t) => n + t.clips.length, 0);
   const isDesktop = Boolean(window.electronAPI);
   const projectFormatLabel = projectSettings
-    ? `${projectSettings.width}x${projectSettings.height} \u00B7 ${projectSettings.frameRate}fps \u00B7 ${projectSettings.exportFormat.toUpperCase()}`
+    ? `${projectSettings.width}\u00D7${projectSettings.height} ${projectSettings.frameRate}fps`
     : '';
 
   // Auto-save: debounced 30-second save on state changes
@@ -65,7 +64,6 @@ export function StatusBar() {
   const prevClipCountRef = useRef(clipCount);
 
   useEffect(() => {
-    // Detect meaningful state changes
     const tracksChanged = tracks.length !== prevTracksLenRef.current;
     const clipCountChanged = clipCount !== prevClipCountRef.current;
     prevTracksLenRef.current = tracks.length;
@@ -86,30 +84,37 @@ export function StatusBar() {
 
   return (
     <div className="status-bar">
+      {/* Connection / mode */}
       <div className="status-item">
         <div className="status-dot" />
-        <span>{isDesktop ? 'Local desktop mode' : 'Connected'}</span>
+        <span>{isDesktop ? 'Desktop' : 'Connected'}</span>
       </div>
-      <div className="status-item" style={{ color: 'var(--text-tertiary)' }}>
+
+      {/* Project name */}
+      <div className="status-item hide-mobile" style={{ color: 'var(--text-tertiary)' }}>
         {projectName}
       </div>
-      <div className="divider" />
+
+      <div className="divider hide-mobile" />
+
+      {/* Track & clip counts */}
       <div className="status-item">
-        <span>{tracks.length} tracks</span>
+        <span>{tracks.length}T / {clipCount}C</span>
       </div>
-      <div className="status-item">
-        <span>Workspace: {activePanel}</span>
+
+      {/* Duration */}
+      <div className="status-item hide-mobile">
+        <span>{tc.secondsToTC(duration)}</span>
       </div>
-      <div className="status-item">
-        <span>{clipCount} clips</span>
+
+      {/* Playhead TC */}
+      <div className="status-item hide-mobile">
+        <span>{tc.secondsToTC(playheadTime)}</span>
       </div>
-      <div className="status-item">
-        <span>Duration: {tc.secondsToTC(duration)}</span>
-      </div>
-      <div className="status-item">
-        <span>Playhead: {tc.secondsToTC(playheadTime)}</span>
-      </div>
+
       <div className="status-spacer" />
+
+      {/* Play state */}
       <div className="status-item">
         {isPlaying ? (
           <><div className="status-dot" style={{ background: 'var(--error)', animation: 'pulse 1s infinite' }} /><span>Playing</span></>
@@ -117,26 +122,30 @@ export function StatusBar() {
           <span>Stopped</span>
         )}
       </div>
+
       <div className="divider" />
+
+      {/* Save status */}
       <SaveStatusIndicator />
+
+      {/* Desktop extras */}
       {isDesktop && (
-        <>
-          <div className="status-item">
-            <span>Native desktop pipeline</span>
-          </div>
-          <div className="status-item">
-            <span>Project package</span>
-          </div>
-        </>
+        <div className="status-item hide-mobile">
+          <span>Local</span>
+        </div>
       )}
-      <div className="status-item">
-        <span>Zoom: {Math.round(zoom)}px/s</span>
-      </div>
-      <div className="status-item">
+
+      {/* Format info */}
+      <div className="status-item hide-mobile">
         <span>{projectFormatLabel}</span>
       </div>
-      <div className="status-item">
-        <span>{tc.fps}fps{tc.dropFrame ? ' DF' : ' NDF'}</span>
+
+      {/* FPS + zoom */}
+      <div className="status-item hide-mobile">
+        <span>{tc.fps}fps{tc.dropFrame ? ' DF' : ''}</span>
+      </div>
+      <div className="status-item hide-mobile">
+        <span>{Math.round(zoom)}px/s</span>
       </div>
     </div>
   );

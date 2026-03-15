@@ -310,6 +310,7 @@ describe('phase 1 editor monitor keyboard actions', () => {
           children: [],
           assets: [baseAsset, overlayAsset],
           isOpen: true,
+          sequences: [],
         },
       ],
       tracks: [

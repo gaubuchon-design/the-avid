@@ -32,6 +32,7 @@ describe('ScriptPanel', () => {
               isFavorite: false,
             },
           ],
+          sequences: [],
         },
       ],
       transcript: [
