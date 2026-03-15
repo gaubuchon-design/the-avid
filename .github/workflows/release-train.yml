@@ -11,7 +11,8 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
+  packages: write
 
 jobs:
   release-context:
@@ -48,11 +49,51 @@ jobs:
           echo "release_ref_name=${RELEASE_REF_NAME}" >> "$GITHUB_OUTPUT"
           echo "short_sha=${RELEASE_SHA:0:12}" >> "$GITHUB_OUTPUT"
 
+  # ---------------------------------------------------------------------------
+  # Tag the release commit
+  # ---------------------------------------------------------------------------
+  tag-release:
+    name: Tag Release
+    runs-on: ubuntu-latest
+    needs: [release-context]
+    if: ${{ needs.release-context.outputs.should_release == 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-context.outputs.release_sha }}
+          fetch-depth: 0
+
+      - name: Create release tag
+        shell: bash
+        run: |
+          TAG="release/${{ needs.release-context.outputs.short_sha }}"
+          if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists, skipping."
+          else
+            git tag "${TAG}" "${{ needs.release-context.outputs.release_sha }}"
+            git push origin "${TAG}"
+            echo "Created tag: ${TAG}"
+          fi
+
+      - name: Summarize release
+        run: |
+          echo "## Release Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **SHA:** \`${{ needs.release-context.outputs.release_sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Ref:** \`${{ needs.release-context.outputs.release_ref_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Tag:** \`release/${{ needs.release-context.outputs.short_sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # Deploy Web App
+  # ---------------------------------------------------------------------------
   deploy-web:
     name: Deploy Web App
     runs-on: ubuntu-latest
     needs: [release-context]
     if: ${{ needs.release-context.outputs.should_release == 'true' && secrets.VERCEL_TOKEN != '' && vars.VERCEL_ORG_ID != '' && vars.VERCEL_WEB_PROJECT_ID != '' }}
+    outputs:
+      deployment_url: ${{ steps.deploy.outputs.url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -88,12 +129,30 @@ jobs:
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_WEB_PROJECT_ID }}
 
       - name: Deploy web to production
+        id: deploy
         working-directory: apps/web
-        run: vercel deploy --prebuilt --prod --token="${VERCEL_TOKEN}"
+        run: |
+          URL=$(vercel deploy --prebuilt --prod --token="${VERCEL_TOKEN}" 2>&1 | grep -oE 'https://[^ ]+' | tail -1)
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_WEB_PROJECT_ID }}
+
+      - name: Health check web deployment
+        if: steps.deploy.outputs.url != ''
+        run: |
+          echo "Checking deployment at ${{ steps.deploy.outputs.url }}..."
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' "${{ steps.deploy.outputs.url }}" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check passed (HTTP $STATUS)"
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $STATUS, retrying in 10s..."
+            sleep 10
+          done
+          echo "::warning::Health check did not return HTTP 200 after 5 attempts (last: $STATUS)"
 
   deploy-desktop-update-service:
     name: Deploy Desktop Update Endpoint
@@ -215,6 +274,21 @@ jobs:
             "${AUTH_HEADER[@]}" \
             -H "Content-Type: application/json" \
             -d "{\"image\":\"${IMAGE_REF}\",\"sha\":\"${RELEASE_SHA}\",\"ref\":\"${RELEASE_REF_NAME}\"}"
+
+      - name: Verify API health
+        if: vars.API_HEALTH_URL != ''
+        run: |
+          echo "Checking API health at ${{ vars.API_HEALTH_URL }}..."
+          for i in 1 2 3 4 5 6; do
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' "${{ vars.API_HEALTH_URL }}" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "API health check passed (HTTP $STATUS)"
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $STATUS, retrying in 15s..."
+            sleep 15
+          done
+          echo "::warning::API health check did not return HTTP 200 after 6 attempts (last: $STATUS)"
 
   resolve-desktop-version:
     name: Resolve Desktop Release Version
@@ -419,3 +493,34 @@ jobs:
           EXPO_EAS_PROJECT_ID: ${{ vars.EXPO_EAS_PROJECT_ID }}
           EXPO_UPDATES_URL: ${{ vars.EXPO_UPDATES_URL }}
           EXPO_APP_VERSION: ${{ vars.EXPO_APP_VERSION || '0.1.0' }}
+
+  # ---------------------------------------------------------------------------
+  # Release summary (runs after all deployments)
+  # ---------------------------------------------------------------------------
+  release-summary:
+    name: Release Summary
+    runs-on: ubuntu-latest
+    needs:
+      [
+        release-context,
+        tag-release,
+        deploy-web,
+        deploy-desktop-update-service,
+        build-and-push-api,
+        deploy-api,
+      ]
+    if: always() && needs.release-context.outputs.should_release == 'true'
+    steps:
+      - name: Generate release summary
+        run: |
+          echo "## Release Train Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Component | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Release Tag | ${{ needs.tag-release.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Web App | ${{ needs.deploy-web.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Desktop Update CDN | ${{ needs.deploy-desktop-update-service.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| API Image | ${{ needs.build-and-push-api.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| API Rollout | ${{ needs.deploy-api.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**SHA:** \`${{ needs.release-context.outputs.short_sha }}\`" >> "$GITHUB_STEP_SUMMARY"

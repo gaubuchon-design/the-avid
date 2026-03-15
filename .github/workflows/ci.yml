@@ -2,7 +2,7 @@
 # CI Pipeline - The Avid NLE
 # =============================================================================
 # Runs on every PR targeting master and on pushes to master.
-# Steps: install -> lint -> type-check -> test -> build
+# Steps: lint | type-check | security-audit (parallel) -> test (coverage) -> build -> docker
 # =============================================================================
 
 name: CI
@@ -24,10 +24,10 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Lint & Type-check (fast feedback)
+  # Lint (runs in parallel with type-check and security-audit)
   # ---------------------------------------------------------------------------
-  lint-and-typecheck:
-    name: Lint & Type-check
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -49,21 +49,93 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .turbo
-          key: turbo-${{ runner.os }}-${{ github.sha }}
+          key: turbo-lint-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
-            turbo-${{ runner.os }}-
+            turbo-lint-${{ runner.os }}-
 
       - name: Lint
         run: npx turbo run lint
-
-      - name: Type-check
-        run: npx turbo run type-check
 
       - name: Format check
         run: npx prettier --check "**/*.{ts,tsx,js,jsx,json,md,yml,yaml}"
 
   # ---------------------------------------------------------------------------
-  # Unit & Integration Tests
+  # Type-check (runs in parallel with lint and security-audit)
+  # ---------------------------------------------------------------------------
+  type-check:
+    name: Type-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Turbo cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: turbo-typecheck-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-typecheck-${{ runner.os }}-
+
+      - name: Type-check
+        run: npx turbo run type-check
+
+  # ---------------------------------------------------------------------------
+  # Security audit (dependency vulnerabilities)
+  # ---------------------------------------------------------------------------
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true
+
+      - name: Summarize audit results
+        if: always()
+        run: |
+          echo "## Dependency Audit" >> "$GITHUB_STEP_SUMMARY"
+          npm audit --omit=dev --json 2>/dev/null | node -e "
+            const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            const v = data.metadata?.vulnerabilities || {};
+            const total = (v.high || 0) + (v.critical || 0);
+            console.log('| Severity | Count |');
+            console.log('|----------|-------|');
+            console.log('| Critical | ' + (v.critical || 0) + ' |');
+            console.log('| High     | ' + (v.high || 0) + ' |');
+            console.log('| Moderate | ' + (v.moderate || 0) + ' |');
+            console.log('| Low      | ' + (v.low || 0) + ' |');
+            if (total > 0) console.log('');
+            if (total > 0) console.log('> **Action required:** ' + total + ' high/critical vulnerabilities found.');
+          " >> "$GITHUB_STEP_SUMMARY" || true
+
+  # ---------------------------------------------------------------------------
+  # Unit & Integration Tests (with coverage reporting)
   # ---------------------------------------------------------------------------
   test:
     name: Test (Node ${{ matrix.node-version }})
@@ -92,12 +164,45 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .turbo
-          key: turbo-${{ runner.os }}-node${{ matrix.node-version }}-${{ github.sha }}
+          key: turbo-test-${{ runner.os }}-node${{ matrix.node-version }}-${{ github.sha }}
           restore-keys: |
-            turbo-${{ runner.os }}-node${{ matrix.node-version }}-
+            turbo-test-${{ runner.os }}-node${{ matrix.node-version }}-
 
-      - name: Run tests
-        run: npx turbo run test
+      - name: Run tests with coverage
+        run: npx turbo run test:coverage
+
+      - name: Upload coverage artifacts
+        if: matrix.node-version == 20
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            apps/*/coverage/
+            packages/*/coverage/
+            libs/*/coverage/
+            services/*/coverage/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Summarize coverage
+        if: matrix.node-version == 20 && always()
+        run: |
+          echo "## Test Coverage Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Package | Statements | Branches | Functions | Lines |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---------|-----------|----------|-----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          for summary in $(find . -path '*/coverage/coverage-summary.json' -not -path '*/node_modules/*' 2>/dev/null); do
+            pkg_dir=$(echo "$summary" | sed 's|/coverage/coverage-summary.json||' | sed 's|^\./||')
+            node -e "
+              const data = JSON.parse(require('fs').readFileSync('$summary', 'utf8'));
+              const t = data.total;
+              const s = t.statements?.pct ?? '-';
+              const b = t.branches?.pct ?? '-';
+              const f = t.functions?.pct ?? '-';
+              const l = t.lines?.pct ?? '-';
+              console.log('| \`$pkg_dir\` | ' + s + '% | ' + b + '% | ' + f + '% | ' + l + '% |');
+            " >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          done
 
   # ---------------------------------------------------------------------------
   # Build (ensures all packages compile cleanly)
@@ -106,7 +211,7 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [lint-and-typecheck]
+    needs: [lint, type-check]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -132,6 +237,21 @@ jobs:
 
       - name: Build all packages
         run: npx turbo run build
+
+      - name: Report build artifact sizes
+        if: always()
+        run: |
+          echo "## Build Artifact Sizes" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Package | Size |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---------|------|" >> "$GITHUB_STEP_SUMMARY"
+          for dist_dir in apps/*/dist packages/*/dist libs/*/dist services/*/dist; do
+            if [ -d "$dist_dir" ]; then
+              pkg=$(echo "$dist_dir" | sed 's|/dist$||')
+              size=$(du -sh "$dist_dir" 2>/dev/null | cut -f1)
+              echo "| \`$pkg\` | $size |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
 
   # ---------------------------------------------------------------------------
   # Docker build smoke test (API only)

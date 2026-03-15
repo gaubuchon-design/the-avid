@@ -167,6 +167,43 @@ See:
 - [DESKTOP_AUTO_UPDATES.md](DESKTOP_AUTO_UPDATES.md)
 - [VERCEL_DESKTOP_UPDATE_ENDPOINT.md](VERCEL_DESKTOP_UPDATE_ENDPOINT.md)
 
+## Test Coverage
+
+All workspaces have coverage thresholds enforced in their `vitest.config.ts`:
+
+| Metric     | Minimum |
+| ---------- | ------- |
+| Statements | 50%     |
+| Branches   | 40%     |
+| Functions  | 45%     |
+| Lines      | 50%     |
+
+Run coverage locally:
+
+```bash
+npm run test:coverage                              # All workspaces
+npx turbo run test:coverage --filter=@mcua/core    # Single workspace
+```
+
+Coverage reports are generated in each workspace's `coverage/` directory.
+
+In CI, coverage summaries are uploaded as artifacts and posted to the GitHub
+Actions run summary on every test run.
+
+## CI/CD Pipeline
+
+The monorepo uses three GitHub Actions workflows:
+
+- **CI** (`ci.yml`): lint, type-check, security audit, test (with coverage),
+  build, and Docker smoke test — triggered on every PR and push to `master`
+- **Release Train** (`release-train.yml`): deploys web, desktop update CDN, API,
+  mobile OTA, and desktop installers — triggered after CI succeeds on `master`
+- **Desktop Installers** (`desktop-installers.yml`): standalone desktop builds —
+  manual dispatch or weekly schedule
+
+See [CICD_RELEASE_PIPELINE.md](CICD_RELEASE_PIPELINE.md) for full details
+including required secrets, health checks, and rollout order.
+
 ## Color Pipeline
 
 The editor includes a professional color management pipeline. Key concepts:
