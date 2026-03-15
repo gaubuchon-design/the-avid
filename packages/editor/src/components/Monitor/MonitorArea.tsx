@@ -64,12 +64,11 @@ function drawCanvasFrame(
   targetCanvas: HTMLCanvasElement,
   sourceCanvas: HTMLCanvasElement,
 ): boolean {
-  const ctx = targetCanvas.getContext('2d');
+  const ctx = targetCanvas.getContext('2d', { alpha: false, desynchronized: true });
   if (!ctx) {
     return false;
   }
 
-  ctx.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
   ctx.drawImage(sourceCanvas, 0, 0, targetCanvas.width, targetCanvas.height);
   return true;
 }
@@ -254,6 +253,8 @@ export function MonitorArea() {
         colorProcessing: monitorTransport.colorProcessing,
         effectQuality: monitorTransport.effectQuality,
         useCache: monitorTransport.useCache,
+        skipEffects: monitorTransport.skipEffects,
+        skipOverlays: monitorTransport.skipOverlays,
       });
 
       if (layerAvailability.totalVideoLayers > 0 && layerAvailability.pendingVideoLayers === 0) {

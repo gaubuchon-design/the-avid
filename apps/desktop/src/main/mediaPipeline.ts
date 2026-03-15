@@ -17,6 +17,7 @@ import {
   type AudioTrackRoutingDescriptor,
 } from '@mcua/core';
 import { detectGPU, getHWAccelDecodeArgs, getHWAccelFFmpegArgs } from './gpu';
+import { findRawCodec, probeRawFile, getRawCodecUnavailableReason } from './rawCodecRegistry';
 import type {
   CaptionDescriptor,
   EditorBin,
@@ -220,7 +221,7 @@ export async function ensureProjectMediaPaths(paths: ProjectMediaPaths): Promise
 
 export function inferMediaType(filePath: string): EditorMediaAsset['type'] {
   const extension = path.extname(filePath).toLowerCase();
-  if (['.mov', '.mp4', '.m4p', '.mxf', '.webm', '.avi', '.m4v', '.mkv', '.mpg', '.mpeg', '.mts', '.m2ts', '.ismv', '.isma', '.r3d', '.braw', '.ari'].includes(extension)) {
+  if (['.mov', '.mp4', '.m4p', '.mxf', '.webm', '.avi', '.m4v', '.mkv', '.mpg', '.mpeg', '.mts', '.m2ts', '.ismv', '.isma', '.r3d', '.braw', '.ari', '.arx', '.crm'].includes(extension)) {
     return 'VIDEO';
   }
   if (['.wav', '.mp3', '.aif', '.aiff', '.aac', '.m4a', '.flac', '.ogg'].includes(extension)) {
@@ -723,6 +724,38 @@ async function probeMediaFile(filePath: string): Promise<ProbeMediaResult> {
   const fallback: EditorMediaTechnicalMetadata = {
     container: extension || undefined,
   };
+
+  // Check for proprietary RAW formats that require vendor SDKs
+  const rawCodec = findRawCodec(filePath);
+  if (rawCodec) {
+    const rawResult = await probeRawFile(filePath);
+    if (rawResult) {
+      // SDK is installed and returned metadata — use it
+      return {
+        technicalMetadata: {
+          container: extension,
+          videoCodec: rawResult.codec,
+          width: rawResult.width,
+          height: rawResult.height,
+          frameRate: rawResult.fps,
+          durationSeconds: rawResult.durationSeconds,
+          colorDescriptor: rawResult.colorSpace ? { colorSpace: rawResult.colorSpace } : undefined,
+        },
+        streams: [{
+          id: `raw-video-0`,
+          index: 0,
+          kind: 'video' as const,
+          codec: rawResult.codec,
+          width: rawResult.width,
+          height: rawResult.height,
+          frameRate: { numerator: Math.round(rawResult.fps * 1000), denominator: 1000, framesPerSecond: rawResult.fps },
+        }],
+      };
+    }
+    // SDK not available — log the reason but continue with ffprobe fallback
+    const reason = getRawCodecUnavailableReason(filePath);
+    if (reason) console.warn(`[mediaPipeline] ${reason}`);
+  }
 
   if (!availability.ffprobe || !toolPaths.ffprobe) {
     return {

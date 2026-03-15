@@ -10,6 +10,9 @@ import {
   pauseVideoSource,
   tryLoadClipSource,
 } from '../../engine/compositeRecordFrame';
+import { videoSourceManager } from '../../engine/VideoSourceManager';
+import { useMonitorTransportState } from '../../hooks/useMonitorTransportState';
+import { compositeFrameCache } from '../../engine/FrameCache';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -191,10 +194,17 @@ export function RecordMonitor() {
 
   const { setActiveMonitor } = usePlayerStore();
 
+  // Adaptive quality: skip effects and reduce resolution during scrub
+  const monitorTransport = useMonitorTransportState(playheadTime, editorIsPlaying);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const rafRef = useRef<number>();
   const lastClipIdRef = useRef<string | null>(null);
+  const prevCanvasSize = useRef({ w: 0, h: 0 });
+  // Cache last good frame to hold during seeking (prevents black flash)
+  const cachedFrameRef = useRef<ImageData | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 480, h: 270 });
 
   // Responsive canvas sizing
@@ -221,18 +231,41 @@ export function RecordMonitor() {
     return () => observer.disconnect();
   }, []);
 
+  // ── Pre-load all clip sources on mount and when tracks change ──────────────
+  useEffect(() => {
+    const state = useEditorStore.getState();
+    for (const track of state.tracks) {
+      if (track.type !== 'VIDEO' && track.type !== 'GRAPHIC') continue;
+      for (const clip of track.clips) {
+        if (clip.assetId) {
+          tryLoadClipSource(clip.assetId, state.bins as any);
+        }
+      }
+    }
+  }, [playheadTime]); // re-check when playhead moves (catches new clips entering view)
+
   // ── Continuous RAF render loop ──────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const render = () => {
-      const ctx = canvas.getContext('2d');
-      if (!ctx) { rafRef.current = requestAnimationFrame(render); return; }
+      // Apply render scale from transport state (half-res during scrub)
+      const { w: baseW, h: baseH } = canvasSize;
+      const scale = monitorTransport.renderScale;
+      const w = Math.max(1, Math.round(baseW * Math.min(scale, 1)));
+      const h = Math.max(1, Math.round(baseH * Math.min(scale, 1)));
 
-      const { w, h } = canvasSize;
-      canvas.width = w;
-      canvas.height = h;
+      // Only resize canvas when dimensions actually change (avoids clearing every frame)
+      if (prevCanvasSize.current.w !== w || prevCanvasSize.current.h !== h) {
+        canvas.width = w;
+        canvas.height = h;
+        prevCanvasSize.current = { w, h };
+        ctxRef.current = canvas.getContext('2d', { alpha: false, desynchronized: true });
+      }
+      const ctx = ctxRef.current ?? canvas.getContext('2d', { alpha: false, desynchronized: true });
+      if (!ctx) { rafRef.current = requestAnimationFrame(render); return; }
+      ctxRef.current = ctx;
 
       const state = useEditorStore.getState();
       const titleState = useTitleStore.getState();
@@ -254,21 +287,69 @@ export function RecordMonitor() {
         tryLoadClipSource(activeClip.assetId, state.bins as any);
       }
 
-      compositeRecordFrame({
-        ctx,
-        canvasW: w,
-        canvasH: h,
-        playheadTime: state.playheadTime,
-        tracks: state.tracks,
-        fps: state.sequenceSettings.fps,
-        aspectRatio: 16 / 9,
-        showSafeZones: state.showSafeZones,
-        isPlaying: state.isPlaying,
-        titleClips: state.titleClips,
-        subtitleTracks: state.subtitleTracks,
-        currentTitle: titleState.currentTitle,
-        isTitleEditing: titleState.isEditing,
-      });
+      // Frame cache key based on playhead position (frame number)
+      const frameNumber = Math.round(state.playheadTime * state.sequenceSettings.fps);
+      const cacheKey = `rec-${frameNumber}`;
+      const cacheQuality = monitorTransport.scrubActive ? 'scrub' : monitorTransport.renderQuality;
+      compositeFrameCache.setPlayheadFrame(frameNumber);
+
+      // Check if any video layer is mid-seek
+      const videoLayers = state.tracks.filter(t => (t.type === 'VIDEO' || t.type === 'GRAPHIC') && !t.muted);
+      let anyLayerSeeking = false;
+      for (const track of videoLayers) {
+        for (const clip of track.clips) {
+          if (clip.assetId && state.playheadTime >= clip.startTime && state.playheadTime < clip.endTime) {
+            const src = videoSourceManager.getSource(clip.assetId);
+            if (src?.element?.seeking) {
+              anyLayerSeeking = true;
+              break;
+            }
+          }
+        }
+        if (anyLayerSeeking) break;
+      }
+
+      if (anyLayerSeeking) {
+        // While seeking: try frame cache first, then hold previous frame
+        const drewFromCache = compositeFrameCache.drawBestTo(cacheKey, ctx, w, h);
+        if (!drewFromCache && cachedFrameRef.current) {
+          ctx.putImageData(cachedFrameRef.current, 0, 0);
+        }
+      } else {
+        // Try cache hit first (fastest path)
+        const cacheHit = compositeFrameCache.drawTo(cacheKey, cacheQuality, ctx, w, h);
+
+        if (!cacheHit) {
+          // Cache miss — composite and store
+          compositeRecordFrame({
+            ctx,
+            canvasW: w,
+            canvasH: h,
+            playheadTime: state.playheadTime,
+            tracks: state.tracks,
+            fps: state.sequenceSettings.fps,
+            aspectRatio: 16 / 9,
+            showSafeZones: state.showSafeZones,
+            isPlaying: state.isPlaying,
+            titleClips: state.titleClips,
+            subtitleTracks: state.subtitleTracks,
+            currentTitle: titleState.currentTitle,
+            isTitleEditing: titleState.isEditing,
+            skipEffects: monitorTransport.skipEffects,
+            skipOverlays: monitorTransport.skipOverlays,
+          });
+
+          // Cache the composited frame
+          compositeFrameCache.put(cacheKey, canvas, cacheQuality, frameNumber);
+        }
+
+        // Also store as fallback ImageData for seek-hold
+        try {
+          cachedFrameRef.current = ctx.getImageData(0, 0, w, h);
+        } catch {
+          // getImageData can fail on cross-origin or tainted canvases
+        }
+      }
 
       rafRef.current = requestAnimationFrame(render);
     };

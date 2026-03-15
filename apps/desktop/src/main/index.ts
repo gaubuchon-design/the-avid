@@ -1835,6 +1835,13 @@ ipcMain.handle('projects:rescan-watch-folders', async (_event, projectId: unknow
   return rescanProjectWatchFolders(projectId);
 });
 
+// ─── RAW Codec Status ─────────────────────────────────────────────────────────
+
+ipcMain.handle('codecs:raw-status', async () => {
+  const { getRawCodecStatus } = await import('./rawCodecRegistry');
+  return getRawCodecStatus();
+});
+
 // ─── Job Handlers ─────────────────────────────────────────────────────────────
 
 ipcMain.handle('jobs:list', async () => {
