@@ -23,24 +23,25 @@ transport, or deployment-specific behavior.
 
 ```text
 apps/
-  api/
-  desktop/
-  mobile/
-  web/
+  api/                  # Express API server
+  desktop/              # Electron workstation (thin shell)
+  mobile/               # Expo companion (thin shell)
+  web/                  # Browser editor (thin shell)
 libs/
-  adapters/
-  contracts/
-  ui-components/
+  adapters/             # External system adapters (MC, ProTools, etc.)
+  contracts/            # Shared wire types & Zod schemas
+  ui-components/        # Agentic UI components
 packages/
-  core/
-  media-backend/
-  render-agent/
-  ui/
+  core/                 # Canonical editorial data model
+  editor/               # Shared editor UI (components, stores, engines, pages)
+  media-backend/        # Media schema helpers
+  render-agent/         # Render node agent
+  ui/                   # Design tokens, theme, shared hooks
 services/
-  agent-orchestrator/
-  desktop-update-cdn/
-  knowledge-node/
-  local-ai-runtime/
+  agent-orchestrator/   # Gemini planning engine
+  desktop-update-cdn/   # Vercel updater feed
+  knowledge-node/       # SQLite+ANN search service
+  local-ai-runtime/     # Model runner abstraction
 ```
 
 ## Runtime Surfaces
@@ -66,6 +67,17 @@ services/
 Both web and desktop editor state ultimately serialize back into this shared
 model.
 
+### `@mcua/editor`
+
+`@mcua/editor` is the shared editor UI package. It carries:
+
+- all React components, pages, stores, engines, hooks, and styles
+- a platform abstraction layer (`PlatformProvider`, `usePlatform()`)
+- everything needed to render the full editorial experience
+
+See [SHARED_UI_ARCHITECTURE.md](SHARED_UI_ARCHITECTURE.md) for the full
+specification.
+
 ### `@mcua/media-backend`
 
 `@mcua/media-backend` holds shared media-schema helpers used by the
@@ -74,24 +86,31 @@ standalone running service.
 
 ## Editor Architecture
 
-The editor shell is mostly shared between web and desktop:
+The editor UI lives in a single shared package, `@mcua/editor`, imported by
+every platform shell. This is documented in detail in
+[SHARED_UI_ARCHITECTURE.md](SHARED_UI_ARCHITECTURE.md).
 
-- React components render the workspace, bins, inspector, timeline, and monitor
-  surfaces
-- Zustand stores hold editor/session state
-- singleton engines encapsulate domain logic such as playback, effects, trim,
-  audio, color, and export behavior
+Key layers inside `@mcua/editor`:
 
-Desktop adds:
+- **Platform abstraction** (`src/platform/`) — `PlatformProvider` context that
+  each shell uses to inject platform-specific capabilities (filesystem, media
+  pipeline, app lifecycle). Components call `usePlatform()` to access these.
+- **Components** — React components for workspace, bins, timeline, monitors,
+  effects, audio, color, export, and more.
+- **Stores** — Zustand stores for editor, player, audio, color, effects, media,
+  collaboration, and settings state.
+- **Engines** — Singleton domain engines (snap, audio, title, AAF, GPU, etc.)
+  that encapsulate editing logic.
 
-- filesystem-backed project packages
-- desktop media ingest/export jobs
-- parity playback transports
-- native file open/save/import APIs
-- Electron auto-updates
+Each platform shell is thin:
 
-Web keeps the same editor shell but swaps in browser-first persistence and
-playback constraints.
+- `apps/web/` — `BrowserRouter`, auth guards, `PlatformProvider` with browser
+  capabilities, PWA registration.
+- `apps/desktop/` — `MemoryRouter`, update banner, deep links,
+  `PlatformProvider` bridging `electronAPI` into platform capabilities. The
+  Electron main process owns native media pipeline, hardware access, and
+  auto-updates.
+- `apps/mobile/` — Companion review/approval experience.
 
 ## Media Pipeline
 
