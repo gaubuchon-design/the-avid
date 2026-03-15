@@ -1,10 +1,86 @@
 import React, { useEffect, useState, useCallback, type ReactNode } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { hydrateProject } from '@mcua/core';
-import { DashboardPage } from '../../../web/src/pages/DashboardPage';
-import { EditorPage } from '../../../web/src/pages/EditorPage';
-import { saveProjectToRepository } from '../../../web/src/lib/projectRepository';
-import { useEditorStore } from '../../../web/src/store/editor.store';
+import {
+  DashboardPage,
+  EditorPage,
+  useEditorStore,
+  PlatformProvider,
+} from '@mcua/editor';
+import type { PlatformCapabilities, MediaJob } from '@mcua/editor';
+import { saveProjectToRepository } from '@mcua/editor/lib/projectRepository';
+
+// ─── Desktop Platform Capabilities ──────────────────────────────────────────
+
+function buildDesktopCapabilities(): PlatformCapabilities {
+  const api = window.electronAPI;
+  return {
+    surface: 'desktop',
+    hasNativePlayback: true,
+    hasHardwareAccess: true,
+    fs: api ? {
+      readTextFile: (filePath) => api.readTextFile(filePath),
+      writeTextFile: async (filePath, content) => { await api.writeTextFile(filePath, content); },
+      showOpenDialog: async (options) => {
+        const result = await api.openFile({
+          title: options?.title,
+          filters: options?.filters,
+          properties: [
+            'openFile',
+            ...(options?.multiSelections ? ['multiSelections' as const] : []),
+            ...(options?.directory ? ['openDirectory' as const] : []),
+          ],
+        });
+        return result.canceled ? [] : result.filePaths;
+      },
+      showSaveDialog: async (options) => {
+        const result = await api.saveFile({
+          title: options?.title,
+          defaultPath: options?.defaultPath,
+          filters: options?.filters,
+        });
+        return result.canceled ? null : (result.filePath ?? null);
+      },
+    } : undefined,
+    media: api ? {
+      ingestFiles: async (filePaths) => {
+        const assets = await api.importMedia('', filePaths);
+        return assets.length > 0 ? assets[0]!.id : '';
+      },
+      listJobs: async () => {
+        const jobs = await api.listDesktopJobs();
+        return jobs.map((j): MediaJob => ({
+          id: j.id,
+          status: j.status === 'QUEUED' ? 'queued'
+            : j.status === 'RUNNING' ? 'running'
+            : j.status === 'COMPLETED' ? 'completed'
+            : 'failed',
+          progress: j.progress,
+          label: j.label,
+          error: j.error,
+        }));
+      },
+      cancelJob: async () => { /* desktop jobs not cancellable via this path yet */ },
+      onJobUpdate: (cb) => api.onDesktopJobUpdate((job) => {
+        cb({
+          id: job.id,
+          status: job.status === 'QUEUED' ? 'queued'
+            : job.status === 'RUNNING' ? 'running'
+            : job.status === 'COMPLETED' ? 'completed'
+            : 'failed',
+          progress: job.progress,
+          label: job.label,
+          error: job.error,
+        });
+      }),
+    } : undefined,
+    app: api ? {
+      checkForUpdates: async () => { await api.app.checkForUpdates(); },
+      installUpdate: () => api.app.installUpdate(),
+      getVersion: () => api.app.platform ?? '0.0.0',
+    } : undefined,
+  };
+}
 
 // ─── Error Boundary ─────────────────────────────────────────────────────────────
 
@@ -271,9 +347,6 @@ function UpdateBanner() {
 
 export default function App() {
   const navigate = useNavigate();
-  const setDesktopJobs = useEditorStore((state) => state.setDesktopJobs);
-  const upsertDesktopJob = useEditorStore((state) => state.upsertDesktopJob);
-
   const handleOpenProject = useCallback(async (filePath: string) => {
     try {
       const serialized = await window.electronAPI?.readTextFile(filePath);
@@ -287,7 +360,6 @@ export default function App() {
     }
   }, [navigate]);
 
-  // Handle deep links (avid://open?project=<id>)
   const handleDeepLink = useCallback((url: string) => {
     try {
       const parsed = new URL(url);
@@ -299,7 +371,6 @@ export default function App() {
         return;
       }
 
-      // avid://new -> create new project
       if (parsed.hostname === 'new') {
         navigate('/editor/new');
         return;
@@ -333,24 +404,35 @@ export default function App() {
     }
 
     void window.electronAPI.listDesktopJobs().then((jobs) => {
-      setDesktopJobs(jobs);
+      useEditorStore.setState({ desktopJobs: jobs as never });
     }).catch((error) => {
       console.warn('[DesktopJobs] Failed to list desktop jobs:', error);
     });
 
     return window.electronAPI.onDesktopJobUpdate((job) => {
-      upsertDesktopJob(job);
+      useEditorStore.setState((state) => {
+        const existing = state.desktopJobs.findIndex((j) => j.id === job.id);
+        const updated = [...state.desktopJobs];
+        if (existing >= 0) {
+          updated[existing] = job as never;
+        } else {
+          updated.push(job as never);
+        }
+        return { desktopJobs: updated };
+      });
     });
-  }, [setDesktopJobs, upsertDesktopJob]);
+  }, []);
 
   return (
-    <ErrorBoundary>
-      <Routes>
-        <Route path="/" element={<DashboardPage />} />
-        <Route path="/editor/:projectId" element={<EditorPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-      <UpdateBanner />
-    </ErrorBoundary>
+    <PlatformProvider capabilities={buildDesktopCapabilities()}>
+      <ErrorBoundary>
+        <Routes>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/editor/:projectId" element={<EditorPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+        <UpdateBanner />
+      </ErrorBoundary>
+    </PlatformProvider>
   );
 }

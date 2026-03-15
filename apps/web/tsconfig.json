@@ -28,6 +28,12 @@
       ],
       "@mcua/ui/*": [
         "../../packages/ui/src/*"
+      ],
+      "@mcua/editor": [
+        "../../packages/editor/src"
+      ],
+      "@mcua/editor/*": [
+        "../../packages/editor/src/*"
       ]
     }
   },

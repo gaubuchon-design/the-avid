@@ -7,6 +7,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@mcua/core': path.resolve(__dirname, '../../packages/core/src'),
+      '@mcua/editor': path.resolve(__dirname, '../../packages/editor/src'),
       '@mcua/ui': path.resolve(__dirname, '../../packages/ui/src'),
     },
   },

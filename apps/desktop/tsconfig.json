@@ -16,7 +16,9 @@
       "@mcua/core": ["../../packages/core/src"],
       "@mcua/core/*": ["../../packages/core/src/*"],
       "@mcua/ui": ["../../packages/ui/src"],
-      "@mcua/ui/*": ["../../packages/ui/src/*"]
+      "@mcua/ui/*": ["../../packages/ui/src/*"],
+      "@mcua/editor": ["../../packages/editor/src"],
+      "@mcua/editor/*": ["../../packages/editor/src/*"]
     }
   },
   "include": ["src", "electron.vite.config.ts"]

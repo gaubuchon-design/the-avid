@@ -1,5 +1,6 @@
-import type { WorkspacePreset } from '../App';
 import type { EditorPage } from '../components/PageNavigation/PageNavigation';
+
+export type WorkspacePreset = 'default';
 
 const VALID_EDITOR_PAGES: ReadonlySet<EditorPage> = new Set<EditorPage>(['media', 'cut', 'edit', 'vfx', 'color', 'protools']);
 const VALID_WORKSPACES: ReadonlySet<WorkspacePreset> = new Set<WorkspacePreset>(['default']);

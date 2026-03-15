@@ -2,10 +2,10 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
-import { ErrorBoundary } from './components/ErrorBoundary';
-import './styles/globals.css';
-import './styles/design-system.css';
-import './styles/editor.css';
+import { ErrorBoundary } from '@mcua/editor';
+import '@mcua/editor/styles/globals.css';
+import '@mcua/editor/styles/design-system.css';
+import '@mcua/editor/styles/editor.css';
 
 const rootElement = document.getElementById('root');
 
