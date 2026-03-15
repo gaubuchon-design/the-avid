@@ -21,6 +21,7 @@ function seedEditorialFixture() {
       color: '#5b6af5',
       isOpen: true,
       children: [],
+      sequences: [],
       assets: [
         {
           id: 'asset-video-long',
@@ -160,20 +161,13 @@ describe('useEditorStore', () => {
     expect(state.duration).toBe(40);
   });
 
-  it('opens the new project dialog with the requested template', () => {
-    useEditorStore.getState().openNewProjectDialog('commercial');
+  it('toggles the new project dialog open and closed', () => {
+    expect(useEditorStore.getState().showNewProjectDialog).toBe(false);
 
-    const state = useEditorStore.getState();
-    expect(state.showNewProjectDialog).toBe(true);
-    expect(state.newProjectDialogTemplate).toBe('commercial');
-  });
-
-  it('defaults the new project dialog to the film template and closes cleanly', () => {
-    useEditorStore.getState().openNewProjectDialog();
-    expect(useEditorStore.getState().newProjectDialogTemplate).toBe('film');
+    useEditorStore.getState().toggleNewProjectDialog();
     expect(useEditorStore.getState().showNewProjectDialog).toBe(true);
 
-    useEditorStore.getState().closeNewProjectDialog();
+    useEditorStore.getState().toggleNewProjectDialog();
     expect(useEditorStore.getState().showNewProjectDialog).toBe(false);
   });
 
@@ -645,6 +639,7 @@ describe('useEditorStore', () => {
           name: 'Master',
           color: '#5b6af5',
           children: [],
+          sequences: [],
           assets: [baseAsset, overlayAsset],
           isOpen: true,
         },
@@ -918,7 +913,7 @@ describe('useEditorStore', () => {
       duration: 14,
     });
 
-    useEditorStore.getState().liftMarkedRange();
+    useEditorStore.getState().liftSelection();
 
     let clips = useEditorStore.getState().tracks[0]!.clips;
     expect(clips).toHaveLength(2);
@@ -985,7 +980,7 @@ describe('useEditorStore', () => {
       duration: 14,
     });
 
-    useEditorStore.getState().extractMarkedRange();
+    useEditorStore.getState().extractSelection();
 
     let clips = useEditorStore.getState().tracks[0]!.clips;
     expect(clips.map((clip) => [clip.id, clip.startTime, clip.endTime])).toEqual([

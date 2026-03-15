@@ -26,7 +26,6 @@ describe('phase 1 new project dialog', () => {
     repositoryMocks.listProjectSummariesFromRepository.mockResolvedValue([]);
     useEditorStore.setState({
       showNewProjectDialog: true,
-      newProjectDialogTemplate: 'documentary',
     });
   });
 
@@ -35,7 +34,7 @@ describe('phase 1 new project dialog', () => {
     useEditorStore.setState(initialState, true);
   });
 
-  it('keeps advanced sequence controls hidden until requested', async () => {
+  it('renders the dialog with all settings fields visible', async () => {
     render(
       <MemoryRouter>
         <NewProjectDialog />
@@ -43,18 +42,73 @@ describe('phase 1 new project dialog', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue('Documentary Edit')).toBeInTheDocument();
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('Create an editorial project')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Frame rate')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Resolution')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Notes')).not.toBeInTheDocument();
+    // Dialog header
+    expect(screen.getByText('New Project')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit sequence settings' }));
+    // Project name input with placeholder
+    expect(screen.getByLabelText('Project Name')).toBeInTheDocument();
 
-    expect(screen.getByLabelText('Frame rate')).toBeInTheDocument();
+    // Video settings are visible immediately (no toggle needed)
+    expect(screen.getByLabelText('Frame Rate')).toBeInTheDocument();
     expect(screen.getByLabelText('Resolution')).toBeInTheDocument();
-    expect(screen.getByLabelText('Notes')).toBeInTheDocument();
+
+    // Color management section
+    expect(screen.getByLabelText('Working Color Space')).toBeInTheDocument();
+    expect(screen.getByLabelText('HDR Mode')).toBeInTheDocument();
+
+    // Create button exists but disabled until project name is entered
+    const createBtn = screen.getByRole('button', { name: /Create Project/i });
+    expect(createBtn).toBeInTheDocument();
+  });
+
+  it('enables the create button only when project name is provided', async () => {
+    render(
+      <MemoryRouter>
+        <NewProjectDialog />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    const nameInput = screen.getByLabelText('Project Name');
+    const createBtn = screen.getByRole('button', { name: /Create Project/i });
+
+    // Initially disabled (empty name)
+    expect(createBtn).toBeDisabled();
+
+    // Type a name
+    fireEvent.change(nameInput, { target: { value: 'My Documentary' } });
+
+    // Now enabled
+    expect(createBtn).not.toBeDisabled();
+  });
+
+  it('allows selecting color management options', async () => {
+    render(
+      <MemoryRouter>
+        <NewProjectDialog />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    // Default: Rec.709 / SDR
+    const csSelect = screen.getByLabelText('Working Color Space') as HTMLSelectElement;
+    const hdrSelect = screen.getByLabelText('HDR Mode') as HTMLSelectElement;
+    expect(csSelect.value).toBe('rec709');
+    expect(hdrSelect.value).toBe('sdr');
+
+    // Change to Rec.2020 / PQ
+    fireEvent.change(csSelect, { target: { value: 'rec2020' } });
+    fireEvent.change(hdrSelect, { target: { value: 'pq' } });
+    expect(csSelect.value).toBe('rec2020');
+    expect(hdrSelect.value).toBe('pq');
   });
 });

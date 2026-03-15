@@ -44,6 +44,7 @@ describe('trim monitor preview', () => {
             { id: 'asset-left', name: 'Left Clip', type: 'VIDEO', status: 'READY', tags: [], isFavorite: false },
             { id: 'asset-right', name: 'Right Clip', type: 'VIDEO', status: 'READY', tags: [], isFavorite: false },
           ],
+          sequences: [],
         },
       ],
       tracks: [
@@ -117,6 +118,7 @@ describe('trim monitor preview', () => {
             { id: 'asset-v2-a', name: 'V2 Left', type: 'VIDEO', status: 'READY', tags: [], isFavorite: false },
             { id: 'asset-v2-b', name: 'V2 Right', type: 'VIDEO', status: 'READY', tags: [], isFavorite: false },
           ],
+          sequences: [],
         },
       ],
       tracks: [
@@ -221,6 +223,7 @@ describe('trim monitor preview', () => {
           assets: [
             { id: 'asset-main', name: 'Main Clip', type: 'VIDEO', status: 'READY', tags: [], isFavorite: false },
           ],
+          sequences: [],
         },
       ],
       tracks: [
@@ -280,6 +283,7 @@ describe('trim monitor preview', () => {
             { id: 'asset-mid', name: 'Middle', type: 'VIDEO', status: 'READY', tags: [], isFavorite: false },
             { id: 'asset-right', name: 'Right', type: 'VIDEO', status: 'READY', tags: [], isFavorite: false },
           ],
+          sequences: [],
         },
       ],
       tracks: [
@@ -362,6 +366,7 @@ describe('trim monitor preview', () => {
           assets: [
             { id: 'asset-main', name: 'Main Clip', type: 'VIDEO', status: 'READY', tags: [], isFavorite: false },
           ],
+          sequences: [],
         },
       ],
       tracks: [

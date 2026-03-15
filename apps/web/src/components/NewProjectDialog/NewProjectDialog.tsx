@@ -16,6 +16,8 @@ interface SequenceSettings {
   dropFrame: boolean;
   sampleRate: number;
   bitDepth: number;
+  workingColorSpace: 'rec709' | 'rec2020' | 'dci-p3' | 'aces-cct';
+  hdrMode: 'sdr' | 'hlg' | 'pq';
 }
 
 // ─── Inline Styles ──────────────────────────────────────────────────────────────
@@ -271,6 +273,8 @@ export function NewProjectDialog() {
     dropFrame: false,
     sampleRate: 48000,
     bitDepth: 24,
+    workingColorSpace: 'rec709',
+    hdrMode: 'sdr',
   });
   const [isCreating, setIsCreating] = useState(false);
 
@@ -313,7 +317,7 @@ export function NewProjectDialog() {
   const handleClose = useCallback(() => {
     toggleDialog();
     setProjectName('');
-    setSequence({ fps: 23.976, resolutionIndex: 0, dropFrame: false, sampleRate: 48000, bitDepth: 24 });
+    setSequence({ fps: 23.976, resolutionIndex: 0, dropFrame: false, sampleRate: 48000, bitDepth: 24, workingColorSpace: 'rec709', hdrMode: 'sdr' });
     setIsCreating(false);
   }, [toggleDialog]);
 
@@ -513,6 +517,43 @@ export function NewProjectDialog() {
                     {opt.label}
                   </option>
                 ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Color Management */}
+          <div style={S.sectionLabel}>Color Management</div>
+
+          <div style={S.settingsRow}>
+            <div style={S.settingsField}>
+              <label htmlFor="npd-cs" style={S.label}>
+                Working Color Space
+              </label>
+              <select
+                id="npd-cs"
+                style={S.select}
+                value={sequence.workingColorSpace}
+                onChange={(e) => setSequence((prev) => ({ ...prev, workingColorSpace: e.target.value as typeof prev.workingColorSpace }))}
+              >
+                <option value="rec709">Rec. 709 (HD)</option>
+                <option value="rec2020">Rec. 2020 (UHD / WCG)</option>
+                <option value="dci-p3">DCI-P3 (Cinema)</option>
+                <option value="aces-cct">ACEScct (ACES)</option>
+              </select>
+            </div>
+            <div style={S.settingsField}>
+              <label htmlFor="npd-hdr" style={S.label}>
+                HDR Mode
+              </label>
+              <select
+                id="npd-hdr"
+                style={S.select}
+                value={sequence.hdrMode}
+                onChange={(e) => setSequence((prev) => ({ ...prev, hdrMode: e.target.value as typeof prev.hdrMode }))}
+              >
+                <option value="sdr">SDR</option>
+                <option value="pq">HDR — PQ (ST 2084)</option>
+                <option value="hlg">HDR — HLG</option>
               </select>
             </div>
           </div>
