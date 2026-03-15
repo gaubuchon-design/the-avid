@@ -10,6 +10,9 @@ import { useEditorStore } from '../store/editor.store';
 
 const TEMPLATE_OPTIONS: Array<{ template: ProjectTemplate; label: string; desc: string; icon: string }> = [
   { template: 'film', label: 'Blank Project', desc: '1920x1080 · 24fps', icon: '🎬' },
+  { template: 'film', label: 'Film (4K)', desc: '3840x2160 · 24fps', icon: '🎞' },
+  { template: 'film', label: 'Social Short', desc: '1080x1920 · 30fps', icon: '📱' },
+  { template: 'film', label: 'Broadcast', desc: '1920x1080 · 29.97fps', icon: '📺' },
 ];
 
 function iconForProject(icon: string): string {
@@ -354,7 +357,7 @@ export function DashboardPage() {
                 </div>
               )}
 
-              {/* Empty state */}
+              {/* Empty state — no results from filter */}
               {!isLoading && !loadError && filteredProjects.length === 0 && projects.length > 0 && (
                 <div style={{
                   gridColumn: '1 / -1', padding: 32, textAlign: 'center',
@@ -370,6 +373,37 @@ export function DashboardPage() {
                   <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                     Try adjusting your search or filter criteria
                   </div>
+                </div>
+              )}
+
+              {/* Empty state — brand new user, no projects yet */}
+              {!isLoading && !loadError && projects.length === 0 && (
+                <div style={{
+                  gridColumn: '1 / -1', padding: '48px 32px', textAlign: 'center',
+                  background: 'linear-gradient(135deg, rgba(109,76,250,0.06), rgba(79,99,245,0.04))',
+                  border: '1px solid rgba(109,76,250,0.15)',
+                  borderRadius: 'var(--radius-lg)',
+                }}>
+                  <div style={{ fontSize: 36, marginBottom: 12, opacity: 0.7 }}>
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline' }}>
+                      <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
+                      <line x1="7" y1="2" x2="7" y2="22" /><line x1="17" y1="2" x2="17" y2="22" />
+                      <line x1="2" y1="12" x2="22" y2="12" />
+                    </svg>
+                  </div>
+                  <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>
+                    Welcome to The Avid
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 20, maxWidth: 340, margin: '0 auto 20px' }}>
+                    Create your first project to start editing. Import media, build sequences, and deliver professional cuts.
+                  </div>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => toggleNewProjectDialog()}
+                    style={{ fontSize: 13, padding: '8px 20px' }}
+                  >
+                    + Create Your First Project
+                  </button>
                 </div>
               )}
 

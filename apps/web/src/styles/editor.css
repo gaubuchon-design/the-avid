@@ -332,6 +332,40 @@
   color: var(--brand-bright);
 }
 
+/* Labeled toolbar buttons — icon + short label for discoverability */
+.toolbar-labeled-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: var(--transition-colors);
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-ui);
+  white-space: nowrap;
+}
+
+.toolbar-labeled-btn:hover {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.toolbar-labeled-btn.active {
+  background: var(--brand-dim);
+  color: var(--brand-bright);
+}
+
+.toolbar-labeled-btn span {
+  font-size: 10.5px;
+}
+
 /* AI toggle button */
 .toolbar-ai-btn {
   gap: var(--space-1);
@@ -1461,6 +1495,21 @@
   min-height: 0;
 }
 
+/* Bin header action buttons with labels */
+.bin-header-btn {
+  display: flex !important;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px !important;
+  padding: 2px 6px !important;
+  white-space: nowrap;
+}
+
+.bin-header-btn span {
+  font-size: 10px;
+  font-weight: 500;
+}
+
 .bin-search {
   display: flex;
   align-items: center;
@@ -1548,6 +1597,18 @@
 
 /* Smart bins */
 .smart-bin-item { position: relative; }
+/* Sequence items in bin tree */
+.bin-sequence-item {
+  border-left-color: transparent;
+}
+.bin-sequence-item.selected {
+  background: rgba(91, 110, 244, 0.10);
+  border-left-color: var(--brand-bright);
+}
+.bin-sequence-item .bin-name {
+  font-size: 11px;
+}
+
 .smart-bin-item .bin-name { font-style: italic; }
 
 .smart-bin-remove {
@@ -4881,7 +4942,8 @@
   flex-shrink: 0;
 }
 
-.panel-tabs .tab {
+.panel-tabs .tab,
+.panel-tabs .panel-tab {
   padding: var(--space-1-5) var(--space-3);
   font-size: var(--text-sm);
   border: none;
@@ -4893,9 +4955,11 @@
   font-family: var(--font-ui);
 }
 
-.panel-tabs .tab:hover { color: var(--text-secondary); }
+.panel-tabs .tab:hover,
+.panel-tabs .panel-tab:hover { color: var(--text-secondary); }
 
-.panel-tabs .tab.active {
+.panel-tabs .tab.active,
+.panel-tabs .panel-tab.active {
   border-bottom: 2px solid var(--accent);
   color: var(--text-primary);
   font-weight: var(--weight-medium);
