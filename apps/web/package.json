@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@mcua/core": "*",
+    "@mcua/editor": "*",
     "@mcua/ui": "*",
     "@tanstack/react-query": "^5.50.0",
     "immer": "^10.1.0",

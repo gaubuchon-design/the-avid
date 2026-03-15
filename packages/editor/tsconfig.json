@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "baseUrl": ".",
+    "paths": {
+      "@mcua/core": ["../core/src"],
+      "@mcua/core/*": ["../core/src/*"],
+      "@mcua/ui": ["../ui/src"],
+      "@mcua/ui/*": ["../ui/src/*"]
+    }
+  },
+  "include": ["src"]
+}

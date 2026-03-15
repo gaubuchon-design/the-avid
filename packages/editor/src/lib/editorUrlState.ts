@@ -1,0 +1,18 @@
+import type { EditorPage } from '../components/PageNavigation/PageNavigation';
+
+export type WorkspacePreset = 'default';
+
+const VALID_EDITOR_PAGES: ReadonlySet<EditorPage> = new Set<EditorPage>(['media', 'cut', 'edit', 'vfx', 'color', 'protools']);
+const VALID_WORKSPACES: ReadonlySet<WorkspacePreset> = new Set<WorkspacePreset>(['default']);
+
+export function isLegacyExportPageParam(param: string | null): boolean {
+  return param === 'export';
+}
+
+export function resolveEditorPageParam(param: string | null): EditorPage {
+  return param && VALID_EDITOR_PAGES.has(param as EditorPage) ? (param as EditorPage) : 'edit';
+}
+
+export function resolveWorkspaceParam(param: string | null): WorkspacePreset {
+  return param && VALID_WORKSPACES.has(param as WorkspacePreset) ? (param as WorkspacePreset) : 'default';
+}

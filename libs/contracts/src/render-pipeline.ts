@@ -83,6 +83,14 @@ export interface RenderJob {
   readonly retryCount: number;
   /** Maximum number of retries allowed. */
   readonly maxRetries: number;
+  /** Source color space of the input media for this job. */
+  readonly sourceColorSpace?: string;
+  /** Target/output color space for this render. */
+  readonly outputColorSpace?: string;
+  /** Whether HDR-to-SDR tone mapping is required. */
+  readonly toneMapRequired?: boolean;
+  /** Preferred hardware acceleration API (auto-detected or user-specified). */
+  readonly hwAccel?: 'nvenc' | 'videotoolbox' | 'amf' | 'qsv' | 'vaapi' | 'mediacodec' | 'auto' | null;
 }
 
 // -- Render Node Info --------------------------------------------------------
@@ -115,6 +123,14 @@ export interface RenderNodeInfo {
   readonly lastHeartbeat: string;
   /** Supported render job types. */
   readonly capabilities: readonly RenderJobType[];
+  /** Hardware acceleration API available on this node. */
+  readonly hwAccelAPI?: 'nvenc' | 'videotoolbox' | 'amf' | 'qsv' | 'vaapi' | 'mediacodec' | 'none';
+  /** CPU architecture of the render node. */
+  readonly cpuArch?: 'x64' | 'arm64' | 'ia32';
+  /** Supported hardware-accelerated encoders. */
+  readonly hwEncoders?: readonly string[];
+  /** Supported hardware-accelerated decoders. */
+  readonly hwDecoders?: readonly string[];
 }
 
 // -- Progress report ---------------------------------------------------------
