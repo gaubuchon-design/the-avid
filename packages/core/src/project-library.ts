@@ -370,6 +370,28 @@ export interface EditorMediaAsset {
   isFavorite: boolean;
 }
 
+export interface EditorSequenceSettings {
+  name: string;
+  fps: number;
+  dropFrame: boolean;
+  startTC: number;
+  width: number;
+  height: number;
+  sampleRate: number;
+  colorSpace: string;
+  displayTransform: string;
+}
+
+export interface EditorSequence {
+  id: string;
+  name: string;
+  settings: EditorSequenceSettings;
+  tracks: EditorTrack[];
+  duration: number;
+  createdAt: string;
+  modifiedAt: string;
+}
+
 export interface EditorBin {
   id: string;
   name: string;
@@ -377,6 +399,7 @@ export interface EditorBin {
   parentId?: string;
   children: EditorBin[];
   assets: EditorMediaAsset[];
+  sequences?: EditorSequence[];
   isOpen: boolean;
 }
 
@@ -1783,6 +1806,11 @@ function normalizeBins(bins: EditorBin[]): EditorBin[] {
     ...bin,
     children: normalizeBins(bin.children ?? []),
     assets: (bin.assets ?? []).map(normalizeMediaAsset),
+    sequences: (bin.sequences ?? []).map((seq) => ({
+      ...seq,
+      tracks: seq.tracks ?? [],
+      settings: seq.settings ?? { name: seq.name, fps: 24, dropFrame: false, startTC: 0, width: 1920, height: 1080, sampleRate: 48000, colorSpace: 'rec709', displayTransform: 'sdr-rec709' },
+    })),
     isOpen: Boolean(bin.isOpen),
   }));
 }

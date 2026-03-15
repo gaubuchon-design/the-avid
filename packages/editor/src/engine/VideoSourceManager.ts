@@ -12,6 +12,10 @@ export interface VideoSource {
   height: number;
   ready: boolean;
   objectUrl?: string; // track for cleanup
+  /** Decode pool: extra video elements for parallel seeking during scrub. */
+  decodePool?: HTMLVideoElement[];
+  /** Index of the next decode pool element to use for round-robin seeking. */
+  decodePoolIndex?: number;
 }
 
 /**
@@ -67,15 +71,21 @@ class VideoSourceManager {
 
     this.sources.set(assetId, source);
 
-    // Wait for metadata
+    // Wait for enough data to render frames (HAVE_CURRENT_DATA = readyState 2)
     return new Promise<VideoSource>((resolve, reject) => {
-      video.addEventListener('loadedmetadata', () => {
+      const onReady = () => {
         source.duration = isFinite(video.duration) ? video.duration : 0;
         source.width = video.videoWidth;
         source.height = video.videoHeight;
         source.ready = true;
         this.notify();
         resolve(source);
+      };
+
+      // Use loadeddata (readyState >= 2) instead of loadedmetadata (readyState >= 1)
+      // This ensures the first frame is decodable before we mark as ready.
+      video.addEventListener('loadeddata', () => {
+        onReady();
       }, { once: true });
 
       video.addEventListener('error', () => {
@@ -161,12 +171,98 @@ class VideoSourceManager {
   }
 
   /**
+   * Get the best available video element for drawing — prefers one that
+   * is NOT currently seeking, using the decode pool for round-robin.
+   * This is critical for smooth scrubbing: while the primary element
+   * is seeking to the next frame, a pool element may already have the
+   * previous frame ready to draw.
+   */
+  getDrawableElement(assetId: string): HTMLVideoElement | null {
+    const source = this.sources.get(assetId);
+    if (!source?.ready) return null;
+
+    // Primary element ready? Use it.
+    if (!source.element.seeking && source.element.readyState >= 2) {
+      return source.element;
+    }
+
+    // Check decode pool for a ready element
+    if (source.decodePool) {
+      for (const poolEl of source.decodePool) {
+        if (!poolEl.seeking && poolEl.readyState >= 2) {
+          return poolEl;
+        }
+      }
+    }
+
+    // Fall back to primary even if seeking (will draw last decoded frame)
+    return source.element.readyState >= 2 ? source.element : null;
+  }
+
+  /**
+   * Ensure a decode pool exists for an asset (creates extra video elements).
+   * Pool elements share the same URL but can seek independently.
+   */
+  ensureDecodePool(assetId: string, poolSize = 2): void {
+    const source = this.sources.get(assetId);
+    if (!source?.ready || source.decodePool) return;
+
+    source.decodePool = [];
+    source.decodePoolIndex = 0;
+
+    for (let i = 0; i < poolSize; i++) {
+      const el = document.createElement('video');
+      el.crossOrigin = 'anonymous';
+      el.preload = 'auto';
+      el.playsInline = true;
+      el.muted = true;
+      el.src = source.url;
+      el.load();
+      source.decodePool.push(el);
+    }
+  }
+
+  /**
+   * Seek using the decode pool (round-robin). Returns the element that was seeked.
+   * This allows overlapping seeks: while one element is decoding, we seek the next.
+   */
+  seekPoolElement(assetId: string, time: number): HTMLVideoElement | null {
+    const source = this.sources.get(assetId);
+    if (!source?.ready) return null;
+
+    // If no pool, fall back to primary element
+    if (!source.decodePool || source.decodePool.length === 0) {
+      if (!source.element.seeking) {
+        source.element.currentTime = time;
+      }
+      return source.element;
+    }
+
+    // Round-robin through pool to find a non-seeking element
+    const poolSize = source.decodePool.length;
+    for (let i = 0; i < poolSize; i++) {
+      const idx = (source.decodePoolIndex! + i) % poolSize;
+      const el = source.decodePool[idx];
+      if (!el.seeking) {
+        el.currentTime = time;
+        source.decodePoolIndex = (idx + 1) % poolSize;
+        return el;
+      }
+    }
+
+    // All pool elements busy — skip this seek (hold frame)
+    return null;
+  }
+
+  /**
    * Seek the active video to a specific time in seconds.
    */
   seekTo(time: number): void {
     const source = this.getActiveSource();
     if (!source?.element || !source.ready) return;
     if (!isFinite(time)) return;
+    // Don't queue seeks while already seeking — prevents pile-up during scrubbing
+    if (source.element.seeking) return;
     const maxDur = isFinite(source.duration) && source.duration > 0 ? source.duration : Infinity;
     const clampedTime = Math.max(0, Math.min(time, maxDur));
     if (Math.abs(source.element.currentTime - clampedTime) > 0.01) {

@@ -38,6 +38,10 @@ export interface CompositingContext {
   subtitleTracks: SubtitleTrack[];
   currentTitle: any | null;
   isTitleEditing: boolean;
+  /** Skip effects processing during scrub for performance. */
+  skipEffects?: boolean;
+  /** Skip overlays (titles/subtitles/safe zones) during scrub. */
+  skipOverlays?: boolean;
 }
 
 export interface PlaybackCompositingContext {
@@ -49,6 +53,10 @@ export interface PlaybackCompositingContext {
   isTitleEditing: boolean;
   overlayProcessing?: 'pre' | 'post';
   effectQuality?: EffectRenderQuality;
+  /** Skip all effects processing during scrub for performance. */
+  skipEffects?: boolean;
+  /** Skip titles/subtitles/safe zones during scrub for performance. */
+  skipOverlays?: boolean;
 }
 
 export interface PlaybackVideoLayerAvailability {
@@ -227,18 +235,21 @@ export function syncVideoPlayback(
     if (vid.paused) {
       vid.currentTime = sourceTime;
       vid.play().catch(() => {});
-    }
-    // Correct drift if video is more than 2 frames away from expected position
-    const frameDuration = 1 / fps;
-    const drift = Math.abs(vid.currentTime - sourceTime);
-    if (drift > frameDuration * 2) {
-      vid.currentTime = sourceTime;
+    } else if (!vid.seeking) {
+      // Correct drift if video is more than 2 frames away from expected position
+      // Don't seek while already seeking — prevents seek queue pile-up
+      const frameDuration = 1 / fps;
+      const drift = Math.abs(vid.currentTime - sourceTime);
+      if (drift > frameDuration * 2) {
+        vid.currentTime = sourceTime;
+      }
     }
   } else {
     // When paused: stop video and seek to exact frame
     if (!vid.paused) vid.pause();
-    if (!vid.seeking && Math.abs(vid.currentTime - sourceTime) > frameTolerance) {
-      vid.currentTime = sourceTime;
+    // Use decode pool for round-robin seeking — prevents seek pile-up during scrubbing
+    if (Math.abs(vid.currentTime - sourceTime) > frameTolerance) {
+      videoSourceManager.seekPoolElement(clip.assetId!, sourceTime);
     }
   }
 }
@@ -270,7 +281,10 @@ export function tryLoadClipSource(
       const asset = bin.assets.find((a) => a.id === assetId);
       if (asset && (asset.fileHandle || asset.playbackUrl)) {
         const urlOrFile = asset.fileHandle ?? asset.playbackUrl!;
-        videoSourceManager.loadSource(assetId, urlOrFile).catch(() => {});
+        videoSourceManager.loadSource(assetId, urlOrFile).then(() => {
+          // Create decode pool for smooth scrubbing (parallel seeking)
+          videoSourceManager.ensureDecodePool(assetId);
+        }).catch(() => {});
         return;
       }
       if (bin.children) search(bin.children);
@@ -291,11 +305,8 @@ export function inspectPlaybackVideoLayerAvailability(
     }
 
     totalVideoLayers += 1;
-    const source = videoSourceManager.getSource(layer.assetId);
-    const vid = source?.element;
-    const isDrawable = Boolean(
-      vid && source?.ready && vid.readyState >= 2 && (snapshot.isPlaying || !vid.seeking)
-    );
+    const drawableVid = videoSourceManager.getDrawableElement(layer.assetId);
+    const isDrawable = Boolean(drawableVid);
 
     if (isDrawable) {
       drawableVideoLayers += 1;
@@ -357,6 +368,8 @@ export function compositeRecordFrame(cx: CompositingContext): void {
     snapshot,
     currentTitle: cx.currentTitle,
     isTitleEditing: cx.isTitleEditing,
+    skipEffects: cx.skipEffects,
+    skipOverlays: cx.skipOverlays,
   });
 }
 
@@ -364,6 +377,8 @@ export function compositePlaybackSnapshot(cx: PlaybackCompositingContext): void 
   const { ctx, canvasW, canvasH, snapshot } = cx;
   const overlayProcessing = cx.overlayProcessing ?? 'post';
   const effectQuality = cx.effectQuality ?? 'preview';
+  const skipEffects = cx.skipEffects ?? false;
+  const skipOverlays = cx.skipOverlays ?? false;
   const compositorOwnsSeeking =
     !snapshot.isPlaying && (snapshot.consumer === 'export' || snapshot.consumer === 'scope');
   const frameTolerance = snapshot.fps > 0 ? Math.max(0.5 / snapshot.fps, 0.02) : 0.02;
@@ -378,9 +393,11 @@ export function compositePlaybackSnapshot(cx: PlaybackCompositingContext): void 
     const clip = layer.clip;
     if (!layer.assetId) continue;
 
+    // Use decode pool to get the best drawable element (non-seeking preferred)
+    const drawableVid = videoSourceManager.getDrawableElement(layer.assetId);
     const source = videoSourceManager.getSource(layer.assetId);
-    const vid = source?.element;
-    if (!vid || !source.ready || vid.readyState < 2) continue;
+    const vid = drawableVid ?? source?.element;
+    if (!vid || !source?.ready || vid.readyState < 2) continue;
 
     // Export/scope rendering drives its own seeking. Monitor rendering syncs earlier.
     if (
@@ -417,14 +434,16 @@ export function compositePlaybackSnapshot(cx: PlaybackCompositingContext): void 
       layerRender.ctx.drawImage(vid, drawX, drawY, drawW, drawH);
       layerRender.ctx.restore();
 
-      applyClipEffectsToLayer(
-        layerRender.ctx,
-        canvasW,
-        canvasH,
-        clip.id,
-        snapshot.frameNumber,
-        effectQuality
-      );
+      if (!skipEffects) {
+        applyClipEffectsToLayer(
+          layerRender.ctx,
+          canvasW,
+          canvasH,
+          clip.id,
+          snapshot.frameNumber,
+          effectQuality
+        );
+      }
 
       ctx.save();
       ctx.globalCompositeOperation = blendMode;
@@ -441,18 +460,20 @@ export function compositePlaybackSnapshot(cx: PlaybackCompositingContext): void 
     drewVideo = true;
   }
 
-  for (const effectLayer of snapshot.effectLayers) {
-    applyEffectLayerToComposite(
-      ctx,
-      canvasW,
-      canvasH,
-      effectLayer.clip.id,
-      snapshot.frameNumber,
-      effectQuality
-    );
+  if (!skipEffects) {
+    for (const effectLayer of snapshot.effectLayers) {
+      applyEffectLayerToComposite(
+        ctx,
+        canvasW,
+        canvasH,
+        effectLayer.clip.id,
+        snapshot.frameNumber,
+        effectQuality
+      );
+    }
   }
 
-  if (overlayProcessing === 'post') {
+  if (overlayProcessing === 'post' && !skipOverlays) {
     // 3. Composite title graphics (GRAPHIC track title clips)
     if (cx.currentTitle && cx.isTitleEditing) {
       renderTitle(ctx, cx.currentTitle, canvasW, canvasH, snapshot.frameNumber, snapshot.fps);

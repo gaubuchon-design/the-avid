@@ -190,11 +190,18 @@ export function SourceMonitor() {
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Dedicated video element for source monitor — NOT shared with VideoSourceManager/timeline.
+  // This prevents the timeline's syncVideoPlayback() from fighting over currentTime.
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const videoUrlRef = useRef<string | null>(null);
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 480, h: 270 });
+  const prevCanvasSize = useRef({ w: 0, h: 0 });
+  const videoReadyRef = useRef(false);
   const [videoReady, setVideoReady] = useState(false);
   const rafRef = useRef<number>();
   const syncRafRef = useRef<number>();
+  const lastDrawnTimeRef = useRef<number>(-1);
 
   // Get the source asset from editor store (master's approach with sourceAsset + sourcePlayhead)
   // Also support looking up by sourceClipId through bins (our hardened approach)
@@ -248,74 +255,162 @@ export function SourceMonitor() {
     return () => observer.disconnect();
   }, []);
 
-  // Load/update video element when source asset changes
+  // Load/update a DEDICATED video element when source asset changes.
+  // We create our own HTMLVideoElement instead of sharing with VideoSourceManager,
+  // because the timeline's syncVideoPlayback() would fight over currentTime.
   useEffect(() => {
+    videoReadyRef.current = false;
     setVideoReady(false);
+    lastDrawnTimeRef.current = -1;
 
-    if (!sourceAsset) {
-      if (videoRef.current) {
-        videoRef.current.pause();
-        videoRef.current.src = '';
-      }
+    // Clean up previous dedicated video
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.removeAttribute('src');
+      videoRef.current.load();
       videoRef.current = null;
-      return;
     }
-
-    // Get the video source from VideoSourceManager (already loaded by setSourceAsset)
-    const source = videoSourceManager.getSource(sourceAsset.id);
-    if (source?.ready) {
-      videoRef.current = source.element;
-      setVideoReady(true);
-      return;
-    }
-
-    // If not loaded yet, wait for it via subscription
-    const unsub = videoSourceManager.subscribe(() => {
-      const s = videoSourceManager.getSource(sourceAsset.id);
-      if (s?.ready) {
-        videoRef.current = s.element;
-        setVideoReady(true);
+    if (videoUrlRef.current) {
+      // Only revoke if it was an objectURL we created
+      if (videoUrlRef.current.startsWith('blob:')) {
+        URL.revokeObjectURL(videoUrlRef.current);
       }
-    });
+      videoUrlRef.current = null;
+    }
 
-    return unsub;
+    if (!sourceAsset) return;
+
+    // Determine the URL to load
+    let url: string;
+    if (sourceAsset.fileHandle instanceof File) {
+      url = URL.createObjectURL(sourceAsset.fileHandle);
+      videoUrlRef.current = url; // track for cleanup
+    } else if (sourceAsset.playbackUrl) {
+      url = sourceAsset.playbackUrl;
+    } else {
+      // No playable source — fall back to checking VideoSourceManager for its URL
+      const managed = videoSourceManager.getSource(sourceAsset.id);
+      if (managed?.url) {
+        url = managed.url;
+      } else {
+        return; // nothing to play
+      }
+    }
+
+    // Create a fresh, dedicated video element
+    const video = document.createElement('video');
+    video.crossOrigin = 'anonymous';
+    video.preload = 'auto';
+    video.playsInline = true;
+    video.muted = true; // audio routed through Web Audio API separately
+    video.src = url;
+    videoRef.current = video;
+
+    video.addEventListener('loadeddata', () => {
+      videoReadyRef.current = true;
+      setVideoReady(true);
+    }, { once: true });
+
+    video.addEventListener('error', () => {
+      console.warn(`[SourceMonitor] Failed to load video for asset ${sourceAsset.id}`);
+    }, { once: true });
+
+    video.load();
+
+    return () => {
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+      if (videoUrlRef.current?.startsWith('blob:')) {
+        URL.revokeObjectURL(videoUrlRef.current);
+        videoUrlRef.current = null;
+      }
+    };
   }, [sourceAsset?.id]);
 
-  // Render loop — draw video frame or placeholder
+  // Persistent render loop — runs continuously, reads state non-reactively.
+  // Does NOT restart on playhead changes (which caused frame-gap flicker).
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const render = () => {
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
+      // Only resize canvas when dimensions actually change (avoids clearing canvas)
       const { w, h } = canvasSize;
-      canvas.width = w;
-      canvas.height = h;
+      if (prevCanvasSize.current.w !== w || prevCanvasSize.current.h !== h) {
+        canvas.width = w;
+        canvas.height = h;
+        prevCanvasSize.current = { w, h };
+        ctxRef.current = canvas.getContext('2d', { alpha: false, desynchronized: true });
+      }
+      const ctx = ctxRef.current ?? canvas.getContext('2d', { alpha: false, desynchronized: true });
+      if (!ctx) { rafRef.current = requestAnimationFrame(render); return; }
+      ctxRef.current = ctx;
 
       const video = videoRef.current;
-      if (video && videoReady && video.readyState >= 2) {
-        // Draw video frame
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, w, h);
+      if (video && videoReadyRef.current && video.readyState >= 2) {
+        // Only redraw when video time has actually changed (or on first draw)
+        const currentVideoTime = video.currentTime;
+        const needsRedraw = Math.abs(currentVideoTime - lastDrawnTimeRef.current) > 0.0001
+          || prevCanvasSize.current.w !== w;
 
-        const videoAR = video.videoWidth / video.videoHeight;
-        const canvasAR = w / h;
-        let drawW = w, drawH = h, drawX = 0, drawY = 0;
-        if (videoAR > canvasAR) {
-          drawH = Math.floor(w / videoAR);
-          drawY = Math.floor((h - drawH) / 2);
-        } else if (videoAR < canvasAR) {
-          drawW = Math.floor(h * videoAR);
-          drawX = Math.floor((w - drawW) / 2);
+        if (needsRedraw) {
+          lastDrawnTimeRef.current = currentVideoTime;
+
+          // Calculate letterboxed draw rect
+          const videoAR = video.videoWidth / video.videoHeight;
+          const canvasAR = w / h;
+          let drawW = w, drawH = h, drawX = 0, drawY = 0;
+          if (videoAR > canvasAR) {
+            drawH = Math.floor(w / videoAR);
+            drawY = Math.floor((h - drawH) / 2);
+          } else if (videoAR < canvasAR) {
+            drawW = Math.floor(h * videoAR);
+            drawX = Math.floor((w - drawW) / 2);
+          }
+
+          // Only fill black for letterbox bars, not the whole canvas
+          if (drawX > 0 || drawY > 0) {
+            ctx.fillStyle = '#000';
+            if (drawY > 0) {
+              ctx.fillRect(0, 0, w, drawY);
+              ctx.fillRect(0, drawY + drawH, w, h - drawY - drawH);
+            }
+            if (drawX > 0) {
+              ctx.fillRect(0, drawY, drawX, drawH);
+              ctx.fillRect(drawX + drawW, drawY, w - drawX - drawW, drawH);
+            }
+          }
+
+          ctx.drawImage(video, drawX, drawY, drawW, drawH);
+
+          // Read marker state non-reactively
+          const edState = useEditorStore.getState();
+          const sIn = edState.sourceInPoint;
+          const sOut = edState.sourceOutPoint;
+          if (sIn !== null || sOut !== null) {
+            const sFps = edState.sequenceSettings.fps;
+            if (sIn !== null) {
+              ctx.fillStyle = AVID_RED;
+              ctx.font = '600 10px monospace';
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'alphabetic';
+              ctx.fillText('IN: ' + formatTimecode(sIn, sFps), 10, h - 10);
+            }
+            if (sOut !== null) {
+              ctx.fillStyle = AVID_RED;
+              ctx.font = '600 10px monospace';
+              ctx.textAlign = 'right';
+              ctx.textBaseline = 'alphabetic';
+              ctx.fillText('OUT: ' + formatTimecode(sOut, sFps), w - 10, h - 10);
+            }
+          }
         }
-        ctx.drawImage(video, drawX, drawY, drawW, drawH);
-
-        // Draw in/out markers
-        drawMarkers(ctx, w, h);
-      } else {
+        // If no redraw needed, previous frame stays on canvas (no flicker)
+      } else if (!videoReadyRef.current || !video) {
         drawPlaceholder(ctx, w, h);
       }
+      // If video exists but readyState < 2, keep previous frame (no black flash)
 
       rafRef.current = requestAnimationFrame(render);
     };
@@ -324,22 +419,25 @@ export function SourceMonitor() {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [canvasSize, videoReady, sourceInPoint, sourceOutPoint, sourcePlayhead]);
+  }, [canvasSize]); // Only restart on canvas resize — NOT on playhead/marker changes
 
-  // Sync video seek with source playhead (when not playing)
+  // Sync dedicated video seek with source playhead (when not playing).
+  // This is the ONLY place that seeks the source monitor's video element.
+  // The timeline's syncVideoPlayback() cannot affect it since we use a dedicated element.
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !videoReady) return;
-    if (!isPlaying && isFinite(sourcePlayhead) && Math.abs(video.currentTime - sourcePlayhead) > 0.05) {
+    if (!video || !videoReadyRef.current) return;
+    const frameTolerance = fps > 0 ? 0.4 / fps : 0.015;
+    if (!isPlaying && !video.seeking && isFinite(sourcePlayhead) && Math.abs(video.currentTime - sourcePlayhead) > frameTolerance) {
       video.currentTime = Math.max(0, sourcePlayhead);
     }
-  }, [sourcePlayhead, isPlaying, videoReady]);
+  }, [sourcePlayhead, isPlaying, fps]);
 
   // Play/pause — properly cancel previous RAF sync loop before creating new one.
   // Also applies playback rate from playerStore.speed for JKL shuttle support.
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !videoReady) return;
+    if (!video || !videoReadyRef.current) return;
 
     // Always cancel any existing sync loop first
     if (syncRafRef.current) {
@@ -395,7 +493,7 @@ export function SourceMonitor() {
         syncRafRef.current = undefined;
       }
     };
-  }, [isPlaying, speed, videoReady, fps, setSourcePlayhead]);
+  }, [isPlaying, speed, videoReady, fps, setSourcePlayhead]); // videoReady triggers re-run when element loads
 
   function drawMarkers(c: CanvasRenderingContext2D, cw: number, ch: number) {
     if (sourceInPoint !== null) {
@@ -519,33 +617,56 @@ export function SourceMonitor() {
   // Keyboard shortcuts are now handled centrally by useGlobalKeyboard() in EditorPage.
   // I/O marks are routed there based on activeMonitor, along with JKL shuttle.
 
-  // Scrub bar interaction
+  // Scrub bar interaction — RAF-throttled for smooth frame-accurate scrubbing
   const scrubRef = useRef<HTMLDivElement>(null);
-  const handleScrub = useCallback((e: React.MouseEvent) => {
-    const bar = scrubRef.current;
-    if (!bar || !sourceAsset?.duration) return;
-    const rect = bar.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    setSourcePlayhead(pct * sourceAsset.duration);
-  }, [sourceAsset?.duration, setSourcePlayhead]);
+  const scrubRafRef = useRef<number>();
+  const pendingScrubX = useRef<number | null>(null);
 
   const handleScrubDrag = useCallback((e: React.MouseEvent) => {
-    handleScrub(e);
     const bar = scrubRef.current;
     if (!bar || !sourceAsset?.duration) return;
     const dur = sourceAsset.duration;
-    const onMove = (ev: MouseEvent) => {
+
+    // Stop playback when scrubbing
+    if (isPlaying) pause();
+
+    const updateFromX = (clientX: number) => {
       const rect = bar.getBoundingClientRect();
-      const pct = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+      const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
       setSourcePlayhead(pct * dur);
+    };
+
+    // Immediate first update
+    updateFromX(e.clientX);
+
+    const onMove = (ev: MouseEvent) => {
+      pendingScrubX.current = ev.clientX;
+      if (!scrubRafRef.current) {
+        scrubRafRef.current = requestAnimationFrame(() => {
+          scrubRafRef.current = undefined;
+          if (pendingScrubX.current !== null) {
+            updateFromX(pendingScrubX.current);
+            pendingScrubX.current = null;
+          }
+        });
+      }
     };
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      if (scrubRafRef.current) {
+        cancelAnimationFrame(scrubRafRef.current);
+        scrubRafRef.current = undefined;
+      }
+      // Flush final position
+      if (pendingScrubX.current !== null) {
+        updateFromX(pendingScrubX.current);
+        pendingScrubX.current = null;
+      }
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [sourceAsset?.duration, setSourcePlayhead, handleScrub]);
+  }, [sourceAsset?.duration, setSourcePlayhead, isPlaying, pause]);
 
   const tc = formatTimecode(sourcePlayhead, fps);
   const dur = sourceAsset?.duration ?? 0;

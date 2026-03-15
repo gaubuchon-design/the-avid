@@ -19,6 +19,10 @@ export interface PlaybackSnapshotFrameOptions {
   overlayProcessing?: PlaybackOverlayProcessing;
   effectQuality?: EffectRenderQuality;
   useCache?: boolean;
+  /** Skip effects during scrub for performance. */
+  skipEffects?: boolean;
+  /** Skip overlays (titles/subtitles/safe zones) during scrub. */
+  skipOverlays?: boolean;
 }
 
 export interface PlaybackSnapshotFrameResult {
@@ -261,7 +265,7 @@ function compositeSnapshotToCanvas(
   canvas: HTMLCanvasElement,
   options: PlaybackSnapshotFrameOptions,
 ): CanvasRenderingContext2D | null {
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
   if (!ctx) {
     return null;
   }
@@ -275,6 +279,8 @@ function compositeSnapshotToCanvas(
     isTitleEditing: options.isTitleEditing ?? false,
     overlayProcessing: options.overlayProcessing ?? 'post',
     effectQuality: options.effectQuality ?? 'preview',
+    skipEffects: options.skipEffects,
+    skipOverlays: options.skipOverlays,
   });
 
   return ctx;

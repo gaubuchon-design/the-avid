@@ -1059,6 +1059,84 @@ function getPreferredTrack(state: Pick<EditorState, 'tracks' | 'selectedTrackId'
   return matchingTrack ?? state.tracks.find((track) => !track.locked) ?? null;
 }
 
+/**
+ * Ensure at least one sequence and default tracks exist.
+ * When no sequence exists, creates one whose settings match the given
+ * asset's frame rate, resolution, and sample rate — matching Avid MC
+ * behavior where the first clip determines sequence parameters.
+ * Returns the preferred track for the asset (never null after this call).
+ */
+function ensureSequenceAndTracks(s: EditorState & EditorActions, asset: MediaAsset): Track {
+  // Auto-create a sequence if none exists
+  if (s.sequences.length === 0 || s.tracks.length === 0) {
+    const fps = asset.fps || s.projectSettings.frameRate || 24;
+    const width = asset.width || s.projectSettings.width || 1920;
+    const height = asset.height || s.projectSettings.height || 1080;
+    const sampleRate = asset.sampleRate || 48000;
+
+    // Infer drop-frame from NTSC frame rates
+    const dropFrame = [29.97, 59.94, 23.976].some(
+      (df) => Math.abs(fps - df) < 0.01
+    );
+
+    const seqSettings: SequenceSettings = {
+      name: 'Sequence 1',
+      fps,
+      dropFrame,
+      startTC: 0,
+      width,
+      height,
+      sampleRate,
+      colorSpace: s.sequenceSettings.colorSpace,
+      displayTransform: s.sequenceSettings.displayTransform,
+    };
+    s.sequenceSettings = seqSettings;
+
+    // Also update project settings to match
+    s.projectSettings.frameRate = fps;
+    s.projectSettings.width = width;
+    s.projectSettings.height = height;
+
+    const seqId = createId('seq');
+    const now = new Date().toISOString();
+
+    // Create default tracks (V1, A1, A2)
+    const v1: Track = {
+      id: createId('track'), name: 'V1', type: 'VIDEO', sortOrder: 0,
+      muted: false, locked: false, solo: false, volume: 1, clips: [],
+      color: TRACK_COLOR_PRESETS['VIDEO']?.[0] ?? '#5b6af5',
+    };
+    const a1: Track = {
+      id: createId('track'), name: 'A1', type: 'AUDIO', sortOrder: 1,
+      muted: false, locked: false, solo: false, volume: 1, clips: [],
+      color: TRACK_COLOR_PRESETS['AUDIO']?.[0] ?? '#e04eb5',
+    };
+    const a2: Track = {
+      id: createId('track'), name: 'A2', type: 'AUDIO', sortOrder: 2,
+      muted: false, locked: false, solo: false, volume: 1, clips: [],
+      color: TRACK_COLOR_PRESETS['AUDIO']?.[1] ?? '#4eb5e0',
+    };
+    s.tracks = [v1, a1, a2];
+    s.enabledTrackIds = [v1.id, a1.id, a2.id];
+
+    const seq: Sequence = {
+      id: seqId, name: seqSettings.name, settings: { ...seqSettings },
+      tracks: s.tracks, duration: 0, createdAt: now, modifiedAt: now,
+    };
+    s.sequences.push(seq);
+    s.activeSequenceId = seqId;
+
+    // Place sequence in the first bin
+    if (s.bins.length > 0 && s.bins[0]) {
+      if (!s.bins[0].sequences) s.bins[0].sequences = [];
+      s.bins[0].sequences.push(seq);
+    }
+  }
+
+  // Now find the preferred track (guaranteed to exist after above)
+  return getPreferredTrack(s, asset) ?? s.tracks[0]!;
+}
+
 // Module-level holder for the alpha dialog resolve callback.
 // Functions are not compatible with Immer proxies, so we store
 // the resolve callback outside of the store state.
@@ -1555,10 +1633,8 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         return;
       }
 
-      const targetTrack = getPreferredTrack(s, asset);
-      if (!targetTrack) {
-        return;
-      }
+      // Auto-create sequence + tracks if needed (matches first clip's fps/res)
+      const targetTrack = ensureSequenceAndTracks(s, asset);
 
       const startTime = Math.max(
         s.playheadTime,
@@ -1590,6 +1666,9 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     overwriteEdit: () => set((s) => {
       const asset = s.sourceAsset;
       if (!asset) return;
+
+      // Auto-create sequence + tracks if needed (matches first clip's fps/res)
+      ensureSequenceAndTracks(s, asset);
 
       // Use source in/out points if set, otherwise use full clip duration
       const srcIn = s.sourceInPoint ?? 0;
@@ -1688,6 +1767,9 @@ export const useEditorStore = create<EditorState & EditorActions>()(
     insertEdit: () => set((s) => {
       const asset = s.sourceAsset;
       if (!asset) return;
+
+      // Auto-create sequence + tracks if needed (matches first clip's fps/res)
+      ensureSequenceAndTracks(s, asset);
 
       const srcIn = s.sourceInPoint ?? 0;
       const srcOut = s.sourceOutPoint ?? (asset.duration ?? 6);
@@ -2280,25 +2362,66 @@ export const useEditorStore = create<EditorState & EditorActions>()(
           const pAny = project as any;
           s.projectName = pAny.name ?? 'Untitled Project';
           s.lastSavedAt = pAny.updatedAt ?? null;
+          s.projectCreatedAt = pAny.createdAt ?? null;
           s.saveStatus = 'saved';
+
+          // Hydrate bins recursively (including children and sequences)
+          const hydrateBins = (rawBins: any[]): Bin[] => rawBins.map((b: any) => ({
+            id: b.id, name: b.name, color: b.color ?? '#818cf8',
+            parentId: b.parentId, isOpen: b.isOpen ?? false,
+            children: hydrateBins(b.children ?? []),
+            assets: (b.assets ?? []).map((a: any) => ({
+              id: a.id, name: a.name ?? 'Untitled', type: a.type ?? 'VIDEO',
+              duration: a.duration ?? 0, status: a.status ?? 'READY' as const,
+              tags: a.tags ?? [], isFavorite: false,
+              width: a.width, height: a.height, fps: a.fps,
+              codec: a.codec, fileSize: a.fileSize,
+              colorSpace: a.colorSpace, startTimecode: a.startTimecode,
+              sampleRate: a.sampleRate, audioChannels: a.audioChannels,
+            })),
+            sequences: (b.sequences ?? []).map((sq: any) => ({
+              id: sq.id, name: sq.name, settings: sq.settings,
+              tracks: sq.tracks ?? [], duration: sq.duration ?? 0,
+              createdAt: sq.createdAt ?? new Date().toISOString(),
+              modifiedAt: sq.modifiedAt ?? new Date().toISOString(),
+            })),
+          }));
+
           if (pAny.bins && pAny.bins.length > 0) {
-            s.bins = pAny.bins.map((b: any) => ({
-              id: b.id, name: b.name, color: b.color ?? '#818cf8',
-              parentId: b.parentId, children: [] as Bin[], sequences: [] as Sequence[], isOpen: false,
-              assets: (b.assets ?? []).map((a: any) => ({
-                id: a.id, name: a.name ?? 'Untitled', type: a.type ?? 'VIDEO',
-                duration: a.duration ?? 0, status: 'READY' as const,
-                tags: a.tags ?? [], isFavorite: false,
-                width: a.width, height: a.height, fps: a.fps,
-                codec: a.codec, fileSize: a.fileSize,
-              })),
-            }));
+            s.bins = hydrateBins(pAny.bins);
           }
-          if (pAny.sequences && pAny.sequences.length > 0) {
+
+          // Collect all sequences from bins into the flat sequences array
+          const allSequences: Sequence[] = [];
+          const collectSequences = (bins: Bin[]) => {
+            for (const bin of bins) {
+              if (bin.sequences) allSequences.push(...bin.sequences);
+              collectSequences(bin.children);
+            }
+          };
+          collectSequences(s.bins);
+          s.sequences = allSequences;
+
+          // Activate the first sequence if available
+          if (allSequences.length > 0) {
+            const seq = allSequences[0]!;
+            s.activeSequenceId = seq.id;
+            s.sequenceSettings = { ...seq.settings };
+            if (seq.tracks.length > 0) {
+              s.tracks = JSON.parse(JSON.stringify(seq.tracks));
+            }
+            s.duration = seq.duration;
+          } else if (pAny.sequences && pAny.sequences.length > 0) {
+            // Legacy fallback: sequences stored at project root
             const seq = pAny.sequences[0];
             if (seq && seq.tracks && seq.tracks.length > 0) {
               s.tracks = seq.tracks;
             }
+          }
+
+          // Hydrate project settings if persisted
+          if (pAny.settings) {
+            Object.assign(s.projectSettings, pAny.settings);
           }
         });
       }).catch((err: unknown) => {
@@ -2355,19 +2478,29 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       if (!state.projectId) return;
       set((s) => { s.saveStatus = 'saving'; });
       try {
+        const serializeBins = (bins: Bin[]): any[] => bins.map((b) => ({
+          id: b.id, name: b.name, color: b.color, parentId: b.parentId,
+          isOpen: b.isOpen,
+          children: serializeBins(b.children),
+          assets: b.assets.map((a) => ({
+            id: a.id, name: a.name, type: a.type, duration: a.duration,
+            width: a.width, height: a.height, fps: a.fps, codec: a.codec,
+            fileSize: a.fileSize, tags: a.tags, status: a.status,
+            colorSpace: a.colorSpace, startTimecode: a.startTimecode,
+            sampleRate: a.sampleRate, audioChannels: a.audioChannels,
+          })),
+          sequences: (b.sequences ?? []).map((sq) => ({
+            id: sq.id, name: sq.name, settings: sq.settings,
+            tracks: sq.tracks, duration: sq.duration,
+            createdAt: sq.createdAt, modifiedAt: sq.modifiedAt,
+          })),
+        }));
         const project = {
           id: state.projectId, schemaVersion: 2,
           name: state.projectName,
-          createdAt: state.lastSavedAt ?? new Date().toISOString(),
+          createdAt: state.projectCreatedAt ?? state.lastSavedAt ?? new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-          bins: state.bins.map((b) => ({
-            id: b.id, name: b.name, color: b.color, parentId: b.parentId,
-            assets: b.assets.map((a) => ({
-              id: a.id, name: a.name, type: a.type, duration: a.duration,
-              width: a.width, height: a.height, fps: a.fps, codec: a.codec,
-              fileSize: a.fileSize, tags: a.tags,
-            })),
-          })),
+          bins: serializeBins(state.bins),
           media: [], settings: state.projectSettings,
         } as unknown as EditorProject;
         await saveProjectToRepository(project);
@@ -2393,7 +2526,7 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       // Phase 1: Create placeholder assets immediately for UI feedback
       const assetIds: string[] = [];
       set((s) => {
-        const targetBin = binId
+        let targetBin = binId
           ? (function findBin(bins: Bin[]): Bin | null {
               for (const b of bins) {
                 if (b.id === binId) return b;
@@ -2403,7 +2536,22 @@ export const useEditorStore = create<EditorState & EditorActions>()(
               return null;
             })(s.bins)
           : s.bins[0] ?? null;
-        if (!targetBin) return;
+
+        // Auto-create a default bin if none exist
+        if (!targetBin) {
+          const newBin: Bin = {
+            id: createId('bin'),
+            name: 'Media',
+            color: '#818cf8',
+            isOpen: true,
+            children: [],
+            assets: [],
+            sequences: [],
+          };
+          s.bins.push(newBin);
+          s.selectedBinId = newBin.id;
+          targetBin = newBin;
+        }
 
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
