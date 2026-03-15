@@ -347,7 +347,8 @@ interface BinItemProps {
 const BinItem = memo(function BinItem({ bin, depth = 0 }: BinItemProps) {
   const { selectedBinId, selectBin, toggleBin, binDragOverId, setBinDragOverId, setBinContextMenu } = useEditorStore();
   const isSelected = selectedBinId === bin.id;
-  const hasChildren = bin.children.length > 0 || (bin.sequences?.length ?? 0) > 0;
+  const seqCount = bin.sequences?.length ?? 0;
+  const hasChildren = bin.children.length > 0 || seqCount > 0;
   const assetCount = countAssets(bin);
   const isDragOver = binDragOverId === bin.id;
 
@@ -425,17 +426,26 @@ const BinItem = memo(function BinItem({ bin, depth = 0 }: BinItemProps) {
               onClick={e => { e.stopPropagation(); toggleBin(bin.id); }}>&#9654;</div>
           ) : <div style={{ width: 14 }} />}
         </div>
-        <div className="bin-dot" style={{ background: bin.color }} />
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={bin.color || 'var(--text-muted)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+          <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+        </svg>
         <span className="bin-name">{bin.name}</span>
-        <span className="bin-count">{assetCount}</span>
+        <span className="bin-count">
+          {assetCount > 0 && assetCount}
+          {seqCount > 0 && (
+            <span title={`${seqCount} sequence${seqCount > 1 ? 's' : ''}`} style={{ color: 'var(--brand-bright)', marginLeft: seqCount > 0 && assetCount > 0 ? 3 : 0 }}>
+              {seqCount > 0 ? `${seqCount}s` : ''}
+            </span>
+          )}
+        </span>
       </div>
       {bin.isOpen && (
         <>
-          {bin.children.map(child => (
-            <BinItem key={child.id} bin={child} depth={depth + 1} />
-          ))}
           {(bin.sequences ?? []).map(seq => (
             <BinSequenceItem key={seq.id} sequence={seq} depth={depth + 1} />
+          ))}
+          {bin.children.map(child => (
+            <BinItem key={child.id} bin={child} depth={depth + 1} />
           ))}
         </>
       )}
@@ -463,7 +473,7 @@ const BinSequenceItem = memo(function BinSequenceItem({ sequence, depth }: BinSe
 
   return (
     <div
-      className={`bin-item${isActive ? ' selected' : ''}`}
+      className={`bin-item bin-sequence-item${isActive ? ' selected' : ''}`}
       style={{
         paddingLeft: 8 + depth * 14,
       }}
@@ -479,17 +489,17 @@ const BinSequenceItem = memo(function BinSequenceItem({ sequence, depth }: BinSe
       <div className="bin-indent">
         <div style={{ width: 14 }} />
       </div>
-      {/* Filmstrip icon for sequences */}
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--brand-bright, #7b8cff)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: 4 }}>
+      {/* Timeline/filmstrip icon for sequences */}
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={isActive ? 'var(--brand-bright, #7b8cff)' : 'var(--text-muted)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
         <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
         <line x1="7" y1="2" x2="7" y2="22" /><line x1="17" y1="2" x2="17" y2="22" />
         <line x1="2" y1="12" x2="22" y2="12" />
-        <line x1="2" y1="7" x2="7" y2="7" /><line x1="2" y1="17" x2="7" y2="17" />
-        <line x1="17" y1="7" x2="22" y2="7" /><line x1="17" y1="17" x2="22" y2="17" />
       </svg>
-      <span className="bin-name" style={{ color: 'var(--brand-bright, #7b8cff)' }}>{sequence.name}</span>
-      <span className="bin-count" style={{ fontSize: 9, color: 'var(--text-muted)' }}>
-        {formatDuration(sequence.duration)}
+      <span className="bin-name" style={{ color: isActive ? 'var(--brand-bright, #7b8cff)' : 'var(--text-secondary)' }}>{sequence.name}</span>
+      <span className="bin-count" style={{ fontSize: 9, color: 'var(--text-muted)', display: 'flex', gap: 4, alignItems: 'center' }}>
+        <span>{formatDuration(sequence.duration)}</span>
+        <span style={{ opacity: 0.5 }}>·</span>
+        <span>{sequence.settings?.fps ?? 24}fps</span>
       </span>
     </div>
   );
@@ -930,7 +940,7 @@ export function BinPanel() {
 
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
-  const [tab, setTab] = useState<'bins' | 'smart' | 'search' | 'sequences'>('bins');
+  const [tab, setTab] = useState<'bins' | 'smart' | 'search'>('bins');
   const [showNewBinInput, setShowNewBinInput] = useState(false);
   const [newBinName, setNewBinName] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
@@ -1075,28 +1085,31 @@ export function BinPanel() {
       {/* Header */}
       <div className="panel-header">
         <span className="panel-title">{isEffectsMode ? 'Effects' : 'Media'}</span>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 3, alignItems: 'center' }}>
           {!isEffectsMode && (
             <>
-              {/* New Sequence button */}
+              {/* New Sequence button — most important action */}
               <button
-                className="tl-btn"
+                className="tl-btn bin-header-btn"
                 title="New Sequence (Ctrl+Shift+N)"
                 aria-label="New Sequence"
-                onClick={() => toggleSequenceDialog()}
-                style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 3 }}
+                onClick={() => {
+                  if (selectedBinId) {
+                    useEditorStore.getState().openSequenceDialogForBin(selectedBinId);
+                  } else {
+                    toggleSequenceDialog();
+                  }
+                }}
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
                   <line x1="7" y1="2" x2="7" y2="22" /><line x1="17" y1="2" x2="17" y2="22" />
                   <line x1="2" y1="12" x2="22" y2="12" />
                 </svg>
-                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
+                <span>Seq</span>
               </button>
               {/* Import media button */}
-              <button className="tl-btn" title="Import Media" style={{ fontSize: 12 }}
+              <button className="tl-btn bin-header-btn" title="Import Media (drag & drop also supported)"
                 aria-label="Import media files"
                 onClick={() => {
                   const input = document.createElement('input');
@@ -1109,13 +1122,21 @@ export function BinPanel() {
                     }
                   };
                   input.click();
-                }}>+</button>
+                }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                <span>Import</span>
+              </button>
               {/* New Bin button */}
-              <button className="tl-btn" title="New Bin" aria-label="Create new bin"
+              <button className="tl-btn bin-header-btn" title="New Bin" aria-label="Create new bin"
                 onClick={() => setShowNewBinInput(true)}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
                 </svg>
+                <span>Bin</span>
               </button>
             </>
           )}
@@ -1154,14 +1175,26 @@ export function BinPanel() {
       {/* Tabs */}
       {!isEffectsMode && (
         <div className="panel-tabs">
-          {(['bins', 'sequences', 'smart', 'search'] as const).map(t => {
-            const label = t === 'bins' ? 'Bins' : t === 'sequences' ? 'Seqs' : t === 'smart' ? 'Smart' : 'Search';
+          {(['bins', 'smart', 'search'] as const).map(t => {
+            const label = t === 'bins' ? 'Bins' : t === 'smart' ? 'Smart Bins' : 'Search';
+            const icon = t === 'bins' ? (
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+              </svg>
+            ) : t === 'smart' ? (
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+              </svg>
+            ) : (
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+            );
             return (
-              <button key={t} className={`panel-tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
-                {t === 'smart' ? `${String.fromCharCode(10022)} ${label}` : label}
-                {t === 'sequences' && binSequences.length > 0 && (
-                  <span style={{ marginLeft: 3, fontSize: 9, color: 'var(--text-muted)' }}>({binSequences.length})</span>
-                )}
+              <button key={t} className={`panel-tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}
+                style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                {icon}
+                {label}
               </button>
             );
           })}
@@ -1270,7 +1303,7 @@ export function BinPanel() {
             className="bin-tree"
             style={{ borderBottom: '1px solid var(--border-subtle)' }}
             role="tree"
-            aria-label={tab === 'sequences' ? 'Sequences' : 'Media bins'}
+            aria-label="Media bins"
             onDragOver={(e) => {
               if (e.dataTransfer.types.includes('application/x-bin-id')) {
                 e.preventDefault();
@@ -1279,51 +1312,58 @@ export function BinPanel() {
             }}
             onDrop={handleRootDrop}
           >
-            {tab === 'sequences' ? (
-              binSequences.length > 0 ? (
-                binSequences.map((seq) => <SequenceItem key={seq.id} sequence={seq} />)
-              ) : (
-                <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
-                  No sequences in this bin.<br />
-                  <button
-                    className="tl-btn"
-                    style={{ marginTop: 8, fontSize: 11 }}
-                    onClick={() => toggleSequenceDialog()}
-                    aria-label="Create new sequence"
-                  >
-                    Create New Sequence
-                  </button>
-                </div>
-              )
-            ) : tab === 'smart' ? (
+            {tab === 'smart' ? (
               smartBins.length > 0 ? (
                 smartBins.map(sb => <SmartBinItem key={sb.id} smartBin={sb} />)
               ) : (
-                <div style={{ padding: 12, textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
-                  No smart bins. Smart bins auto-populate based on rules.
+                <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.4, marginBottom: 6 }}>
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                  </svg>
+                  <div>No smart bins yet</div>
+                  <div style={{ fontSize: 10, marginTop: 4, color: 'var(--text-muted)', opacity: 0.7 }}>Smart bins auto-filter assets by rules</div>
                 </div>
               )
             ) : (
-              bins.map(bin => <BinItem key={bin.id} bin={bin} />)
+              <>
+                {bins.map(bin => <BinItem key={bin.id} bin={bin} />)}
+                {bins.length === 0 && (
+                  <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.4, marginBottom: 6 }}>
+                      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                    </svg>
+                    <div>No bins yet</div>
+                    <div style={{ fontSize: 10, marginTop: 4, color: 'var(--text-muted)', opacity: 0.7 }}>
+                      Create a bin to organize your media and sequences
+                    </div>
+                    <button
+                      className="tl-btn"
+                      style={{ marginTop: 8, fontSize: 11 }}
+                      onClick={() => setShowNewBinInput(true)}
+                      aria-label="Create new bin"
+                    >
+                      + New Bin
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
 
           {/* Asset area */}
-          {tab !== 'sequences' && (
-            <div className="panel-body">
-              {filtered.length === 0 ? (
-                <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
-                  {search ? 'No matches' : 'No assets in this bin'}
-                </div>
-              ) : viewMode === 'grid' ? (
-                <div className="asset-grid">
-                  {filtered.map(asset => <AssetCard key={asset.id} asset={asset} />)}
-                </div>
-              ) : (
-                <AssetListView assets={filtered} />
-              )}
-            </div>
-          )}
+          <div className="panel-body">
+            {filtered.length === 0 ? (
+              <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
+                {search ? 'No matches' : selectedBinId ? 'Drop media files here or click + to import' : 'Select a bin to view assets'}
+              </div>
+            ) : viewMode === 'grid' ? (
+              <div className="asset-grid">
+                {filtered.map(asset => <AssetCard key={asset.id} asset={asset} />)}
+              </div>
+            ) : (
+              <AssetListView assets={filtered} />
+            )}
+          </div>
         </>
       )}
 
@@ -1333,14 +1373,15 @@ export function BinPanel() {
         fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
         {isEffectsMode ? (
           <span>{EFFECTS_LIBRARY.reduce((n, c) => n + c.effects.length, 0)} effects available</span>
-        ) : tab === 'sequences' ? (
-          <span>{binSequences.length} sequence{binSequences.length !== 1 ? 's' : ''}</span>
         ) : (
           <>
             <span>{filtered.length} items</span>
+            {binSequences.length > 0 && (
+              <span>· {binSequences.length} seq{binSequences.length !== 1 ? 's' : ''}</span>
+            )}
             {selectedAssetIds.length > 1 && (
               <span style={{ color: 'var(--brand-bright)' }}>
-                {selectedAssetIds.length} selected
+                · {selectedAssetIds.length} selected
               </span>
             )}
             <span style={{ marginLeft: 'auto' }}>
