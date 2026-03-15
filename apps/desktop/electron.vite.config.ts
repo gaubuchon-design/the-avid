@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react';
 const isProduction = process.env['NODE_ENV'] === 'production';
 const workspaceAliases = {
   '@mcua/core': path.resolve(__dirname, '../../packages/core/src'),
+  '@mcua/editor': path.resolve(__dirname, '../../packages/editor/src'),
   '@mcua/media-backend': path.resolve(__dirname, '../../packages/media-backend/src'),
   '@mcua/ui': path.resolve(__dirname, '../../packages/ui/src'),
 };
@@ -75,7 +76,6 @@ export default defineConfig({
         strict: true,
         allow: [
           path.resolve(__dirname, 'src'),
-          path.resolve(__dirname, '../web/src'),
           path.resolve(__dirname, '../../packages'),
         ],
       },

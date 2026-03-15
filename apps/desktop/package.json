@@ -32,6 +32,7 @@
   },
   "dependencies": {
     "@mcua/core": "*",
+    "@mcua/editor": "*",
     "@mcua/ui": "*",
     "electron-updater": "^6.2.0",
     "immer": "^10.1.0",

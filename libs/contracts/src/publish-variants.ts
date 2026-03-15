@@ -68,6 +68,12 @@ export interface DeliverySpec {
   readonly captionFormat: string | null;
   /** Whether the platform requires a thumbnail image. */
   readonly thumbnailRequired: boolean;
+  /** Output color space (e.g. 'rec709', 'rec2020'). Defaults to project working space. */
+  readonly outputColorSpace?: string;
+  /** Output HDR mode. Null/undefined means inherit from project. */
+  readonly hdrMode?: 'sdr' | 'hlg' | 'pq' | null;
+  /** Output transfer function (e.g. 'srgb', 'pq', 'hlg'). */
+  readonly transferFunction?: string;
 }
 
 // ─── Publish Variant ──────────────────────────────────────────────────────────

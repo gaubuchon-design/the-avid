@@ -1,4 +1,4 @@
-import { createLogger } from './lib/logger';
+import { createLogger } from '@mcua/editor/lib/logger';
 
 const logger = createLogger('PWA');
 

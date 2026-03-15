@@ -1,0 +1,30 @@
+{
+  "name": "@avid/media",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native codec services for THE AVID — FFmpeg, LibRaw, OpenEXR, OpenImageIO bindings",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "build:native": "cmake-js compile -d native",
+    "build:native:release": "cmake-js compile -d native --release",
+    "prebuild": "prebuildify --napi --strip",
+    "dev": "tsc --noEmit --watch",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist build prebuilds"
+  },
+  "dependencies": {
+    "node-addon-api": "^7.1.0"
+  },
+  "devDependencies": {
+    "cmake-js": "^7.3.0",
+    "prebuildify": "^6.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.0.0"
+  },
+  "binary": {
+    "napi_versions": [8]
+  }
+}
